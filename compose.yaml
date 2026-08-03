@@ -1,0 +1,13 @@
+services:
+  resualign:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      RESUALIGN_PERSONAL_MODE: "1"
+      RESUALIGN_JOB_DB: /app/data/jobs.db
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

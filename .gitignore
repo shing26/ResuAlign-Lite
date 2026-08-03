@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment and secrets
+.env
+
+# Local runtime data: personal resumes, jobs, sessions, settings
+data/
+
+# Local agent/tool configuration
+.codex/
+
+# Scratch artifacts: keep only the CI smoke scripts under phase-16/18
+.scratch/*
+!.scratch/phase-16/
+!.scratch/phase-18/
+.scratch/phase-16/*
+!.scratch/phase-16/*.py
+.scratch/phase-18/*
+!.scratch/phase-18/*.py
+
+# Generated reports
+resualign-report-*.json
+benchmarks/results/
+
+# Local scratch utilities
+gentool.py
+w.py
+
+# Build artifacts
+build/
+dist/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

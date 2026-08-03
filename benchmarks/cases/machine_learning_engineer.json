@@ -1,0 +1,12 @@
+{
+  "id": "machine-learning-engineer",
+  "resume_text": "SYNTHETIC RESUME - Machine Learning Engineer\n\nSummary\nMachine learning engineer with 4 years of experience building model training pipelines, feature stores, and serving infrastructure.\n\nSkills\nPython, PyTorch, TensorFlow, Spark, SQL, Kubernetes, MLflow, Airflow\n\nExperience\nML Engineer, Recommendation Startup (2021-present)\n- Built Python training pipelines for ranking models.\n- Processed large-scale feature sets with Spark.\n- Deployed models as containers on Kubernetes.\n- Tracked experiments with MLflow and promoted models through staging.\n\nData Engineer, Retail Company (2019-2021)\n- Developed SQL features and validation checks.\n- Scheduled retraining jobs with Airflow.\n- Monitored model drift in production.",
+  "jd_text": "Machine Learning Engineer\n\nWe are hiring a machine learning engineer to own model development and deployment.\n\nRequirements\n- Strong Python programming.\n- Experience with Spark for large-scale data processing.\n- Feature engineering and data quality validation.\n- Model training, evaluation, and experiment tracking.\n- Production model serving and monitoring.\n- SQL and familiarity with Kubernetes are a plus.",
+  "expected_direction": [
+    "highlight Python and Spark pipeline experience",
+    "show production model deployment evidence",
+    "emphasize data quality validation workflows"
+  ],
+  "tags": ["ml", "english"],
+  "source_note": "Synthetic resume and JD authored for benchmark regression; not based on any real person or document."
+}

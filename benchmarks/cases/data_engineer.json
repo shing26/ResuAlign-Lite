@@ -1,0 +1,11 @@
+{
+  "id": "data-engineer",
+  "resume_text": "SYNTHETIC RESUME - Data Engineer\n\nSummary\nData engineer with 4 years of experience building ETL pipelines, data warehouses, and reporting layers.\n\nSkills\nPython, SQL, Spark, Airflow, PostgreSQL, dbt\n\nExperience\nData Engineer, Analytics Company (2021-present)\n- Built ETL pipelines in Python and Spark for daily ingestion.\n- Scheduled jobs with Airflow and monitored task failures.\n- Wrote data quality checks before loading warehouse tables.\n- Optimized SQL queries and partitioned tables for faster reporting.\n\nData Analyst, Retail Company (2019-2021)\n- Produced SQL reports for finance and operations.\n- Maintained small Python scripts for data cleanup.",
+  "jd_text": "Data Engineer\n\nWe are hiring a data engineer to own ingestion pipelines for a growing analytics platform.\n\nRequirements\n- Strong SQL and Python.\n- Spark for large-scale batch processing.\n- Airflow for scheduling and orchestration.\n- Experience with data quality validation and pipeline testing.\n- Familiarity with warehouse modeling and dbt is a plus.",
+  "expected_direction": [
+    "highlight Spark and SQL ETL pipeline experience",
+    "show Airflow scheduling and orchestration",
+    "emphasize data quality validation workflows"
+  ],
+  "source_note": "Synthetic resume and JD authored for benchmark regression; not based on any real person or document."
+}

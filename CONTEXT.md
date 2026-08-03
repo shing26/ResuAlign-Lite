@@ -1,0 +1,296 @@
+# ResuAlign — Domain Glossary
+
+> 终局：简历-岗位全链路优化平台。
+> CLI 只是前端之一，未来会扩展 Web UI / API 层。
+> 核心引擎前端无关，多阶段 pipeline 可组合，铁律：不捏造事实。
+
+## Implementation Status (2026-08-03)
+
+- Core pipeline stages (diagnose, JD profile, gap analysis, tailor, evaluate)
+  are implemented in `src/resualign/`.
+- CLI, FastAPI, web UI, crawler URL input, and two-stage extractor are live.
+- The regression suite covers 300+ pytest tests at 90%+ coverage; benchmark
+  harness is in `benchmarks/` with nine synthetic cases, offline 28/28 goals.
+- Phase 10 adds tenant scoping: email/password accounts, bearer-token
+  sessions, and tenant-owned analysis jobs (ADR-0013).
+- Phase 11 adds a SaaS workbench: versioned Master Resume management,
+  per-tenant applications, pinned resume snapshots, and application reruns.
+- Phase 16 closes the personal workbench loop: independent resume diagnosis,
+  job-specific final drafts with refresh recovery and save-as-new-resume,
+  JD parse failure fallback with salary prefill, classification degradation
+  and reclassification, city-aware salary benchmark sources, and frontend
+  vocabulary sync. A unified desktop/mobile Playwright gate covers the new
+  and old flows in CI.
+- Phase 18 redesigns the frontend as a card-based local workbench with
+  CSS-only component motion: list stagger, nav/segmented indicators, progress
+  pulse, diff reveal, toast and skeleton feedback, all gated by
+  `prefers-reduced-motion`. The existing rail/canvas skeleton, module color
+  bands, protected selectors, and all `data-*` / `aria-*` contracts remain
+  unchanged (ADR-0017).
+- Workbench latency optimization (ADR-0018): JD profile + gap analysis are one
+  LLM call, a diagnosis cache is reused when the same resume reruns, and long
+  JD contexts are capped. Cold workbench runs drop from 4 to 3 LLM calls;
+  cached reruns drop to 2. `benchmarks/latency_benchmark.py` reproduces the
+  wall-clock gain at 4.0s -> 3.0s -> 2.0s with simulated 1s calls.
+- The web UI defaults to personal mode: no login screen, anonymous requests
+  map to a stable local tenant, and 401 responses render as readable local
+  errors without login modals. `RESUALIGN_PERSONAL_MODE=0` re-enables the
+  dormant auth branch, but personal mode is the only delivered default.
+
+## Pipeline Stages (long-term vision)
+
+**Stage 1 — JD Ingestion**
+Crawl job descriptions from career sites (Playwright/Selenium). Handle anti-scraping, varying page structures. Raw text → LLM structured extraction → standard JSON.
+
+**Stage 2 — JD Profiling**
+Deep analysis of a JD: extract must-have vs nice-to-have, hard skills vs soft skills, business scenarios (high-concurrency, low-latency, etc.). Produces a \JDProfile\.
+
+**Stage 3 — Gap Analysis**
+Compare Master Resume against JDProfile. Output a structured gap report: missing keywords, misaligned emphasis, weak evidence.
+
+**Stage 4 — Dynamic Tailoring**
+Rewrite resume sections to close gaps. **Iron rule: never invent.** LLM may rephrase, reorder, or re-emphasize existing facts only. Provenance tracked per diff.
+
+**Stage 5 — Evaluation**
+LLM-as-Judge: compare original vs tailored resume against the JD. Score improvement, flag hallucinations.
+
+## Token Optimization Principle
+
+Two-stage extraction for all long texts:
+1. Lightweight pass (regex / NLP heuristics) to narrow scope
+2. LLM pass for refinement on the narrowed context
+
+Applies to JD ingestion, resume parsing, and gap analysis. Saves 60-80% token cost on long documents.
+
+## Core Entities
+
+**Job Description (JD)**
+A textual description of a job opening. In the minimal version, provided inline (\--jd\) or from file (\--jd-file\). In the full version, crawled and structured by the ingestion pipeline.
+
+**JD Profile**
+Structured extraction of a JD: must-have skills, nice-to-have skills, soft skills, business scenarios, required years of experience, education requirements. Used as the target for gap analysis.
+
+**Master Resume**
+The candidate's full, un-tailored resume. The single source of truth that all tailored versions derive from. The gap analysis and tailoring engine always reference back to this to prevent hallucination.
+
+**Gap Report**
+Structured comparison between Master Resume and JD Profile. Lists missing keywords, misaligned descriptions (emphasis on wrong aspects), and strength matches (good alignment to keep).
+
+**Tailored Resume**
+A version of the Master Resume rewritten for a specific JD. Every change traces back to a source sentence in the Master Resume. No invented content.
+
+**Eval Score**
+Quality metric from LLM-as-Judge: how well the tailored resume matches the JD, whether any hallucination was detected, and what fraction of gaps were addressed.
+
+**Engine / Pipeline**
+The core orchestration. In the minimal version: parse → diagnose → align → output. In the full version: ingest → profile → gap → tailor → evaluate. Accepts a \ResuAlignConfig\ and returns a \Report\. Frontend-agnostic.
+
+**Resume**
+A candidate's professional profile, submitted as a file in PDF, DOCX, or plain-text format. The system extracts raw text for LLM analysis.
+
+**Diagnosis** *(minimal version)*
+An LLM-produced evaluation of a resume, containing a score (0–100), a list of detected skills, and a list of textual issues/improvement suggestions. Produced without any JD context.
+
+**Alignment** *(minimal version)*
+The process of comparing a resume with a specific JD and generating suggested edits.
+
+**Diff**
+A single atomic edit suggestion. Carries a type (add/modify/remove), the original sentence, proposed sentence, reason, confidence, and a **provenance field** linking back to the exact source sentence in the Master Resume. Never invents.
+
+**Report** *(current)*
+Combined output: diagnosis + alignment diffs + metadata. Printed to terminal and optionally written to JSON.
+
+**Report** *(full version)*
+Extended output: JD profile + gap report + tailored resume + eval score. All sections referenceable independently by frontends.
+
+## Delivery & Progress
+
+**Analysis Job**
+An asynchronous run of the alignment pipeline owned by the Web/API layer. It
+transitions through queued, running, succeeded, and failed, and eventually
+holds a Report. Jobs are persisted in SQLite and scoped to the owning tenant;
+queued/running jobs interrupted by a restart end in a clear failed state.
+_Avoid_: request, task
+
+**User**
+An account with an email and a hashed password that owns a tenant workspace.
+Authentication uses opaque bearer tokens with hashed session records.
+_Avoid_: account holder, login
+
+**Tenant**
+The scoping boundary for jobs, master resumes, and applications. Every user is
+a tenant in the MVP; cross-tenant reads behave like missing resources.
+_Avoid_: organization, workspace owner
+
+**Master Resume Version**
+An immutable snapshot of a Master Resume. Updating the resume appends a new
+version; rollback points the current version back without rewriting history.
+_Avoid_: resume edit, history entry
+
+**Application**
+A per-tenant record that pins a Master Resume version, stores JD text/url and
+status, and points at the latest analysis job. Re-running an application
+updates the latest job without deleting prior history.
+_Avoid_: job application, submission
+
+**Stage Progress**
+A notification emitted before each pipeline stage, carrying the stage name and
+a human-readable message. The engine stays I/O-free by handing progress to a
+callback instead of printing.
+_Avoid_: status text, log line
+
+**JD Source**
+Anything that turns a job posting reference into JD text: an inline paste, a
+file, a crawled URL, or (future) an agent-based fetcher. Frontends treat all
+JD Sources as producing the same plain-text input to the pipeline.
+_Avoid_: fetcher, scraper
+
+**Site Handler**
+A site-specific extraction strategy for a known job board, such as LinkedIn or
+BOSS直聘. Unknown boards use generic extraction rather than failing.
+
+## Benchmark & Quality
+
+**Benchmark Case**
+A synthetic resume + JD pair with concrete expected tailoring directions and a
+provenance note. Cases are authored, PII-free, and stable for offline
+regression runs.
+_Avoid_: fixture, sample
+
+**Expected Direction**
+A concrete tailoring goal attached to a Benchmark Case, used by the regression
+harness to measure keyword coverage.
+
+**Case Tag**
+Optional metadata on a Benchmark Case describing role, domain, or language;
+reserved for future subset selection without changing the case schema.
+
+## Configuration
+
+**ResuAlignConfig**
+A dataclass holding all runtime configuration (provider, api_key, model, base_url, etc.). Can be constructed from:
+  1. Explicit kwargs (programmatic API / future Web layer)
+  2. \dotenv\ + env var fallback (CLI convenience)
+
+CLI-specific flags (like \--output-dir\) live in the CLI layer and are translated into \ResuAlignConfig\ before calling the engine.
+
+**Provider**
+The LLM service backend. Supported values: \deepseek\, \openrouter\, \ollama\. Mapped to base URLs internally.
+
+**Config Source**
+A layer in the priority stack: CLI argument > \.env\ file > environment variable. Higher layers override lower ones.
+
+## Module Boundaries (full vision)
+
+**esualign/engine.py\**
+Pipeline orchestrator. Imports stage modules, chains them. Frontend-agnostic. No argparse, no HTTP, no I/O.
+
+**esualign/cli.py\**
+CLI frontend. Parses arguments → builds config → calls \engine.run()\ → prints/dumps report.
+
+**esualign/api.py\** *(future)*
+FastAPI frontend. Builds config from request params → calls \engine.run()\ → returns JSON response.
+
+**esualign/parser.py\**
+File-format abstraction: PDF/DOCX/txt → plain text.
+
+**esualign/llm.py\**
+LLM interaction. Builds prompt, sends HTTP request, parses JSON response. Retries on failure.
+
+**esualign/models.py\**
+Data classes: \DiffItem\, \Analysis\, \Report\, \ResuAlignConfig\, plus future types: \JDProfile\, \GapReport\, \TailoredResume\, \EvalScore\.
+
+**esualign/extractor.py\** *(future)*
+Two-stage extraction: regex/NLP → LLM refinement.
+
+**esualign/crawler.py\** *(future)*
+JD crawling abstraction. Playwright/Selenium for career sites.
+
+**esualign/jd_profiler.py\** *(future)*
+JD → structured \JDProfile\. Prompt + JSON schema for must-have/nice-to-have, skills, scenarios.
+
+**esualign/gap_analyzer.py\** *(future)*
+Master Resume + JDProfile → \GapReport\. Keyword matching + LLM-based semantic gap detection.
+
+**esualign/tailor.py\** *(future)*
+Master Resume + GapReport → TailoredResume. Constraint-guided rewriting with provenance tracking.
+
+**esualign/evaluator.py\** *(future)*
+LLM-as-Judge: original vs tailored vs JD. Produces EvalScore + hallucination audit.
+
+## Key Quality Attributes
+
+- **Provenance**: every word in a tailored resume traces back to the Master Resume. No hallucination.
+- **Testability**: LLM calls mockable at the httpx transport layer; parsers testable with real fixture files.
+- **Frontend-agnostic engine**: \engine.run()\ accepts config + input, returns Report. No I/O inside engine.
+- **Token efficiency**: two-stage extraction on all long-text paths.
+- **Simplicity**: Single-responsibility modules, no framework, minimal runtime dependencies.
+- **Observability**: Warnings on stderr; progress markers for long operations.
+
+## Workbench Modules (2026-08-02)
+
+**Job Library**
+The core entity of the personal workbench. A persisted, tenant-scoped store of
+job postings with raw JD text, source, location, salary range, classification
+tags, and application status. All other workbench modules read from it.
+_Avoid_: job feed, scraped cache
+
+**Job Classification**
+The multi-dimensional tagging of a Job Library record: job function (backend,
+frontend, algorithm, data, client, ops, testing, product, design, operations),
+seniority (intern, campus, junior, mid, senior, expert), and free-form
+technology/domain tags. Produced by the LLM and editable by the user.
+_Avoid_: job category, job type
+
+**Salary Benchmark**
+A reference for judging a job's salary competitiveness: an editable table keyed
+by city x function x seniority, supplemented by the median of same-function
+jobs already in the library, with per-job manual override. The appraisal card
+labels the source: settings table (normalized city), library median, or neutral.
+_Avoid_: salary database, pay grade
+
+**Master Resume Diagnosis**
+An async no-JD pipeline run against one Master Resume, producing a 0-100
+score, skills, issues, and suggestions. The resume record keeps the latest
+diagnosis job id so archive refreshes restore the most recent result.
+_Avoid_: analyze-only page, report history
+
+**Final Draft**
+A job-specific persisted copy of an accepted tailored resume. It survives
+refresh and re-opening of the workspace, overwrites as a new version, and can
+be explicitly saved as a new Master Resume without mutating the original.
+_Avoid_: automatic master resume overwrite, throwaway draft
+
+**Classification Pending**
+A durable library-job flag set when the classification LLM fails. The job is
+still saved, shows an amber badge, and can be reclassified later without
+blocking ingestion or batch import.
+_Avoid_: failed row skip, silent unknown classification
+
+**Vocabulary Sync**
+Job function, seniority, and status options rendered by the library filters
+and edit modal come from `/api/settings`; the frontend caches the list per
+page load and falls back to built-ins when the settings API is unavailable.
+_Avoid_: duplicated hard-coded dropdowns, per-filter settings requests
+
+**Worth Appraisal**
+A transparent 0-100 score for whether to apply to a job, composed of resume
+match (40%), salary competitiveness (30%), hard conditions (20%), and job
+quality signals (10%), ending in apply / consider / skip. Weights are editable.
+_Avoid_: suitability score, job match rate
+
+**Application Status**
+A lightweight per-job lifecycle marker: not applied, applied, interviewing,
+offered, or declined. The Single-Job Workspace is the one-stop entry for
+appraisal and status updates.
+_Avoid_: pipeline stage, funnel state
+
+**Single-Job Workspace**
+The per-job working page combining JD analysis, worth appraisal, status, and
+generation of a tailored resume draft from the Master Resume version.
+_Avoid_: job detail page, application form
+
+**Rewrite Granularity**
+The prompt-level rewrite intensity for the tailor stage: `fine` (微调) keeps
+structure and wording, `medium` (重构, default) rewrites within the existing
+structure, and `coarse` (重塑) permits full restructure.

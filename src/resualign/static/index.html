@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ResuAlign 求职工作台</title>
+  <link rel="stylesheet" href="/static/styles.css?v=18">
+</head>
+<body class="app-body">
+  <div class="container app-shell">
+    <aside class="app-rail">
+      <div class="rail-mark" aria-hidden="true">RA</div>
+      <nav class="tabs tabs--rail" aria-label="主导航">
+        <button type="button" data-route="resume" aria-selected="true">简历中心</button>
+        <button type="button" data-route="jobs" aria-selected="false">岗位库</button>
+        <button type="button" data-route="workspace" aria-selected="false">工作台</button>
+        <button type="button" data-route="settings" aria-selected="false">设置</button>
+      </nav>
+      <div class="rail-foot">
+        <span class="rail-dot" aria-hidden="true"></span>
+        <span>本地 · 个人模式</span>
+      </div>
+    </aside>
+    <div class="app-main">
+      <header class="topbar">
+        <div class="brand">
+          <span class="logo" aria-hidden="true">RA</span>
+          <div>
+            <h1>ResuAlign</h1>
+            <p class="tagline">求职工作台</p>
+          </div>
+        </div>
+        <div class="model-status">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="mode-label">个人模式</span>
+        </div>
+      </header>
+      <main id="app" aria-live="polite"></main>
+    </div>
+  </div>
+  <div id="toast-region" class="toast-region" aria-live="assertive"></div>
+  <script type="module" src="/static/app.js?v=18"></script>
+</body>
+</html>
