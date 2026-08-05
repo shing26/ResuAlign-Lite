@@ -553,6 +553,63 @@ def test_workbench_run_polls_and_returns_report():
     )
 
 
+def test_workbench_run_emits_job_stage_into_open_session():
+    job = _create_library_job()
+    resume = _create_resume()
+    session = client.get(
+        f"/api/workspace/session/{job['job_id']}",
+        headers=_auth_headers(),
+    ).json()
+    session_id = session["session_id"]
+
+    with patch("resualign.api._run_job"), patch(
+        "resualign.api.build_config", return_value=_config()
+    ):
+        r = client.post(
+            f"/api/jobs/{job['job_id']}/workbench",
+            json={"master_resume_id": resume["resume_id"]},
+            headers=_auth_headers(),
+        )
+    assert r.status_code == 202
+    analysis_job_id = r.json()["job_id"]
+
+    def run_with_stages(
+        config,
+        resume_text,
+        jd_text,
+        run_eval=False,
+        granularity="medium",
+        prompt_focus="balanced",
+        custom_prompt="",
+        diagnosis=None,
+        on_stage=None,
+        cache=None,
+        tenant="default",
+    ):
+        if on_stage is not None:
+            on_stage("jd_analysis", "Extracting JD profile")
+        return _finished_report()
+
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api.run", side_effect=run_with_stages
+    ):
+        api_module._run_job(analysis_job_id)
+
+    session = api_module._session_store.get(session_id)
+    assert session is not None
+    stage_events = [
+        item
+        for item in session["events"]
+        if item["event"] == "job.stage"
+    ]
+    assert stage_events
+    assert all(item["data"].get("workbench") is True for item in stage_events)
+    assert all(
+        item["data"].get("job_id") == job["job_id"]
+        for item in stage_events
+    )
+
+
 def test_workbench_run_persists_tailor_prefs():
     job = _create_library_job()
     resume = _create_resume()

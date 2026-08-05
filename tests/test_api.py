@@ -304,13 +304,16 @@ def test_job_runs_to_succeeded_with_full_report_shape():
     assert result["model"] == "test-model"
     assert result["diffs"][0]["type"] == "modify"
     assert result["jd_profile"] == {
-        "must_have_skills": ["Python"],
-        "nice_to_have_skills": ["Redis"],
-        "soft_skills": ["Communication"],
-        "business_scenarios": ["Backend"],
-        "min_years_experience": 3,
-        "education_requirements": ["BS"],
-    }
+            "must_have_skills": ["Python"],
+            "nice_to_have_skills": ["Redis"],
+            "soft_skills": ["Communication"],
+            "business_scenarios": ["Backend"],
+            "min_years_experience": 3,
+            "education_requirements": ["BS"],
+            "required_skills": ["Python"],
+            "nice_to_have": ["Redis"],
+            "business_scene": ["Backend"],
+        }
     assert result["gap_report"] == {
         "missing_keywords": ["Redis"],
         "misaligned_emphasis": ["Leadership"],
@@ -634,6 +637,21 @@ def test_restart_recovery_requeues_pending_jobs():
             time.sleep(0.01)
 
     assert {call.args[0] for call in mock_run.call_args_list} == set(job_ids)
+
+
+def test_restart_recovery_requeues_crawl_tasks():
+    task = api_module._crawl_tasks.create(
+        "tenant-crawl", "https://example.com/jobs/1"
+    )
+    api_module._crawl_tasks.update_state(task["crawl_id"], "fetching")
+
+    with patch("resualign.api._run_job"):
+        api_module._recover_pending_jobs()
+
+    refreshed = api_module._crawl_tasks.get(task["crawl_id"])
+    assert refreshed is not None
+    assert refreshed["status"] == "queued"
+    assert refreshed["stage"] == "requeued"
 
 
 def test_analyze_rate_limited_after_budget():

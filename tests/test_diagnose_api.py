@@ -173,7 +173,10 @@ def test_diagnose_success_polls_and_survives_refresh():
     assert result["diagnosis"]["score"] == 78
     assert result["diagnosis"]["skills"] == ["Python", "FastAPI"]
     assert result["diagnosis"]["issues"] == ["Add metrics"]
-    assert result["diagnosis"]["suggestions"] == ["建议：Add metrics"]
+    assert result["diagnosis"]["suggestions"] == [
+        "用 STAR 结构补结果量化：把“负责”改为“主导/落地”，"
+        "给出吞吐量、耗时、覆盖率或营收等具体数字"
+    ]
 
     # Refresh recovery: a fresh store still links the job on the same DB.
     api_module._resumes = MasterResumeStore(
@@ -188,6 +191,32 @@ def test_diagnose_success_polls_and_survives_refresh():
     ).json()
     assert recovered["status"] == "succeeded"
     assert recovered["result"]["diagnosis"]["score"] == 78
+
+
+def test_diagnose_suggestions_are_actionable_and_distinct_from_issues():
+    resume = _create_resume()
+    report = Report(
+        score=70,
+        skills=["Python", "FastAPI"],
+        issues=["Add metrics", "Missing keywords"],
+        model="test-model",
+    )
+    body = _queue_diagnosis(resume["resume_id"])
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api.run", return_value=report
+    ):
+        api_module._run_job(body["job_id"])
+    snapshot = client.get(
+        f"/api/jobs/{body['job_id']}", headers=_auth_headers()
+    ).json()
+    diagnosis = snapshot["result"]["diagnosis"]
+    assert len(diagnosis["suggestions"]) == len(diagnosis["issues"])
+    for issue, suggestion in zip(
+        diagnosis["issues"], diagnosis["suggestions"]
+    ):
+        assert suggestion != issue
+        assert len(suggestion) > len(issue)
+    assert "Python" in diagnosis["suggestions"][1]
 
 
 def test_diagnose_runs_engine_without_jd():

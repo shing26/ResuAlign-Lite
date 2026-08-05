@@ -4,6 +4,30 @@ import pytest
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def reset_shared_rate_limiters():
+    """Keep per-host API rate limiters from starving later tests."""
+    import resualign.api as api_module
+
+    api_module._auth_rate_limiter.reset()
+    api_module._analyze_rate_limiter.reset()
+    api_module._import_rate_limiter.reset()
+    yield
+
+
+@pytest.fixture(autouse=True)
+def isolated_crawl_task_store(tmp_path):
+    """Keep crawl task rows out of the real data directory during tests."""
+    import resualign.api as api_module
+
+    saved = api_module._crawl_tasks
+    api_module._crawl_tasks = api_module.CrawlTaskStore(
+        db_path=tmp_path / "crawl-tasks-test.db"
+    )
+    yield
+    api_module._crawl_tasks = saved
+
+
 class MockLLMClient:
     """Sequence-based fake LLM client for unit testing pipeline stages.
 
@@ -17,6 +41,7 @@ class MockLLMClient:
         ])
         self.call_count = 0
         self.calls = []
+        self.structured_calls = []
 
     def chat_json(self, system, user, model=None):
         self.calls.append((system[:50], user[:50]))
@@ -25,6 +50,20 @@ class MockLLMClient:
             self.call_count += 1
             return r
         return {}
+
+    def chat_structured(self, system, user, schema_model, model=None):
+        self.structured_calls.append((system, user, schema_model, model))
+        return self.chat_json(system, user, model=model)
+
+
+class SchemaAwareLLMClient(MockLLMClient):
+    """Fake LLM client that explicitly exposes chat_structured."""
+
+    strict_provenance = True
+
+    def chat_structured(self, system, user, schema_model, model=None):
+        self.structured_calls.append((system, user, schema_model, model))
+        return self.chat_json(system, user, model=model)
 
 
 def _diag(score=80):
@@ -48,8 +87,11 @@ def _jd_analysis():
 
 def _tailor():
     return {"sections": {"experience": "Built services using Java"},
-            "diffs": [{"type": "modify", "original": "old", "proposed": "new",
-                        "reason": "match", "confidence": "high", "provenance": "old"}]}
+            "diffs": [{"type": "modify", "original": "Python dev",
+                        "proposed": "Built services using Java",
+                        "reason": "match", "confidence": "high",
+                        "provenance": "Python dev",
+                        "provenance_quote": "Python dev"}]}
 
 
 def _eval():

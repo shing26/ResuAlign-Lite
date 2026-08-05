@@ -1,0 +1,43 @@
+{
+  "version": "2.0.1",
+  "description": "Incremental API additions over the immutable contracts/openapi-v1.json golden. tests/test_contract.py checks the additive superset, and contracts/openapi-current.json snapshots the resulting OpenAPI document.",
+  "paths": [
+    "/api/jobs/{job_id}/preanalyze",
+    "/api/jobs/{job_id}/workbench/rewrite",
+    "/api/kanban/bulk-status",
+    "/api/settings/reset",
+    "/api/settings/status",
+    "/api/workbench/session/init",
+    "/api/workbench/session/{session_id}/analyze",
+    "/api/workbench/session/{session_id}",
+    "/api/workbench/session/{session_id}/events",
+    "/api/workspace/session/{job_id}"
+  ],
+  "operations": [],
+  "schemas": [
+    "JobPreanalyzeResponse",
+    "KanbanBulkStatusRequest",
+    "KanbanBulkStatusResponse",
+    "KanbanBulkStatusResultItem",
+    "WorkbenchRewriteRequest",
+    "WorkbenchRewriteResponse",
+    "WorkbenchSessionInitRequest",
+    "WorkstationAlignmentSection",
+    "WorkstationCrawlSection",
+    "WorkstationGapSection",
+    "WorkstationJDSection",
+    "WorkstationMeta",
+    "WorkstationResumeSection",
+    "WorkstationState"
+  ],
+  "sse_events": [
+    "job.stage",
+    "job.gap_ready",
+    "tailor.diff",
+    "job.result",
+    "job.error",
+    "crawl.status",
+    "heartbeat"
+  ],
+  "breaking_changes": []
+}
