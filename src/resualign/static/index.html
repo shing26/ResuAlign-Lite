@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ResuAlign 求职工作台</title>
-  <link rel="stylesheet" href="/static/styles.css?v=18">
+  <link rel="stylesheet" href="/static/styles.css?v=22">
 </head>
 <body class="app-body">
   <div class="container app-shell">
@@ -30,15 +30,65 @@
             <p class="tagline">求职工作台</p>
           </div>
         </div>
-        <div class="model-status">
-          <span class="dot" aria-hidden="true"></span>
-          <span id="mode-label">个人模式</span>
+        <div class="command-bar">
+          <button
+            type="button"
+            class="command-bar__trigger"
+            data-action="open-command-panel"
+            data-command-trigger
+            aria-haspopup="dialog"
+            aria-label="打开万能输入"
+            title="打开万能输入"
+          >
+            <span class="command-bar__icon" aria-hidden="true"></span>
+            <span class="command-bar__label">粘贴 JD 或输入岗位链接...</span>
+            <kbd class="command-bar__kbd">Ctrl K</kbd>
+          </button>
+        </div>
+        <div class="topbar-actions">
+          <button class="theme-toggle" type="button" data-action="toggle-theme" data-theme-toggle aria-pressed="false" aria-label="切换明暗主题" title="切换明暗主题">
+            <span class="theme-toggle-icon" aria-hidden="true">◐</span>
+            <span data-theme-label>浅色</span>
+          </button>
+          <div class="model-status">
+            <span class="dot" aria-hidden="true"></span>
+            <span id="mode-label">个人模式</span>
+          </div>
         </div>
       </header>
       <main id="app" aria-live="polite"></main>
     </div>
   </div>
+  <div id="print-root" class="print-root" aria-hidden="true"></div>
   <div id="toast-region" class="toast-region" aria-live="assertive"></div>
-  <script type="module" src="/static/app.js?v=18"></script>
+  <div
+    class="command-palette"
+    data-command-palette
+    role="presentation"
+    hidden
+  >
+    <div class="command-palette__dialog" role="dialog" aria-modal="true" aria-label="万能输入">
+      <form class="command-palette__form" data-form="command-panel">
+        <div class="command-palette__input-row">
+          <span class="command-palette__glyph" aria-hidden="true"></span>
+          <input
+            type="text"
+            name="command"
+            data-command-input
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="粘贴 JD 文本或输入 JD 链接，Cmd/Ctrl+K 快速开启..."
+          >
+          <kbd>Esc</kbd>
+        </div>
+        <div class="command-palette__preview" data-command-preview role="status" aria-live="polite"></div>
+        <div class="command-palette__actions">
+          <button type="button" class="btn btn-ghost" data-action="close-command-panel">取消</button>
+          <button type="submit" class="btn btn-primary" data-command-confirm disabled>确认并生成分析</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <script type="module" src="/static/app/main.js?v=22"></script>
 </body>
 </html>

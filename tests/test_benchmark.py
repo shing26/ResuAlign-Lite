@@ -17,6 +17,15 @@ EXPECTED_NEW_CASE_IDS = {
     "chinese-python-backend",
 }
 
+EXPECTED_T8_CASE_IDS = {
+    "adversarial-hallucination-claims",
+    "adversarial-hallucination-projects",
+    "cache-hit-python-backend",
+    "cache-hit-java-microservices",
+    "batch-5-jd-data-platform",
+    "schema-retry-tailor-structured",
+}
+
 
 @pytest.fixture(scope="module")
 def benchmark_module():
@@ -61,6 +70,29 @@ def test_expanded_coverage_includes_required_roles(benchmark_module):
             assert len(case["tags"]) >= 1
 
 
+def test_benchmark_dataset_expands_to_15(benchmark_module):
+    cases = benchmark_module.load_cases(CASES_DIR)
+    assert len(cases) == 15
+    ids = {case["id"] for case in cases}
+    assert EXPECTED_T8_CASE_IDS <= ids
+
+
+def test_t8_scenario_metadata(benchmark_module):
+    cases = benchmark_module.load_cases(CASES_DIR)
+    by_id = {case["id"]: case for case in cases}
+    assert by_id["adversarial-hallucination-claims"]["scenario"] == (
+        "anti_hallucination"
+    )
+    assert by_id["adversarial-hallucination-projects"]["scenario"] == (
+        "anti_hallucination"
+    )
+    assert by_id["cache-hit-python-backend"]["cache_hit"] is True
+    assert "cached_diagnosis" in by_id["cache-hit-python-backend"]
+    assert by_id["batch-5-jd-data-platform"]["batch"] is True
+    assert len(by_id["batch-5-jd-data-platform"]["batch_jds"]) == 5
+    assert by_id["schema-retry-tailor-structured"]["schema_retry"] is True
+
+
 def test_fake_llm_client_is_deterministic(benchmark_module):
     client = benchmark_module.FakeLLMClient()
     first = client.chat_json("You are a resume auditor.", "user A")
@@ -68,6 +100,21 @@ def test_fake_llm_client_is_deterministic(benchmark_module):
     assert first == second
     assert "score" in first
     assert client.call_count == 2
+
+
+def test_schema_retry_fake_payload_triggers_retry(benchmark_module):
+    from resualign.schema_registry import TailoredResumeSchema
+
+    client = benchmark_module.FakeLLMClient()
+    client.schema_retry = True
+    result = client.chat_structured(
+        "You are a precise resume editor. Given a resume and a gap report.",
+        "user",
+        TailoredResumeSchema,
+    )
+    assert client.schema_retry_attempts == 2
+    assert client.call_count == 2
+    assert result["diffs"]
 
 
 def test_keyword_overlap_heuristic(benchmark_module):
@@ -103,6 +150,7 @@ def test_offline_benchmark_writes_results_without_network(
     assert data["summary"]["cases"] >= 9
     assert len(data["cases"]) == len(benchmark_module.load_cases(CASES_DIR))
     assert data["summary"]["covered_goals"] == data["summary"]["total_goals"]
+    assert data["summary"]["avg_goal_coverage"] >= 0.8
     for case in data["cases"]:
         report = case["report"]
         assert report["score"] >= 0
@@ -110,5 +158,8 @@ def test_offline_benchmark_writes_results_without_network(
         assert report["gap_report"] is not None
         assert report["tailored_resume"] is not None
         assert "diffs" in report["tailored_resume"]
+        if case["id"] == "schema-retry-tailor-structured":
+            assert case["schema_retry_attempts"] == 2
+            assert report["score"] > 0
         overlap = case["keyword_overlap"]
         assert overlap["coverage"] >= 0.6

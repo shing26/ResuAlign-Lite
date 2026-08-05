@@ -15,18 +15,24 @@ data/
 # Local agent/tool configuration
 .codex/
 
-# Scratch artifacts: keep only the CI smoke scripts under phase-16/18
+# Scratch artifacts: keep only the CI smoke scripts under phase-16/18/20
 .scratch/*
 !.scratch/phase-16/
 !.scratch/phase-18/
+!.scratch/phase-20/
 .scratch/phase-16/*
 !.scratch/phase-16/*.py
 .scratch/phase-18/*
 !.scratch/phase-18/*.py
+.scratch/phase-20/*
+!.scratch/phase-20/*.py
 
 # Generated reports
 resualign-report-*.json
 benchmarks/results/
+server.log
+server.err.log
+tmp-*.db
 
 # Local scratch utilities
 gentool.py

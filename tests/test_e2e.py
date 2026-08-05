@@ -33,7 +33,7 @@ def test_e2e_with_alignment(httpx_mock, capsys):
     rs = [
         '{"score":85,"skills":["Java","Spring"],"issues":[]}',
         '{"jd_profile":{"must_have_skills":["Java"],"nice_to_have_skills":[],"soft_skills":[],"business_scenarios":["Backend"],"min_years_experience":null,"education_requirements":[]},"gap_report":{"missing_keywords":[],"misaligned_emphasis":[],"strength_matches":[]}}',
-        '{"sections":{"exp":"Built services" },"diffs":[{"type":"modify","original":"old","proposed":"new","reason":"JD match","confidence":"high","provenance":"old"}]}',
+        '{"sections":{"exp":"Built services" },"diffs":[{"type":"modify","original":"Java, Spring Boot","proposed":"Java, Spring Boot, and backend services", "reason":"JD match","confidence":"high","provenance_quote":"Java, Spring Boot"}]}',
     ]
     for r in rs:
         httpx_mock.add_response(json={"choices":[{"message":{"content":r}}]})

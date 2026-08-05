@@ -5,7 +5,8 @@ on:
   pull_request:
 
 jobs:
-  test:
+  unit-contract:
+    name: Stage 1 - unit + contract
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -13,21 +14,77 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Unit and contract tests with coverage
+        run: python -m pytest --cov=resualign --cov-report=term-missing --cov-report=xml --cov-fail-under=85 --junitxml=test-results.xml tests/
+        env:
+          PYTHONPATH: src
+      - name: Upload unit and contract artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-contract-artifacts
+          path: |
+            coverage.xml
+            test-results.xml
+      - name: Frontend syntax check (ESM tolerant)
+        run: |
+          node --input-type=module --check < src/resualign/static/app.js
+          if ls src/resualign/static/app/*.js >/dev/null 2>&1; then
+            for file in src/resualign/static/app/*.js; do
+              node --input-type=module --check < "$file"
+            done
+          fi
+        shell: bash
+
+  benchmark-gate:
+    name: Stage 2 - benchmark gate
+    needs: unit-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Latency call-count and wallclock gate
+        run: python benchmarks/latency_benchmark.py
+        env:
+          PYTHONPATH: src
+      - name: Offline benchmark suite (15 cases)
+        run: python benchmarks/run_benchmark.py --offline
+        env:
+          PYTHONPATH: src
+
+  playwright-smoke:
+    name: Stage 3 - Playwright smoke
+    needs: benchmark-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies and Chromium
         run: |
           pip install -r requirements.txt
           pip install playwright
           python -m playwright install --with-deps chromium
-      - name: Run tests with coverage gate
-        run: python -m pytest --cov=resualign --cov-report=term-missing tests/
-        env:
-          PYTHONPATH: src
-      - name: Offline benchmark
-        run: python benchmarks/run_benchmark.py --offline
-        env:
-          PYTHONPATH: src
-      - name: Frontend syntax check
-        run: node --check src/resualign/static/app.js
-      - name: Playwright smoke pass
+      - name: Phase 16 smoke
         run: python .scratch/phase-16/playwright_smoke.py
         env:
           PYTHONPATH: src
+      - name: Phase 18 smoke
+        run: python .scratch/phase-18/playwright_smoke.py
+        env:
+          PYTHONPATH: src
+      - name: Phase 20 key-path smoke
+        run: python .scratch/phase-20/playwright_smoke.py
+        env:
+          PYTHONPATH: src
+      - name: Upload Playwright artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-artifacts
+          path: .scratch/phase-20/shots/
