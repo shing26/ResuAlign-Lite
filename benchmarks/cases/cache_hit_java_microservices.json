@@ -1,0 +1,20 @@
+{
+  "id": "cache-hit-java-microservices",
+  "scenario": "cache_hit",
+  "tags": ["cache-hit", "java"],
+  "cache_hit": true,
+  "expected_llm_calls": 2,
+  "cached_diagnosis": {
+    "score": 80,
+    "skills": ["Java", "Spring Boot", "Spring Cloud", "Kafka", "SQL"],
+    "issues": ["Add production deployment evidence."]
+  },
+  "resume_text": "SYNTHETIC RESUME - Java Microservices Engineer\n\nSummary\nJava engineer with 6 years of experience building microservices and event-driven systems.\n\nSkills\nJava, Spring Boot, Spring Cloud, Kafka, SQL\n\nExperience\nSenior Java Engineer, Example Corp (2020-present)\n- Built Spring Boot services for payment workflows.\n- Used Spring Cloud for service discovery.\n- Streamed events with Kafka.\n- Maintained SQL schemas and query tuning.",
+  "jd_text": "Java Microservices Engineer\n\nHiring a Java engineer for microservices and event streaming. Requirements: Spring Cloud microservices, Kafka event streaming, observability and tracing, SQL performance tuning.",
+  "expected_direction": [
+    "highlight Spring Cloud microservices",
+    "emphasize Kafka event streaming",
+    "show observability and tracing"
+  ],
+  "source_note": "Synthetic cache-hit regression case; no real person or document."
+}

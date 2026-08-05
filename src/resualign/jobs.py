@@ -205,16 +205,34 @@ class JobRegistry:
             self._ensure_initialized()
             return self._get_current(job_id, now, tenant_id=tenant_id)
 
-    def mark_running(self, job_id: str) -> None:
+    def claim_running(self, job_id: str) -> bool:
+        """Atomically claim a queued job and return True on success."""
         now = self._clock()
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
-                conn.execute(
+                cursor = conn.execute(
                     "UPDATE jobs SET status = 'running', started_at = ? "
                     "WHERE job_id = ? AND status = 'queued'",
                     (now, job_id),
                 )
+                return cursor.rowcount > 0
+
+    def mark_running(self, job_id: str) -> None:
+        """Backward-compatible running transition that ignores double claims."""
+        self.claim_running(job_id)
+
+    def requeue_interrupted(self, job_id: str) -> bool:
+        """Requeue a running job left by a dead process; queued stays queued."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "UPDATE jobs SET status = 'queued', started_at = NULL "
+                    "WHERE job_id = ? AND status = 'running'",
+                    (job_id,),
+                )
+                return cursor.rowcount > 0
 
     def update_progress(self, job_id: str, stage: str, message: str) -> None:
         with self._lock:
@@ -351,7 +369,10 @@ class JobRegistry:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        if str(self.db_path) == ":memory:":
+        from .store_base import _apply_sqlite_pragmas
+
+        in_memory = str(self.db_path) == ":memory:"
+        if in_memory:
             if self._memory_connection is None:
                 self._memory_connection = sqlite3.connect(":memory:")
                 self._memory_connection.row_factory = sqlite3.Row
@@ -359,7 +380,7 @@ class JobRegistry:
         else:
             connection = sqlite3.connect(str(self.db_path), timeout=5.0)
             connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
+        _apply_sqlite_pragmas(connection, in_memory=in_memory)
         try:
             yield connection
             connection.commit()
@@ -367,7 +388,7 @@ class JobRegistry:
             connection.rollback()
             raise
         finally:
-            if str(self.db_path) != ":memory:":
+            if not in_memory:
                 connection.close()
 
     def _get_current(

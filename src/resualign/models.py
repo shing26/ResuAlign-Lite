@@ -4,12 +4,16 @@ from typing import Optional
 
 @dataclass
 class DiffItem:
+    diff_id: str = ""
     type: str = "modify"
     original: str = ""
     proposed: str = ""
     reason: str = ""
     confidence: str = "medium"
     provenance: str = ""
+    provenance_quote: str = ""
+    source_span: Optional[tuple[int, int]] = None
+    provenance_state: str = "pending_review"
 
 
 @dataclass
@@ -27,6 +31,21 @@ class JDProfile:
     business_scenarios: list[str] = field(default_factory=list)
     min_years_experience: Optional[int] = None
     education_requirements: list[str] = field(default_factory=list)
+
+    @property
+    def required_skills(self) -> list[str]:
+        """Public alias for the required-skill contract."""
+        return self.must_have_skills
+
+    @property
+    def nice_to_have(self) -> list[str]:
+        """Public alias for the optional-skill contract."""
+        return self.nice_to_have_skills
+
+    @property
+    def business_scene(self) -> list[str]:
+        """Public alias for the business-scenario contract."""
+        return self.business_scenarios
 
 
 @dataclass
@@ -49,6 +68,7 @@ class EvalScore:
 class TailoredResume:
     sections: dict[str, str] = field(default_factory=dict)
     diffs: list[DiffItem] = field(default_factory=list)
+    invalid_diffs: list[DiffItem] = field(default_factory=list)
 
 
 @dataclass

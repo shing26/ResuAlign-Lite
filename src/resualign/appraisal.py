@@ -12,6 +12,20 @@ DEFAULT_WEIGHTS = {
     "quality": 10,
 }
 
+COMMUTE_MINUTES_FREE = 15
+COMMUTE_MINUTES_PENALTY_PER_MINUTE = 1.0
+COMMUTE_COST_FREE = 0.2
+COMMUTE_COST_PENALTY_PER_YUAN = 20.0
+
+_COMPONENT_LABELS = {
+    "match": "匹配度",
+    "salary": "薪资",
+    "hard_conditions": "硬性条件",
+    "quality": "岗位质量",
+    "commute": "通勤",
+}
+_ALLOWED_WEIGHT_KEYS = set(DEFAULT_WEIGHTS) | {"commute"}
+
 VERDICT_APPLY = "投递"
 VERDICT_CONSIDER = "考虑"
 VERDICT_SKIP = "放弃"
@@ -238,6 +252,45 @@ def _quality_score(job: dict[str, Any]) -> float:
     return min(100.0, round(score, 2))
 
 
+def _commute_score(
+    commute_minutes: Optional[int],
+    commute_cost_per_minute: Optional[float],
+) -> float:
+    """Score commute convenience 0-100 from time and per-minute cost."""
+    minutes = max(0, int(commute_minutes or 0))
+    cost = max(0.0, float(commute_cost_per_minute or 0))
+    penalty = 0.0
+    if minutes > COMMUTE_MINUTES_FREE:
+        penalty += min(
+            60.0,
+            (minutes - COMMUTE_MINUTES_FREE)
+            * COMMUTE_MINUTES_PENALTY_PER_MINUTE,
+        )
+    if cost > COMMUTE_COST_FREE:
+        penalty += min(
+            30.0,
+            (cost - COMMUTE_COST_FREE) * COMMUTE_COST_PENALTY_PER_YUAN,
+        )
+    return round(max(0.0, 100.0 - penalty), 2)
+
+
+def _appraisal_conclusion(
+    components: dict[str, float], verdict: str
+) -> str:
+    scored = {
+        key: components[key]
+        for key in _COMPONENT_LABELS
+        if key in components
+    }
+    top = max(scored, key=scored.get)
+    low = min(scored, key=scored.get)
+    return (
+        f"建议{verdict}；优势在{_COMPONENT_LABELS[top]}"
+        f"（{scored[top]:.0f}），短板在{_COMPONENT_LABELS[low]}"
+        f"（{scored[low]:.0f}）。"
+    )
+
+
 def compute_appraisal(
     job: dict[str, Any],
     resume_match_score: Optional[float] = None,
@@ -247,6 +300,9 @@ def compute_appraisal(
     resume_education: Optional[str] = None,
     settings: Optional[dict[str, Any]] = None,
     library_median: Optional[float] = None,
+    commute_minutes: Optional[int] = None,
+    commute_cost_per_minute: Optional[float] = None,
+    living_cost_adjustment: Optional[float] = None,
 ) -> dict[str, Any]:
     """Score a job 0-100 and return a verdict with transparent reasons.
 
@@ -254,13 +310,31 @@ def compute_appraisal(
     chain: settings reference (function x city), library same-function
     median, then a neutral missing benchmark.
     """
+    commute_minutes = 0 if commute_minutes is None else commute_minutes
+    commute_cost_per_minute = (
+        0.0
+        if commute_cost_per_minute is None
+        else commute_cost_per_minute
+    )
+    living_cost_adjustment = (
+        1.0 if living_cost_adjustment is None else living_cost_adjustment
+    )
+    if not 0.8 <= living_cost_adjustment <= 1.2:
+        raise ValueError("living_cost_adjustment must be between 0.8 and 1.2")
+    if commute_minutes < 0 or commute_cost_per_minute < 0:
+        raise ValueError("Commute inputs must be non-negative")
+
     resolved_weights = dict(DEFAULT_WEIGHTS)
+    resolved_weights["commute"] = 0.0
     if weights:
+        unknown = set(weights) - _ALLOWED_WEIGHT_KEYS
+        if unknown:
+            raise ValueError(f"Unknown weights: {sorted(unknown)}")
         missing = set(DEFAULT_WEIGHTS) - set(weights)
         if missing:
             raise ValueError(f"Missing weights: {sorted(missing)}")
         resolved_weights.update(weights)
-        if sum(resolved_weights.values()) != 100:
+        if abs(sum(resolved_weights.values()) - 100) > 1e-6:
             raise ValueError("Weights must sum to 100")
 
     if settings is not None:
@@ -278,13 +352,16 @@ def compute_appraisal(
         else 50.0
     )
     salary = _salary_score(job, salary_benchmark)
+    salary = round(min(100.0, salary * living_cost_adjustment), 2)
     hard = _hard_conditions_score(job, resume_years, resume_education)
     quality = _quality_score(job)
+    commute = _commute_score(commute_minutes, commute_cost_per_minute)
     score = round(
         match * resolved_weights["match"]
         + salary * resolved_weights["salary"]
         + hard * resolved_weights["hard_conditions"]
-        + quality * resolved_weights["quality"],
+        + quality * resolved_weights["quality"]
+        + commute * resolved_weights["commute"],
         2,
     ) / 100
 
@@ -319,18 +396,22 @@ def compute_appraisal(
     reasons.append(f"硬性条件 {hard:.0f}/100，岗位质量 {quality:.0f}/100")
 
     city_normalized = normalize_city(job.get("location")) or None
+    components = {
+        "match": round(match, 2),
+        "salary": salary,
+        "hard_conditions": hard,
+        "quality": quality,
+        "commute": commute,
+        "living_cost_adjustment": living_cost_adjustment,
+    }
     return {
         "score": score,
         "verdict": verdict,
-        "components": {
-            "match": round(match, 2),
-            "salary": salary,
-            "hard_conditions": hard,
-            "quality": quality,
-        },
+        "components": components,
         "reasons": reasons,
         "weights": resolved_weights,
         "salary_benchmark": salary_benchmark,
         "benchmark_source": benchmark_source,
         "city_normalized": city_normalized,
+        "conclusion": _appraisal_conclusion(components, verdict),
     }

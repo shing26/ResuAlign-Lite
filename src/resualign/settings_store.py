@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
 from typing import Any
 
@@ -16,6 +17,8 @@ CREATE TABLE IF NOT EXISTS user_settings (
     salary_reference_json TEXT NOT NULL DEFAULT '[]',
     appraisal_weights_json TEXT NOT NULL DEFAULT '{}',
     classification_vocabulary_json TEXT NOT NULL DEFAULT '{}',
+    llm_provider TEXT,
+    llm_model TEXT,
     updated_at REAL NOT NULL
 );
 """
@@ -60,6 +63,8 @@ def default_settings() -> dict[str, Any]:
             "seniorities": list(SENIORITIES),
             "statuses": list(JOB_STATUSES),
         },
+        "llm_provider": None,
+        "llm_model": None,
     }
 
 
@@ -73,7 +78,8 @@ class SettingsStore(_SqliteStore):
             with self._connect() as conn:
                 row = conn.execute(
                     "SELECT salary_reference_json, appraisal_weights_json, "
-                    "classification_vocabulary_json FROM user_settings "
+                    "classification_vocabulary_json, llm_provider, llm_model "
+                    "FROM user_settings "
                     "WHERE tenant_id = ?",
                     (tenant_id,),
                 ).fetchone()
@@ -89,6 +95,8 @@ class SettingsStore(_SqliteStore):
             "classification_vocabulary": json.loads(
                 row["classification_vocabulary_json"] or "{}"
             ),
+            "llm_provider": row["llm_provider"],
+            "llm_model": row["llm_model"],
         }
         return _merge_defaults(defaults, settings)
 
@@ -106,15 +114,17 @@ class SettingsStore(_SqliteStore):
                 conn.execute(
                     "INSERT INTO user_settings ("
                     "tenant_id, salary_reference_json, "
-                    "appraisal_weights_json, "
-                    "classification_vocabulary_json, updated_at"
-                    ") VALUES (?, ?, ?, ?, ?) "
+                    "appraisal_weights_json, classification_vocabulary_json, "
+                    "llm_provider, llm_model, updated_at"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(tenant_id) DO UPDATE SET "
                     "salary_reference_json = excluded.salary_reference_json, "
                     "appraisal_weights_json = "
                     "excluded.appraisal_weights_json, "
                     "classification_vocabulary_json = "
                     "excluded.classification_vocabulary_json, "
+                    "llm_provider = excluded.llm_provider, "
+                    "llm_model = excluded.llm_model, "
                     "updated_at = excluded.updated_at",
                     (
                         tenant_id,
@@ -128,6 +138,8 @@ class SettingsStore(_SqliteStore):
                             merged["classification_vocabulary"],
                             ensure_ascii=False,
                         ),
+                        merged.get("llm_provider"),
+                        merged.get("llm_model"),
                         now,
                     ),
                 )
@@ -135,6 +147,27 @@ class SettingsStore(_SqliteStore):
 
     def _ensure_initialized(self) -> None:
         super()._ensure_initialized(_SETTINGS_SCHEMA)
+        if getattr(self, "_llm_columns_added", False):
+            return
+        with self._lock:
+            if getattr(self, "_llm_columns_added", False):
+                return
+            with self._connect() as conn:
+                try:
+                    conn.execute(
+                        "ALTER TABLE user_settings "
+                        "ADD COLUMN llm_provider TEXT"
+                    )
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    conn.execute(
+                        "ALTER TABLE user_settings "
+                        "ADD COLUMN llm_model TEXT"
+                    )
+                except sqlite3.OperationalError:
+                    pass
+            self._llm_columns_added = True
 
 
 def _merge_defaults(
@@ -156,11 +189,30 @@ def _merge_defaults(
             )
             for key in defaults["classification_vocabulary"]
         },
+        "llm_provider": updates.get(
+            "llm_provider", defaults.get("llm_provider")
+        ),
+        "llm_model": updates.get("llm_model", defaults.get("llm_model")),
     }
     return merged
 
 
 def _validate_settings(settings: dict[str, Any]) -> None:
+    provider = settings.get("llm_provider")
+    if provider is not None and provider not in (
+        "deepseek",
+        "openrouter",
+        "ollama",
+    ):
+        raise UserStoreError(
+            "llm_provider must be one of deepseek, openrouter, ollama"
+        )
+    model = settings.get("llm_model")
+    if model is not None and (not isinstance(model, str) or not model.strip()):
+        raise UserStoreError("llm_model must be a non-empty string")
+    if model is not None and provider is None:
+        raise UserStoreError("llm_provider is required when setting llm_model")
+
     weights = settings.get("appraisal_weights") or {}
     missing = set(DEFAULT_WEIGHTS) - set(weights)
     if missing:

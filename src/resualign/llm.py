@@ -1,9 +1,34 @@
 import json
+import re
 import time
 from abc import ABC, abstractmethod
-from typing import Optional, ClassVar
+from typing import Any, ClassVar, Optional, Type
 
 import httpx
+from pydantic import BaseModel, ValidationError
+
+
+STRUCTURED_MAX_EXTRA_RETRIES = 2
+
+
+def _parse_json_object(content: str) -> dict[str, Any]:
+    """Parse a provider JSON object without using raw_decode."""
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text).strip()
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            value = json.loads(text[start : end + 1])
+        else:
+            raise
+    if not isinstance(value, dict):
+        raise LLMResponseError("Structured response is not a JSON object")
+    return value
 
 
 class LLMResponseError(Exception):
@@ -19,9 +44,36 @@ class LLMClient(ABC):
         """Send a chat request and return parsed JSON."""
         ...
 
+    def chat_structured(
+        self,
+        system: str,
+        user: str,
+        schema_model: Type[BaseModel],
+        model: Optional[str] = None,
+    ) -> dict:
+        """Return a dict validated against a Pydantic response schema.
+
+        Providers that do not expose the provider-specific method in a
+        subclass fall back to JSON mode plus bounded schema-validation retries.
+        """
+        last_error: Optional[Exception] = None
+        for _ in range(STRUCTURED_MAX_EXTRA_RETRIES + 1):
+            try:
+                result = self.chat_json(system, user, model=model)
+                return schema_model.model_validate(result).model_dump()
+            except ValidationError as exc:
+                last_error = exc
+                time.sleep(1)
+        raise LLMResponseError(
+            "Structured response failed schema validation after "
+            f"{STRUCTURED_MAX_EXTRA_RETRIES + 1} attempts: {last_error}"
+        )
+
 
 class OpenAIClient(LLMClient):
     """Concrete LLM client compatible with OpenAI / DeepSeek / Ollama APIs."""
+
+    strict_provenance = True
 
     # Defaults that can be overridden per instance or per subclass
     DEFAULT_MAX_TOKENS: ClassVar[int] = 16384
@@ -35,6 +87,11 @@ class OpenAIClient(LLMClient):
         self.base_url = (
             config.base_url
             or _DEFAULT_PROVIDER_URLS.get(config.provider, "https://api.openai.com/v1")
+        )
+        provider = str(getattr(config, "provider", "")).lower()
+        self.supports_structured_outputs = (
+            provider in {"openai", "azure"}
+            or "api.openai.com" in self.base_url
         )
         self.max_retries = self.DEFAULT_MAX_RETRIES
         self._client = httpx.Client(
@@ -91,10 +148,8 @@ class OpenAIClient(LLMClient):
                         max_tokens = min(max_tokens * 2, 65536)
                     time.sleep(1)
                     continue
-                decoder = json.JSONDecoder()
                 try:
-                    obj, _ = decoder.raw_decode(content, start)
-                    return obj
+                    return _parse_json_object(content)
                 except Exception:
                     if attempt == self.max_retries:
                         raise
@@ -112,16 +167,201 @@ class OpenAIClient(LLMClient):
                     ) from e
                 time.sleep(1)
 
+    def chat_structured(
+        self,
+        system: str,
+        user: str,
+        schema_model: Type[BaseModel],
+        model: Optional[str] = None,
+    ) -> dict:
+        if self.supports_structured_outputs:
+            return self._chat_structured_provider(
+                system, user, schema_model, model=model
+            )
+        return self._chat_structured_json_mode(
+            system, user, schema_model, model=model
+        )
+
+    def _chat_structured_provider(
+        self,
+        system: str,
+        user: str,
+        schema_model: Type[BaseModel],
+        model: Optional[str] = None,
+    ) -> dict:
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        schema = schema_model.model_json_schema()
+        body = {
+            "model": model or self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": self.DEFAULT_TEMPERATURE,
+            "max_tokens": self.DEFAULT_MAX_TOKENS,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema_model.__name__,
+                    "schema": schema,
+                    "strict": True,
+                },
+            },
+        }
+        for attempt in range(self.max_retries + 1):
+            try:
+                r = self._client.post(
+                    f"{self.base_url.rstrip('/')}/chat/completions",
+                    headers=headers,
+                    json=body,
+                )
+                r.raise_for_status()
+                response = r.json()
+                message = response["choices"][0]["message"]
+                content = message.get("content") or ""
+                return schema_model.model_validate(
+                    _parse_json_object(content)
+                ).model_dump()
+            except httpx.HTTPStatusError as exc:
+                if exc.response is not None and exc.response.status_code == 400:
+                    return self._chat_structured_json_mode(
+                        system, user, schema_model, model=model
+                    )
+                if attempt == self.max_retries:
+                    raise LLMResponseError(
+                        "Structured LLM call failed after "
+                        f"{self.max_retries + 1} attempts: {exc}"
+                    ) from exc
+                time.sleep(1)
+            except (ValidationError, json.JSONDecodeError, LLMResponseError) as exc:
+                if attempt == self.max_retries:
+                    raise LLMResponseError(
+                        "Structured response failed validation after "
+                        f"{self.max_retries + 1} attempts: {exc}"
+                    ) from exc
+                time.sleep(1)
+            except Exception as exc:
+                if attempt == self.max_retries:
+                    raise LLMResponseError(
+                        "Structured LLM call failed after "
+                        f"{self.max_retries + 1} attempts: {exc}"
+                    ) from exc
+                time.sleep(1)
+
+    def _chat_structured_json_mode(
+        self,
+        system: str,
+        user: str,
+        schema_model: Type[BaseModel],
+        model: Optional[str] = None,
+    ) -> dict:
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        body = {
+            "model": model or self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": self.DEFAULT_TEMPERATURE,
+            "max_tokens": self.DEFAULT_MAX_TOKENS,
+            "response_format": {"type": "json_object"},
+        }
+        last_error: Optional[Exception] = None
+        for attempt in range(STRUCTURED_MAX_EXTRA_RETRIES + 1):
+            try:
+                r = self._client.post(
+                    f"{self.base_url.rstrip('/')}/chat/completions",
+                    headers=headers,
+                    json=body,
+                )
+                r.raise_for_status()
+                response = r.json()
+                message = response["choices"][0]["message"]
+                content = message.get("content") or ""
+                return schema_model.model_validate(
+                    _parse_json_object(content)
+                ).model_dump()
+            except (ValidationError, json.JSONDecodeError, LLMResponseError) as exc:
+                last_error = exc
+                if attempt >= STRUCTURED_MAX_EXTRA_RETRIES:
+                    raise LLMResponseError(
+                        "Structured response failed schema validation after "
+                        f"{STRUCTURED_MAX_EXTRA_RETRIES + 1} attempts: {last_error}"
+                    ) from exc
+                time.sleep(1)
+            except Exception as exc:
+                last_error = exc
+                if attempt >= STRUCTURED_MAX_EXTRA_RETRIES:
+                    raise LLMResponseError(
+                        "Structured LLM call failed after "
+                        f"{STRUCTURED_MAX_EXTRA_RETRIES + 1} attempts: {last_error}"
+                    ) from exc
+                time.sleep(1)
+
 
 DIAG_PROMPT = (
     "You are a resume auditor. Return JSON with score (0-100), issues (list of strings), "
     "and skills (list of strings). Output ONLY JSON."
 )
+DIAG_PROMPT_VERSION = "1"
 _DEFAULT_PROVIDER_URLS: dict[str, str] = {
     "deepseek": "https://api.deepseek.com",
     "openrouter": "https://openrouter.ai/api/v1",
     "ollama": "http://localhost:11434/v1",
 }
+
+
+def _structured_or_json(
+    client: LLMClient,
+    system: str,
+    user: str,
+    schema_model: Type[BaseModel],
+    model: Optional[str] = None,
+) -> dict:
+    """Use chat_structured when available; otherwise preserve chat_json callers."""
+    structured = getattr(client, "chat_structured", None)
+    if callable(structured):
+        return structured(system, user, schema_model, model=model)
+    return client.chat_json(system, user, model=model)
+
+
+def diagnose_resume(
+    client: LLMClient,
+    resume_text: str,
+    cache=None,
+    tenant: str = "default",
+    model: Optional[str] = None,
+) -> dict:
+    """Run diagnosis through an optional content-hash cache."""
+    from .cache import ContentCache
+    from .schema_registry import AnalysisSchema
+
+    resolved_model = model or getattr(client, "model", "default")
+    if cache is not None:
+        cached = cache.get(
+            tenant,
+            resolved_model,
+            DIAG_PROMPT_VERSION,
+            resume_text,
+        )
+        if cached is not None:
+            return cached
+    result = _structured_or_json(
+        client,
+        DIAG_PROMPT,
+        resume_text,
+        AnalysisSchema,
+        model=resolved_model,
+    )
+    if cache is not None:
+        cache.put(
+            tenant,
+            resolved_model,
+            DIAG_PROMPT_VERSION,
+            resume_text,
+            result,
+        )
+    return result
 
 # ---------------------------------------------------------------------------
 # LLM client abstractions

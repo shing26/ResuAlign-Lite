@@ -1,7 +1,7 @@
 from typing import Callable, Optional
 
 from .models import Report, ResuAlignConfig
-from .llm import LLMClient, OpenAIClient, DIAG_PROMPT
+from .llm import LLMClient, OpenAIClient, diagnose_resume
 from .jd_analysis import profile_and_gaps
 from .tailor import tailor_resume
 from .evaluator import evaluate
@@ -35,6 +35,8 @@ def run(
     custom_prompt: str = "",
     diagnosis: Optional[dict] = None,
     on_stage: Optional[Callable[[str, str], None]] = None,
+    cache=None,
+    tenant: str = "default",
 ) -> Report:
     """Run the full pipeline: diagnose + optional alignment.
 
@@ -51,7 +53,13 @@ def run(
         if diagnosis is not None:
             diag_result = diagnosis
         else:
-            diag_result = client.chat_json(DIAG_PROMPT, resume_text)
+            diag_result = diagnose_resume(
+                client,
+                resume_text,
+                cache=cache,
+                tenant=tenant,
+                model=config.model,
+            )
 
         report = Report(
             score=diag_result.get("score", 0),
@@ -71,7 +79,11 @@ def run(
                 "Extracting JD profile and analyzing gaps...",
             )
             report.jd_profile, report.gap_report = profile_and_gaps(
-                client, resume_text, jd_input
+                client,
+                resume_text,
+                jd_input,
+                cache=cache,
+                tenant=tenant,
             )
 
             # Tailoring
@@ -109,6 +121,7 @@ def run(
                     resume_text,
                     sections_text,
                     truncate_text(jd_text, MAX_JD_CONTEXT_CHARS),
+                    diffs=report.tailored_resume.diffs,
                 )
         return report
     finally:

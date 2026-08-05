@@ -1,5 +1,12 @@
-from .llm import LLMClient
+import re
+import uuid
+
+from .llm import LLMClient, _structured_or_json
 from .models import TailoredResume, DiffItem
+from .schema_registry import DiffItemSchema, TailoredResumeSchema
+
+
+BULLET_REWRITE_PROMPT_VERSION = "bullet-rewrite-v1"
 
 
 TAILOR_PROMPT = (
@@ -103,6 +110,105 @@ PROMPT_FOCUS_GUIDES = {
     ),
 }
 
+BULLET_INSTRUCTIONS = {
+    "quantified": (
+        "Re-emphasize measurable outcomes that already exist in the bullet "
+        "(numbers, percentages, counts, or reductions). Never invent or "
+        "inflate metrics that are absent from the original bullet."
+    ),
+    "high_concurrency": (
+        "Tie the existing facts to high-concurrency, low-latency, or "
+        "production platform language when the facts support it. Use the "
+        "JD's exact scenario phrase when available; never add capabilities "
+        "the original bullet does not contain."
+    ),
+    "concise": (
+        "Shorten the bullet to one crisp line while preserving every fact "
+        "and the original meaning. Do not drop numbers or technologies."
+    ),
+}
+
+
+def _normalize_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def _normalized_char_map(text: str) -> tuple[str, list[int]]:
+    """Return whitespace-collapsed text plus a char->original index map."""
+    norm_chars: list[str] = []
+    map_to_original: list[int] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        if text[index].isspace():
+            start = index
+            while index < length and text[index].isspace():
+                index += 1
+            norm_chars.append(" ")
+            map_to_original.append(start)
+        else:
+            norm_chars.append(text[index])
+            map_to_original.append(index)
+            index += 1
+    return "".join(norm_chars), map_to_original
+
+
+def _resolve_span(quote: str, resume_text: str) -> tuple[int, int] | None:
+    """Locate a provenance quote with exact or whitespace-normalized matching."""
+    if not quote:
+        return None
+    exact = resume_text.find(quote)
+    if exact >= 0:
+        return (exact, exact + len(quote))
+    normalized_text, char_map = _normalized_char_map(resume_text)
+    normalized_quote = _normalize_whitespace(quote)
+    position = normalized_text.find(normalized_quote)
+    if position < 0 or position >= len(char_map):
+        return None
+    start = char_map[position]
+    end_index = position + len(normalized_quote)
+    end = char_map[end_index] if end_index < len(char_map) else len(resume_text)
+    return (start, end)
+
+
+def parse_diff_with_provenance(
+    item: dict,
+    resume_text: str,
+) -> tuple[DiffItem, bool]:
+    """Build a DiffItem and verify its provenance against the source resume."""
+    diff_type = item.get("type", "modify")
+    if diff_type not in {"modify", "add", "remove"}:
+        diff_type = "modify"
+    confidence = item.get("confidence", "medium")
+    if confidence not in {"high", "medium", "low"}:
+        confidence = "medium"
+    original = item.get("original", "")
+    quote = str(item.get("provenance_quote") or item.get("provenance") or "").strip()
+    source_span = None
+    valid = False
+    provenance_state = "pending_review"
+    source_span = _resolve_span(quote, resume_text)
+    if quote and source_span is not None:
+        valid = True
+        provenance_state = "verified"
+    elif quote:
+        provenance_state = "missing"
+    elif diff_type == "add" and not str(original).strip():
+        provenance_state = "missing"
+    diff = DiffItem(
+        diff_id=str(item.get("diff_id") or uuid.uuid4().hex),
+        type=diff_type,
+        original=original,
+        proposed=item.get("proposed", ""),
+        reason=item.get("reason", ""),
+        confidence=confidence,
+        provenance=quote if valid else item.get("provenance", ""),
+        provenance_quote=quote if valid else "",
+        source_span=source_span,
+        provenance_state=provenance_state,
+    )
+    return diff, valid
+
 
 def tailor_resume(
     client: LLMClient,
@@ -137,24 +243,108 @@ def tailor_resume(
             "fabricate skills, experience, metrics, tools, or any other fact "
             "not present in the original resume."
         )
-    result = client.chat_json(system, user)
+    result = _structured_or_json(client, system, user, TailoredResumeSchema)
     diffs = []
+    invalid_diffs = []
+    strict_provenance = bool(getattr(client, "strict_provenance", False))
     for item in result.get("diffs", []):
-        diff_type = item.get("type", "modify")
-        if diff_type not in {"modify", "add", "remove"}:
-            diff_type = "modify"
-        confidence = item.get("confidence", "medium")
-        if confidence not in {"high", "medium", "low"}:
-            confidence = "medium"
-        diffs.append(DiffItem(
-            type=diff_type,
-            original=item.get("original", ""),
-            proposed=item.get("proposed", ""),
-            reason=item.get("reason", ""),
-            confidence=confidence,
-            provenance=item.get("provenance", ""),
-        ))
+        diff, valid = parse_diff_with_provenance(item, resume_text)
+        if diff.type == "add" and not diff.original.strip():
+            invalid_diffs.append(diff)
+            continue
+        if not valid and strict_provenance:
+            invalid_diffs.append(diff)
+        else:
+            diffs.append(diff)
+            if not valid:
+                invalid_diffs.append(diff)
     return TailoredResume(
         sections=result.get("sections", {}),
         diffs=diffs,
+        invalid_diffs=invalid_diffs,
     )
+
+
+def rewrite_bullet(
+    client: LLMClient,
+    original: str,
+    instruction: str,
+    jd_context: str | None = None,
+    cache=None,
+    tenant: str = "default",
+    model: str | None = None,
+) -> DiffItem:
+    """Rewrite one resume bullet with a whitelisted instruction."""
+    if instruction not in BULLET_INSTRUCTIONS:
+        raise ValueError(
+            f"Invalid instruction: {instruction}; expected "
+            "quantified, high_concurrency, or concise"
+        )
+    original = (original or "").strip()
+    if not original:
+        raise ValueError("Original bullet is required")
+    resolved_model = model or getattr(client, "model", "default")
+    content = f"{instruction}\n{original}\n{jd_context or ''}"
+    if cache is not None:
+        cached = cache.get(
+            tenant,
+            resolved_model,
+            BULLET_REWRITE_PROMPT_VERSION,
+            content,
+        )
+        if cached is not None:
+            return DiffItem(
+                diff_id=uuid.uuid4().hex,
+                type="modify",
+                original=original,
+                proposed=cached.get("proposed", ""),
+                reason=cached.get("reason", ""),
+                confidence="high",
+                provenance=original,
+                provenance_quote=original,
+                source_span=(0, len(original)),
+                provenance_state="verified",
+            )
+
+    system = (
+        "You rewrite exactly one resume bullet for a job application.\n"
+        "RULES:\n"
+        "1. Preserve every fact, technology, and metric already present.\n"
+        "2. NEVER invent skills, experience, tools, or numbers.\n"
+        "3. Apply the requested instruction to the existing facts.\n"
+        "4. Keep the same language as the original bullet.\n"
+        "Return ONLY JSON: {\"proposed\": \"...\", \"reason\": \"...\"}."
+    )
+    user = (
+        f"Original bullet:\n{original}\n\n"
+        f"Instruction: {BULLET_INSTRUCTIONS[instruction]}\n\n"
+        f"JD context:\n{jd_context or '(none)'}"
+    )
+    result = _structured_or_json(
+        client,
+        system,
+        user,
+        DiffItemSchema,
+        model=resolved_model,
+    )
+    diff = DiffItem(
+        diff_id=uuid.uuid4().hex,
+        type="modify",
+        original=original,
+        proposed=str(result.get("proposed") or "").strip(),
+        reason=str(result.get("reason") or "").strip(),
+        confidence="high",
+        provenance=original,
+        provenance_quote=original,
+        source_span=(0, len(original)),
+        provenance_state="verified",
+    )
+    if cache is not None:
+        cache.put(
+            tenant,
+            resolved_model,
+            BULLET_REWRITE_PROMPT_VERSION,
+            content,
+            {"proposed": diff.proposed, "reason": diff.reason},
+        )
+    return diff

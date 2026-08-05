@@ -8,13 +8,20 @@ import http.client
 import http.cookies
 import ipaddress
 import json
+import logging
+import os
+import random
 import re
 import socket
 import ssl
+import threading
+import time
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
+
+from .observability import current_request_id, log_event
 
 HEADERS = {
     "User-Agent": "ResuAlign/1.0",
@@ -24,6 +31,137 @@ HEADERS = {
     ),
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
+DEFAULT_UA_POOL = (
+    HEADERS["User-Agent"],
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/126.0.0.0 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) "
+        "Gecko/20100101 Firefox/126.0"
+    ),
+)
+DEFAULT_MIN_INTERVAL = 1.0
+MAX_RETRIES = 2
+_RETRYABLE_HTTP_ERRORS = (
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.TimeoutException,
+)
+_DYNAMIC_SITE_TOKENS = ("feishu", "moka", "mokahr", "zhipin", "boss", "linkedin")
+
+logger = logging.getLogger(__name__)
+
+
+class _HostRateLimiter:
+    """Thread-safe per-host minimum interval limiter."""
+
+    def __init__(self, interval: float = DEFAULT_MIN_INTERVAL):
+        self.interval = max(0.0, float(interval))
+        self._next_available: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def wait(self, host: str) -> None:
+        if not host or self.interval <= 0:
+            return
+        now = time.monotonic()
+        with self._lock:
+            next_available = max(now, self._next_available.get(host, 0.0))
+            self._next_available[host] = next_available + self.interval
+        delay = next_available - now
+        if delay > 0:
+            time.sleep(delay)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._next_available.clear()
+
+
+def _env_min_interval() -> float:
+    raw = os.getenv("RESUALIGN_CRAWL_MIN_INTERVAL", "").strip()
+    if not raw:
+        return DEFAULT_MIN_INTERVAL
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_MIN_INTERVAL
+
+
+_crawl_rate_limiter = _HostRateLimiter(_env_min_interval())
+_ua_index = 0
+_ua_lock = threading.Lock()
+
+
+class _UARotator:
+    """Per-crawl user-agent rotator seeded with the base UA string."""
+
+    def __init__(self):
+        self._pool = _ua_pool()
+        self._index = 0
+        self._env_configured = bool(
+            os.getenv("RESUALIGN_CRAWL_UA_POOL", "").strip()
+        )
+
+    def next(self) -> str:
+        if self._env_configured:
+            return _next_user_agent()
+        value = self._pool[self._index % len(self._pool)]
+        self._index += 1
+        return value
+
+
+def _next_user_agent() -> str:
+    global _ua_index
+    pool = _ua_pool()
+    with _ua_lock:
+        value = pool[_ua_index % len(pool)]
+        _ua_index += 1
+        return value
+
+
+def _ua_pool() -> list[str]:
+    raw = os.getenv("RESUALIGN_CRAWL_UA_POOL", "").strip()
+    if not raw:
+        return list(DEFAULT_UA_POOL)
+    try:
+        values = json.loads(raw)
+    except (TypeError, ValueError):
+        logger.warning("Invalid RESUALIGN_CRAWL_UA_POOL; using defaults")
+        return list(DEFAULT_UA_POOL)
+    pool = [
+        str(value).strip()
+        for value in values
+        if isinstance(value, str) and str(value).strip()
+    ]
+    return pool or list(DEFAULT_UA_POOL)
+
+
+def _proxy_url() -> str:
+    return os.getenv("RESUALIGN_CRAWL_PROXY", "").strip()
+
+
+def _playwright_enabled() -> bool:
+    value = os.getenv("RESUALIGN_CRAWL_PLAYWRIGHT", "0").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _is_dynamic_site(url: str) -> bool:
+    host = urlparse(url).netloc.lower()
+    return any(token in host for token in _DYNAMIC_SITE_TOKENS)
+
+
+def _throttle(url: str) -> None:
+    limiter = _crawl_rate_limiter
+    if hasattr(limiter, "interval"):
+        limiter.interval = _env_min_interval()
+    limiter.wait((urlparse(url).hostname or "").lower())
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 MAX_REDIRECTS = 5
 ALLOWED_SCHEMES = ("http", "https")
@@ -76,70 +214,265 @@ def crawl_jd(
     timeout: int = 30,
     selector: str | None = None,
     meta: dict | None = None,
+    request_id: str | None = None,
+    on_stage=None,
 ) -> str:
-    """Fetch a job description URL and return its cleaned plain text."""
+    """Fetch a JD URL and return cleaned text with hardening applied."""
+    request_id = request_id or current_request_id()
+    started = time.monotonic()
+    ua_rotator = _UARotator()
+    try:
+        if on_stage is not None:
+            on_stage("fetching", "Fetching JD")
+        fetched = _static_fetch(
+            url, timeout=timeout, ua_rotator=ua_rotator, request_id=request_id
+        )
+        if on_stage is not None:
+            on_stage("parsing", "Parsing JD content")
+        text = _parse_html(
+            fetched.content,
+            fetched.encoding,
+            fetched.url,
+            selector,
+            meta,
+            ip=fetched.ip,
+            timeout=timeout,
+            cookies=fetched.cookies,
+        )
+    except CrawlError as exc:
+        if exc.category in ("empty", "fetch", "http") and _is_dynamic_site(url):
+            fallback_text = _playwright_fallback(
+                url, timeout=timeout, selector=selector, meta=meta,
+                request_id=request_id,
+            )
+            if fallback_text is not None:
+                log_event(
+                    logger,
+                    "crawler.playwright_success",
+                    request_id=request_id,
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    extra={"url": url},
+                )
+                return fallback_text
+        log_event(
+            logger,
+            "crawler.failed",
+            level="warning",
+            request_id=request_id,
+            duration_ms=(time.monotonic() - started) * 1000,
+            extra={"url": url, "category": exc.category},
+        )
+        raise
+    log_event(
+        logger,
+        "crawler.success",
+        request_id=request_id,
+        duration_ms=(time.monotonic() - started) * 1000,
+        extra={"url": url},
+    )
+    return text
+
+
+class _StaticFetchResult:
+    def __init__(
+        self,
+        content: bytes,
+        encoding: str,
+        url: str,
+        ip: str | None,
+        cookies: dict[str, str],
+    ):
+        self.content = content
+        self.encoding = encoding
+        self.url = url
+        self.ip = ip
+        self.cookies = cookies
+
+
+def _static_fetch(
+    url: str,
+    timeout: int,
+    ua_rotator: _UARotator,
+    request_id: str | None,
+) -> _StaticFetchResult:
+    """Fetch through redirects while throttling and validating every hop."""
     current_url = url
     cookies: dict[str, str] = {}
     for _ in range(MAX_REDIRECTS + 1):
         _validate_target(current_url)
-        pinned_ip = _resolve_public_host(
-            urlparse(current_url).hostname or ""
+        proxy = _proxy_url()
+        pinned_ip = (
+            None
+            if proxy
+            else _resolve_public_host(urlparse(current_url).hostname or "")
         )
-        headers = dict(HEADERS)
-        if cookies:
-            headers["Cookie"] = "; ".join(
-                f"{name}={value}" for name, value in cookies.items()
-            )
+        headers = _headers_for_cookies(cookies, ua_rotator)
         try:
-            with _fetch_stream(
+            response = _fetch_with_retry(
                 current_url,
                 timeout=timeout,
                 ip=pinned_ip,
                 headers=headers,
-            ) as response:
-                _merge_cookies(cookies, response)
-                if response.status_code in (301, 302, 303, 307, 308):
-                    location = response.headers.get("location")
-                    if not location:
-                        raise CrawlError(
-                            f"Redirect without location at {current_url}",
-                            category="http",
-                            url=current_url,
-                        )
-                    current_url = urljoin(current_url, location)
-                    continue
-                if response.status_code >= 400:
+                request_id=request_id,
+            )
+            _merge_cookies(cookies, response)
+            if response.status_code in (301, 302, 303, 307, 308):
+                location = response.headers.get("location")
+                if not location:
                     raise CrawlError(
-                        f"Failed to fetch {current_url}: "
-                        f"HTTP {response.status_code}",
+                        f"Redirect without location at {current_url}",
                         category="http",
                         url=current_url,
                     )
-                content = _read_limited(
-                    response, MAX_RESPONSE_BYTES, current_url
+                current_url = urljoin(current_url, location)
+                continue
+            if response.status_code >= 400:
+                raise CrawlError(
+                    f"Failed to fetch {current_url}: "
+                    f"HTTP {response.status_code}",
+                    category="http",
+                    url=current_url,
                 )
+            encoding = (
+                response.encoding
+                or response.charset_encoding
+                or "utf-8"
+            )
+            return _StaticFetchResult(
+                response.content,
+                encoding,
+                current_url,
+                pinned_ip,
+                cookies,
+            )
+        except CrawlError:
+            raise
+        except httpx.HTTPError as exc:
+            raise CrawlError(
+                f"Failed to fetch {current_url}: {exc}",
+                category="fetch",
+                url=current_url,
+            ) from exc
+    raise CrawlError(
+        f"Too many redirects at {url}",
+        category="http",
+        url=url,
+    )
+
+
+def _headers_for_cookies(
+    cookies: dict[str, str],
+    ua_rotator: _UARotator | None = None,
+) -> dict[str, str]:
+    headers = dict(HEADERS)
+    if ua_rotator is not None:
+        headers["User-Agent"] = ua_rotator.next()
+    if cookies:
+        headers["Cookie"] = "; ".join(
+            f"{name}={value}" for name, value in cookies.items()
+        )
+    return headers
+
+
+class _FetchedResponse:
+    def __init__(
+        self,
+        status_code: int,
+        headers,
+        content: bytes,
+        encoding: str,
+        charset_encoding: str | None,
+    ):
+        self.status_code = status_code
+        self.headers = headers
+        self.content = content
+        self.encoding = encoding
+        self.charset_encoding = charset_encoding
+
+
+def _backoff_delay(attempt: int) -> float:
+    base = 0.5 * (2 ** attempt)
+    return random.uniform(base * 0.5, base)
+
+
+def _fetch_with_retry(
+    url: str,
+    timeout: int,
+    ip: str | None = None,
+    headers: dict | None = None,
+    method: str = "GET",
+    json_body: dict | None = None,
+    request_id: str | None = None,
+) -> _FetchedResponse:
+    """Fetch one response with bounded exponential-backoff retries."""
+    request_id = request_id or current_request_id()
+    last_error: httpx.HTTPError | None = None
+    for attempt in range(MAX_RETRIES + 1):
+        _throttle(url)
+        try:
+            with _fetch_stream(
+                url,
+                timeout=timeout,
+                ip=ip,
+                headers=headers or HEADERS,
+                method=method,
+                json_body=json_body,
+            ) as response:
+                content = _read_limited(response, MAX_RESPONSE_BYTES, url)
                 encoding = (
                     getattr(response, "encoding", None)
                     or getattr(response, "charset_encoding", None)
                     or "utf-8"
                 )
-                break
+                return _FetchedResponse(
+                    response.status_code,
+                    response.headers,
+                    content,
+                    encoding,
+                    getattr(response, "charset_encoding", None),
+                )
+        except _RETRYABLE_HTTP_ERRORS as exc:
+            last_error = exc
+            if attempt < MAX_RETRIES:
+                delay = _backoff_delay(attempt)
+                log_event(
+                    logger,
+                    "crawler.retry",
+                    level="warning",
+                    request_id=request_id,
+                    duration_ms=delay * 1000,
+                    extra={
+                        "url": url,
+                        "attempt": attempt + 1,
+                        "error": str(exc),
+                    },
+                )
+                time.sleep(delay)
         except CrawlError:
             raise
-        except httpx.HTTPError as e:
-            raise CrawlError(
-                f"Failed to fetch {current_url}: {e}",
-                category="fetch",
-                url=current_url,
-            ) from e
-    else:
-        raise CrawlError(
-            f"Too many redirects at {url}",
-            category="http",
-            url=url,
-        )
+        except httpx.HTTPError:
+            raise
+    assert last_error is not None
+    raise last_error
 
-    soup = BeautifulSoup(_decode_content(content, encoding), "html.parser")
+
+def _parse_html(
+    content: bytes | str,
+    encoding: str,
+    url: str,
+    selector: str | None,
+    meta: dict | None,
+    ip: str | None = None,
+    timeout: int = 30,
+    cookies: dict[str, str] | None = None,
+) -> str:
+    """Clean and extract JD text from fetched HTML."""
+    decoded = (
+        _decode_content(content, encoding)
+        if isinstance(content, bytes)
+        else content
+    )
+    soup = BeautifulSoup(decoded, "html.parser")
 
     if selector is not None:
         for tag in soup(BOILERPLATE_TAGS):
@@ -154,7 +487,7 @@ def crawl_jd(
         raw_text = "\n".join(node.get_text(separator="\n") for node in nodes)
     else:
         raw_text = _extract_site_text(
-            url, soup, pinned_ip, timeout, meta, cookies
+            url, soup, ip, timeout, meta, cookies or {}
         )
 
     lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
@@ -164,14 +497,114 @@ def crawl_jd(
     return text
 
 
+def _playwright_fetch_html(
+    url: str,
+    timeout: int = 30,
+    request_id: str | None = None,
+) -> str | None:
+    """Fetch a rendered page with Playwright when it is installed."""
+    request_id = request_id or current_request_id()
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        log_event(
+            logger,
+            "crawler.playwright_unavailable",
+            level="warning",
+            request_id=request_id,
+            extra={"url": url},
+        )
+        return None
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                page = browser.new_page(
+                    user_agent=_headers_for_cookies({})["User-Agent"]
+                )
+                page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=max(1000, timeout * 1000),
+                )
+                return page.content()
+            finally:
+                browser.close()
+    except Exception as exc:
+        log_event(
+            logger,
+            "crawler.playwright_failed",
+            level="warning",
+            request_id=request_id,
+            extra={"url": url, "error": str(exc)},
+        )
+        return None
+
+
+def _playwright_fallback(
+    url: str,
+    timeout: int,
+    selector: str | None,
+    meta: dict | None,
+    request_id: str | None,
+) -> str | None:
+    """Optionally retry a dynamic-site failure with a rendered browser."""
+    if not _playwright_enabled():
+        return None
+    _throttle(url)
+    html_content = _playwright_fetch_html(url, timeout=timeout, request_id=request_id)
+    if not html_content:
+        return None
+    proxy = _proxy_url()
+    try:
+        ip = None if proxy else _resolve_public_host(
+            urlparse(url).hostname or ""
+        )
+    except CrawlError:
+        return None
+    try:
+        return _parse_html(
+            html_content,
+            "utf-8",
+            url,
+            selector,
+            meta,
+            ip=ip,
+            timeout=timeout,
+            cookies={},
+        )
+    except CrawlError:
+        return None
+
+
 def _validate_target(url: str) -> None:
-    """Reject unsupported schemes, missing hosts, and private literals."""
+    """Reject unsafe schemes, credentials, ports, and private literals."""
     if not isinstance(url, str) or not url.strip():
         raise CrawlError("URL is required", category="url", url=url)
     parsed = urlparse(url)
     if parsed.scheme.lower() not in ALLOWED_SCHEMES:
         raise CrawlError(
             f"Unsupported URL scheme: {parsed.scheme!r}",
+            category="url",
+            url=url,
+        )
+    if parsed.username or parsed.password:
+        raise CrawlError(
+            "URL must not contain credentials",
+            category="url",
+            url=url,
+        )
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise CrawlError(
+            "URL has an invalid port",
+            category="url",
+            url=url,
+        ) from exc
+    if port is not None and port not in (80, 443):
+        raise CrawlError(
+            "URL port must be 80 or 443",
             category="url",
             url=url,
         )
@@ -228,9 +661,16 @@ def _fetch_stream(
     method: str = "GET",
     json_body: dict | None = None,
 ):
-    """Open a streaming request; redirects are handled by the caller."""
+    """Open a streaming request; redirects are handled by the caller.
+
+    When RESUALIGN_CRAWL_PROXY is set the request goes through the proxy and
+    direct IP pinning is skipped because the proxy performs DNS resolution.
+    That is an explicit SSRF tradeoff for deployments that require egress
+    through a trusted proxy.
+    """
     request_headers = headers or HEADERS
-    if ip:
+    proxy = _proxy_url()
+    if ip and not proxy:
         return _PinnedStream(
             url,
             timeout=timeout,
@@ -239,13 +679,18 @@ def _fetch_stream(
             method=method,
             json_body=json_body,
         )
+    stream_kwargs = {
+        "method": method,
+        "url": url,
+        "headers": request_headers,
+        "timeout": timeout,
+        "follow_redirects": False,
+        "json": json_body,
+    }
+    if proxy:
+        stream_kwargs["proxy"] = proxy
     return httpx.stream(
-        method,
-        url,
-        headers=request_headers,
-        timeout=timeout,
-        follow_redirects=False,
-        json=json_body,
+        **stream_kwargs
     )
 
 
@@ -462,7 +907,7 @@ def _moka_job_text(
     headers["Referer"] = url
     api_url = f"https://{urlparse(url).netloc}/api/outer/ats-apply/website/job"
     try:
-        with _fetch_stream(
+        response = _fetch_with_retry(
             api_url,
             timeout=timeout,
             ip=ip,
@@ -474,10 +919,10 @@ def _moka_job_text(
                 "siteId": int(site_id),
                 "locale": "zh-CN",
             },
-        ) as response:
-            if response.status_code != 200:
-                return _generic_job_text(soup)
-            content = _read_limited(response, MAX_RESPONSE_BYTES, api_url)
+        )
+        if response.status_code != 200:
+            return _generic_job_text(soup)
+        content = response.content
     except (httpx.HTTPError, CrawlError):
         return _generic_job_text(soup)
 
@@ -572,10 +1017,12 @@ def _feishu_job_text(
         "?portal_type=6&with_recommend=false"
     )
     try:
-        with _fetch_stream(api_url, timeout=timeout, ip=ip) as response:
-            if response.status_code != 200:
-                return _generic_job_text(soup)
-            content = _read_limited(response, MAX_RESPONSE_BYTES, api_url)
+        response = _fetch_with_retry(
+            api_url, timeout=timeout, ip=ip
+        )
+        if response.status_code != 200:
+            return _generic_job_text(soup)
+        content = response.content
     except (httpx.HTTPError, CrawlError):
         return _generic_job_text(soup)
     try:
@@ -595,8 +1042,8 @@ def _feishu_job_text(
         part
         for part in (
             detail.get("title"),
-            detail.get("description"),
-            detail.get("requirement"),
+            _strip_html(str(detail.get("description") or "")),
+            _strip_html(str(detail.get("requirement") or "")),
         )
         if part
     ]
@@ -680,8 +1127,24 @@ def _meta_from_soup(soup: BeautifulSoup) -> dict[str, str | None]:
             "meta", attrs={"property": "og:site_name"}
         ) or soup.find("meta", attrs={"name": "author"})
         if meta_tag is not None and meta_tag.get("content"):
-            company = meta_tag["content"]
+            company = _clean_company_name(meta_tag["content"])
+    if company is not None:
+        company = _clean_company_name(company)
     return {"title": title, "company": company, "city": city}
+
+
+def _clean_company_name(name) -> str | None:
+    """Trim hiring-site suffixes so og:site_name reads like a company."""
+    if not name:
+        return None
+    value = str(name).strip()
+    value = re.sub(
+        r"(人才招聘|招聘官网|官方招聘|校园招聘|社会招聘|招聘|官网|careers?)$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
+    return value.strip(" |·-—–") or None
 
 
 def _clean_page_title(title: str) -> str:
@@ -692,6 +1155,91 @@ def _clean_page_title(title: str) -> str:
             normalized = normalized.split(separator, 1)[0].strip()
             break
     return normalized or title.strip()
+
+
+_JOB_TEXT_KEYWORDS = (
+    "职责",
+    "要求",
+    "岗位",
+    "任职",
+    "工作内容",
+    "responsibilit",
+    "requirement",
+    "description",
+    "qualification",
+)
+
+
+def _collect_long_strings(
+    node,
+    out: list[str],
+    seen: set[str],
+    limit: int,
+) -> None:
+    """Collect long, job-like strings from parsed SSR JSON."""
+    if len(out) >= limit:
+        return
+    if isinstance(node, str):
+        text = node.strip()
+        if (
+            len(text) >= 40
+            and any(keyword in text.lower() for keyword in _JOB_TEXT_KEYWORDS)
+        ):
+            key = text[:200]
+            if key not in seen:
+                seen.add(key)
+                out.append(text)
+        return
+    if isinstance(node, dict):
+        for value in node.values():
+            _collect_long_strings(value, out, seen, limit)
+    elif isinstance(node, list):
+        for value in node:
+            _collect_long_strings(value, out, seen, limit)
+
+
+def _json_script_text(soup: BeautifulSoup) -> str:
+    """Extract readable JD text from SSR JSON embedded in script tags."""
+    markers = (
+        "__INITIAL_STATE__",
+        "__NUXT__",
+        "__APP_DATA__",
+        "__SSR_DATA__",
+        "__NEXT_DATA__",
+    )
+    out: list[str] = []
+    seen: set[str] = set()
+    for script in soup.find_all("script"):
+        content = (script.string or script.get_text() or "").strip()
+        if not content:
+            continue
+        parsed = None
+        if content[:1] in ("{", "["):
+            try:
+                parsed = json.loads(content)
+            except (UnicodeDecodeError, ValueError):
+                parsed = None
+        if parsed is None:
+            for marker in markers:
+                match = re.search(
+                    re.escape(marker) + r"\s*=\s*(\{.*\})",
+                    content,
+                    re.S,
+                )
+                if match is None:
+                    continue
+                try:
+                    parsed = json.loads(match.group(1))
+                except (UnicodeDecodeError, ValueError):
+                    parsed = None
+                if parsed is not None:
+                    break
+        if parsed is None:
+            continue
+        _collect_long_strings(parsed, out, seen, 40)
+        if len(out) >= 40:
+            break
+    return "\n\n".join(out)
 
 
 def _select_first(soup: BeautifulSoup, selectors: tuple[str, ...]):
@@ -719,6 +1267,7 @@ def _zhipin_job_text(soup: BeautifulSoup) -> str:
 
 
 def _generic_job_text(soup: BeautifulSoup) -> str:
+    ssr_text = _json_script_text(soup).strip()
     clean = BeautifulSoup(str(soup), "html.parser")
     for tag in clean(BOILERPLATE_TAGS):
         tag.decompose()
@@ -735,6 +1284,8 @@ def _generic_job_text(soup: BeautifulSoup) -> str:
         text = best.get_text(separator="\n")
         if text.strip():
             return text
+    if ssr_text:
+        return ssr_text
     return clean.get_text(separator="\n")
 
 

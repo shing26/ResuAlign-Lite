@@ -15,6 +15,20 @@ class UserStoreError(Exception):
     """Raised for invalid credentials or duplicate user registration."""
 
 
+def _apply_sqlite_pragmas(
+    connection: sqlite3.Connection,
+    *,
+    in_memory: bool = False,
+) -> None:
+    """Apply the package-wide SQLite connection settings."""
+    connection.execute("PRAGMA foreign_keys=ON")
+    if in_memory:
+        return
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA busy_timeout=5000")
+    connection.execute("PRAGMA synchronous=NORMAL")
+
+
 class _SqliteStore:
     """Shared SQLite connection lifecycle for workspace stores."""
 
@@ -49,7 +63,8 @@ class _SqliteStore:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        if str(self.db_path) == ":memory:":
+        in_memory = str(self.db_path) == ":memory:"
+        if in_memory:
             if self._memory_connection is None:
                 self._memory_connection = sqlite3.connect(":memory:")
                 self._memory_connection.row_factory = sqlite3.Row
@@ -57,6 +72,7 @@ class _SqliteStore:
         else:
             connection = sqlite3.connect(str(self.db_path), timeout=5.0)
             connection.row_factory = sqlite3.Row
+        _apply_sqlite_pragmas(connection, in_memory=in_memory)
         try:
             yield connection
             connection.commit()
@@ -64,5 +80,5 @@ class _SqliteStore:
             connection.rollback()
             raise
         finally:
-            if str(self.db_path) != ":memory:":
+            if not in_memory:
                 connection.close()

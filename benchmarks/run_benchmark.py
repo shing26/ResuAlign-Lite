@@ -17,13 +17,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, TextIO
 
+from pydantic import ValidationError
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from resualign.engine import run
-from resualign.llm import OpenAIClient
+from resualign.llm import (
+    LLMResponseError,
+    STRUCTURED_MAX_EXTRA_RETRIES,
+    OpenAIClient,
+)
 from resualign.models import ResuAlignConfig
 
 
@@ -178,12 +184,48 @@ class FakeLLMClient:
     def __init__(self):
         self.calls = []
         self.call_count = 0
+        self.schema_retry = False
+        self.schema_retry_attempts = 0
+        self.schema_retry_stage = "tailor"
 
     def chat_json(self, system: str, user: str, model: Optional[str] = None) -> dict:
         self.calls.append({"system": system, "user": user})
         self.call_count += 1
         stage = self._stage(system)
         return copy.deepcopy(_FAKE_RESPONSES[stage])
+
+    def chat_structured(
+        self,
+        system: str,
+        user: str,
+        schema_model,
+        model: Optional[str] = None,
+    ) -> dict:
+        """Simulate one invalid schema response followed by a valid one."""
+        if not self.schema_retry or self._stage(system) != self.schema_retry_stage:
+            return self.chat_json(system, user, model=model)
+        for attempt in range(1, STRUCTURED_MAX_EXTRA_RETRIES + 2):
+            if attempt == 1:
+                self.calls.append({"system": system, "user": user})
+                self.call_count += 1
+                # A payload that is invalid for every registered schema: set
+                # each declared field to a non-coercible value so Pydantic
+                # cannot silently fall back to defaults.
+                result = {
+                    name: "invalid"
+                    for name in schema_model.model_fields
+                }
+            else:
+                result = self.chat_json(system, user, model=model)
+            self.schema_retry_attempts = attempt
+            try:
+                return schema_model.model_validate(result).model_dump()
+            except ValidationError:
+                continue
+        raise LLMResponseError(
+            "Structured response failed schema validation after "
+            f"{STRUCTURED_MAX_EXTRA_RETRIES + 1} attempts"
+        )
 
     @staticmethod
     def _stage(system: str) -> str:
@@ -254,6 +296,22 @@ def load_cases(cases_dir: Path) -> List[Dict]:
             raise ValueError(f"{path.name}: missing fields {sorted(missing)}")
         if not isinstance(data["expected_direction"], list) or not data["expected_direction"]:
             raise ValueError(f"{path.name}: expected_direction must be a non-empty list")
+        if data.get("batch"):
+            batch_jds = data.get("batch_jds")
+            if not isinstance(batch_jds, list) or len(batch_jds) < 2:
+                raise ValueError(
+                    f"{path.name}: batch cases require at least 2 batch_jds"
+                )
+            if not all(isinstance(jd, str) and jd.strip() for jd in batch_jds):
+                raise ValueError(f"{path.name}: batch_jds must be non-empty strings")
+        forbidden = data.get("must_not_contain")
+        if forbidden is not None and (
+            not isinstance(forbidden, list)
+            or not all(isinstance(claim, str) and claim.strip() for claim in forbidden)
+        ):
+            raise ValueError(
+                f"{path.name}: must_not_contain must be a list of non-empty strings"
+            )
         data["source_file"] = path.name
         cases.append(data)
     return cases
@@ -331,22 +389,77 @@ def _evidence_from_report(report) -> str:
 
 
 def _run_case(case: Dict, config: ResuAlignConfig, client) -> Dict:
-    t0 = time.monotonic()
-    report = run(
-        config,
-        case["resume_text"],
-        case["jd_text"],
-        llm_client=client,
-    )
-    report.elapsed_seconds = round(time.monotonic() - t0, 3)
-    evidence = _evidence_from_report(report)
+    resume_text = case["resume_text"]
+    jd_texts = list(case.get("batch_jds") or [case["jd_text"]])
+    client.schema_retry = bool(case.get("schema_retry"))
+    client.schema_retry_attempts = 0
+    call_start = client.call_count
+    diagnosis = case.get("cached_diagnosis")
+
+    reports = []
+    for jd_text in jd_texts:
+        t0 = time.monotonic()
+        report = run(
+            config,
+            resume_text,
+            jd_text,
+            llm_client=client,
+            diagnosis=diagnosis,
+        )
+        report.elapsed_seconds = round(time.monotonic() - t0, 3)
+        reports.append(report)
+
+    evidence_parts = [_evidence_from_report(report) for report in reports]
+    evidence = " ".join(evidence_parts)
+    base_report = _report_to_dict(reports[0])
+    if len(reports) > 1:
+        report = {
+            "score": round(
+                sum(item.score for item in reports) / len(reports), 1
+            ),
+            "skills": list(base_report["skills"]),
+            "issues": list(base_report["issues"]),
+            "model": config.model,
+            "elapsed_seconds": round(
+                sum(item.elapsed_seconds for item in reports), 3
+            ),
+            "diffs": list(base_report["diffs"]),
+            "jd_profile": base_report["jd_profile"],
+            "gap_report": base_report["gap_report"],
+            "tailored_resume": base_report["tailored_resume"],
+            "batch_reports": [_report_to_dict(item) for item in reports],
+        }
+    else:
+        report = base_report
+
+    for claim in case.get("must_not_contain", []):
+        if claim and claim in evidence:
+            raise AssertionError(
+                f"{case.get('source_file', case['id'])}: "
+                f"hallucinated claim present in output: {claim}"
+            )
+
+    llm_call_count = client.call_count - call_start
+    expected_calls = case.get("expected_llm_calls")
+    if expected_calls is not None and llm_call_count != expected_calls:
+        raise AssertionError(
+            f"{case.get('source_file', case['id'])}: expected "
+            f"{expected_calls} LLM calls, got {llm_call_count}"
+        )
+
     return {
         "id": case["id"],
         "source_file": case.get("source_file", ""),
         "source_note": case.get("source_note", ""),
         "expected_direction": list(case["expected_direction"]),
-        "report": _report_to_dict(report),
+        "report": report,
         "keyword_overlap": evaluate_goals(case["expected_direction"], evidence),
+        "llm_call_count": llm_call_count,
+        "cache_hit": bool(case.get("cache_hit") or diagnosis is not None),
+        "batch_count": len(jd_texts) if len(jd_texts) > 1 else None,
+        "schema_retry_attempts": (
+            client.schema_retry_attempts if case.get("schema_retry") else None
+        ),
     }
 
 
@@ -478,12 +591,26 @@ def run_benchmark(
         results.append(result)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    summary = _summarize(results)
+    if mode == "offline":
+        if summary["avg_goal_coverage"] < 0.8:
+            raise AssertionError(
+                "offline benchmark average goal coverage below gate: "
+                f"{summary['avg_goal_coverage']:.3f} < 0.8"
+            )
+        for result in results:
+            coverage = result["keyword_overlap"]["coverage"]
+            if coverage < 0.6:
+                raise AssertionError(
+                    f"{result['id']} goal coverage below gate: "
+                    f"{coverage:.3f} < 0.6"
+                )
     payload = {
         "timestamp": timestamp,
         "mode": mode,
         "model": config.model,
         "cases": results,
-        "summary": _summarize(results),
+        "summary": summary,
     }
     results_dir.mkdir(parents=True, exist_ok=True)
     json_path = results_dir / f"benchmark-{timestamp}.json"

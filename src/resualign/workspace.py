@@ -73,6 +73,35 @@ CREATE TABLE IF NOT EXISTS applications (
 CREATE INDEX IF NOT EXISTS idx_applications_tenant ON applications(tenant_id);
 """
 
+APPLICATION_STATUSES = (
+    "draft",
+    "applied",
+    "interview",
+    "offer",
+    "rejected",
+    "withdrawn",
+    "running",
+    "queued",
+    "succeeded",
+    "failed",
+    "canceled",
+)
+
+_APPLICATION_STATUS_ALIASES = {
+    "未投递": "draft",
+    "已投递": "applied",
+    "面试中": "interview",
+    "已拿Offer": "offer",
+    "放弃": "withdrawn",
+    "rejected": "withdrawn",
+}
+
+
+def application_status_canonical(status: str) -> str:
+    """Map a stored application status into the unified five-state model."""
+    value = str(status or "").strip()
+    return _APPLICATION_STATUS_ALIASES.get(value, value)
+
 
 class UserStore(_SqliteStore):
     """Thread-safe user and session store persisted in SQLite."""
@@ -681,6 +710,7 @@ class ApplicationStore(_SqliteStore):
             "jd_text": row["jd_text"],
             "jd_url": row["jd_url"],
             "status": row["status"],
+            "status_canonical": application_status_canonical(row["status"]),
             "latest_job_id": row["latest_job_id"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],

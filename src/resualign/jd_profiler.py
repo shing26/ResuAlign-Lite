@@ -1,5 +1,9 @@
-from .llm import LLMClient
+from .llm import LLMClient, _structured_or_json
 from .models import JDProfile
+from .schema_registry import JDProfileSchema
+
+
+JD_PROFILER_PROMPT_VERSION = "1"
 
 
 JD_PROFILER_PROMPT = (
@@ -23,10 +27,33 @@ JD_PROFILER_PROMPT = (
 )
 
 
-def profile_jd(client: LLMClient, jd_text: str) -> JDProfile:
-    """Extract structured profile from a raw job description."""
-    result = client.chat_json(JD_PROFILER_PROMPT, jd_text)
-    return JDProfile(
+def profile_jd(
+    client: LLMClient,
+    jd_text: str,
+    cache=None,
+    tenant: str = "default",
+    model=None,
+) -> JDProfile:
+    """Extract a structured profile from a raw job description."""
+    resolved_model = model or getattr(client, "model", "default")
+    if cache is not None:
+        cached = cache.get(
+            tenant,
+            resolved_model,
+            JD_PROFILER_PROMPT_VERSION,
+            jd_text,
+        )
+        if cached is not None:
+            return JDProfile(**cached)
+
+    result = _structured_or_json(
+        client,
+        JD_PROFILER_PROMPT,
+        jd_text,
+        JDProfileSchema,
+        model=resolved_model,
+    )
+    profile = JDProfile(
         must_have_skills=result.get("must_have_skills", []),
         nice_to_have_skills=result.get("nice_to_have_skills", []),
         soft_skills=result.get("soft_skills", []),
@@ -34,3 +61,12 @@ def profile_jd(client: LLMClient, jd_text: str) -> JDProfile:
         min_years_experience=result.get("min_years_experience"),
         education_requirements=result.get("education_requirements", []),
     )
+    if cache is not None:
+        cache.put(
+            tenant,
+            resolved_model,
+            JD_PROFILER_PROMPT_VERSION,
+            jd_text,
+            profile.__dict__,
+        )
+    return profile

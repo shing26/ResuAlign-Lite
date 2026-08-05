@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Sequence
 
 from .job_library import JOB_FUNCTIONS, SENIORITIES
+from .llm import _structured_or_json
+from .schema_registry import ClassifierResultSchema
 
 _CLASSIFIER_SYSTEM_PROMPT = (
     "You are a job classifier. Given a job description, return JSON with "
@@ -36,10 +39,29 @@ def classify_job(
     jd_text: str,
     job_functions: Sequence[str] | None = None,
     seniorities: Sequence[str] | None = None,
+    *,
+    cache=None,
+    tenant: str = "default",
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Classify a JD into function, seniority, and tech/domain tags."""
     functions = list(job_functions or JOB_FUNCTIONS)
     levels = list(seniorities or SENIORITIES)
+    prompt_version = hashlib.sha256(
+        (
+            _CLASSIFIER_SYSTEM_PROMPT
+            + "|"
+            + ",".join(functions)
+            + "|"
+            + ",".join(levels)
+        ).encode("utf-8")
+    ).hexdigest()
+    resolved_model = model or getattr(client, "model", "default")
+    if cache is not None:
+        cached = cache.get(tenant, resolved_model, prompt_version, jd_text)
+        if cached is not None:
+            return cached
+
     function_default = "其他" if "其他" in functions else (
         functions[0] if functions else "其他"
     )
@@ -54,14 +76,20 @@ def classify_job(
         'Respond as JSON: {"job_function": "...", "seniority": "...", '
         '"tech_tags": ["..."]}'
     )
-    raw = client.chat_json(_CLASSIFIER_SYSTEM_PROMPT, user_prompt)
+    raw = _structured_or_json(
+        client,
+        _CLASSIFIER_SYSTEM_PROMPT,
+        user_prompt,
+        ClassifierResultSchema,
+        model=resolved_model,
+    )
     raw_tags = raw.get("tech_tags") or []
     tags = [
         str(tag).strip()
         for tag in raw_tags
         if str(tag).strip()
     ]
-    return {
+    result = {
         "job_function": normalize_enum(
             raw.get("job_function"), functions, function_default
         ),
@@ -70,3 +98,6 @@ def classify_job(
         ),
         "tech_tags": tags,
     }
+    if cache is not None:
+        cache.put(tenant, resolved_model, prompt_version, jd_text, result)
+    return result
