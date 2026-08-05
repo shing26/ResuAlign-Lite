@@ -35,7 +35,6 @@ import {
 } from "./events.js";
 import {
   acceptSelectedDiffs,
-  lineDiff,
   regenerateDiff,
   renderWbError,
   renderWbResult,
@@ -62,6 +61,7 @@ import {
 } from "./split-canvas.js";
 import {
   inlineMarkdown,
+  lineDiff,
   parseHashValue,
   parseImportText,
   renderBoardCard,

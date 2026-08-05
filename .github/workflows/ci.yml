@@ -40,6 +40,9 @@ jobs:
       - name: Frontend unit tests (node:test)
         run: node --test tests/frontend/*.test.mjs
         shell: bash
+      - name: Frontend ESM import graph check
+        run: node tests/frontend/imports-check.mjs
+        shell: bash
 
   benchmark-gate:
     name: Stage 2 - benchmark gate
