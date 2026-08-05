@@ -4,11 +4,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ..deps import get_current_user
-from ..schemas import BatchAlignRequest
-
 import resualign.api as api_module
 
+from ...batch import BatchAlignRequest
+from ..deps import get_current_user
 
 router = APIRouter()
 

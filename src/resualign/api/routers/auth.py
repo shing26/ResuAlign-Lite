@@ -3,10 +3,10 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ..deps import get_current_user, _bearer_token
-from ..schemas import LoginRequest, SignupRequest
-
 import resualign.api as api_module
+
+from ..deps import _bearer_token, get_current_user
+from ..schemas import LoginRequest, SignupRequest
 
 router = APIRouter()
 

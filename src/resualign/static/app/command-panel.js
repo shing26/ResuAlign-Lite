@@ -1,39 +1,7 @@
 /* Universal command palette: paste JD text or a JD URL, confirm, open Optimizer. */
 
 import { $, api, esc, toast } from "./events.js";
-
-const URL_RE = /^https?:\/\/[^\s]+$/i;
-
-export function isJdUrl(value) {
-  return URL_RE.test(String(value || "").trim());
-}
-
-function previewFor(value) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) {
-    return `<div class="command-preview command-preview--hint">粘贴 JD 文本或输入 JD 链接，确认后自动建库并预分析。</div>`;
-  }
-  if (isJdUrl(trimmed)) {
-    return `
-      <div class="command-preview command-preview--url">
-        <div class="command-preview__head">
-          <span class="badge badge-blue">JD 链接</span>
-          <span class="small muted">将抓取岗位内容并自动入库存档</span>
-        </div>
-        <div class="command-preview__line">${esc(trimmed)}</div>
-      </div>`;
-  }
-  const lines = trimmed.split(/\r?\n/).filter(Boolean);
-  const previewLines = lines.slice(0, 5);
-  return `
-    <div class="command-preview command-preview--text">
-      <div class="command-preview__head">
-        <span class="badge badge-teal">JD 文本</span>
-        <span class="small muted">${trimmed.length} 字符 · ${lines.length} 行</span>
-      </div>
-      <div class="command-preview__body">${previewLines.map((line) => `<div>${esc(line)}</div>`).join("")}${lines.length > 5 ? `<div class="small muted">… 其余 ${lines.length - 5} 行</div>` : ""}</div>
-    </div>`;
-}
+import { isJdUrl, previewFor } from "./format.js";
 
 function setPreview(value) {
   const node = $("[data-command-preview]");

@@ -3,13 +3,13 @@ import json
 import sys
 import time
 from dataclasses import asdict
-import colorama
 from datetime import datetime
 from pathlib import Path
 
+import colorama
+
 from .config import build_config
 from .engine import run
-
 
 colorama.init()
 

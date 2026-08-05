@@ -14,7 +14,6 @@ from fastapi import Request
 import resualign.api as api_module
 from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
 
-
 logger = logging.getLogger(__name__)
 SESSION_TTL_SECONDS = 30 * 60
 _SESSION_EVENT_QUEUE_SIZE = 512
@@ -431,8 +430,8 @@ def _create_library_job_without_llm(
 
 def _library_dedupe_key(jd_text: str) -> str:
     """Mirror the text dedupe key used by JobLibraryStore.create_job."""
-    import re as _re
     import hashlib as _hashlib
+    import re as _re
 
     normalized = _re.sub(r"\s+", " ", (jd_text or "").strip().lower())
     return "text:" + _hashlib.sha256(

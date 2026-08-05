@@ -2,13 +2,13 @@
 
 import pytest
 
+from resualign.jobs import JobRegistry
 from resualign.workspace import (
     ApplicationStore,
     MasterResumeStore,
     UserStore,
     UserStoreError,
 )
-from resualign.jobs import JobRegistry
 
 
 @pytest.fixture

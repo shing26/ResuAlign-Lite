@@ -1,8 +1,11 @@
 ﻿import json
 import os
 from pathlib import Path
+
 import pytest
+
 from resualign.cli import main
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 def setup_env():
@@ -18,7 +21,8 @@ def cleanup_reports():
         f.unlink()
 
 def test_e2e_diagnosis_only(httpx_mock, capsys):
-    setup_env(); cleanup_reports()
+    setup_env()
+    cleanup_reports()
     httpx_mock.add_response(json={"choices":[{"message":{"content":'{"score":78,"skills":["Python"],"issues":["Too long"]}'}}]})
     main([str(FIXTURES / "sample.txt")])
     out = capsys.readouterr().out
@@ -26,10 +30,12 @@ def test_e2e_diagnosis_only(httpx_mock, capsys):
     assert "78" in out
     data = json.loads(list(Path.cwd().glob("resualign-report-*.json"))[0].read_text())
     assert data["score"] == 78
-    cleanup_reports(); cleanup_env()
+    cleanup_reports()
+    cleanup_env()
 
 def test_e2e_with_alignment(httpx_mock, capsys):
-    setup_env(); cleanup_reports()
+    setup_env()
+    cleanup_reports()
     rs = [
         '{"score":85,"skills":["Java","Spring"],"issues":[]}',
         '{"jd_profile":{"must_have_skills":["Java"],"nice_to_have_skills":[],"soft_skills":[],"business_scenarios":["Backend"],"min_years_experience":null,"education_requirements":[]},"gap_report":{"missing_keywords":[],"misaligned_emphasis":[],"strength_matches":[]}}',
@@ -43,7 +49,8 @@ def test_e2e_with_alignment(httpx_mock, capsys):
     assert "85" in out
     data = json.loads(list(Path.cwd().glob("resualign-report-*.json"))[0].read_text())
     assert len(data["diffs"]) == 1
-    cleanup_reports(); cleanup_env()
+    cleanup_reports()
+    cleanup_env()
 
 def test_e2e_missing_api_key(capsys):
     saved_env = os.environ.pop("DEEPSEEK_API_KEY", "")

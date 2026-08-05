@@ -2,9 +2,8 @@ import re
 import uuid
 
 from .llm import LLMClient, _structured_or_json
-from .models import TailoredResume, DiffItem
+from .models import DiffItem, TailoredResume
 from .schema_registry import DiffItemSchema, TailoredResumeSchema
-
 
 BULLET_REWRITE_PROMPT_VERSION = "bullet-rewrite-v1"
 

@@ -1,7 +1,7 @@
 import pytest
 
-from resualign.tailor import tailor_resume
 from resualign.models import TailoredResume
+from resualign.tailor import tailor_resume
 
 
 class MockLLM:

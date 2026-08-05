@@ -1,8 +1,8 @@
 from fastapi import APIRouter
 
 from . import (
-    applications,
     analyze,
+    applications,
     auth,
     health,
     jobs,

@@ -7,6 +7,7 @@ from fastapi import Depends, Header, HTTPException, Request
 
 import resualign.api as api_module
 
+
 class _RateLimiter:
     """Minimal in-memory sliding-window rate limiter per client key."""
 

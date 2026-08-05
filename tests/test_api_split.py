@@ -5,8 +5,6 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
-import pytest
-
 
 def test_resualign_api_is_a_package():
     module = importlib.import_module("resualign.api")

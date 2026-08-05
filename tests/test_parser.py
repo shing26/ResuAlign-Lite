@@ -1,10 +1,12 @@
 from pathlib import Path
+
 import pytest
+
 from resualign.parser import (
+    FileParseError,
     extract_text,
     normalize_text,
     structured_resume_sections,
-    FileParseError,
 )
 
 HERE = Path(__file__).parent

@@ -1,7 +1,7 @@
 from resualign.evaluator import evaluate
-from resualign.tailor import tailor_resume
 from resualign.llm import OpenAIClient
 from resualign.models import ResuAlignConfig
+from resualign.tailor import tailor_resume
 
 from .conftest import SchemaAwareLLMClient
 

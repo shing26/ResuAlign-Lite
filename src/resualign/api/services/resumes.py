@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 import resualign.api as api_module
 
+
 def _content_sha256(text: str) -> str:
     """Return a stable content fingerprint for the diagnosis cache."""
     return hashlib.sha256((text or '').encode('utf-8')).hexdigest()

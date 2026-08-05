@@ -1,12 +1,11 @@
 from typing import Callable, Optional
 
-from .models import Report, ResuAlignConfig
-from .llm import LLMClient, OpenAIClient, diagnose_resume
-from .jd_analysis import profile_and_gaps
-from .tailor import tailor_resume
 from .evaluator import evaluate
 from .extractor import extract_structured
-
+from .jd_analysis import profile_and_gaps
+from .llm import LLMClient, OpenAIClient, diagnose_resume
+from .models import Report, ResuAlignConfig
+from .tailor import tailor_resume
 
 MAX_JD_INPUT_CHARS = 8000
 MAX_JD_CONTEXT_CHARS = 6000

@@ -1,7 +1,6 @@
 from .llm import LLMClient
 from .models import GapReport
 
-
 GAP_ANALYSIS_PROMPT = (
     "You are a resume gap analyst. Given a resume and a structured JD profile, \n"
     "identify gaps. Return JSON with: \n"

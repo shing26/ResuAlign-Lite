@@ -10,7 +10,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .models import ResuAlignConfig
 
-
 RUNTIME_LLM_OVERRIDE: dict[str, str | None] = {
     "provider": None,
     "model": None,

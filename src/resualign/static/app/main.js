@@ -60,8 +60,14 @@ import {
   renderOptimizerCanvas,
   startAlignmentRun,
 } from "./split-canvas.js";
+import {
+  inlineMarkdown,
+  parseHashValue,
+  parseImportText,
+  renderBoardCard,
+  renderMarkdown,
+} from "./format.js";
 
-const ROUTE_NAMES = ["resume", "jobs", "workspace", "settings"];
 const ROUTE_LABELS = {
   resume: "简历中心",
   jobs: "岗位库",
@@ -70,28 +76,7 @@ const ROUTE_LABELS = {
 };
 
 function parseHash() {
-  const hash = window.location.hash.replace(/^#\/?/, "");
-  const parts = hash.split("/").filter(Boolean);
-  if (parts[0] === "workspace" && parts[1]) {
-    let jobId = parts[1];
-    try {
-      jobId = decodeURIComponent(jobId);
-    } catch {
-      /* keep raw value */
-    }
-    return { name: "workspace", jobId };
-  }
-  if (parts[0] === "resume" && parts[1]) {
-    let resumeId = parts[1];
-    try {
-      resumeId = decodeURIComponent(resumeId);
-    } catch {
-      /* keep raw value */
-    }
-    return { name: "resume", jobId: null, resumeId };
-  }
-  const name = ROUTE_NAMES.includes(parts[0]) ? parts[0] : "resume";
-  return { name, jobId: null, resumeId: null };
+  return parseHashValue(window.location.hash);
 }
 
 function navigate(name, id = null) {
@@ -282,51 +267,6 @@ async function renderResumeDetailView(app, resumeId) {
   await recoverDiagnosis(resume);
 }
 
-function inlineMarkdown(text) {
-  return text
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/`([^`]+)`/g, "<code>$1</code>");
-}
-
-function renderMarkdown(text) {
-  const html = [];
-  let listOpen = false;
-  const closeList = () => {
-    if (listOpen) {
-      html.push("</ul>");
-      listOpen = false;
-    }
-  };
-  for (const raw of String(text || "").split("\n")) {
-    const line = esc(raw);
-    const trimmed = line.trim();
-    if (!trimmed) {
-      closeList();
-      continue;
-    }
-    const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
-    if (heading) {
-      closeList();
-      const level = heading[1].length;
-      html.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
-      continue;
-    }
-    const listItem = trimmed.match(/^[-*•]\s+(.*)$/);
-    if (listItem) {
-      if (!listOpen) {
-        html.push("<ul>");
-        listOpen = true;
-      }
-      html.push(`<li>${inlineMarkdown(listItem[1])}</li>`);
-      continue;
-    }
-    closeList();
-    html.push(`<p>${inlineMarkdown(trimmed)}</p>`);
-  }
-  closeList();
-  return html.join("");
-}
-
 async function openResumeEditor(resumeId) {
   let resume = state.resumes.find((item) => item.resume_id === resumeId);
   if (!resume) {
@@ -494,36 +434,6 @@ function openJobEditor(job) {
 /* ------------------------------------------------------------------ */
 /* Workspace                                                           */
 /* ------------------------------------------------------------------ */
-
-function renderBoardCard(job) {
-  const canonical = canonicalJobStatus(job.status);
-  const statusOptions = JOB_STATUS_CANONICAL.map(
-    (value) =>
-      `<option value="${value}" ${canonical === value ? "selected" : ""}>${esc(JOB_STATUS_LABELS[value])}</option>`,
-  ).join("");
-  return `
-    <article class="board-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}">
-      <div class="board-card__top">
-        <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
-        <button type="button" class="board-card__title" data-action="open-job-detail" data-id="${job.job_id}">${esc(job.title)}</button>
-      </div>
-      <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
-      <div class="board-card__tags">
-        <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
-        <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
-        ${job.classification_pending ? '<span class="badge badge-amber badge-pending">分类待定</span>' : ""}
-      </div>
-      <div class="board-card__timeline">
-        ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
-        ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
-      </div>
-      <div class="row" style="margin-top:8px">
-        <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${statusOptions}</select>
-        <button class="btn btn-ghost btn-sm" data-action="open-workspace" data-id="${job.job_id}">工作台</button>
-        <button class="btn btn-ghost btn-sm" data-action="edit-job" data-id="${job.job_id}">编辑</button>
-      </div>
-    </article>`;
-}
 
 function renderPipelineBoard(app, vocabulary, resumes = []) {
   const columns = JOB_STATUS_CANONICAL.map((canonical) => {
@@ -2195,30 +2105,6 @@ async function submitImport(data, form) {
       statusNode.textContent = `导入失败：${error.message}`;
     }
   }, 800);
-}
-
-function parseImportText(text, filename) {
-  const trimmed = text.trim();
-  if (!trimmed) return [];
-  if (trimmed.startsWith("[") || filename.endsWith(".json")) {
-    try {
-      const parsed = JSON.parse(trimmed);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  const lines = trimmed.split(/\r?\n/).filter(Boolean);
-  if (!lines.length) return [];
-  const headers = lines[0].split(",").map((header) => header.trim());
-  return lines.slice(1).map((line) => {
-    const values = line.split(",").map((value) => value.trim());
-    const row = {};
-    headers.forEach((header, index) => {
-      if (header) row[header] = values[index] || "";
-    });
-    return row;
-  });
 }
 
 /* ------------------------------------------------------------------ */

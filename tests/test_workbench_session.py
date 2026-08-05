@@ -20,7 +20,6 @@ from resualign.workspace import (
     UserStore,
 )
 
-
 client = TestClient(app)
 _auth_cache = None
 

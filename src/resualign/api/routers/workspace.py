@@ -11,11 +11,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
-from ..deps import get_current_user
-from ..schemas import WorkbenchSessionInitRequest, WorkstationState
-
 import resualign.api as api_module
 
+from ..deps import get_current_user
+from ..schemas import WorkbenchSessionInitRequest, WorkstationState
 
 router = APIRouter()
 

@@ -1,4 +1,4 @@
-from resualign.models import DiffItem, Analysis, Report, ResuAlignConfig
+from resualign.models import Analysis, DiffItem, Report, ResuAlignConfig
 
 
 def test_diffitem_defaults():

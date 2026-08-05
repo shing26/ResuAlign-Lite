@@ -5,14 +5,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
+import resualign.api as api_module
+
 from ..deps import get_current_user
 from ..schemas import (
     MasterResumeCreateRequest,
     MasterResumeRollbackRequest,
     MasterResumeUpdateRequest,
 )
-
-import resualign.api as api_module
 
 router = APIRouter()
 

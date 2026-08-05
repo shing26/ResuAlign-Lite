@@ -26,12 +26,11 @@ if str(SRC_DIR) not in sys.path:
 
 from resualign.engine import run
 from resualign.llm import (
-    LLMResponseError,
     STRUCTURED_MAX_EXTRA_RETRIES,
+    LLMResponseError,
     OpenAIClient,
 )
 from resualign.models import ResuAlignConfig
-
 
 _STOPWORDS = {
     "a", "an", "the", "and", "or", "for", "to", "of", "with", "in", "on",

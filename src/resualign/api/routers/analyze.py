@@ -3,10 +3,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+import resualign.api as api_module
+
 from ..deps import get_current_user
 from ..schemas import AnalyzeRequest
-
-import resualign.api as api_module
 
 router = APIRouter()
 

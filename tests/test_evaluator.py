@@ -1,6 +1,7 @@
 from resualign.evaluator import evaluate
 from resualign.models import EvalScore
 
+
 class MockLLM:
     def __init__(self, result=None):
         self.result = result if result is not None else {
@@ -27,7 +28,7 @@ def test_evaluate_empty_results():
     mock = MockLLM(result={})
     score = evaluate(mock, "a", "b", "c")
     assert score.jd_match_score == 0
-    assert score.hallucination_detected == False
+    assert not score.hallucination_detected
     assert score.gap_coverage == 0.0
 
 def test_evaluate_hallucination_detected():
@@ -38,5 +39,5 @@ def test_evaluate_hallucination_detected():
         "gap_coverage": 0.5,
     })
     score = evaluate(mock, "orig", "tailored", "jd")
-    assert score.hallucination_detected == True
+    assert score.hallucination_detected
     assert "Kubernetes" in score.hallucination_details[0]

@@ -21,7 +21,6 @@ from resualign.models import (
 from resualign.settings_store import SettingsStore
 from resualign.tailor import (
     parse_diff_with_provenance,
-    rewrite_bullet,
     tailor_resume,
 )
 from resualign.workspace import (
@@ -30,7 +29,6 @@ from resualign.workspace import (
     MasterResumeStore,
     UserStore,
 )
-
 
 client = TestClient(app)
 _auth_cache = None

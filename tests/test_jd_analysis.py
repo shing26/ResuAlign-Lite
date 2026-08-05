@@ -1,4 +1,4 @@
-from resualign.jd_analysis import JD_ANALYSIS_PROMPT, profile_and_gaps
+from resualign.jd_analysis import profile_and_gaps
 from resualign.models import GapReport, JDProfile
 
 from .conftest import _gap, _profile

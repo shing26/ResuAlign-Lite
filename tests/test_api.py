@@ -11,8 +11,6 @@ import resualign.api as api_module
 from resualign.api import app
 from resualign.crawler import CrawlError
 from resualign.jobs import JobRegistry
-from resualign.settings_store import SettingsStore
-from resualign.workspace import UserStore
 from resualign.models import (
     DiffItem,
     EvalScore,
@@ -22,6 +20,8 @@ from resualign.models import (
     ResuAlignConfig,
     TailoredResume,
 )
+from resualign.settings_store import SettingsStore
+from resualign.workspace import UserStore
 
 client = TestClient(app)
 _auth_cache = None

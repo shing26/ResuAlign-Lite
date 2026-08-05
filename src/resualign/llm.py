@@ -7,7 +7,6 @@ from typing import Any, ClassVar, Optional, Type
 import httpx
 from pydantic import BaseModel, ValidationError
 
-
 STRUCTURED_MAX_EXTRA_RETRIES = 2
 
 
@@ -333,7 +332,6 @@ def diagnose_resume(
     model: Optional[str] = None,
 ) -> dict:
     """Run diagnosis through an optional content-hash cache."""
-    from .cache import ContentCache
     from .schema_registry import AnalysisSchema
 
     resolved_model = model or getattr(client, "model", "default")

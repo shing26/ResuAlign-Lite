@@ -20,11 +20,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..appraisal import compute_appraisal, resume_profile
 from ..batch import BatchAlignStore
+from ..cache import ContentCache
 from ..classifier import classify_job
 from ..config import EnvSettings, build_config
 from ..crawler import CrawlError, crawl_jd
@@ -35,6 +35,7 @@ from ..job_library import CrawlTaskStore
 from ..jobs import JobRegistry
 from ..llm import LLMResponseError, OpenAIClient
 from ..models import Report
+from ..observability import log_event, log_slow_call, new_request_id
 from ..parser import (
     SUPPORTED_EXTENSIONS,
     FileParseError,
@@ -44,8 +45,6 @@ from ..parser import (
 from ..salary import extract_salary_range
 from ..settings_store import SettingsStore
 from ..tailor import rewrite_bullet
-from ..cache import ContentCache
-from ..observability import log_event, log_slow_call, new_request_id
 from ..workspace import (
     ApplicationStore,
     JobLibraryStore,
@@ -53,11 +52,10 @@ from ..workspace import (
     UserStore,
     UserStoreError,
 )
-
 from .deps import (
-    _RateLimiter,
     _bearer_token,
     _enforce_rate_limit,
+    _RateLimiter,
     get_current_user,
 )
 from .schemas import (
@@ -79,6 +77,68 @@ from .schemas import (
     WorkbenchAcceptRequest,
     WorkbenchRunRequest,
 )
+
+# Re-exported names: routers/services access these as `resualign.api.X`
+# (`import resualign.api as api_module`), so they must stay importable here.
+__all__ = [
+    "ApplicationStore",
+    "AnalyzeRequest",
+    "ApplicationCreateRequest",
+    "ApplicationUpdateRequest",
+    "BatchAlignStore",
+    "BulkStatusRequest",
+    "ContentCache",
+    "CrawlError",
+    "CrawlTaskStore",
+    "EnvSettings",
+    "FileParseError",
+    "FinalDraftRequest",
+    "JDParseRequest",
+    "JobCreateRequest",
+    "JobImportRequest",
+    "JobLibraryStore",
+    "JobRegistry",
+    "JobUpdateRequest",
+    "LLMResponseError",
+    "LoginRequest",
+    "MasterResumeCreateRequest",
+    "MasterResumeRollbackRequest",
+    "MasterResumeStore",
+    "MasterResumeUpdateRequest",
+    "OpenAIClient",
+    "Report",
+    "SUPPORTED_EXTENSIONS",
+    "SettingsStore",
+    "SettingsUpdateRequest",
+    "SignupRequest",
+    "UserStore",
+    "UserStoreError",
+    "WorkbenchAcceptRequest",
+    "WorkbenchRunRequest",
+    "_bearer_token",
+    "_cancel_batch_align",
+    "_enforce_rate_limit",
+    "_get_batch_align",
+    "_queue_batch_align",
+    "build_config",
+    "classify_job",
+    "compute_appraisal",
+    "crawl_jd",
+    "extract_salary_range",
+    "extract_text",
+    "get_current_user",
+    "jd_profile_to_dict",
+    "log_event",
+    "log_slow_call",
+    "new_request_id",
+    "proactive_jd_profile",
+    "profile_and_gaps",
+    "profile_jd",
+    "resume_profile",
+    "rewrite_bullet",
+    "run",
+    "structured_resume_sections",
+]
 
 
 logger = logging.getLogger(__name__)
@@ -124,10 +184,10 @@ _payloads: dict[
 ] = {}
 
 
+from .services import batch as _batch_service
 from .services import jobs as _jobs_service
 from .services import resumes as _resumes_service
 from .services import workbench as _workbench_service
-from .services import batch as _batch_service
 
 _session_store = _workbench_service.WorkstationSessionStore()
 
@@ -232,14 +292,32 @@ app.include_router(_batch_router.router)
 
 from .routers import (
     analyze as _analyze_router,
+)
+from .routers import (
     applications as _applications_router,
+)
+from .routers import (
     auth as _auth_router,
+)
+from .routers import (
     batch as _batch_router_alias,
+)
+from .routers import (
     health as _health_router,
+)
+from .routers import (
     jobs as _jobs_router,
+)
+from .routers import (
     kanban as _kanban_router,
+)
+from .routers import (
     resumes as _resumes_router,
+)
+from .routers import (
     settings as _settings_router,
+)
+from .routers import (
     workspace as _workspace_router,
 )
 

@@ -14,7 +14,9 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -e ".[dev]"
+      - name: Ruff lint gate
+        run: ruff check src/ tests/ benchmarks/ run.py
       - name: Unit and contract tests with coverage
         run: python -m pytest --cov=resualign --cov-report=term-missing --cov-report=xml --cov-fail-under=85 --junitxml=test-results.xml tests/
         env:
@@ -35,6 +37,9 @@ jobs:
             done
           fi
         shell: bash
+      - name: Frontend unit tests (node:test)
+        run: node --test tests/frontend/*.test.mjs
+        shell: bash
 
   benchmark-gate:
     name: Stage 2 - benchmark gate
@@ -46,7 +51,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -e ".[dev]"
       - name: Latency call-count and wallclock gate
         run: python benchmarks/latency_benchmark.py
         env:
@@ -67,7 +72,7 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies and Chromium
         run: |
-          pip install -r requirements.txt
+          pip install -e ".[dev]"
           pip install playwright
           python -m playwright install --with-deps chromium
       - name: Phase 16 smoke

@@ -1,45 +1,37 @@
 /* Runtime helpers, modal handling, and progress/polling events. */
 
+import {
+  DEFAULT_VOCABULARY,
+  STAGE_LABELS,
+  buildDiagnosisMarkdownFrom,
+  esc,
+  normalizeVocabulary,
+  normalizeVocabularyList,
+} from "./format.js";
+
+/* Pure formatting / vocabulary / status helpers now live in format.js.
+ * They are re-exported here so every existing import path keeps working. */
+export {
+  DEFAULT_VOCABULARY,
+  JOB_FUNCTIONS,
+  JOB_STATUS_ALIASES,
+  JOB_STATUS_CANONICAL,
+  JOB_STATUS_LABELS,
+  JOB_STATUSES,
+  SENIORITIES,
+  STAGE_LABELS,
+  canonicalJobStatus,
+  esc,
+  formatDate,
+  formatSalary,
+  jobStatusLabel,
+  normalizeVocabulary,
+  normalizeVocabularyList,
+  options,
+} from "./format.js";
+
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-
-export const JOB_FUNCTIONS = [
-  "后端", "前端", "算法", "数据", "测试", "运维",
-  "产品", "设计", "运营", "销售", "其他",
-];
-export const SENIORITIES = ["初级", "中级", "高级", "资深", "未知"];
-export const JOB_STATUSES = ["未投递", "已投递", "面试中", "已拿Offer", "放弃"];
-export const JOB_STATUS_CANONICAL = ["draft", "applied", "interview", "offer", "withdrawn"];
-export const JOB_STATUS_ALIASES = {
-  "未投递": "draft",
-  "已投递": "applied",
-  "面试中": "interview",
-  "已拿Offer": "offer",
-  "放弃": "withdrawn",
-};
-export const JOB_STATUS_LABELS = {
-  draft: "未投递",
-  applied: "已投递",
-  interview: "面试中",
-  offer: "已拿Offer",
-  withdrawn: "放弃",
-};
-
-export function canonicalJobStatus(status) {
-  const value = String(status || "").trim();
-  return JOB_STATUS_ALIASES[value] || value;
-}
-
-export function jobStatusLabel(status) {
-  const canonical = canonicalJobStatus(status);
-  return JOB_STATUS_LABELS[canonical] || canonical;
-}
-
-export const DEFAULT_VOCABULARY = {
-  job_functions: JOB_FUNCTIONS,
-  seniorities: SENIORITIES,
-  statuses: JOB_STATUSES,
-};
 
 let vocabularyRequest = null;
 
@@ -51,16 +43,6 @@ export const APP_STATUS_LABELS = {
   offer: "已拿Offer",
   rejected: "未通过",
   withdrawn: "已放弃",
-};
-export const STAGE_LABELS = {
-  queued: "排队中",
-  running: "运行中",
-  diagnose: "诊断简历",
-  jd_profile: "提取JD画像",
-  jd_analysis: "提取JD画像与差距分析",
-  gap_analysis: "差距分析",
-  tailoring: "AI 改写简历",
-  evaluation: "LLM 评估",
 };
 export const STAGE_WEIGHTS = {
   queued: 0.05,
@@ -107,14 +89,6 @@ export const state = {
   token: localStorage.getItem("resualign_token") || "",
 };
 
-export function esc(value) {
-  return String(value ?? "").replace(
-    /[&<>"']/g,
-    (char) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char],
-  );
-}
-
 export function toast(message, kind = "info") {
   const region = $("#toast-region");
   const node = document.createElement("div");
@@ -129,51 +103,6 @@ export function toast(message, kind = "info") {
   node.append(text, close);
   region.append(node);
   setTimeout(() => node.remove(), 6000);
-}
-
-export function formatDate(timestamp) {
-  if (!timestamp) return "—";
-  const date = new Date(timestamp * 1000);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-    date.getDate(),
-  ).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(
-    date.getMinutes(),
-  ).padStart(2, "0")}`;
-}
-
-export function formatSalary(job) {
-  const min = job.salary_min;
-  const max = job.salary_max;
-  const unit = job.salary_currency || "CNY";
-  if (min == null && max == null) return "薪资面议";
-  if (min != null && max != null) return `${min / 1000}-${max / 1000}K`;
-  return `${(min ?? max) / 1000}K`;
-}
-
-export function options(values, selected) {
-  return values
-    .map(
-      (value) =>
-        `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(value)}</option>`,
-    )
-    .join("");
-}
-
-export function normalizeVocabularyList(values, fallback) {
-  if (!Array.isArray(values)) return [...fallback];
-  const cleaned = values
-    .map((value) => String(value ?? "").trim())
-    .filter(Boolean);
-  return cleaned.length ? cleaned : [...fallback];
-}
-
-export function normalizeVocabulary(vocabulary) {
-  const source = vocabulary && typeof vocabulary === "object" ? vocabulary : {};
-  return {
-    job_functions: normalizeVocabularyList(source.job_functions, JOB_FUNCTIONS),
-    seniorities: normalizeVocabularyList(source.seniorities, SENIORITIES),
-    statuses: normalizeVocabularyList(source.statuses, JOB_STATUSES),
-  };
 }
 
 export function vocabularyList(key) {
@@ -519,40 +448,7 @@ export function buildDiagnosisMarkdown(originalContent = "") {
   const diagnosis = result.diagnosis || result;
   const titleNode = document.querySelector(".page-header h2");
   const title = titleNode ? titleNode.textContent : "简历诊断";
-  const lines = [
-    `# ${title}`,
-    "",
-    `> 诊断分：${diagnosis.score ?? "—"} / 100 · 模型：${diagnosis.model || "未知"}`,
-    "",
-  ];
-  if ((diagnosis.skills || []).length) {
-    lines.push(
-      "## 技能",
-      "",
-      ...diagnosis.skills.map((skill) => `- ${skill}`),
-      "",
-    );
-  }
-  if ((diagnosis.issues || []).length) {
-    lines.push(
-      "## 问题",
-      "",
-      ...diagnosis.issues.map((issue) => `- ${issue}`),
-      "",
-    );
-  }
-  if ((diagnosis.suggestions || []).length) {
-    lines.push(
-      "## 优化建议",
-      "",
-      ...diagnosis.suggestions.map((item) => `- ${item}`),
-      "",
-    );
-  }
-  if (originalContent) {
-    lines.push("## 原始简历", "", originalContent, "");
-  }
-  return lines.join("\n");
+  return buildDiagnosisMarkdownFrom(diagnosis, title, originalContent);
 }
 
 export function startBatchPolling(batchId) {

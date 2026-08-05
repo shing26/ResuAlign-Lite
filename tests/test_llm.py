@@ -1,7 +1,8 @@
 import json
 
 import pytest
-from resualign.llm import OpenAIClient, LLMResponseError
+
+from resualign.llm import LLMResponseError, OpenAIClient
 from resualign.models import ResuAlignConfig
 
 

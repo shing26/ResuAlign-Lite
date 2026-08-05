@@ -9,7 +9,6 @@ from .jd_profiler import JD_PROFILER_PROMPT, profile_jd
 from .llm import LLMClient
 from .models import GapReport, JDProfile
 
-
 JD_ANALYSIS_PROMPT = (
     "You are a job description analyst and resume gap analyst. "
     "Given a resume and a job description, return ONE JSON object with "
@@ -69,8 +68,8 @@ def profile_and_gaps(
             )
 
     user = f"Resume:\n{resume_text}\n\nJob Description:\n{jd_text}"
-    from .schema_registry import JDAnalysisSchema
     from .llm import _structured_or_json
+    from .schema_registry import JDAnalysisSchema
 
     result = _structured_or_json(
         client,

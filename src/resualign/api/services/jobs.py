@@ -5,14 +5,13 @@ import logging
 import re
 import threading
 import time
-import uuid
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import HTTPException
 
-from ..schemas import JobImportRequest
-
 import resualign.api as api_module
+
+from ..schemas import JobImportRequest
 
 logger = logging.getLogger(__name__)
 

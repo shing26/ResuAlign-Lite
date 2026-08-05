@@ -3,12 +3,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
+import resualign.api as api_module
+
 from ...config import clear_runtime_llm, set_runtime_llm
+from ...settings_store import default_settings
 from ..deps import get_current_user
 from ..schemas import SettingsUpdateRequest
-from ...settings_store import default_settings
-
-import resualign.api as api_module
 
 router = APIRouter()
 

@@ -2,7 +2,6 @@ from .llm import LLMClient, _structured_or_json
 from .models import JDProfile
 from .schema_registry import JDProfileSchema
 
-
 JD_PROFILER_PROMPT_VERSION = "1"
 
 

@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from resualign.job_library import JOB_FUNCTIONS, JobLibraryStore, SENIORITIES
+from resualign.job_library import JOB_FUNCTIONS, SENIORITIES, JobLibraryStore
 from resualign.workspace import UserStoreError
 
 

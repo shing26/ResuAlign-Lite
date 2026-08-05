@@ -1,6 +1,7 @@
-import pytest
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from resualign.cli import _parse_args, main
 from resualign.config import build_config

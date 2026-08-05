@@ -2,7 +2,8 @@ import pytest
 
 from resualign.engine import run, truncate_text
 from resualign.models import ResuAlignConfig
-from .conftest import MockLLMClient, _diag, _jd_analysis, _tailor, _eval
+
+from .conftest import MockLLMClient, _diag, _eval, _jd_analysis, _tailor
 
 
 def test_engine_diagnosis_only():
