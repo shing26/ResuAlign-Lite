@@ -20,8 +20,12 @@ def _settings_vocabulary(user_id: str) -> tuple[list[str], list[str]]:
     vocabulary = api_module._settings_store.get_settings(user_id)['classification_vocabulary']
     return ([str(item) for item in vocabulary.get('job_functions') or []], [str(item) for item in vocabulary.get('seniorities') or []])
 
-def _classify_job(jd_text: str, job_functions: list[str] | None=None, seniorities: list[str] | None=None) -> dict[str, Any]:
-    """Classify a JD using the configured LLM client."""
+def _classify_job(jd_text: str, job_functions: list[str] | None=None, seniorities: list[str] | None=None, tenant: str="default") -> dict[str, Any]:
+    """Classify a JD using the configured LLM client.
+
+    The ``tenant`` scopes the content cache key so classifications never
+    leak across tenants (S1). Callers pass the owning user id.
+    """
     config = api_module.build_config()
     with api_module.OpenAIClient(config, timeout=45.0) as client:
         return api_module.classify_job(
@@ -30,7 +34,7 @@ def _classify_job(jd_text: str, job_functions: list[str] | None=None, senioritie
             job_functions=job_functions,
             seniorities=seniorities,
             cache=api_module._cache,
-            tenant="default",
+            tenant=tenant,
         )
 
 _TITLE_JOB_KEYWORDS = (
@@ -144,7 +148,9 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
     classification = {}
     classification_pending = 0
     try:
-        classification = api_module._classify_job(jd_text, job_functions, seniorities)
+        classification = api_module._classify_job(
+            jd_text, job_functions, seniorities, tenant=user['user_id']
+        )
     except api_module.LLMResponseError as exc:
         logger.warning('Job classification failed, storing as pending: %s', exc)
         classification_pending = 1
@@ -265,40 +271,43 @@ def _run_job(job_id: str) -> None:
             if payload.get('diagnosis'):
                 result['diagnosis'] = api_module._build_diagnosis_section(result)
                 result['diagnosis_source_hash'] = api_module._content_sha256(payload.get('resume_text') or '')
-            api_module._registry.succeed(job_id, result)
+            # Persist the library alignment product BEFORE marking the
+            # registry job succeeded. If save_alignment crashes, the registry
+            # job stays non-terminal and startup recovery can requeue or flag
+            # it instead of leaving a succeeded job with no durable product.
             library_job_id = payload.get('library_job_id')
             if library_job_id:
+                tailored = result.get('tailored_resume') or {}
+                sections = tailored.get('sections') or {}
+                draft = (
+                    "\n\n".join(str(value) for value in sections.values())
+                    if sections
+                    else None
+                )
+                eval_score = result.get('eval_score')
+                match_score = (
+                    eval_score.get('jd_match_score')
+                    if eval_score
+                    else None
+                )
+                if match_score is None:
+                    match_score = api_module._gap_match_score(result)
+                session = api_module._session_store.find_by_job(
+                    library_job_id, tenant_id
+                )
+                if session is not None:
+                    for index, diff in enumerate(result.get("diffs") or []):
+                        api_module._session_store.emit(
+                            session["session_id"],
+                            "tailor.diff",
+                            {
+                                "job_id": library_job_id,
+                                "diff_id": diff.get("diff_id"),
+                                "index": index,
+                                "tentative": True,
+                            },
+                        )
                 try:
-                    tailored = result.get('tailored_resume') or {}
-                    sections = tailored.get('sections') or {}
-                    draft = (
-                        "\n\n".join(str(value) for value in sections.values())
-                        if sections
-                        else None
-                    )
-                    eval_score = result.get('eval_score')
-                    match_score = (
-                        eval_score.get('jd_match_score')
-                        if eval_score
-                        else None
-                    )
-                    if match_score is None:
-                        match_score = api_module._gap_match_score(result)
-                    session = api_module._session_store.find_by_job(
-                        library_job_id, tenant_id
-                    )
-                    if session is not None:
-                        for index, diff in enumerate(result.get("diffs") or []):
-                            api_module._session_store.emit(
-                                session["session_id"],
-                                "tailor.diff",
-                                {
-                                    "job_id": library_job_id,
-                                    "diff_id": diff.get("diff_id"),
-                                    "index": index,
-                                    "tentative": True,
-                                },
-                            )
                     api_module._jobs.save_alignment(
                         tenant_id,
                         library_job_id,
@@ -313,44 +322,66 @@ def _run_job(job_id: str) -> None:
                         prompt_version='engine.v1',
                         alignment_status='succeeded',
                     )
-                    if session is not None:
-                        api_module._session_store.update(
-                            session["session_id"],
-                            {
-                                "job": api_module._jobs.get_job(
-                                    tenant_id, library_job_id
-                                ),
-                                "alignment": {
-                                    "status": "succeeded",
-                                    "stage": "done",
-                                    "diffs": result.get("diffs") or [],
-                                    "invalid_diffs": (
-                                        tailored.get("invalid_diffs") or []
-                                    ),
-                                    "draft": draft,
-                                    "eval_score": eval_score,
-                                },
-                            },
-                        )
-                        api_module._session_store.emit(
-                            session["session_id"],
-                            "job.result",
-                            {
-                                "job_id": library_job_id,
-                                "result": result,
-                            },
-                        )
                 except Exception:
                     logger.exception(
-                        'Failed to persist alignment for library job %s',
+                        'Failed to persist alignment for library job %s; '
+                        'keeping analysis job %s non-terminal for recovery',
                         library_job_id,
+                        job_id,
                     )
+                    raise
+                if session is not None:
+                    api_module._session_store.update(
+                        session["session_id"],
+                        {
+                            "job": api_module._jobs.get_job(
+                                tenant_id, library_job_id
+                            ),
+                            "alignment": {
+                                "status": "succeeded",
+                                "stage": "done",
+                                "diffs": result.get("diffs") or [],
+                                "invalid_diffs": (
+                                    tailored.get("invalid_diffs") or []
+                                ),
+                                "draft": draft,
+                                "eval_score": eval_score,
+                            },
+                        },
+                    )
+                    api_module._session_store.emit(
+                        session["session_id"],
+                        "job.result",
+                        {
+                            "job_id": library_job_id,
+                            "result": result,
+                        },
+                    )
+            api_module._registry.succeed(job_id, result)
             if application_id:
-                api_module._applications.set_application_job(tenant_id, application_id, job_id, 'succeeded')
+                try:
+                    api_module._applications.set_application_job(
+                        tenant_id, application_id, job_id, 'succeeded'
+                    )
+                except Exception:
+                    # The analysis itself succeeded; an application link
+                    # update failure must not flip the job to failed.
+                    logger.exception(
+                        'Failed to link application %s to succeeded job %s',
+                        application_id,
+                        job_id,
+                    )
         except api_module.CrawlError as exc:
             api_module._registry.fail(job_id, f'Failed to crawl JD from URL: {exc}')
             if application_id:
-                api_module._applications.set_application_job(tenant_id, application_id, job_id, 'failed')
+                try:
+                    api_module._applications.set_application_job(tenant_id, application_id, job_id, 'failed')
+                except Exception:
+                    logger.exception(
+                        'Failed to link application %s after crawl failure %s',
+                        application_id,
+                        job_id,
+                    )
         except Exception:
             logger.exception('Analysis job %s failed', job_id)
             if payload.get('diagnosis'):
@@ -359,7 +390,14 @@ def _run_job(job_id: str) -> None:
                 error = 'Analysis failed after an internal error'
             api_module._registry.fail(job_id, error)
             if application_id:
-                api_module._applications.set_application_job(tenant_id, application_id, job_id, 'failed')
+                try:
+                    api_module._applications.set_application_job(tenant_id, application_id, job_id, 'failed')
+                except Exception:
+                    logger.exception(
+                        'Failed to link application %s after failure %s',
+                        application_id,
+                        job_id,
+                    )
         finally:
             api_module._registry.delete_payload(job_id)
             api_module._payloads.pop(job_id, None)

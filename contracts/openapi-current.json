@@ -1619,7 +1619,7 @@
     "/api/applications": {
       "post": {
         "summary": "Create Application",
-        "description": "Create an application pinned to the master resume's current version.",
+        "description": "Create an application pinned to the master resume's current version.\n\nDeprecated: application records are being replaced by the Job Library\nentity (per-job workbench runs, status, and timeline fields). The\nendpoint stays available for existing callers; migrate historical\nrecords with ``merge_applications_into_jobs`` before retiring it.",
         "operationId": "create_application_api_applications_post",
         "parameters": [
           {
@@ -1751,7 +1751,7 @@
       },
       "patch": {
         "summary": "Update Application",
-        "description": "Update application metadata without changing its resume snapshot.",
+        "description": "Update application metadata without changing its resume snapshot.\n\nDeprecated: application records are being replaced by the Job Library\nentity. Kept available for existing callers; the frontend no longer\nsurfaces this form.",
         "operationId": "update_application_api_applications__application_id__patch",
         "parameters": [
           {
@@ -1807,7 +1807,7 @@
       },
       "delete": {
         "summary": "Delete Application",
-        "description": "Delete an application record.",
+        "description": "Delete an application record.\n\nDeprecated: application records are being replaced by the Job Library\nentity. Kept available for existing callers.",
         "operationId": "delete_application_api_applications__application_id__delete",
         "parameters": [
           {
@@ -2470,12 +2470,14 @@
         "properties": {
           "resume_text": {
             "type": "string",
+            "maxLength": 200000,
             "title": "Resume Text"
           },
           "jd_text": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 100000
               },
               {
                 "type": "null"
@@ -2486,7 +2488,8 @@
           "jd_url": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 2000
               },
               {
                 "type": "null"
@@ -2530,6 +2533,7 @@
         "properties": {
           "title": {
             "type": "string",
+            "maxLength": 200,
             "title": "Title"
           },
           "master_resume_id": {
@@ -2539,7 +2543,8 @@
           "jd_text": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 100000
               },
               {
                 "type": "null"
@@ -2550,7 +2555,8 @@
           "jd_url": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 2000
               },
               {
                 "type": "null"
@@ -2571,7 +2577,8 @@
           "title": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 200
               },
               {
                 "type": "null"
@@ -2582,7 +2589,8 @@
           "jd_text": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 100000
               },
               {
                 "type": "null"
@@ -2593,7 +2601,8 @@
           "jd_url": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 2000
               },
               {
                 "type": "null"
@@ -2700,6 +2709,7 @@
         "properties": {
           "draft": {
             "type": "string",
+            "maxLength": 200000,
             "title": "Draft"
           }
         },
@@ -2726,6 +2736,7 @@
         "properties": {
           "jd_url": {
             "type": "string",
+            "maxLength": 2000,
             "title": "Jd Url"
           }
         },
@@ -2740,7 +2751,8 @@
           "title": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 200
               },
               {
                 "type": "null"
@@ -2751,7 +2763,8 @@
           "jd_text": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 100000
               },
               {
                 "type": "null"
@@ -2762,7 +2775,8 @@
           "jd_url": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 2000
               },
               {
                 "type": "null"
@@ -2773,7 +2787,8 @@
           "company": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 200
               },
               {
                 "type": "null"
@@ -2784,7 +2799,8 @@
           "location": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 100
               },
               {
                 "type": "null"
@@ -2839,7 +2855,8 @@
           "source_url": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 2000
               },
               {
                 "type": "null"
@@ -2929,7 +2946,8 @@
           "csv_text": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 2000000
               },
               {
                 "type": "null"
@@ -3031,7 +3049,8 @@
           "title": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 200
               },
               {
                 "type": "null"
@@ -3042,7 +3061,8 @@
           "jd_text": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 100000
               },
               {
                 "type": "null"
@@ -3053,7 +3073,8 @@
           "company": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 200
               },
               {
                 "type": "null"
@@ -3064,7 +3085,8 @@
           "location": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 100
               },
               {
                 "type": "null"
@@ -3119,7 +3141,8 @@
           "source_url": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 2000
               },
               {
                 "type": "null"
@@ -3220,7 +3243,8 @@
           "custom_prompt": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 4000
               },
               {
                 "type": "null"
@@ -3383,10 +3407,12 @@
         "properties": {
           "title": {
             "type": "string",
+            "maxLength": 200,
             "title": "Title"
           },
           "content": {
             "type": "string",
+            "maxLength": 200000,
             "title": "Content"
           }
         },
@@ -3414,6 +3440,7 @@
         "properties": {
           "content": {
             "type": "string",
+            "maxLength": 200000,
             "title": "Content"
           }
         },
@@ -3661,7 +3688,8 @@
           "custom_prompt": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 4000
               },
               {
                 "type": "null"
@@ -3681,7 +3709,8 @@
           "raw_jd": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 100000
               },
               {
                 "type": "null"
@@ -3692,7 +3721,8 @@
           "jd_url": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 2000
               },
               {
                 "type": "null"
@@ -3714,7 +3744,8 @@
           "resume_text": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 200000
               },
               {
                 "type": "null"
@@ -3745,7 +3776,8 @@
           "custom_prompt": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 4000
               },
               {
                 "type": "null"

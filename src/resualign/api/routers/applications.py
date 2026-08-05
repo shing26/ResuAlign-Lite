@@ -12,7 +12,13 @@ router = APIRouter()
 
 @router.post('/api/applications', status_code=201)
 def create_application(req: ApplicationCreateRequest, user: dict[str, Any]=Depends(get_current_user)):
-    """Create an application pinned to the master resume's current version."""
+    """Create an application pinned to the master resume's current version.
+
+    Deprecated: application records are being replaced by the Job Library
+    entity (per-job workbench runs, status, and timeline fields). The
+    endpoint stays available for existing callers; migrate historical
+    records with ``merge_applications_into_jobs`` before retiring it.
+    """
     try:
         return api_module._applications.create_application(tenant_id=user['user_id'], title=req.title, master_resume_id=req.master_resume_id, jd_text=req.jd_text, jd_url=req.jd_url)
     except api_module.UserStoreError as exc:
@@ -33,7 +39,12 @@ def get_application(application_id: str, user: dict[str, Any]=Depends(get_curren
 
 @router.patch('/api/applications/{application_id}')
 def update_application(application_id: str, req: ApplicationUpdateRequest, user: dict[str, Any]=Depends(get_current_user)):
-    """Update application metadata without changing its resume snapshot."""
+    """Update application metadata without changing its resume snapshot.
+
+    Deprecated: application records are being replaced by the Job Library
+    entity. Kept available for existing callers; the frontend no longer
+    surfaces this form.
+    """
     try:
         application = api_module._applications.update_application(user['user_id'], application_id, title=req.title, jd_text=req.jd_text, jd_url=req.jd_url, status=req.status)
     except api_module.UserStoreError as exc:
@@ -44,7 +55,11 @@ def update_application(application_id: str, req: ApplicationUpdateRequest, user:
 
 @router.delete('/api/applications/{application_id}', status_code=204)
 def delete_application(application_id: str, user: dict[str, Any]=Depends(get_current_user)):
-    """Delete an application record."""
+    """Delete an application record.
+
+    Deprecated: application records are being replaced by the Job Library
+    entity. Kept available for existing callers.
+    """
     if not api_module._applications.delete_application(user['user_id'], application_id):
         raise HTTPException(status_code=404, detail='Application not found')
     return None

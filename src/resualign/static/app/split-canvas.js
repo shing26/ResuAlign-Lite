@@ -46,6 +46,14 @@ let draggingJobId = null;
 let alignmentStartedAt = 0;
 let workbenchJobs = [];
 let autoAnalyzedJd = false;
+let canvasRenderHooks = [];
+
+/* Render hooks let main.js attach extras (batch panel, etc.) after a
+   canvas view is painted. Kept as a list so future views can register
+   their own post-render work without touching this module. */
+export function setCanvasRenderHook(fn) {
+  if (typeof fn === "function") canvasRenderHooks.push(fn);
+}
 
 function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const job = (session && session.job) || {};
@@ -672,6 +680,13 @@ export async function renderCopilotBoard(app) {
     </div>
     <div id="job-board" class="pipeline-board" data-pipeline-board>${columns}</div>`;
   bindBoardDrag(app);
+  canvasRenderHooks.forEach((hook) => {
+    try {
+      hook(app);
+    } catch {
+      /* a failing hook must not break the board render */
+    }
+  });
 }
 
 function bindBoardDrag(root) {

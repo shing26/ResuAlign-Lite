@@ -407,6 +407,10 @@ def main() -> None:
             and "failed to load" not in error.lower()
         ]
         expect(not severe, f"console errors: {severe}")
+        # Q2 gate: every required fake-LLM stage must have been hit >= 1.
+        # The fake server returns 500 (surfaced as AssertionError by api_call)
+        # when a required stage was never reached.
+        api_call(llm.base_url, "GET", "/assert-stages")
     finally:
         for job_id in created["job_ids"]:
             try:

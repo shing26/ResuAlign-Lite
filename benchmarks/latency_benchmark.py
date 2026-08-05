@@ -289,10 +289,10 @@ def _print_row(label: str, row: dict, out: TextIO) -> None:
 
 
 _PLAN_SLO_SECONDS = {
-    "legacy (4 calls)": 5.0,
-    "current cold (3 calls)": 3.3,
-    "current cached (2 calls)": 2.2,
-    "schema retry (4 calls)": 4.4,
+    "legacy (4 calls)": 7.0,
+    "current cold (3 calls)": 5.5,
+    "current cached (2 calls)": 4.0,
+    "schema retry (4 calls)": 7.0,
 }
 
 

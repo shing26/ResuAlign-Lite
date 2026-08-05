@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from typing import Any
 
@@ -70,6 +69,11 @@ def default_settings() -> dict[str, Any]:
 
 class SettingsStore(_SqliteStore):
     """Store and validate editable user preferences for the workbench."""
+
+    MIGRATIONS = (
+        (1, "ALTER TABLE user_settings ADD COLUMN llm_provider TEXT"),
+        (2, "ALTER TABLE user_settings ADD COLUMN llm_model TEXT"),
+    )
 
     def get_settings(self, tenant_id: str) -> dict[str, Any]:
         defaults = default_settings()
@@ -147,27 +151,6 @@ class SettingsStore(_SqliteStore):
 
     def _ensure_initialized(self) -> None:
         super()._ensure_initialized(_SETTINGS_SCHEMA)
-        if getattr(self, "_llm_columns_added", False):
-            return
-        with self._lock:
-            if getattr(self, "_llm_columns_added", False):
-                return
-            with self._connect() as conn:
-                try:
-                    conn.execute(
-                        "ALTER TABLE user_settings "
-                        "ADD COLUMN llm_provider TEXT"
-                    )
-                except sqlite3.OperationalError:
-                    pass
-                try:
-                    conn.execute(
-                        "ALTER TABLE user_settings "
-                        "ADD COLUMN llm_model TEXT"
-                    )
-                except sqlite3.OperationalError:
-                    pass
-            self._llm_columns_added = True
 
 
 def _merge_defaults(

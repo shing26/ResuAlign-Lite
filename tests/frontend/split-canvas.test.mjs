@@ -329,7 +329,7 @@ test("renderBoardCard renders job-board card with check and edit actions", () =>
     classification_pending: false,
   });
   assert.match(html, /data-board-check/);
-  assert.match(html, /data-action="open-job-detail"/);
+  assert.match(html, /data-action="open-job-timeline"/);
   assert.match(html, /data-action="edit-job"/);
   assert.match(html, /data-action="delete-job"/);
   assert.match(html, /aria-label="选择 前端"/);

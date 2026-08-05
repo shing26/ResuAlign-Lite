@@ -7,6 +7,7 @@ import {
   esc,
   normalizeVocabulary,
   normalizeVocabularyList,
+  renderBatchMatrixHtml,
 } from "./format.js";
 
 /* Pure formatting / vocabulary / status helpers now live in format.js.
@@ -86,8 +87,35 @@ export const state = {
   diagnosisResumeId: null,
   settings: null,
   vocabulary: null,
+  pollers: {},
   token: localStorage.getItem("resualign_token") || "",
 };
+
+/* ------------------------------------------------------------------ */
+/* Polling registry: one start/stop API for every async poller.        */
+/* startPolling registers fn under id and runs it immediately;         */
+/* stopAllPolling() clears every registered timer (used on render).    */
+/* ------------------------------------------------------------------ */
+
+export function startPolling(id, fn, interval) {
+  stopPolling(id);
+  const timer = window.setInterval(fn, interval);
+  state.pollers[id] = { timer, fn, interval };
+  fn();
+  return timer;
+}
+
+export function stopPolling(id) {
+  const entry = state.pollers[id];
+  if (entry) {
+    window.clearInterval(entry.timer);
+    delete state.pollers[id];
+  }
+}
+
+export function stopAllPolling() {
+  for (const id of Object.keys(state.pollers)) stopPolling(id);
+}
 
 export function toast(message, kind = "info") {
   const region = $("#toast-region");
@@ -168,6 +196,7 @@ export async function api(path, options = {}) {
           ? detail.reason
           : JSON.stringify(detail);
     const error = new Error(message);
+    error.status = response.status;
     if (detail && typeof detail === "object") error.data = detail;
     throw error;
   }
@@ -235,18 +264,13 @@ export async function recoverDiagnosis(resume) {
 export function startDiagnosisPolling(jobId, resumeId) {
   stopDiagnosisPolling();
   state.diagnosisResumeId = resumeId || state.diagnosisResumeId;
-  state.diagnosisPolling = {
-    jobId,
-    timer: window.setInterval(() => pollDiagnosisJob(jobId), 1000),
-  };
-  pollDiagnosisJob(jobId);
+  state.diagnosisPolling = { jobId };
+  startPolling("diagnosis", () => pollDiagnosisJob(jobId), 1000);
 }
 
 export function stopDiagnosisPolling() {
-  if (state.diagnosisPolling) {
-    window.clearInterval(state.diagnosisPolling.timer);
-    state.diagnosisPolling = null;
-  }
+  stopPolling("diagnosis");
+  state.diagnosisPolling = null;
 }
 
 export async function pollDiagnosisJob(jobId) {
@@ -453,15 +477,13 @@ export function buildDiagnosisMarkdown(originalContent = "") {
 
 export function startBatchPolling(batchId) {
   stopBatchPolling();
-  state.batchPolling = { batchId, timer: window.setInterval(() => pollBatch(batchId), 1000) };
-  pollBatch(batchId);
+  state.batchPolling = { batchId };
+  startPolling("batch", () => pollBatch(batchId), 1000);
 }
 
 export function stopBatchPolling() {
-  if (state.batchPolling) {
-    window.clearInterval(state.batchPolling.timer);
-    state.batchPolling = null;
-  }
+  stopPolling("batch");
+  state.batchPolling = null;
 }
 
 export async function pollBatch(batchId) {
@@ -486,34 +508,7 @@ export function renderBatchResults(batch) {
   if (status) status.textContent = `已完成 ${batch.summary.completed}/${batch.summary.total}`;
   const results = $("[data-batch-results]");
   if (!results) return;
-  if (!batch.rows.some((row) => row.summary)) {
-    results.innerHTML = `<div class="batch-progress">${batch.rows
-      .map(
-        (row) =>
-          `<span class="badge badge-pending">${esc(row.title || row.job_id)}: ${esc(row.status)}</span>`,
-      )
-      .join("")}</div>`;
-    return;
-  }
-  const rows = batch.rows
-    .map((row) => {
-      const summary = row.summary || {};
-      const score = summary.score;
-      const verdict =
-        score == null ? "—" : score >= 75 ? "投递" : score >= 55 ? "考虑" : "放弃";
-      return `<tr>
-        <td>${esc(row.title || row.job_id)}</td>
-        <td>${esc(score ?? "—")}</td>
-        <td>${esc((summary.key_gaps || []).slice(0, 3).join("、") || "—")}</td>
-        <td>${esc(verdict)}</td>
-        <td>${esc(summary.next_step || row.status)}</td>
-        <td><a class="btn btn-ghost btn-sm" href="#/workspace/${encodeURIComponent(row.job_id)}">打开工作台</a></td>
-      </tr>`;
-    })
-    .join("");
-  results.innerHTML = `<div class="table-wrap"><table class="data batch-matrix">
-    <thead><tr><th>岗位</th><th>分数</th><th>关键缺口</th><th>结论</th><th>下一步</th><th>操作</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+  results.innerHTML = renderBatchMatrixHtml(batch);
 }
 
 export function renderWbProgress(snapshot) {
@@ -534,15 +529,11 @@ export function renderWbProgress(snapshot) {
 }
 
 export function stopWbPolling() {
-  if (state.wbPolling) {
-    window.clearInterval(state.wbPolling.timer);
-    state.wbPolling = null;
-  }
+  stopPolling("wb");
+  state.wbPolling = null;
 }
 
 export function stopApplicationPolling() {
-  if (state.applicationPoll) {
-    window.clearInterval(state.applicationPoll.timer);
-    state.applicationPoll = null;
-  }
+  stopPolling("application");
+  state.applicationPoll = null;
 }

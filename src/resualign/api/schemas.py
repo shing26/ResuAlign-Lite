@@ -1,13 +1,22 @@
-
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+_JD_TEXT_MAX = 100_000
+_RESUME_TEXT_MAX = 200_000
+_DRAFT_MAX = 200_000
+_CSV_TEXT_MAX = 2_000_000
+_CUSTOM_PROMPT_MAX = 4_000
+_TITLE_MAX = 200
+_COMPANY_MAX = 200
+_LOCATION_MAX = 100
+_URL_MAX = 2_000
+
 
 class AnalyzeRequest(BaseModel):
-    resume_text: str
-    jd_text: str | None = None
-    jd_url: str | None = None
+    resume_text: str = Field(max_length=_RESUME_TEXT_MAX)
+    jd_text: str | None = Field(default=None, max_length=_JD_TEXT_MAX)
+    jd_url: str | None = Field(default=None, max_length=_URL_MAX)
     run_eval: bool = False
     granularity: Literal['fine', 'medium', 'coarse'] = 'medium'
     prompt_focus: Literal['balanced', 'quantified', 'skills'] = 'balanced'
@@ -21,38 +30,38 @@ class LoginRequest(BaseModel):
     password: str
 
 class MasterResumeCreateRequest(BaseModel):
-    title: str
-    content: str
+    title: str = Field(max_length=_TITLE_MAX)
+    content: str = Field(max_length=_RESUME_TEXT_MAX)
 
 class MasterResumeUpdateRequest(BaseModel):
-    content: str
+    content: str = Field(max_length=_RESUME_TEXT_MAX)
 
 class MasterResumeRollbackRequest(BaseModel):
     version: int
 
 class ApplicationCreateRequest(BaseModel):
-    title: str
+    title: str = Field(max_length=_TITLE_MAX)
     master_resume_id: str
-    jd_text: str | None = None
-    jd_url: str | None = None
+    jd_text: str | None = Field(default=None, max_length=_JD_TEXT_MAX)
+    jd_url: str | None = Field(default=None, max_length=_URL_MAX)
 
 class ApplicationUpdateRequest(BaseModel):
-    title: str | None = None
-    jd_text: str | None = None
-    jd_url: str | None = None
+    title: str | None = Field(default=None, max_length=_TITLE_MAX)
+    jd_text: str | None = Field(default=None, max_length=_JD_TEXT_MAX)
+    jd_url: str | None = Field(default=None, max_length=_URL_MAX)
     status: str | None = None
 
 class JobCreateRequest(BaseModel):
-    title: str | None = None
-    jd_text: str | None = None
-    jd_url: str | None = None
-    company: str | None = None
-    location: str | None = None
+    title: str | None = Field(default=None, max_length=_TITLE_MAX)
+    jd_text: str | None = Field(default=None, max_length=_JD_TEXT_MAX)
+    jd_url: str | None = Field(default=None, max_length=_URL_MAX)
+    company: str | None = Field(default=None, max_length=_COMPANY_MAX)
+    location: str | None = Field(default=None, max_length=_LOCATION_MAX)
     salary_min: float | None = None
     salary_max: float | None = None
     salary_currency: str | None = None
     source_type: str | None = None
-    source_url: str | None = None
+    source_url: str | None = Field(default=None, max_length=_URL_MAX)
     job_function: str | None = None
     seniority: str | None = None
     tech_tags: list[str] | None = None
@@ -60,18 +69,18 @@ class JobCreateRequest(BaseModel):
     posting_date: str | None = None
 
 class JDParseRequest(BaseModel):
-    jd_url: str
+    jd_url: str = Field(max_length=_URL_MAX)
 
 class JobUpdateRequest(BaseModel):
-    title: str | None = None
-    jd_text: str | None = None
-    company: str | None = None
-    location: str | None = None
+    title: str | None = Field(default=None, max_length=_TITLE_MAX)
+    jd_text: str | None = Field(default=None, max_length=_JD_TEXT_MAX)
+    company: str | None = Field(default=None, max_length=_COMPANY_MAX)
+    location: str | None = Field(default=None, max_length=_LOCATION_MAX)
     salary_min: float | None = None
     salary_max: float | None = None
     salary_currency: str | None = None
     source_type: str | None = None
-    source_url: str | None = None
+    source_url: str | None = Field(default=None, max_length=_URL_MAX)
     job_function: str | None = None
     seniority: str | None = None
     tech_tags: list[str] | None = None
@@ -79,7 +88,7 @@ class JobUpdateRequest(BaseModel):
     posting_date: str | None = None
     tailor_granularity: Literal['fine', 'medium', 'coarse'] | None = None
     tailor_focus: Literal['balanced', 'quantified', 'skills'] | None = None
-    custom_prompt: str | None = None
+    custom_prompt: str | None = Field(default=None, max_length=_CUSTOM_PROMPT_MAX)
 
 class BulkStatusRequest(BaseModel):
     job_ids: list[str]
@@ -87,7 +96,7 @@ class BulkStatusRequest(BaseModel):
 
 class JobImportRequest(BaseModel):
     jobs: list[dict[str, Any]] | None = None
-    csv_text: str | None = None
+    csv_text: str | None = Field(default=None, max_length=_CSV_TEXT_MAX)
 
 class SettingsUpdateRequest(BaseModel):
     salary_reference: list[dict[str, Any]] | None = None
@@ -100,26 +109,26 @@ class WorkbenchRunRequest(BaseModel):
     master_resume_id: str
     granularity: Literal['fine', 'medium', 'coarse'] = 'medium'
     prompt_focus: Literal['balanced', 'quantified', 'skills'] = 'balanced'
-    custom_prompt: str | None = None
+    custom_prompt: str | None = Field(default=None, max_length=_CUSTOM_PROMPT_MAX)
 
 class WorkbenchAcceptRequest(BaseModel):
     job_id: str
     accepted_indices: list[int] = []
 
 class FinalDraftRequest(BaseModel):
-    draft: str
+    draft: str = Field(max_length=_DRAFT_MAX)
 
 
 class WorkbenchSessionInitRequest(BaseModel):
     """Create a workstation session from a pasted JD or a JD URL."""
 
-    raw_jd: str | None = None
-    jd_url: str | None = None
+    raw_jd: str | None = Field(default=None, max_length=_JD_TEXT_MAX)
+    jd_url: str | None = Field(default=None, max_length=_URL_MAX)
     master_resume_id: str | None = None
-    resume_text: str | None = None
+    resume_text: str | None = Field(default=None, max_length=_RESUME_TEXT_MAX)
     granularity: Literal["fine", "medium", "coarse"] = "medium"
     prompt_focus: Literal["balanced", "quantified", "skills"] = "balanced"
-    custom_prompt: str | None = None
+    custom_prompt: str | None = Field(default=None, max_length=_CUSTOM_PROMPT_MAX)
     idempotency_key: str | None = None
 
 

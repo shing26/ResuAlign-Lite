@@ -1,46 +1,32 @@
 import {
   $,
   $$,
-  APP_STATUS_LABELS,
   api,
   buildDiagnosisMarkdown,
   canonicalJobStatus,
   closeModal,
   download,
-  ensureVocabulary,
   esc,
   formatDate,
   formatSalary,
   JOB_STATUS_CANONICAL,
   JOB_STATUS_LABELS,
   normalizeVocabulary,
-  openLoginModal,
   options,
   recoverDiagnosis,
   renderBatchResults,
   renderDiagnosisError,
   renderDiagnosisProgress,
-  renderDiagnosisResult,
-  renderWbProgress,
   showModal,
   startBatchPolling,
   startDiagnosisPolling,
   state,
-  stopApplicationPolling,
+  stopAllPolling,
   stopBatchPolling,
   stopDiagnosisPolling,
-  stopWbPolling,
   toast,
   vocabularyList,
 } from "./events.js";
-import {
-  acceptSelectedDiffs,
-  regenerateDiff,
-  renderWbError,
-  renderWbResult,
-  toggleWbView,
-} from "./diff-editor.js";
-import { renderAppraisal } from "./appraisal-panel.js";
 import { initTheme, toggleTheme } from "./theme.js";
 import {
   closeCommandPanel,
@@ -53,18 +39,17 @@ import {
   activeSessionForExport,
   closeSplitCanvas,
   copyAlignMarkdown,
-  exportAlignMarkdown,
   exportAlignJson,
+  exportAlignMarkdown,
   renderCopilotBoard,
   renderOptimizerCanvas,
+  setCanvasRenderHook,
   startAlignmentRun,
 } from "./split-canvas.js";
 import {
-  inlineMarkdown,
+  batchPanelHtml,
   lineDiff,
   parseHashValue,
-  parseImportText,
-  renderBoardCard,
   renderMarkdown,
 } from "./format.js";
 
@@ -102,10 +87,7 @@ async function render() {
   document.body.classList.remove("wb-appraisal-drawer-open");
   closeSplitCanvas();
   setActiveTab();
-  stopWbPolling();
-  stopApplicationPolling();
-  stopDiagnosisPolling();
-  stopBatchPolling();
+  stopAllPolling();
   const app = $("#app");
   const printNode = $("#print-root");
   if (printNode) printNode.innerHTML = "";
@@ -294,120 +276,6 @@ async function openResumeEditor(resumeId) {
 /* Job Library                                                         */
 /* ------------------------------------------------------------------ */
 
-async function renderJobsView(app) {
-  const query = new URLSearchParams({
-    ...state.filters,
-    limit: "500",
-    offset: "0",
-  });
-  for (const key of ["job_function", "seniority", "status", "search"]) {
-    if (!state.filters[key]) query.delete(key);
-  }
-  state.jobs = await api(`/api/jobs?${query}`);
-  const vocabulary = await ensureVocabulary();
-  state.batchResumes = await api("/api/master-resumes");
-  renderPipelineBoard(app, vocabulary, state.batchResumes);
-  return;
-  const cards = state.jobs
-    .map(
-      (job) => `
-      <div class="card job-card ${job.classification_pending ? "job-card--pending" : ""} card-base card-hover-soft">
-        <div class="card-head">
-          <div>
-            <div class="card-title">${esc(job.title)}</div>
-            <div class="card-meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
-          </div>
-          <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
-        </div>
-        <div class="row" style="margin-top:8px">
-          <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
-          ${job.classification_pending ? '<span class="badge badge-amber badge-pending">分类待定</span>' : ""}
-          <span class="badge ${job.status === "未投递" ? "badge-amber" : "badge-teal"}">${esc(job.status)}</span>
-          ${job.classification_pending ? `<button class="btn btn-ghost btn-sm" data-action="reclassify-job" data-id="${job.job_id}">重新分类</button>` : ""}
-        </div>
-        <div class="chips">${(job.tech_tags || [])
-          .map((tag) => `<span class="chip">${esc(tag)}</span>`)
-          .join("")}</div>
-        <details class="drawer job-raw-jd" data-raw-jd="${job.job_id}">
-          <summary class="small">查看原始 JD</summary>
-          <div class="pre raw-jd">${esc(job.jd_text)}</div>
-        </details>
-        <div class="row" style="margin-top:10px">
-          <button class="btn btn-primary btn-sm" data-action="open-workspace" data-id="${job.job_id}">打开工作台</button>
-          <button class="btn btn-outline btn-sm" data-action="edit-job" data-id="${job.job_id}">编辑</button>
-          <button class="btn btn-danger btn-sm" data-action="delete-job" data-id="${job.job_id}">删除</button>
-        </div>
-      </div>`,
-    )
-    .join("");
-
-  app.innerHTML = `
-    <div class="page-header page-header--jobs">
-      <div>
-        <h2>岗位库</h2>
-        <div class="sub">共 ${state.jobs.length} 条（当前页） · 粘贴或导入 JD，分类后进入工作台</div>
-      </div>
-      <div class="row">
-        <button class="btn btn-primary" data-action="show-add-job">添加岗位</button>
-        <button class="btn btn-outline" data-action="show-import">批量导入</button>
-      </div>
-    </div>
-    <form class="panel panel-card filter-bar" data-form="job-filter">
-      <div class="field"><label>职能</label><select name="job_function"><option value="">全部</option>${options(vocabulary.job_functions, state.filters.job_function)}</select></div>
-      <div class="field"><label>级别</label><select name="seniority"><option value="">全部</option>${options(vocabulary.seniorities, state.filters.seniority)}</select></div>
-      <div class="field"><label>状态</label><select name="status"><option value="">全部</option>${options(vocabulary.statuses, state.filters.status)}</select></div>
-      <div class="field"><label>搜索</label><input type="search" name="search" value="${esc(state.filters.search)}" placeholder="标题 / 公司 / JD"></div>
-      <button class="btn btn-secondary" type="submit">筛选</button>
-      <button class="btn btn-ghost" type="button" data-action="clear-filters">清空</button>
-    </form>
-    <form class="panel panel-card" data-form="job-create" hidden>
-      <h3>添加岗位</h3>
-      <div class="segmented segmented-card" role="group" aria-label="输入方式">
-        <button type="button" class="segmented-button" data-mode="paste" aria-pressed="true">粘贴 JD</button>
-        <button type="button" class="segmented-button" data-mode="url" aria-pressed="false">JD 链接</button>
-      </div>
-      <div class="form-grid" style="margin-top:10px">
-        <div class="field"><label>标题</label><input type="text" name="title" placeholder="留空则从 JD 首行提取"></div>
-        <div class="field"><label>公司</label><input type="text" name="company"></div>
-        <div class="field"><label>城市</label><input type="text" name="location"></div>
-        <div class="field"><label>来源链接</label><input type="url" name="source_url"></div>
-        <div class="field"><label>最低薪资（月，元）</label><input type="number" name="salary_min" min="0" step="100"></div>
-        <div class="field"><label>最高薪资（月，元）</label><input type="number" name="salary_max" min="0" step="100"></div>
-        <div class="field"><label>薪资币种</label><input type="text" name="salary_currency" placeholder="CNY"></div>
-        <div class="field wide"><label>JD 文本</label><textarea name="jd_text" rows="8"></textarea></div>
-        <div class="field wide" data-url-field hidden><label>JD 链接</label>
-          <div class="row">
-            <input type="url" name="jd_url" placeholder="https://..." style="flex:1;min-width:0">
-            <button class="btn btn-secondary" type="button" data-action="parse-jd-link">解析 JD 链接</button>
-          </div>
-        </div>
-        <div class="jd-parse-status" data-jd-parse-status role="status" aria-live="polite"></div>
-      </div>
-      <div class="row"><button class="btn btn-primary" type="submit">保存岗位</button>
-        <button class="btn btn-ghost" type="button" data-action="cancel-add-job">取消</button></div>
-    </form>
-    <form class="panel panel-card" data-form="job-import" hidden>
-      <h3>批量导入</h3>
-      <div class="field"><label>粘贴 CSV 或 JSON 数组（字段含 title / jd_text / jd_url / company / location）</label>
-        <textarea name="import_text" rows="6" placeholder='title,jd_text,location&#10;后端工程师,要求 Python 和 FastAPI,上海'></textarea></div>
-      <div class="field"><label>或选择文件（.csv / .json）</label><input type="file" name="import_file" accept=".csv,.json,text/csv,application/json"></div>
-      <div class="row"><button class="btn btn-primary" type="submit">开始导入</button>
-        <button class="btn btn-ghost" type="button" data-action="cancel-import">取消</button>
-        <span class="small muted" data-import-status></span></div>
-    </form>
-    <div id="job-list" class="card-list motion-stagger">${cards || `<div class="panel panel-card empty-state">
-      <div class="big">岗位库为空</div>
-      <div>添加或批量导入岗位后，即可在单岗位工作台做对齐分析。</div>
-      <div class="actions"><button class="btn btn-primary" data-action="show-add-job">添加岗位</button>
-      <button class="btn btn-outline" data-action="show-import">批量导入</button></div></div>`}
-    </div>
-    <div class="row" style="justify-content:center;margin-top:12px">
-      <button class="btn btn-outline btn-sm" data-action="prev-page" ${state.offset === 0 ? "disabled" : ""}>上一页</button>
-      <span class="small muted">${state.offset / state.limit + 1} 页</span>
-      <button class="btn btn-outline btn-sm" data-action="next-page" ${state.jobs.length < state.limit ? "disabled" : ""}>下一页</button>
-    </div>`;
-}
-
 function openJobEditor(job) {
   showModal(
     `编辑「${job.title}」`,
@@ -435,43 +303,7 @@ function openJobEditor(job) {
 /* Workspace                                                           */
 /* ------------------------------------------------------------------ */
 
-function renderPipelineBoard(app, vocabulary, resumes = []) {
-  const columns = JOB_STATUS_CANONICAL.map((canonical) => {
-    const items = state.jobs.filter(
-      (job) => canonicalJobStatus(job.status) === canonical,
-    );
-    return `
-      <section class="board-column" data-status="${canonical}" aria-label="${esc(JOB_STATUS_LABELS[canonical])}">
-        <div class="board-column__head">
-          <span class="board-column__dot board-dot--${canonical}" aria-hidden="true"></span>
-          <h3>${esc(JOB_STATUS_LABELS[canonical])}</h3>
-          <span class="board-column__count">${items.length}</span>
-        </div>
-        <div class="board-column__body">
-          ${items.map(renderBoardCard).join("") || '<div class="board-column__empty">暂无岗位</div>'}
-        </div>
-      </section>`;
-  }).join("");
-
-  app.innerHTML = `
-    <div class="page-header page-header--jobs">
-      <div>
-        <h2>岗位库</h2>
-        <div class="sub">共 ${state.jobs.length} 条 · 在五状态看板中移动岗位，批量更新投递进度</div>
-      </div>
-      <div class="row">
-        <button class="btn btn-primary" data-action="show-add-job">添加岗位</button>
-        <button class="btn btn-outline" data-action="show-import">批量导入</button>
-      </div>
-    </div>
-    <form class="panel panel-card filter-bar" data-form="job-filter">
-      <div class="field"><label>职能</label><select name="job_function"><option value="">全部</option>${options(vocabulary.job_functions, state.filters.job_function)}</select></div>
-      <div class="field"><label>级别</label><select name="seniority"><option value="">全部</option>${options(vocabulary.seniorities, state.filters.seniority)}</select></div>
-      <div class="field"><label>状态</label><select name="status"><option value="">全部</option>${options(vocabulary.statuses, state.filters.status)}</select></div>
-      <div class="field"><label>搜索</label><input type="search" name="search" value="${esc(state.filters.search)}" placeholder="标题 / 公司 / JD"></div>
-      <button class="btn btn-secondary" type="submit">筛选</button>
-      <button class="btn btn-ghost" type="button" data-action="clear-filters">清空</button>
-    </form>
+const JOB_CREATE_FORM_HTML = `
     <form class="panel panel-card" data-form="job-create" hidden>
       <h3>添加岗位</h3>
       <div class="segmented segmented-card" role="group" aria-label="输入方式">
@@ -497,7 +329,9 @@ function renderPipelineBoard(app, vocabulary, resumes = []) {
       </div>
       <div class="row"><button class="btn btn-primary" type="submit">保存岗位</button>
         <button class="btn btn-ghost" type="button" data-action="cancel-add-job">取消</button></div>
-    </form>
+    </form>`;
+
+const JOB_IMPORT_FORM_HTML = `
     <form class="panel panel-card" data-form="job-import" hidden>
       <h3>批量导入</h3>
       <div class="field"><label>粘贴 CSV 或 JSON 数组（字段含 title / jd_text / jd_url / company / location）</label>
@@ -506,57 +340,9 @@ function renderPipelineBoard(app, vocabulary, resumes = []) {
       <div class="row"><button class="btn btn-primary" type="submit">开始导入</button>
         <button class="btn btn-ghost" type="button" data-action="cancel-import">取消</button>
         <span class="small muted" data-import-status></span></div>
-    </form>
-    ${renderBatchPanel(resumes)}
-    <div class="board-toolbar panel panel-card">
-      <label class="row" style="gap:6px"><input type="checkbox" data-board-select-all aria-label="全选当前岗位"><span class="small">全选</span></label>
-      <span class="small muted" data-board-selected-count>已选 0</span>
-      <select data-board-bulk-status aria-label="批量移动到">
-        <option value="">批量移动到...</option>
-        ${JOB_STATUS_CANONICAL.map((value) => `<option value="${value}">${esc(JOB_STATUS_LABELS[value])}</option>`).join("")}
-      </select>
-      <button class="btn btn-secondary btn-sm" data-action="bulk-move-status">批量移动</button>
-    </div>
-    <div id="job-board" class="pipeline-board" data-pipeline-board>${columns}</div>`;
-}
-
-function renderBatchPanel(resumes) {
-  const jobOptions = state.jobs
-    .map(
-      (job) =>
-        `<label class="batch-job-option"><input type="checkbox" name="job_ids" value="${job.job_id}" data-batch-check> <span>${esc(job.title)} 路 ${esc(job.company || "")}</span></label>`,
-    )
-    .join("");
-  const resumeOptions = resumes
-    .map(
-      (resume) =>
-        `<option value="${resume.resume_id}">${esc(resume.title)}（v${resume.current_version}）</option>`,
-    )
-    .join("");
-  return `
-    <form class="panel panel-card batch-panel" data-form="batch-align" data-batch-panel>
-      <h3>批量对齐</h3>
-      <div class="form-grid">
-        <div class="field"><label>主简历</label><select name="master_resume_id" required>
-          <option value="">${resumes.length ? "选择简历..." : "先到简历中心创建主简历"}</option>${resumeOptions}</select></div>
-        <div class="field"><label>对齐粒度</label><select name="granularity">
-          <option value="fine">微调</option><option value="medium">重构</option><option value="coarse">重写</option>
-        </select></div>
-        <div class="field wide"><label>选择 2-5 个岗位</label>
-          <div class="batch-job-list">${jobOptions || '<div class="muted small">岗位库为空</div>'}</div></div>
-        <div class="field wide"><label>自定义补充要求（可选）</label>
-          <textarea name="custom_prompt" rows="2" placeholder="例如：强调高并发缓存场景"></textarea></div>
-      </div>
-      <div class="row">
-        <button class="btn btn-primary" type="submit">开始批量对齐</button>
-        <button class="btn btn-danger" type="button" data-action="cancel-batch-align" data-batch-cancel hidden>取消排队</button>
-        <span class="small muted" data-batch-status></span>
-      </div>
-      <div data-batch-results></div>
     </form>`;
-}
 
-function openJobDetail(job) {
+async function openJobDetail(job) {
   showModal(
     `岗位详情 · ${job.title}`,
     `<form data-form="job-detail-edit">
@@ -574,6 +360,37 @@ function openJobDetail(job) {
         <button class="btn btn-primary" type="submit">保存</button>
       </div>
     </form>`,
+  );
+}
+
+async function showDuplicateJobGuide(payload) {
+  const matches = await api("/api/jobs?limit=100");
+  const haystack = matches || [];
+  const dup = haystack.find(
+    (item) =>
+      (payload.title && item.title === payload.title) ||
+      (payload.jd_text &&
+        (payload.jd_text || "").trim() &&
+        item.jd_text === payload.jd_text.trim()) ||
+      (payload.source_url && item.source_url === payload.source_url),
+  );
+  showModal(
+    "检测到相同岗位",
+    `<div class="drawer">
+      <p>岗位库中已存在相同岗位${
+        dup
+          ? `：「${esc(dup.title)}」${dup.company ? ` · ${esc(dup.company)}` : ""}（${esc(dup.status || "未投递")}）`
+          : ""
+      }，无法重复添加。</p>
+      <div class="actions">
+        <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+        ${
+          dup
+            ? `<button class="btn btn-primary" type="button" data-action="open-workspace" data-id="${dup.job_id}">打开已有岗位</button>`
+            : ""
+        }
+      </div>
+    </div>`,
   );
 }
 
@@ -828,6 +645,7 @@ function renderFinalDraftPanel(app) {
     </div>
     <div class="pre draft-preview">${esc(draft.draft)}</div>
     <div class="row final-draft-actions">
+      <button class="btn btn-primary btn-sm" data-action="record-application">记录投递</button>
       <button class="btn btn-outline btn-sm" data-action="export-final-draft">导出 PDF</button>
       <button class="btn btn-outline btn-sm" data-action="export-final-draft-md">导出 Markdown</button>
       <button class="btn btn-secondary btn-sm" data-action="save-as-new-resume">另存为新主简历</button>
@@ -1278,6 +1096,33 @@ const actions = {
   "edit-job": (button) => {
     const job = state.jobs.find((item) => item.job_id === button.dataset.id);
     if (job) openJobEditor(job);
+  },
+  "open-job-timeline": async (button) => {
+    let job = (state.jobs || []).find(
+      (item) => item.job_id === button.dataset.id,
+    );
+    if (!job) {
+      job = await api(`/api/jobs/${encodeURIComponent(button.dataset.id)}`);
+    }
+    if (job) openJobDetail(job);
+  },
+  "record-application": async (button) => {
+    const job = state.wbJob;
+    if (!job) return;
+    const today = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const appliedAt = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+    await api(`/api/jobs/${encodeURIComponent(job.job_id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "已投递", applied_at: appliedAt }),
+    });
+    toast("已记录投递", "success");
+    render();
+  },
+  "toggle-batch-panel": (button) => {
+    const wrap = button.parentElement && button.parentElement.querySelector("[data-batch-wrap]");
+    const panel = wrap || document.querySelector("[data-batch-wrap]");
+    if (panel) panel.hidden = !panel.hidden;
   },
   "delete-job": async (button) => {
     if (!window.confirm("确定删除这个岗位？")) return;
@@ -1884,9 +1729,17 @@ async function handleForm(formName, data, form) {
         salary_currency: data.salary_currency || null,
         source_url: data.source_url || null,
       };
-      await api("/api/jobs", { method: "POST", body: JSON.stringify(payload) });
-      toast("岗位已添加", "success");
-      render();
+      try {
+        await api("/api/jobs", { method: "POST", body: JSON.stringify(payload) });
+        toast("岗位已添加", "success");
+        render();
+      } catch (error) {
+        if (error.status === 409) {
+          await showDuplicateJobGuide(payload);
+        } else {
+          throw error;
+        }
+      }
       break;
     }
     case "job-edit": {
@@ -2110,6 +1963,52 @@ async function submitImport(data, form) {
 /* ------------------------------------------------------------------ */
 /* Boot                                                                */
 /* ------------------------------------------------------------------ */
+
+setCanvasRenderHook(async (app) => {
+  const toolbar = app.querySelector(".board-toolbar");
+  if (!toolbar || app.querySelector("[data-batch-wrap]")) return;
+  let resumes = state.batchResumes;
+  if (!resumes) {
+    try {
+      resumes = await api("/api/master-resumes");
+      state.batchResumes = resumes;
+    } catch {
+      resumes = [];
+    }
+  }
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "btn btn-outline btn-sm";
+  toggle.setAttribute("data-action", "toggle-batch-panel");
+  toggle.textContent = "批量对比";
+  const wrap = document.createElement("div");
+  wrap.className = "panel panel-card batch-panel-wrap";
+  wrap.hidden = true;
+  wrap.setAttribute("data-batch-wrap", "");
+  wrap.innerHTML = batchPanelHtml(state.jobs || [], resumes || []);
+  toolbar.append(toggle, wrap);
+
+  const headerRow = app.querySelector(".page-header .row");
+  if (headerRow && !app.querySelector('[data-form="job-create"]')) {
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "btn btn-outline";
+    addBtn.setAttribute("data-action", "show-add-job");
+    addBtn.textContent = "添加岗位";
+    const importBtn = document.createElement("button");
+    importBtn.type = "button";
+    importBtn.className = "btn btn-ghost";
+    importBtn.setAttribute("data-action", "show-import");
+    importBtn.textContent = "批量导入";
+    headerRow.append(addBtn, importBtn);
+    const createForm = document.createElement("div");
+    createForm.innerHTML = JOB_CREATE_FORM_HTML.trim();
+    const importForm = document.createElement("div");
+    importForm.innerHTML = JOB_IMPORT_FORM_HTML.trim();
+    app.insertBefore(createForm.firstChild, app.querySelector("#job-board"));
+    app.insertBefore(importForm.firstChild, app.querySelector("#job-board"));
+  }
+});
 
 async function boot() {
   initTheme();

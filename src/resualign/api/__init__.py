@@ -17,7 +17,6 @@ import logging
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -32,7 +31,7 @@ from ..engine import run
 from ..jd_analysis import jd_profile_to_dict, proactive_jd_profile, profile_and_gaps
 from ..jd_profiler import profile_jd
 from ..job_library import CrawlTaskStore
-from ..jobs import JobRegistry
+from ..jobs import JobRegistry, resolve_data_dir
 from ..llm import LLMResponseError, OpenAIClient
 from ..models import Report
 from ..observability import log_event, log_slow_call, new_request_id
@@ -55,7 +54,6 @@ from ..workspace import (
 from .deps import (
     _bearer_token,
     _enforce_rate_limit,
-    _RateLimiter,
     get_current_user,
 )
 from .schemas import (
@@ -142,54 +140,26 @@ __all__ = [
 
 
 logger = logging.getLogger(__name__)
-_env_settings = EnvSettings()
 
-
-_auth_rate_limiter = _RateLimiter(max_requests=20, window_seconds=60)
-_analyze_rate_limiter = _RateLimiter(max_requests=60, window_seconds=60)
-_import_rate_limiter = _RateLimiter(max_requests=20, window_seconds=60)
-_WORKER_SEMAPHORE = threading.BoundedSemaphore(1)
-_MAX_IMPORT_ROWS = 200
-_MAX_RESUME_UPLOAD_BYTES = 10 * 1024 * 1024
-_import_batches: dict[str, dict[str, Any]] = {}
-_batch_store = BatchAlignStore()
-_TIMELINE_FIELDS = ("applied_at", "next_step", "notes", "offer_at", "rejected_at")
-
-
-_registry = JobRegistry(db_path=_env_settings.resualign_job_db or None)
-_users = UserStore(db_path=_env_settings.resualign_job_db or None)
-_resumes = MasterResumeStore(db_path=_env_settings.resualign_job_db or None)
-_applications = ApplicationStore(
-    db_path=_env_settings.resualign_job_db or None
+# Process-wide state (store singletons, rate limiters, constants) lives in
+# state.py and is re-exported here so `api_module._registry` and friends keep
+# working, and tests can swap attributes on this package module directly.
+# I001: state must be imported before the services package, whose modules
+# resolve ``resualign.api`` during import.
+from .state import *  # noqa: E402, F401, F403, I001
+from .state import (  # noqa: F401, I001  (explicit bindings used below)
+    _MAX_BODY_BYTES,
+    _cache,
+    _crawl_tasks,
+    _jobs,
+    _registry,
 )
-_jobs = JobLibraryStore(db_path=_env_settings.resualign_job_db or None)
-_crawl_tasks = CrawlTaskStore(db_path=_env_settings.resualign_job_db or None)
-_settings_store = SettingsStore(db_path=_env_settings.resualign_job_db or None)
-_cache_db = (
-    Path(_env_settings.resualign_job_db).expanduser()
-    if _env_settings.resualign_job_db
-    else Path(__file__).resolve().parents[2] / "data" / "content-cache.db"
-)
-_cache = ContentCache(db_path=_cache_db)
-
-
-def _personal_mode_enabled() -> bool:
-    value = _env_settings.resualign_personal_mode.strip().lower()
-    return value not in {"0", "false", "no"}
-
-
-_PERSONAL_MODE = _personal_mode_enabled()
-_payloads: dict[
-    str, tuple[dict[str, Any], Any, Optional[str], Optional[str]]
-] = {}
 
 
 from .services import batch as _batch_service
 from .services import jobs as _jobs_service
 from .services import resumes as _resumes_service
 from .services import workbench as _workbench_service
-
-_session_store = _workbench_service.WorkstationSessionStore()
 
 _settings_vocabulary = _jobs_service._settings_vocabulary
 _classify_job = _jobs_service._classify_job
@@ -218,8 +188,41 @@ _get_batch_align = _batch_service.get_batch_align
 _cancel_batch_align = _batch_service.cancel_batch_align
 
 
+def _recover_stale_alignments() -> None:
+    """Flag library jobs whose analysis job reached a terminal state without
+    a persisted alignment product (crash between save_alignment and the
+    registry transition, or a failed save in the old commit order).
+
+    Alignment fields are preserved so the UI keeps the last product while
+    marking the job rerunnable.
+    """
+    for job in _jobs.list_alignment_pending():
+        workbench_job_id = job.get('workbench_job_id')
+        if workbench_job_id:
+            registry_job = _registry.get(workbench_job_id)
+            if registry_job is not None and registry_job.status in (
+                'queued',
+                'running',
+            ):
+                # Still in flight; the requeue path below owns it.
+                continue
+        _jobs.update_job(
+            job['tenant_id'],
+            job['job_id'],
+            alignment_status='failed',
+        )
+        logger.info(
+            'Marked library job %s alignment failed: registry job %s is '
+            'terminal/missing while alignment_status was %s; user can rerun',
+            job['job_id'],
+            workbench_job_id,
+            job.get('alignment_status'),
+        )
+
+
 def _recover_pending_jobs() -> None:
     """Requeue queued/running jobs left behind by a previous process."""
+    _recover_stale_alignments()
     for job_id in _registry.pending_job_ids():
         _registry.requeue_interrupted(job_id)
         logger.info("Recovering interrupted analysis job %s", job_id)
@@ -231,6 +234,12 @@ def _recover_pending_jobs() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    logger.info(
+        "Runtime data directory: %s (job db: %s, cache db: %s)",
+        resolve_data_dir(),
+        _registry.db_path,
+        _cache.db_path,
+    )
     _recover_pending_jobs()
     yield
 
@@ -246,8 +255,41 @@ app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 async def _cache_static_assets(request: Request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/static/"):
-        response.headers["Cache-Control"] = "public, max-age=3600"
+        path = request.url.path
+        if path in ("/static/index.html",) or path.startswith("/static/app/"):
+            # ESM entry and modules have no build-time hash; force
+            # revalidation so a new deploy never mixes old/new modules.
+            response.headers["Cache-Control"] = "no-cache"
+        else:
+            response.headers["Cache-Control"] = "public, max-age=3600"
     return response
+
+
+@app.middleware("http")
+async def _limit_request_body_size(request: Request, call_next):
+    """Reject oversized request bodies before routing (A9 input caps).
+
+    Uses the Content-Length header when present; chunked/unknown sizes are
+    left to the route-level Pydantic field limits.
+    """
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > _MAX_BODY_BYTES:
+                from fastapi.responses import JSONResponse
+
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "detail": (
+                            "Request body too large (max "
+                            f"{_MAX_BODY_BYTES} bytes)"
+                        )
+                    },
+                )
+        except ValueError:
+            pass
+    return await call_next(request)
 
 
 @app.middleware("http")

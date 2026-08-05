@@ -43,8 +43,17 @@ python -m uvicorn resualign.api:app --reload
 docker compose up --build
 ```
 
-容器把 `./data` 挂载为数据卷，`RESUALIGN_JOB_DB` 指向 `/app/data/jobs.db`，
-`.env` 通过 `env_file` 注入。健康检查：`GET /health`。
+容器把 `./data` 挂载为数据卷（`RESUALIGN_DATA_DIR=/app/data` 显式统一数据
+目录），`RESUALIGN_JOB_DB` 指向 `/app/data/jobs.db`，`.env` 通过 `env_file`
+注入。镜像以非 root 用户（UID 1000）运行并带 HEALTHCHECK（`GET /health`，
+每 30s 探测），`stop_grace_period: 30s` 留给分析任务收尾。
+
+> Linux 宿主机需保证挂载目录对容器用户可写：
+> `sudo chown -R 1000:1000 ./data`（Docker Desktop 自动映射，无需处理）。
+
+把服务暴露到局域网/公网前，务必阅读
+[docs/deployment-security.md](docs/deployment-security.md)
+（个人模式匿名访问风险、反向代理 Basic Auth、单进程约束等）。
 
 ## 命令行
 
@@ -97,15 +106,26 @@ RESUALIGN_PORT=8000
 ## 数据备份与重置
 
 所有数据（用户、简历、岗位、投递记录、设置、任务）都在 SQLite 文件
-`data/jobs.db` 中。
+`data/jobs.db`（另有按需创建的 `data/content.db` 与 `data/content-cache.db`）
+中，数据目录可用 `RESUALIGN_DATA_DIR` 覆盖。
 
 ```powershell
-# 备份
-Copy-Item data\jobs.db data\jobs-backup-$(Get-Date -Format yyyyMMdd-HHmmss).db
+# 备份（在线一致性备份，服务可保持运行；不要直接 Copy-Item .db 文件）
+powershell -File scripts\backup.ps1
 
 # 重置（先停止服务）
 Remove-Item data\jobs.db
 ```
+
+```bash
+# macOS / Linux
+./scripts/backup.sh
+```
+
+备份输出到 `data/backups/`，日备份保留 7 天、每月 1 号的 weekly 备份保留
+30 天。恢复演练（停服务 → 替换文件 → 启动 → 行数验证）见
+[docs/backup-restore.md](docs/backup-restore.md)；缓存清理与数据维护建议见
+[docs/operations.md](docs/operations.md)。
 
 ## API 摘要
 

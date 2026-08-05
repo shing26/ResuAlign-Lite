@@ -210,6 +210,57 @@ def _text_dedupe_key(text: str) -> str:
 class JobLibraryStore(_SqliteStore):
     """SQLite-backed, tenant-scoped storage for job postings."""
 
+    # Historical single-column upgrades, one version per ALTER. Fresh
+    # databases already carry these columns in _JOB_LIBRARY_SCHEMA; the
+    # shared migrator records them as applied on duplicate-column failures.
+    MIGRATIONS = (
+        (1, "ALTER TABLE library_jobs ADD COLUMN workbench_job_id TEXT"),
+        (2, "ALTER TABLE library_jobs ADD COLUMN workbench_resume_id TEXT"),
+        (3, "ALTER TABLE library_jobs ADD COLUMN tailor_granularity TEXT"),
+        (4, "ALTER TABLE library_jobs ADD COLUMN tailor_focus TEXT"),
+        (5, "ALTER TABLE library_jobs ADD COLUMN custom_prompt TEXT"),
+        (6, "ALTER TABLE library_jobs ADD COLUMN jd_profile_json TEXT"),
+        (7, "ALTER TABLE library_jobs ADD COLUMN gap_report_json TEXT"),
+        (8, "ALTER TABLE library_jobs ADD COLUMN match_score REAL"),
+        (
+            9,
+            "ALTER TABLE library_jobs ADD COLUMN "
+            "alignment_status TEXT NOT NULL DEFAULT 'idle'",
+        ),
+        (
+            10,
+            "ALTER TABLE library_jobs ADD COLUMN "
+            "diffs_json TEXT NOT NULL DEFAULT '[]'",
+        ),
+        (
+            11,
+            "ALTER TABLE library_jobs ADD COLUMN "
+            "invalid_diffs_json TEXT NOT NULL DEFAULT '[]'",
+        ),
+        (12, "ALTER TABLE library_jobs ADD COLUMN draft TEXT"),
+        (13, "ALTER TABLE library_jobs ADD COLUMN eval_score_json TEXT"),
+        (14, "ALTER TABLE library_jobs ADD COLUMN model TEXT"),
+        (15, "ALTER TABLE library_jobs ADD COLUMN prompt_version TEXT"),
+        (16, "ALTER TABLE library_jobs ADD COLUMN generated_at REAL"),
+        (
+            17,
+            "ALTER TABLE library_jobs ADD COLUMN "
+            "classification_pending INTEGER NOT NULL DEFAULT 0",
+        ),
+        (18, "ALTER TABLE library_jobs ADD COLUMN final_draft TEXT"),
+        (19, "ALTER TABLE library_jobs ADD COLUMN final_draft_updated_at REAL"),
+        (
+            20,
+            "ALTER TABLE library_jobs ADD COLUMN "
+            "final_draft_version INTEGER NOT NULL DEFAULT 0",
+        ),
+        (21, "ALTER TABLE library_jobs ADD COLUMN applied_at TEXT"),
+        (22, "ALTER TABLE library_jobs ADD COLUMN next_step TEXT"),
+        (23, "ALTER TABLE library_jobs ADD COLUMN notes TEXT"),
+        (24, "ALTER TABLE library_jobs ADD COLUMN offer_at TEXT"),
+        (25, "ALTER TABLE library_jobs ADD COLUMN rejected_at TEXT"),
+    )
+
     def validate_status(self, status: str) -> str:
         """Return a validated stored status value for the kanban model."""
         return _validate_status(status)
@@ -403,6 +454,45 @@ class JobLibraryStore(_SqliteStore):
                     (tenant_id, dedupe_key),
                 ).fetchone()
                 return self._row_to_job(row) if row else None
+
+    def find_job_by_application_source(
+        self,
+        tenant_id: str,
+        jd_url: str | None = None,
+        jd_text: str | None = None,
+    ) -> Optional[dict[str, Any]]:
+        """Return the library job matching an application's JD source (G6).
+
+        Matches by normalized source URL first, then by the tenant-scoped
+        dedupe key of the JD text. Returns the oldest match; None when no
+        library job corresponds to this application.
+        """
+        url = (jd_url or "").strip()
+        text = (jd_text or "").strip()
+        if not url and not text:
+            return None
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT job_id, source_url, dedupe_key "
+                    "FROM library_jobs WHERE tenant_id = ? "
+                    "ORDER BY created_at ASC",
+                    (tenant_id,),
+                ).fetchall()
+        if url:
+            normalized_url = _normalize_source_url(url)
+            for row in rows:
+                if row["source_url"] and (
+                    _normalize_source_url(row["source_url"]) == normalized_url
+                ):
+                    return self.get_job(tenant_id, row["job_id"])
+        if text:
+            key = _text_dedupe_key(text)
+            for row in rows:
+                if row["dedupe_key"] == key:
+                    return self.get_job(tenant_id, row["job_id"])
+        return None
 
     def list_jobs(
         self,
@@ -828,6 +918,35 @@ class JobLibraryStore(_SqliteStore):
                 )
         return self.get_job(tenant_id, job_id)
 
+    def list_alignment_pending(
+        self, tenant_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return library jobs whose alignment is queued/running (O3 recovery).
+
+        These records are normally transient while a workbench analysis is in
+        flight. Startup recovery scans them to detect the crash window where
+        the registry job reached a terminal state but the alignment product
+        was never persisted.
+        """
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                if tenant_id is None:
+                    rows = conn.execute(
+                        "SELECT * FROM library_jobs "
+                        "WHERE alignment_status IN ('queued', 'running') "
+                        "ORDER BY created_at ASC"
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM library_jobs "
+                        "WHERE tenant_id = ? "
+                        "AND alignment_status IN ('queued', 'running') "
+                        "ORDER BY created_at ASC",
+                        (tenant_id,),
+                    ).fetchall()
+                return [self._row_to_job(row) for row in rows]
+
     def bulk_update_status(
         self,
         tenant_id: str,
@@ -1124,130 +1243,6 @@ class JobLibraryStore(_SqliteStore):
 
     def _ensure_initialized(self) -> None:
         super()._ensure_initialized(_JOB_LIBRARY_SCHEMA)
-        with self._lock:
-            with self._connect() as conn:
-                columns = {
-                    row["name"]
-                    for row in conn.execute(
-                        "PRAGMA table_info(library_jobs)"
-                    ).fetchall()
-                }
-                if "workbench_job_id" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "workbench_job_id TEXT"
-                    )
-                if "workbench_resume_id" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "workbench_resume_id TEXT"
-                    )
-                if "tailor_granularity" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "tailor_granularity TEXT"
-                    )
-                if "tailor_focus" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "tailor_focus TEXT"
-                    )
-                if "custom_prompt" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "custom_prompt TEXT"
-                    )
-                if "jd_profile_json" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "jd_profile_json TEXT"
-                    )
-                if "gap_report_json" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "gap_report_json TEXT"
-                    )
-                if "match_score" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN match_score REAL"
-                    )
-                if "alignment_status" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "alignment_status TEXT NOT NULL DEFAULT 'idle'"
-                    )
-                if "diffs_json" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "diffs_json TEXT NOT NULL DEFAULT '[]'"
-                    )
-                if "invalid_diffs_json" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "invalid_diffs_json TEXT NOT NULL DEFAULT '[]'"
-                    )
-                if "draft" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN draft TEXT"
-                    )
-                if "eval_score_json" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "eval_score_json TEXT"
-                    )
-                if "model" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN model TEXT"
-                    )
-                if "prompt_version" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "prompt_version TEXT"
-                    )
-                if "generated_at" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN generated_at REAL"
-                    )
-                if "classification_pending" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "classification_pending INTEGER NOT NULL DEFAULT 0"
-                    )
-                if "final_draft" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "final_draft TEXT"
-                    )
-                if "final_draft_updated_at" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "final_draft_updated_at REAL"
-                    )
-                if "final_draft_version" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN "
-                        "final_draft_version INTEGER NOT NULL DEFAULT 0"
-                    )
-                if "applied_at" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN applied_at TEXT"
-                    )
-                if "next_step" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN next_step TEXT"
-                    )
-                if "notes" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN notes TEXT"
-                    )
-                if "offer_at" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN offer_at TEXT"
-                    )
-                if "rejected_at" not in columns:
-                    conn.execute(
-                        "ALTER TABLE library_jobs ADD COLUMN rejected_at TEXT"
-                    )
 
 
 CRAWL_TASK_STATES = (

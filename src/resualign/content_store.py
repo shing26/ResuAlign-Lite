@@ -43,7 +43,9 @@ _Content = Union[str, bytes, bytearray, memoryview]
 
 def default_content_db_path() -> Path:
     """Return the default SQLite database path for stored content."""
-    return Path(__file__).resolve().parents[2] / "data" / "content.db"
+    from .jobs import resolve_data_dir
+
+    return resolve_data_dir() / "content.db"
 
 
 class ContentStore:

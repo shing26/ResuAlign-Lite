@@ -2,12 +2,32 @@ services:
   resualign:
     build: .
     ports:
+      # Exposed on all host interfaces by default. For LAN/public use put a
+      # reverse proxy with Basic Auth in front (see docs/deployment-security.md),
+      # or bind to loopback only: "127.0.0.1:8000:8000".
       - "8000:8000"
     env_file:
       - .env
     environment:
       RESUALIGN_PERSONAL_MODE: "1"
       RESUALIGN_JOB_DB: /app/data/jobs.db
+      # Explicit unified data dir so jobs.db / content.db / content-cache.db
+      # and backups all live under the mounted volume.
+      RESUALIGN_DATA_DIR: /app/data
     volumes:
+      # The image runs as non-root UID 1000 (see Dockerfile). On Linux hosts
+      # the bind-mounted data dir must be writable by that UID:
+      #   sudo chown -R 1000:1000 ./data
+      # (Docker Desktop on Windows/macOS maps host permissions automatically.)
       - ./data:/app/data
     restart: unless-stopped
+    # Give the in-process analysis daemon thread time to finish in-flight jobs.
+    stop_grace_period: 30s
+    # Mirrors the Dockerfile HEALTHCHECK (compose overrides it when both exist,
+    # kept here explicitly for `docker compose ps` health status).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
-import threading
 import time
 import uuid
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, Callable, Optional
+
+from .store_base import (
+    _SqliteStore,
+    default_job_db_path,  # noqa: F401  (re-exported for external callers)
+    resolve_data_dir,  # noqa: F401  (re-exported for external callers)
+)
 
 DEFAULT_MAX_JOBS = 100
 DEFAULT_JOB_TTL_SECONDS = 60 * 60
@@ -68,14 +71,6 @@ _JOB_COLUMNS = (
 )
 
 
-def default_job_db_path() -> Path:
-    """Return the configured or default SQLite database path."""
-    override = os.environ.get("RESUALIGN_JOB_DB")
-    if override:
-        return Path(override).expanduser()
-    return Path(__file__).resolve().parents[2] / "data" / "jobs.db"
-
-
 @dataclass
 class AnalysisJob:
     job_id: str
@@ -92,8 +87,10 @@ class AnalysisJob:
     error: Optional[str] = None
 
 
-class JobRegistry:
+class JobRegistry(_SqliteStore):
     """Thread-safe registry persisted in SQLite with TTL and a size cap."""
+
+    MIGRATIONS = _MIGRATIONS
 
     def __init__(
         self,
@@ -102,15 +99,10 @@ class JobRegistry:
         clock: Callable[[], float] = time.time,
         db_path: str | Path | None = None,
     ) -> None:
+        super().__init__(db_path)
         self.max_jobs = max_jobs
         self.ttl_seconds = ttl_seconds
         self._clock = clock
-        self._lock = threading.RLock()
-        self._initialized = False
-        self._memory_connection: Optional[sqlite3.Connection] = None
-        if db_path is None:
-            db_path = default_job_db_path()
-        self.db_path = Path(db_path).expanduser()
 
     def create(
         self,
@@ -364,52 +356,6 @@ class JobRegistry:
                 conn.execute(_INDEX_SQL)
                 self._apply_migrations(conn)
             self._initialized = True
-
-    def _apply_migrations(self, conn: sqlite3.Connection) -> None:
-        """Apply pending versioned migrations exactly once."""
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS schema_migrations ("
-            "version INTEGER PRIMARY KEY, applied_at REAL NOT NULL)"
-        )
-        applied = {
-            row["version"]
-            for row in conn.execute(
-                "SELECT version FROM schema_migrations"
-            ).fetchall()
-        }
-        for version, script in sorted(_MIGRATIONS):
-            if version in applied:
-                continue
-            conn.executescript(script)
-            conn.execute(
-                "INSERT INTO schema_migrations (version, applied_at) "
-                "VALUES (?, ?)",
-                (version, self._clock()),
-            )
-
-    @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
-        from .store_base import _apply_sqlite_pragmas
-
-        in_memory = str(self.db_path) == ":memory:"
-        if in_memory:
-            if self._memory_connection is None:
-                self._memory_connection = sqlite3.connect(":memory:")
-                self._memory_connection.row_factory = sqlite3.Row
-            connection = self._memory_connection
-        else:
-            connection = sqlite3.connect(str(self.db_path), timeout=5.0)
-            connection.row_factory = sqlite3.Row
-        _apply_sqlite_pragmas(connection, in_memory=in_memory)
-        try:
-            yield connection
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            if not in_memory:
-                connection.close()
 
     def _get_current(
         self,

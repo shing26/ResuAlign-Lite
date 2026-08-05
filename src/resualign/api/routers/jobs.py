@@ -117,7 +117,9 @@ def reclassify_library_job(job_id: str, user: dict[str, Any]=Depends(get_current
         raise HTTPException(status_code=422, detail='Job description text is required')
     job_functions, seniorities = api_module._settings_vocabulary(user['user_id'])
     try:
-        classification = api_module._classify_job(jd_text, job_functions, seniorities)
+        classification = api_module._classify_job(
+            jd_text, job_functions, seniorities, tenant=user['user_id']
+        )
     except api_module.LLMResponseError as exc:
         logger.warning('Reclassification failed for job %s: %s', job_id, exc)
         raise HTTPException(status_code=502, detail='自动分类暂时不可用，岗位已保留为分类待定，可稍后重试') from exc
@@ -157,7 +159,13 @@ async def update_library_job(job_id: str, req: JobUpdateRequest, request: Reques
 
 @router.post('/api/jobs/bulk-status', include_in_schema=False)
 def bulk_update_job_status(req: BulkStatusRequest, user: dict[str, Any]=Depends(get_current_user)):
-    """Update status for many library jobs, returning per-id results."""
+    """Update status for many library jobs, returning per-id results.
+
+    Deprecated: this hidden endpoint is superseded by the kanban bulk-status
+    flow (``/api/kanban/bulk-status``) with optimistic locking and
+    idempotency keys. It is kept for backward compatibility only and will be
+    removed in a future release; new callers must use the kanban endpoint.
+    """
     results: list[dict[str, Any]] = []
     updated = 0
     for job_id in req.job_ids:
@@ -332,7 +340,7 @@ def preanalyze_library_job(
     job_functions, seniorities = api_module._settings_vocabulary(user['user_id'])
     try:
         classification = api_module._classify_job(
-            jd_text, job_functions, seniorities
+            jd_text, job_functions, seniorities, tenant=user['user_id']
         )
     except api_module.LLMResponseError as exc:
         logger.warning('Preanalyze classification failed for %s: %s', job_id, exc)

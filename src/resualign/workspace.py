@@ -277,6 +277,14 @@ class UserStore(_SqliteStore):
 class MasterResumeStore(_SqliteStore):
     """Per-tenant master resume storage with immutable version history."""
 
+    MIGRATIONS = (
+        (
+            1,
+            "ALTER TABLE master_resumes "
+            "ADD COLUMN latest_diagnosis_job_id TEXT",
+        ),
+    )
+
     def create_master_resume(
         self, tenant_id: str, title: str, content: str
     ) -> dict[str, Any]:
@@ -499,26 +507,7 @@ class MasterResumeStore(_SqliteStore):
         return time.time()
 
     def _ensure_initialized(self) -> None:
-        if self._initialized:
-            return
-        with self._lock:
-            if self._initialized:
-                return
-            super()._ensure_initialized(_MASTER_RESUME_SCHEMA)
-            self._initialized = False
-            with self._connect() as conn:
-                columns = {
-                    row["name"]
-                    for row in conn.execute(
-                        "PRAGMA table_info(master_resumes)"
-                    ).fetchall()
-                }
-                if "latest_diagnosis_job_id" not in columns:
-                    conn.execute(
-                        "ALTER TABLE master_resumes "
-                        "ADD COLUMN latest_diagnosis_job_id TEXT"
-                    )
-            self._initialized = True
+        super()._ensure_initialized(_MASTER_RESUME_SCHEMA)
 
 
 class ApplicationStore(_SqliteStore):
@@ -722,6 +711,75 @@ class ApplicationStore(_SqliteStore):
         )
 
 
+_APPLICATION_TO_JOB_STATUS = {
+    "draft": "未投递",
+    "applied": "已投递",
+    "interview": "面试中",
+    "offer": "已拿Offer",
+    "rejected": "放弃",
+    "withdrawn": "放弃",
+}
+
+_APPLIED_CANONICAL_STATES = ("applied", "interview", "offer")
+
+
+def _application_applied_at(application: dict[str, Any]) -> str | None:
+    """Format an application's updated_at as the job timeline ISO string."""
+    updated_at = application.get("updated_at")
+    if not updated_at:
+        return None
+    try:
+        return time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(float(updated_at))
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def merge_applications_into_jobs(
+    application_store: ApplicationStore,
+    job_store: JobLibraryStore,
+    tenant_id: str,
+) -> tuple[int, int]:
+    """Migrate per-application pipeline state onto library jobs (G6).
+
+    For every application of the tenant, locate the matching library job by
+    normalized JD URL or JD-text dedupe key. When found and the job is still
+    ``未投递``, copy the application status (and applied_at for applied
+    states) onto the job. Applications without a matching library job, or
+    whose job already moved past the initial state, are skipped.
+
+    Returns ``(merged, skipped)``. Idempotent: re-running only merges
+    applications whose job is still in the initial state.
+    """
+    merged = 0
+    skipped = 0
+    for application in application_store.list_applications(tenant_id):
+        target = job_store.find_job_by_application_source(
+            tenant_id,
+            jd_url=application.get("jd_url"),
+            jd_text=application.get("jd_text"),
+        )
+        if target is None:
+            skipped += 1
+            continue
+        canonical = application_status_canonical(
+            application.get("status") or ""
+        )
+        status_label = _APPLICATION_TO_JOB_STATUS.get(canonical)
+        if status_label is None or canonical_status(target["status"]) != "draft":
+            skipped += 1
+            continue
+        updates: dict[str, Any] = {"status": status_label}
+        if canonical in _APPLIED_CANONICAL_STATES:
+            applied_at = _application_applied_at(application)
+            if applied_at is not None:
+                updates["applied_at"] = applied_at
+        job_store.update_job(tenant_id, target["job_id"], **updates)
+        merged += 1
+    return merged, skipped
+
+
 # JobLibraryStore is defined in job_library.py but re-exported here so callers
 # can treat the workspace module as the shared store namespace.
-from .job_library import JobLibraryStore  # noqa: E402, F401
+from .job_library import JobLibraryStore, canonical_status  # noqa: E402, F401

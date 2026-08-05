@@ -655,12 +655,15 @@ export function boardCard(job) {
         ${job.alignment_status === "succeeded" ? '<span class="badge badge-green">已对齐</span>' : ""}
       </div>
       <div class="board-card__timeline">
+        ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}
         ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
         ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
       </div>
       <div class="row" style="margin-top:8px">
         <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
         <button class="btn btn-ghost btn-sm" data-action="open-optimizer" data-id="${job.job_id}">工作台</button>
+        <button class="btn btn-ghost btn-sm" data-action="open-job-timeline" data-id="${job.job_id}">时间线</button>
+        <button class="btn btn-ghost btn-sm" data-action="edit-job" data-id="${job.job_id}">编辑</button>
         <button class="btn btn-danger btn-sm" data-action="delete-job" data-id="${job.job_id}">删除</button>
       </div>
     </article>`;
@@ -680,7 +683,7 @@ export function renderBoardCard(job) {
     <article class="board-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}">
       <div class="board-card__top">
         <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
-        <button type="button" class="board-card__title" data-action="open-job-detail" data-id="${job.job_id}">${esc(job.title)}</button>
+        <button type="button" class="board-card__title" data-action="open-job-timeline" data-id="${job.job_id}">${esc(job.title)}</button>
       </div>
       <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
       <div class="board-card__tags">
@@ -689,6 +692,7 @@ export function renderBoardCard(job) {
         ${job.classification_pending ? '<span class="badge badge-amber badge-pending">分类待定</span>' : ""}
       </div>
       <div class="board-card__timeline">
+        ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}
         ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
         ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
       </div>
@@ -699,6 +703,89 @@ export function renderBoardCard(job) {
         <button class="btn btn-danger btn-sm" data-action="delete-job" data-id="${job.job_id}">删除</button>
       </div>
     </article>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Batch alignment panel + result matrix                               */
+/* ------------------------------------------------------------------ */
+
+export function batchPanelHtml(jobs, resumes) {
+  const jobOptions = jobs
+    .map(
+      (job) =>
+        `<label class="batch-job-option"><input type="checkbox" name="job_ids" value="${esc(job.job_id)}" data-batch-check> <span>${esc(job.title)} · ${esc(job.company || "")}</span></label>`,
+    )
+    .join("");
+  const resumeOptions = resumes
+    .map(
+      (resume) =>
+        `<option value="${esc(resume.resume_id)}">${esc(resume.title)}（v${resume.current_version}）</option>`,
+    )
+    .join("");
+  return `
+    <form data-form="batch-align" data-batch-panel>
+      <div class="form-grid">
+        <div class="field"><label>主简历</label><select name="master_resume_id" required>
+          <option value="">${resumes.length ? "选择简历..." : "先到简历中心创建主简历"}</option>${resumeOptions}</select></div>
+        <div class="field"><label>对齐粒度</label><select name="granularity">
+          <option value="fine">微调</option><option value="medium">重构</option><option value="coarse">重写</option>
+        </select></div>
+        <div class="field wide"><label>选择 2-5 个岗位</label>
+          <div class="batch-job-list">${jobOptions || '<div class="muted small">岗位库为空</div>'}</div></div>
+        <div class="field wide"><label>自定义补充要求（可选）</label>
+          <textarea name="custom_prompt" rows="2" placeholder="例如：强调高并发缓存场景"></textarea></div>
+      </div>
+      <div class="row">
+        <button class="btn btn-primary" type="submit">开始批量对齐</button>
+        <button class="btn btn-danger" type="button" data-action="cancel-batch-align" data-batch-cancel hidden>取消排队</button>
+        <span class="small muted" data-batch-status></span>
+      </div>
+      <div data-batch-results></div>
+    </form>`;
+}
+
+export function renderBatchMatrixHtml(batch) {
+  const rows = batch.rows || [];
+  const hasSummary = rows.some((row) => row.summary);
+  if (!hasSummary) {
+    return `<div class="batch-progress">${rows
+      .map(
+        (row) =>
+          `<span class="badge badge-pending">${esc(row.title || row.job_id)}: ${esc(row.status)}</span>`,
+      )
+      .join("")}</div>`;
+  }
+  const bars = rows
+    .filter((row) => row.summary && row.summary.score != null)
+    .map((row) => {
+      const score = Math.max(0, Math.min(100, Number(row.summary.score) || 0));
+      return `<div class="batch-bar" data-batch-bar>
+        <span class="batch-bar__label">${esc(row.title || row.job_id)}</span>
+        <div class="batch-bar__track"><div class="batch-bar__fill ${matchTone(score)}" style="width:${score}%"></div></div>
+        <span class="batch-bar__score">${esc(score)}</span>
+      </div>`;
+    })
+    .join("");
+  const tableRows = rows
+    .map((row) => {
+      const summary = row.summary || {};
+      const score = summary.score;
+      const verdict =
+        score == null ? "—" : score >= 75 ? "投递" : score >= 55 ? "考虑" : "放弃";
+      return `<tr>
+        <td>${esc(row.title || row.job_id)}</td>
+        <td>${esc(score ?? "—")}</td>
+        <td>${esc((summary.key_gaps || []).slice(0, 3).join("、") || "—")}</td>
+        <td>${esc(verdict)}</td>
+        <td>${esc(summary.next_step || row.status)}</td>
+        <td><a class="btn btn-ghost btn-sm" href="#/workspace/${encodeURIComponent(row.job_id)}">打开工作台</a></td>
+      </tr>`;
+    })
+    .join("");
+  return `<div class="batch-bars">${bars || '<div class="small muted">暂无已完成岗位</div>'}</div>
+    <div class="table-wrap"><table class="data batch-matrix">
+      <thead><tr><th>岗位</th><th>分数</th><th>关键缺口</th><th>结论</th><th>下一步</th><th>操作</th></tr></thead>
+      <tbody>${tableRows}</tbody></table></div>`;
 }
 
 /* ------------------------------------------------------------------ */

@@ -25,6 +25,8 @@ dev = [
     "pytest>=8.0.0",
     "pytest-httpx>=0.30.0",
     "pytest-cov>=4.0.0",
+    "pytest-xdist>=3.6.0",
+    "jsonschema>=4.18.0",
     "coverage>=7.0.0",
     "ruff>=0.16.0",
 ]
