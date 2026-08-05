@@ -4,7 +4,12 @@ import sqlite3
 
 import pytest
 
-from resualign.job_library import JOB_FUNCTIONS, SENIORITIES, JobLibraryStore
+from resualign.job_library import (
+    JOB_FUNCTIONS,
+    SENIORITIES,
+    CrawlTaskStore,
+    JobLibraryStore,
+)
 from resualign.workspace import UserStoreError
 
 
@@ -287,9 +292,29 @@ def test_delete_job(db_path):
     store = _store(db_path)
     job = store.create_job(**_job_payload())
 
-    assert store.delete_job("tenant-1", job["job_id"]) is True
+    assert store.delete_job("tenant-1", job["job_id"]) == (True, None)
     assert store.get_job("tenant-1", job["job_id"]) is None
-    assert store.delete_job("tenant-1", job["job_id"]) is False
+    assert store.delete_job("tenant-1", job["job_id"]) == (False, None)
+
+
+def test_delete_job_removes_crawl_tasks_and_reports_analysis(db_path):
+    store = _store(db_path)
+    crawls = CrawlTaskStore(db_path=db_path)
+    job = store.create_job(**_job_payload())
+    crawl = crawls.create(
+        tenant_id="tenant-1",
+        job_id=job["job_id"],
+        jd_url="https://example.com/jobs/1",
+    )
+    store.update_job(
+        "tenant-1", job["job_id"], workbench_job_id="analysis-123"
+    )
+
+    deleted, workbench_job_id = store.delete_job("tenant-1", job["job_id"])
+    assert deleted is True
+    assert workbench_job_id == "analysis-123"
+    assert store.get_job("tenant-1", job["job_id"]) is None
+    assert crawls.get(crawl["crawl_id"], "tenant-1") is None
 
 
 def test_controlled_vocabularies():

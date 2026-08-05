@@ -34,3 +34,21 @@ def test_no_salary_text():
 
 def test_compensation_multiplier_suffix():
     assert extract_salary_range("20-30K·14薪") == (20000.0, 30000.0)
+
+
+def test_wan_around_both_sides_monthly():
+    assert extract_salary_range("月薪 2万-3万，13薪") == (20000.0, 30000.0)
+
+
+def test_wan_around_both_sides_annual():
+    assert extract_salary_range("2万-3万/年") == (1666.67, 2500.0)
+
+
+def test_raw_yuan_range_with_currency_context():
+    assert extract_salary_range("薪酬：20000-30000元/月") == (20000.0, 30000.0)
+    assert extract_salary_range("工资 20000-30000元") == (20000.0, 30000.0)
+
+
+def test_raw_yuan_range_without_context_not_salary():
+    assert extract_salary_range("2024-2025 年规划") == (None, None)
+    assert extract_salary_range("Python backend engineer.") == (None, None)

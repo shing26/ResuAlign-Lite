@@ -963,16 +963,37 @@ class JobLibraryStore(_SqliteStore):
                     "result": json.loads(row["result_json"]),
                 }
 
-    def delete_job(self, tenant_id: str, job_id: str) -> bool:
+    def delete_job(
+        self, tenant_id: str, job_id: str
+    ) -> tuple[bool, str | None]:
+        """Delete a library job and its crawl tasks.
+
+        Returns ``(deleted, workbench_job_id)`` so callers can also clean up
+        the pinned analysis job. ``workbench_job_id`` is the analysis job id
+        recorded on the deleted row, or None when no run was pinned.
+        """
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
-                cursor = conn.execute(
+                row = conn.execute(
+                    "SELECT workbench_job_id FROM library_jobs "
+                    "WHERE job_id = ? AND tenant_id = ?",
+                    (job_id, tenant_id),
+                ).fetchone()
+                if row is None:
+                    return False, None
+                workbench_job_id = row["workbench_job_id"]
+                conn.execute(
                     "DELETE FROM library_jobs "
                     "WHERE job_id = ? AND tenant_id = ?",
                     (job_id, tenant_id),
                 )
-                return cursor.rowcount > 0
+                conn.execute(
+                    "DELETE FROM crawl_tasks "
+                    "WHERE job_id = ? AND tenant_id = ?",
+                    (job_id, tenant_id),
+                )
+                return True, workbench_job_id
 
     def salary_median(
         self, tenant_id: str, job_function: str | None = None

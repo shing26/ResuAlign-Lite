@@ -661,6 +661,7 @@ export function boardCard(job) {
       <div class="row" style="margin-top:8px">
         <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
         <button class="btn btn-ghost btn-sm" data-action="open-optimizer" data-id="${job.job_id}">工作台</button>
+        <button class="btn btn-danger btn-sm" data-action="delete-job" data-id="${job.job_id}">删除</button>
       </div>
     </article>`;
 }
@@ -695,6 +696,7 @@ export function renderBoardCard(job) {
         <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${statusOptions}</select>
         <button class="btn btn-ghost btn-sm" data-action="open-workspace" data-id="${job.job_id}">工作台</button>
         <button class="btn btn-ghost btn-sm" data-action="edit-job" data-id="${job.job_id}">编辑</button>
+        <button class="btn btn-danger btn-sm" data-action="delete-job" data-id="${job.job_id}">删除</button>
       </div>
     </article>`;
 }

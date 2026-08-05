@@ -146,3 +146,26 @@ def test_failed_snapshot_only_exposes_error(db_path):
     assert failed["error"] == "boom"
     assert failed["result"] is None
     assert failed["elapsed_seconds"] == 0.5
+
+
+def test_delete_removes_job_and_payload(db_path):
+    now = [100.0]
+    reg = _registry(now, db_path)
+    job = reg.create({"resume_text": "resume"}, _Config())
+
+    assert reg.delete(job.job_id) is True
+    assert reg.get(job.job_id) is None
+    assert reg.get_payload(job.job_id) is None
+    assert len(reg) == 0
+    assert reg.delete(job.job_id) is False
+
+
+def test_delete_scoped_to_tenant(db_path):
+    now = [100.0]
+    reg = _registry(now, db_path)
+    job = reg.create({"resume_text": "resume"}, _Config(), tenant_id="tenant-a")
+
+    assert reg.delete(job.job_id, tenant_id="tenant-b") is False
+    assert reg.get(job.job_id) is not None
+    assert reg.delete(job.job_id, tenant_id="tenant-a") is True
+    assert reg.get(job.job_id) is None

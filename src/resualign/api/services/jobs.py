@@ -33,13 +33,63 @@ def _classify_job(jd_text: str, job_functions: list[str] | None=None, senioritie
             tenant="default",
         )
 
+_TITLE_JOB_KEYWORDS = (
+    "工程师", "开发", "经理", "专员", "主管", "总监", "运营", "设计", "产品",
+    "算法", "数据", "架构", "测试", "运维", "前端", "后端", "客户端",
+    "嵌入式", "研究员", "专家", "顾问", "实习生", "分析师", "策划", "销售",
+    "市场", "客服", "老师", "讲师", "助理", "管培",
+    "engineer", "developer", "manager", "analyst", "designer", "intern",
+)
+_TITLE_NOISE_PREFIXES = (
+    "公司简介", "企业简介", "公司介绍", "我们正在", "正在寻找", "诚聘",
+    "急聘", "招聘简章", "岗位职责", "职位描述", "任职要求", "工作内容",
+    "薪资", "薪酬", "工作地点",
+)
+_TITLE_BRACKET_RECRUIT = re.compile(r"^【\s*(招聘|急聘|诚聘|高薪|直招)\s*】")
+_TITLE_ROLE_PREFIX = re.compile(r"^(岗位|职位|岗位名称|职位名称)\s*[:：]\s*")
+_TITLE_SALARY_SUFFIX = re.compile(
+    r"\s*\d+(?:\.\d+)?\s*[kK万]?\s*[-—~到]?\s*\d+(?:\.\d+)?\s*[kK万]\S*(?:\s+\S+)*"
+    r"|\s*\d+(?:\.\d+)?\s*[kK万]\S*(?:\s+\S+)*"
+)
+
+def _clean_title_candidate(line: str) -> str:
+    """Normalize a candidate line into a readable job title."""
+    candidate = line.strip().lstrip('#-*·• ').strip()
+    candidate = _TITLE_BRACKET_RECRUIT.sub("", candidate).strip(" 【】")
+    candidate = _TITLE_ROLE_PREFIX.sub("", candidate).strip()
+    candidate = _TITLE_SALARY_SUFFIX.sub("", candidate).strip(" ，,·-—–")
+    return candidate[:120]
+
+def _is_title_noise(line: str) -> bool:
+    """Return True for lines that are not plausible job titles."""
+    stripped = line.strip().lstrip('#-*·• ').strip()
+    if not stripped:
+        return True
+    if _TITLE_BRACKET_RECRUIT.search(stripped):
+        return True
+    if any(stripped.startswith(prefix) for prefix in _TITLE_NOISE_PREFIXES):
+        return True
+    if re.match(r'^https?://', stripped, re.IGNORECASE):
+        return True
+    if re.match(r'^\d+(?:\.\d+)?\s*[kK万]', stripped):
+        return True
+    return False
+
 def _derive_title(jd_text: str) -> str:
-    """Derive a job title from the first non-empty JD line."""
-    for line in (jd_text or '').splitlines():
-        candidate = line.strip().lstrip('#-*·• ').strip()
-        if candidate:
-            return candidate[:120]
-    return '未命名岗位'
+    """Derive a job title from JD text, skipping company/recruit noise lines."""
+    lines = (jd_text or '').splitlines()
+    first_clean: str | None = None
+    for line in lines:
+        if _is_title_noise(line):
+            continue
+        candidate = _clean_title_candidate(line)
+        if not candidate:
+            continue
+        if first_clean is None:
+            first_clean = candidate
+        if any(keyword in candidate.lower() for keyword in _TITLE_JOB_KEYWORDS):
+            return candidate
+    return first_clean or '未命名岗位'
 
 def _crawl_jd_or_502(jd_url: str, meta: dict[str, Any] | None=None) -> str:
     """Crawl a JD URL, mapping crawler failures to a stable 502 response."""

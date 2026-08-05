@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
+from resualign.api.services.jobs import _derive_title
 from resualign.crawler import CrawlError
 from resualign.jobs import JobRegistry
 from resualign.settings_store import SettingsStore
@@ -189,6 +190,7 @@ def test_parse_jd_preview_returns_crawler_metadata():
 
 def test_parse_jd_preview_requires_url():
     r = client.post("/api/jobs/parse-jd", json={"jd_url": ""})
+
     assert r.status_code == 422
 
 
@@ -728,3 +730,89 @@ def test_appraisal_neutral_when_no_benchmark():
     assert body["salary_benchmark"] is None
     assert body["components"]["salary"] == 50
     assert any("暂无基准" in reason for reason in body["reasons"])
+
+
+def test_derive_title_skips_company_line():
+    text = "美团\n高级后端工程师\n岗位职责：负责服务端开发"
+    assert _derive_title(text) == "高级后端工程师"
+
+
+def test_derive_title_skips_recruit_bracket_line():
+    text = "【招聘】字节跳动-北京\n算法工程师（推荐方向）\n工作内容：..."
+    assert _derive_title(text) == "算法工程师（推荐方向）"
+
+
+def test_derive_title_strips_salary_and_city():
+    text = "Java开发工程师 15-25K·14薪 北京\n岗位职责：..."
+    assert _derive_title(text) == "Java开发工程师"
+
+
+def test_derive_title_skips_company_intro_and_role_prefix():
+    text = "公司简介：xxx科技有限公司\n岗位：Java工程师\n任职要求：..."
+    assert _derive_title(text) == "Java工程师"
+
+
+def test_derive_title_skips_salary_first_line():
+    text = "15-25K\nPython\n\n高级工程师"
+    assert _derive_title(text) == "高级工程师"
+
+
+def test_derive_title_keeps_english_first_line():
+    text = "Senior Backend Engineer\nPython and FastAPI required"
+    assert _derive_title(text) == "Senior Backend Engineer"
+
+
+def test_derive_title_fallback_when_all_noise():
+    assert _derive_title("【招聘】\n薪资面议\nhttps://example.com") == "未命名岗位"
+
+
+def test_delete_job_cascades_to_pinned_analysis_job():
+    with patch("resualign.api._classify_job", side_effect=_classify):
+        r = client.post(
+            "/api/jobs",
+            json={
+                "title": "Backend Engineer",
+                "jd_text": "Python backend engineer. 20-30K",
+                "company": "Acme",
+            },
+        )
+    assert r.status_code == 201
+    job = r.json()
+
+    analysis = api_module._registry.create(
+        {"jd_text": "Python backend engineer."}, None, tenant_id="local"
+    )
+    api_module._jobs.update_job(
+        "local", job["job_id"], workbench_job_id=analysis.job_id
+    )
+
+    r = client.delete(f"/api/jobs/{job['job_id']}")
+    assert r.status_code == 204
+    assert client.get(f"/api/jobs/{job['job_id']}").status_code == 404
+    assert api_module._registry.get(analysis.job_id) is None
+    assert api_module._registry.get_payload(analysis.job_id) is None
+
+
+def test_delete_job_keeps_other_tenants_analysis_job():
+    with patch("resualign.api._classify_job", side_effect=_classify):
+        r = client.post(
+            "/api/jobs",
+            json={
+                "title": "Backend Engineer",
+                "jd_text": "Python backend engineer. 20-30K",
+                "company": "Acme",
+            },
+        )
+    assert r.status_code == 201
+    job = r.json()
+
+    analysis = api_module._registry.create(
+        {"jd_text": "Python backend engineer."}, None, tenant_id="other"
+    )
+    api_module._jobs.update_job(
+        "local", job["job_id"], workbench_job_id=analysis.job_id
+    )
+
+    r = client.delete(f"/api/jobs/{job['job_id']}")
+    assert r.status_code == 204
+    assert api_module._registry.get(analysis.job_id) is not None

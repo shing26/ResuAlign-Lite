@@ -287,6 +287,26 @@ class JobRegistry:
                 )
                 return cursor.rowcount > 0
 
+    def delete(self, job_id: str, tenant_id: str | None = None) -> bool:
+        """Delete a job and its payload, scoped to the tenant."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                if tenant_id:
+                    row = conn.execute(
+                        "SELECT 1 FROM jobs WHERE job_id = ? AND tenant_id = ?",
+                        (job_id, tenant_id),
+                    ).fetchone()
+                    if row is None:
+                        return False
+                conn.execute(
+                    "DELETE FROM job_payloads WHERE job_id = ?", (job_id,)
+                )
+                cursor = conn.execute(
+                    "DELETE FROM jobs WHERE job_id = ?", (job_id,)
+                )
+                return cursor.rowcount > 0
+
     def snapshot(
         self, job_id: str, tenant_id: str | None = None
     ) -> Optional[dict[str, Any]]:

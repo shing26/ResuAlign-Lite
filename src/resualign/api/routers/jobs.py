@@ -175,9 +175,14 @@ def bulk_update_job_status(req: BulkStatusRequest, user: dict[str, Any]=Depends(
 
 @router.delete('/api/jobs/{job_id}', status_code=204)
 def delete_library_job(job_id: str, user: dict[str, Any]=Depends(get_current_user)):
-    """Delete a library job."""
-    if not api_module._jobs.delete_job(user['user_id'], job_id):
+    """Delete a library job, its crawl tasks, and any pinned analysis job."""
+    deleted, workbench_job_id = api_module._jobs.delete_job(
+        user['user_id'], job_id
+    )
+    if not deleted:
         raise HTTPException(status_code=404, detail='Job not found')
+    if workbench_job_id:
+        api_module._registry.delete(workbench_job_id, tenant_id=user['user_id'])
     return None
 
 @router.post('/api/jobs/{job_id}/workbench', status_code=202)

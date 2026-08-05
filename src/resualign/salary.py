@@ -10,8 +10,17 @@ _RANGE = re.compile(
     r"(?P<low>\d+(?:\.\d+)?)\s*[kK]?\s*[-—~到]\s*"
     r"(?P<high>\d+(?:\.\d+)?)\s*(?P<unit>[kK万])"
 )
+_WAN_RANGE = re.compile(
+    r"(?P<low>\d+(?:\.\d+)?)\s*万\s*[-—~到]\s*"
+    r"(?P<high>\d+(?:\.\d+)?)\s*万"
+)
+_RAW_RANGE = re.compile(
+    r"(?P<low>\d{4,})\s*[-—~到]\s*(?P<high>\d{4,})\s*元(?:\s*/\s*月)?"
+)
 _FLOOR_K = re.compile(r"(?P<amount>\d+(?:\.\d+)?)\s*[kK]\s*以上")
 _WAN_ANNUAL = re.compile(r"(?P<amount>\d+(?:\.\d+)?)\s*万\s*/\s*年")
+
+_SALARY_CONTEXT = re.compile(r"月薪|每月|薪资|薪酬|工资|年薪")
 
 
 def _round2(value: float) -> float:
@@ -44,6 +53,20 @@ def extract_salary_range(text: str) -> tuple[Optional[float], Optional[float]]:
         return (
             low * 1000,
             high * 1000,
+        )
+
+    match = _WAN_RANGE.search(text)
+    if match:
+        low = float(match.group("low")) * 10000
+        high = float(match.group("high")) * 10000
+        monthly = "/年" not in text and "年薪" not in text
+        return (low, high) if monthly else (_round2(low / 12), _round2(high / 12))
+
+    match = _RAW_RANGE.search(text)
+    if match and _SALARY_CONTEXT.search(text):
+        return (
+            float(match.group("low")),
+            float(match.group("high")),
         )
 
     match = _FLOOR_K.search(text)
