@@ -229,6 +229,8 @@ _configure_logging()
 from .state import *  # noqa: E402, F401, F403, I001
 from .state import (  # noqa: F401, I001  (explicit bindings used below)
     _MAX_BODY_BYTES,
+    _WORKER_CONCURRENCY,
+    _WORKER_SEMAPHORE,
     _cache,
     _crawl_tasks,
     _jobs,
@@ -319,6 +321,10 @@ async def lifespan(_: FastAPI):
         resolve_data_dir(),
         _registry.db_path,
         _cache.db_path,
+    )
+    logger.info(
+        "Analysis worker concurrency: %s (RESUALIGN_WORKER_CONCURRENCY=1 means serial)",
+        _WORKER_CONCURRENCY,
     )
     _recover_pending_jobs()
     yield

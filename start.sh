@@ -12,4 +12,6 @@ if [ ! -f "$ROOT/.env" ]; then
 fi
 
 echo "ResuAlign starting at http://${HOST}:${PORT}"
-exec python -m uvicorn resualign.api:app --host "$HOST" --port "$PORT" --app-dir "$ROOT/src"
+# Single process only: the analysis job queue and import/session state live
+# in process memory. Never pass --workers > 1 (see docs/deployment-security.md).
+exec python -m uvicorn resualign.api:app --host "$HOST" --port "$PORT" --workers 1 --app-dir "$ROOT/src"

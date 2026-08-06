@@ -15,4 +15,6 @@ if (-not (Test-Path (Join-Path $Root ".env"))) {
 }
 
 Write-Host "ResuAlign starting at http://${HostName}:${Port}"
-python -m uvicorn resualign.api:app --host $HostName --port $Port --app-dir (Join-Path $Root "src")
+# Single process only: the analysis job queue and import/session state live
+# in process memory. Never pass --workers > 1 (see docs/deployment-security.md).
+python -m uvicorn resualign.api:app --host $HostName --port $Port --workers 1 --app-dir (Join-Path $Root "src")

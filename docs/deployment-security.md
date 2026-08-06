@@ -87,6 +87,18 @@ chown "$(id -u):$(id -g)" .env
 
 因此：**任何启动方式都不得使用 `--workers > 1`**，包括手动命令、systemd、
 容器 CMD（Dockerfile 的 CMD 已是单进程）、K8s 副本数必须为 1。
+`start.ps1` / `start.sh` 已显式传 `--workers 1`。
+
+### 进程内并发：`RESUALIGN_WORKER_CONCURRENCY`
+
+进程内分析任务默认**串行**（`_WORKER_SEMAPHORE = BoundedSemaphore(1)`）——
+这是刻意背压，防止 LLM 调用并发放大成本。个人用户批量对齐 5 个岗位时，
+串行意味着 5×LLM 等待时间排队。
+
+可设 `RESUALIGN_WORKER_CONCURRENCY=2`（或 3）让分析任务并行，对批量对齐
+体验提升明显（LLM-bound，SQLite WAL 写并发足够）。取值范围 1..4，越界
+自动钳制（无效值回落 1）。**多租户共享部署请保持 1**，避免配额放大。
+队列深度与最老等待时长可经 `GET /api/ops/metrics` 观测。
 
 ### 正确的扩容/高可用替代方案
 

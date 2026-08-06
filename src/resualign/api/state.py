@@ -27,6 +27,7 @@ from .deps import _RateLimiter
 
 __all__ = [
     "_PERSONAL_MODE",
+    "_WORKER_CONCURRENCY",
     "_WORKER_SEMAPHORE",
     "_MAX_BODY_BYTES",
     "_MAX_IMPORT_ROWS",
@@ -58,7 +59,26 @@ _env_settings = EnvSettings()
 _auth_rate_limiter = _RateLimiter(max_requests=20, window_seconds=60)
 _analyze_rate_limiter = _RateLimiter(max_requests=60, window_seconds=60)
 _import_rate_limiter = _RateLimiter(max_requests=20, window_seconds=60)
-_WORKER_SEMAPHORE = threading.BoundedSemaphore(1)
+
+
+def _clamp_worker_concurrency(value: int) -> int:
+    """Clamp worker concurrency to the safe 1..4 range.
+
+    Analysis jobs are LLM-bound; even modest concurrency (2-3) removes the
+    serial queue for batch alignment while SQLite WAL handles the writes.
+    Values outside 1..4 (misconfiguration) are clamped, never raised.
+    """
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(parsed, 4))
+
+
+_WORKER_CONCURRENCY = _clamp_worker_concurrency(
+    _env_settings.resualign_worker_concurrency
+)
+_WORKER_SEMAPHORE = threading.BoundedSemaphore(_WORKER_CONCURRENCY)
 _MAX_IMPORT_ROWS = 200
 _MAX_RESUME_UPLOAD_BYTES = 10 * 1024 * 1024
 _MAX_BODY_BYTES = 8 * 1024 * 1024

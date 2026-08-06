@@ -84,6 +84,9 @@ class EnvSettings(BaseSettings):
     # App-level runtime settings (also accepted from .env / environment).
     resualign_personal_mode: str = "1"
     resualign_job_db: str = ""
+    # String type on purpose: invalid values are clamped by the worker
+    # concurrency resolver instead of failing EnvSettings validation.
+    resualign_worker_concurrency: str = "1"
     resualign_crawl_min_interval: float = 1.0
     resualign_crawl_ua_pool: str = ""
     resualign_crawl_proxy: str = ""

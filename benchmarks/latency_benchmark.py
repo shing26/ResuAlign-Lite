@@ -270,6 +270,26 @@ def schema_retry_flow(client: FakeLatencyClient) -> dict:
     }
 
 
+def eval_on_flow(client: FakeLatencyClient) -> dict:
+    """Cold pipeline with run_eval=True: measures the judge round trip.
+
+    The workbench main path hardcodes run_eval=False; this flow quantifies
+    the extra LLM call (resume quality judge) that enabling eval would add.
+    """
+    report = run(
+        ResuAlignConfig(model="fake-latency"),
+        RESUME,
+        JD,
+        llm_client=client,
+        run_eval=True,
+    )
+    return {
+        "call_count": client.call_count,
+        "report_score": report.score,
+        "eval_score": report.eval_score is not None,
+    }
+
+
 def _timed(runner):
     client = FakeLatencyClient()
     start = time.monotonic()
@@ -293,6 +313,7 @@ _PLAN_SLO_SECONDS = {
     "current cold (3 calls)": 5.5,
     "current cached (2 calls)": 4.0,
     "schema retry (4 calls)": 7.0,
+    "eval on (4 calls)": 7.0,
 }
 
 
@@ -334,30 +355,36 @@ def main(argv=None, out: Optional[TextIO] = None) -> dict:
     cold = _timed(new_cold_flow)
     cached = _timed(new_cached_flow)
     schema_retry = _timed(schema_retry_flow)
+    eval_on = _timed(eval_on_flow)
 
     if (
         legacy["call_count"],
         cold["call_count"],
         cached["call_count"],
         schema_retry["call_count"],
-    ) != (4, 3, 2, 4):
+        eval_on["call_count"],
+    ) != (4, 3, 2, 4, 4):
         raise AssertionError(
             "unexpected call counts: "
             f"legacy={legacy['call_count']}, "
             f"cold={cold['call_count']}, cached={cached['call_count']}, "
-            f"schema_retry={schema_retry['call_count']}"
+            f"schema_retry={schema_retry['call_count']}, "
+            f"eval_on={eval_on['call_count']}"
         )
     if schema_retry["schema_retry_attempts"] != 2:
         raise AssertionError(
             "schema retry should recover on the second attempt, got "
             f"{schema_retry['schema_retry_attempts']}"
         )
+    if not eval_on["eval_score"]:
+        raise AssertionError("run_eval=True should produce an eval_score")
 
     for label, row in (
         ("legacy (4 calls)", legacy),
         ("current cold (3 calls)", cold),
         ("current cached (2 calls)", cached),
         ("schema retry (4 calls)", schema_retry),
+        ("eval on (4 calls)", eval_on),
     ):
         _assert_within_bounds(label, row, args.latency)
 
@@ -369,6 +396,7 @@ def main(argv=None, out: Optional[TextIO] = None) -> dict:
             "current_cold_3_calls": cold,
             "current_cached_2_calls": cached,
             "schema_retry_4_calls": schema_retry,
+            "eval_on_4_calls": eval_on,
         },
         "summary": {
             "cold_speedup_pct": round(
@@ -386,6 +414,12 @@ def main(argv=None, out: Optional[TextIO] = None) -> dict:
             ),
             "seconds_saved_cached": round(
                 legacy["elapsed_seconds"] - cached["elapsed_seconds"], 3
+            ),
+            "eval_extra_calls_vs_cold": round(
+                eval_on["call_count"] - cold["call_count"], 0
+            ),
+            "eval_extra_seconds_vs_cold": round(
+                eval_on["elapsed_seconds"] - cold["elapsed_seconds"], 3
             ),
         },
     }
