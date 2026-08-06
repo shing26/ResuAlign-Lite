@@ -1,5 +1,6 @@
 import { $, $$, api, esc, state } from "./events.js";
 import {
+  applyDiffToDraft,
   buildWbDetailHtml,
   buildWbResultHtmlFrom,
   lineDiff,
@@ -180,13 +181,25 @@ export async function acceptSelectedDiffs() {
     method: "POST",
     body: JSON.stringify({ job_id: job.workbench_job_id, accepted_indices: accepted }),
   });
+  /* U7: 后端 /workbench/accept 总是从「原始主简历」重建草稿，连续两轮
+   * 「采纳选中修改」会丢上一轮结果。这里把本轮新增的 accepted index 增量
+   * 合并进工作草稿（state.wbWorkingDraft），保证多轮采纳累积。 */
+  const diffs = job.diffs || [];
+  const previous = new Set(state.wbAcceptedIndices || []);
+  const fresh = accepted.filter((index) => !previous.has(index));
+  let draft = body.draft;
+  if (state.wbWorkingDraft && state.wbWorkingDraft.jobId === jobId) {
+    draft = state.wbWorkingDraft.draft;
+    for (const index of fresh) draft = applyDiffToDraft(draft, diffs[index]);
+  }
+  state.wbWorkingDraft = { jobId, draft };
   state.wbAcceptedIndices = accepted;
   await renderWbResult($("#app"));
   const target = $("[data-accept-result]");
   target.innerHTML = `
     <div class="drawer">
       <h4>采纳 ${body.accepted_count} 项修改后的草稿</h4>
-      <div class="pre">${esc(body.draft)}</div>
+      <div class="pre">${esc(draft)}</div>
       <div class="row" style="margin-top:8px">
         <button class="btn btn-primary btn-sm" data-action="save-final-draft">保存定稿</button>
         <button class="btn btn-secondary btn-sm" data-action="export-draft">导出草稿</button>

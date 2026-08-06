@@ -207,7 +207,13 @@ const ROUTE_NAMES = ["resume", "jobs", "workspace", "settings"];
 
 export function parseHashValue(hash) {
   const value = String(hash || "").replace(/^#\/?/, "");
-  const parts = value.split("/").filter(Boolean);
+  /* Query params let flows deep-link into a view with context, e.g.
+   * "#/workspace/<jobId>?resume=<id>" pre-selects the master resume
+   * dropdown on the optimizer canvas (F4). */
+  const [pathPart, queryPart] = value.split("?");
+  const query = new URLSearchParams(queryPart || "");
+  const resumeFromQuery = query.get("resume") || null;
+  const parts = (pathPart || "").split("/").filter(Boolean);
   if (parts[0] === "workspace" && parts[1]) {
     let jobId = parts[1];
     try {
@@ -215,7 +221,7 @@ export function parseHashValue(hash) {
     } catch {
       /* keep raw value */
     }
-    return { name: "workspace", jobId };
+    return { name: "workspace", jobId, resumeId: resumeFromQuery };
   }
   if (parts[0] === "resume" && parts[1]) {
     let resumeId = parts[1];
@@ -227,7 +233,7 @@ export function parseHashValue(hash) {
     return { name: "resume", jobId: null, resumeId };
   }
   const name = ROUTE_NAMES.includes(parts[0]) ? parts[0] : "resume";
-  return { name, jobId: null, resumeId: null };
+  return { name, jobId: null, resumeId: resumeFromQuery };
 }
 
 /* ------------------------------------------------------------------ */
@@ -577,6 +583,7 @@ export function alignmentControls(session, resumes, jobId) {
     )
     .join("");
   const running = alignment.status === "running" || alignment.status === "queued";
+  const failed = alignment.status === "failed";
   return `
     <form class="align-form" data-form="split-align">
       <input type="hidden" name="job_id" value="${esc(jobId)}">
@@ -606,7 +613,8 @@ export function alignmentControls(session, resumes, jobId) {
         </label>
       </div>
       <div class="align-form__row">
-        <button class="btn btn-primary" type="submit" data-align-run ${running ? "disabled" : ""}>${running ? "对齐运行中..." : "一键生成对齐简历"}</button>
+        <button class="btn btn-primary" type="submit" data-align-run ${running ? "disabled" : ""}>${running ? "对齐运行中..." : failed ? "重新运行对齐" : "一键生成对齐简历"}</button>
+        <button class="btn btn-outline btn-sm" type="button" data-action="cancel-align-job" ${running ? "" : "hidden"}>取消任务</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="apply-accepted-bullets" data-id="${esc(jobId)}" ${!alignment.draft ? "disabled" : ""}>应用已采纳</button>
         <span class="small muted" data-align-status>${alignment.status === "succeeded" ? "已生成对齐版本" : alignment.status === "failed" ? `任务失败：${esc(alignment.error || "请重试")}` : alignment.status === "running" || alignment.status === "queued" ? "正在生成..." : ""}</span>
       </div>
@@ -641,17 +649,20 @@ export function boardCard(job) {
       `<option value="${value}" ${canonical === value ? "selected" : ""}>${esc(JOB_STATUS_LABELS[value])}</option>`,
   ).join("");
   const match = job.match_score != null ? Math.round(job.match_score) : null;
+  /* #F10: job.match_score persists the last workbench eval result, so the
+   * badge title discloses the score origin instead of a bare "匹配度". */
+  const matchTitle = match != null ? "匹配度 · 来自对齐评估" : "尚未分析";
   return `
     <article class="board-card copilot-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}" draggable="true" data-board-drag>
       <div class="board-card__top">
-        ${match != null ? `<span class="match-badge ${matchTone(match)}" title="匹配度">${match}</span>` : `<span class="match-badge match-badge--empty" title="尚未分析">待分析</span>`}
+        ${match != null ? `<span class="match-badge ${matchTone(match)}" title="${matchTitle}">${match}</span>` : `<span class="match-badge match-badge--empty" title="${matchTitle}">待分析</span>`}
         <button type="button" class="board-card__title" data-action="open-optimizer" data-id="${job.job_id}">${esc(job.title)}</button>
       </div>
       <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
       <div class="board-card__tags">
         <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
         <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
-        ${job.classification_pending ? '<span class="badge badge-amber badge-pending">分类待定</span>' : ""}
+        ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
         ${job.alignment_status === "succeeded" ? '<span class="badge badge-green">已对齐</span>' : ""}
       </div>
       <div class="board-card__timeline">
@@ -662,7 +673,7 @@ export function boardCard(job) {
       <div class="row" style="margin-top:8px">
         <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
         <button class="btn btn-ghost btn-sm" data-action="open-optimizer" data-id="${job.job_id}">工作台</button>
-        <button class="btn btn-ghost btn-sm" data-action="open-job-timeline" data-id="${job.job_id}">时间线</button>
+        <button class="btn btn-ghost btn-sm" data-action="open-job-timeline" data-id="${job.job_id}">详情</button>
         <button class="btn btn-ghost btn-sm" data-action="edit-job" data-id="${job.job_id}">编辑</button>
         <button class="btn btn-danger btn-sm" data-action="delete-job" data-id="${job.job_id}">删除</button>
       </div>
@@ -679,17 +690,20 @@ export function renderBoardCard(job) {
     (value) =>
       `<option value="${value}" ${canonical === value ? "selected" : ""}>${esc(JOB_STATUS_LABELS[value])}</option>`,
   ).join("");
+  const match = job.match_score != null ? Math.round(job.match_score) : null;
+  const matchTitle = match != null ? "匹配度 · 来自对齐评估" : "尚未分析";
   return `
     <article class="board-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}">
       <div class="board-card__top">
         <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
+        ${match != null ? `<span class="match-badge ${matchTone(match)}" title="${matchTitle}">${match}</span>` : `<span class="match-badge match-badge--empty" title="${matchTitle}">待分析</span>`}
         <button type="button" class="board-card__title" data-action="open-job-timeline" data-id="${job.job_id}">${esc(job.title)}</button>
       </div>
       <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
       <div class="board-card__tags">
         <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
         <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
-        ${job.classification_pending ? '<span class="badge badge-amber badge-pending">分类待定</span>' : ""}
+        ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
       </div>
       <div class="board-card__timeline">
         ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}
@@ -1530,16 +1544,20 @@ export function parseNextStepDate(text) {
 
 export const REMINDER_WINDOW_MS = 48 * 60 * 60 * 1000; /* 48h */
 
-/* 到期提醒：next_step 非空且含日期、且 <=48h 内或已过期（diffMs <= 窗口）。
- * 返回按紧迫度升序（最早到期在前）的列表：{ job, dueAt, overdue, hoursUntil } */
+/* 到期提醒：优先读结构化的 next_step_due_at（时间线弹窗的 datetime-local
+ * 字段），其次回退到 next_step 自由文本里的日期正则；均无日期则跳过。
+ * 返回按紧迫度升序（最早到期在前）的列表：
+ * { job, dueAt, overdue, hoursUntil, stage }——stage 为面试阶段（可能为空）。 */
 export function dueReminders(jobs, now = new Date()) {
   const ref = now instanceof Date ? now : new Date(now);
   const list = Array.isArray(jobs) ? jobs : [];
   const reminders = [];
   for (const job of list) {
     if (!job || typeof job !== "object") continue;
-    if (!String(job.next_step || "").trim()) continue;
-    const dueAt = parseNextStepDate(job.next_step);
+    const structured = String(job.next_step_due_at || "").trim();
+    const text = String(job.next_step || "").trim();
+    if (!structured && !text) continue;
+    const dueAt = parseNextStepDate(structured || text);
     if (!dueAt) continue;
     const diffMs = dueAt.getTime() - ref.getTime();
     if (diffMs > REMINDER_WINDOW_MS) continue;
@@ -1548,10 +1566,21 @@ export function dueReminders(jobs, now = new Date()) {
       dueAt,
       overdue: diffMs < 0,
       hoursUntil: Math.ceil(diffMs / (60 * 60 * 1000)),
+      stage: (job.interview_stage || "").trim() || null,
     });
   }
   reminders.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
   return reminders;
+}
+
+/* 提醒的“何时”文案：面试阶段徽章 + 本地到期时间，如“二面 · 8/10 15:00”。
+ * 没有阶段或时间时返回空串（调用方回退到 next_step 原文）。 */
+export function reminderWhen(reminder) {
+  if (!reminder || !reminder.dueAt) return "";
+  const date = reminder.dueAt;
+  const pad = (n) => String(n).padStart(2, "0");
+  const when = `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return reminder.stage ? `${reminder.stage} · ${when}` : when;
 }
 
 export function reminderDueLabel(reminder) {
@@ -1598,7 +1627,8 @@ export function renderReminderStrip(reminders) {
   const items = reminders
     .map((reminder) => {
       const job = reminder.job || {};
-      return `<a class="badge badge-amber" href="#/workspace/${encodeURIComponent(job.job_id || "")}" title="${esc(job.next_step || "")}">${esc(job.title || job.job_id || "未命名岗位")} · ${esc(reminderDueLabel(reminder))}</a>`;
+      const when = reminderWhen(reminder);
+      return `<a class="badge badge-amber" href="#/workspace/${encodeURIComponent(job.job_id || "")}" title="${esc(job.next_step || "")}">${esc(job.title || job.job_id || "未命名岗位")} · ${esc(when || job.next_step || "")} · ${esc(reminderDueLabel(reminder))}</a>`;
     })
     .join("");
   return `
@@ -1612,9 +1642,142 @@ export function renderReminderStrip(reminders) {
 export function renderReminderBanner(reminder) {
   if (!reminder) return "";
   const job = reminder.job || {};
+  const when = reminderWhen(reminder);
   return `
     <div class="reminder-banner" data-reminder-banner role="status" aria-label="面试跟进提醒">
       <span class="reminder-strip__label">面试跟进</span>
-      <span>「${esc(job.title || job.job_id || "该岗位")}」${esc(reminderDueLabel(reminder))}：${esc(job.next_step || "")}</span>
+      <span>「${esc(job.title || job.job_id || "该岗位")}」${esc(reminderDueLabel(reminder))}：${esc(when || job.next_step || "")}</span>
     </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* U7 采纳语义：diff 应用纯函数（split-canvas 单条采纳 / 应用已采纳）    */
+/* ------------------------------------------------------------------ */
+/* 应用单条 diff 到草稿。与后端 _apply_diffs 的语义保持一致：
+ * modify 全量替换 original -> proposed；add 追加行；remove 移除行。 */
+
+export function applyDiffToDraft(draft, diff) {
+  const base = String(draft ?? "");
+  if (!diff || typeof diff !== "object") return base;
+  if (diff.type === "modify" && diff.original && diff.proposed) {
+    return base.split(diff.original).join(diff.proposed);
+  }
+  if (diff.type === "add" && diff.proposed) {
+    return `${base}\n${diff.proposed}`;
+  }
+  if (diff.type === "remove" && diff.original) {
+    return base.split(diff.original).join("");
+  }
+  return base;
+}
+
+/* diffCard 使用的可寻址 id：优先 diff_id，缺省回退到 `diff-<index>`，
+ * 保证采纳按钮携带的 data-diff-id 与集合判定一致。 */
+export function diffAcceptedKey(diff, index) {
+  return (diff && diff.diff_id) || `diff-${index}`;
+}
+
+/* 只把 acceptedIds 命中的 diff 应用到草稿上（按原顺序）。 */
+export function applyAcceptedDiffsToDraft(draft, diffs, acceptedIds) {
+  const accepted = new Set(acceptedIds || []);
+  let out = String(draft ?? "");
+  for (let index = 0; index < (diffs || []).length; index += 1) {
+    const diff = diffs[index];
+    if (!accepted.has(diffAcceptedKey(diff, index))) continue;
+    out = applyDiffToDraft(out, diff);
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* F10/U11 匹配度来源标注（纯）                                        */
+/* ------------------------------------------------------------------ */
+/* 工作台徽章取分优先级：对齐评估（eval_score.jd_match_score）→ 差距分析
+ * （gap.score）→ 岗位持久化匹配分（job.match_score，后端写自最近一次
+ * 工作台 eval）。来源文案随徽章 title + 旁注展示。 */
+
+export function matchBadgeInfo(session, job) {
+  const alignment = (session && session.alignment) || {};
+  const evalScore = alignment.eval_score || {};
+  const gap = (session && session.gap) || {};
+  if (evalScore.jd_match_score != null) {
+    return { score: Number(evalScore.jd_match_score), source: "来自对齐评估" };
+  }
+  if (gap.score != null) {
+    return { score: Number(gap.score), source: "来自差距分析" };
+  }
+  if (job && job.match_score != null) {
+    return { score: Number(job.match_score), source: "来自对齐评估" };
+  }
+  return { score: null, source: "" };
+}
+
+export function renderMatchBadge(session, job) {
+  const { score, source } = matchBadgeInfo(session, job);
+  if (score == null) return "";
+  return `<span class="match-badge ${matchTone(score)}" data-match-badge title="${esc(source)}">匹配 ${Math.round(score)}</span>${source ? `<span class="small muted" data-match-source>${esc(source)}</span>` : ""}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* F6/U10 时间线弹窗与编辑弹窗表单 HTML（纯，供 main.js 挂到 modal）     */
+/* ------------------------------------------------------------------ */
+
+export const INTERVIEW_STAGES = ["一面", "二面", "HR面", "谈薪", "笔试", "其他"];
+
+/* 岗位详情/时间线弹窗表单。next_step_due_at 为 datetime-local（本地时间，
+ * 无时区，与 parseNextStepDate 语义一致）；interview_stage 值域含“无”。 */
+export function jobTimelineFormHtml(job) {
+  const statusOptions = JOB_STATUS_CANONICAL.map(
+    (value) =>
+      `<option value="${value}" ${canonicalJobStatus(job.status) === value ? "selected" : ""}>${esc(JOB_STATUS_LABELS[value])}</option>`,
+  ).join("");
+  const stageOptions = `<option value="" ${job.interview_stage ? "" : "selected"}>无</option>${INTERVIEW_STAGES.map(
+    (stage) =>
+      `<option value="${esc(stage)}" ${job.interview_stage === stage ? "selected" : ""}>${esc(stage)}</option>`,
+  ).join("")}`;
+  return `<form data-form="job-detail-edit">
+      <input type="hidden" name="job_id" value="${esc(job.job_id)}">
+      <div class="form-grid">
+        <div class="field"><label>状态</label><select name="status">${statusOptions}</select></div>
+        <div class="field"><label>投递时间</label><input type="datetime-local" name="applied_at" value="${esc(job.applied_at || "")}"></div>
+        <div class="field"><label>下一步</label><input type="text" name="next_step" value="${esc(job.next_step || "")}"></div>
+        <div class="field"><label>到期时间</label><input type="datetime-local" name="next_step_due_at" value="${esc(job.next_step_due_at || "")}"></div>
+        <div class="field"><label>面试阶段</label><select name="interview_stage">${stageOptions}</select></div>
+        <div class="field"><label>Offer 时间</label><input type="datetime-local" name="offer_at" value="${esc(job.offer_at || "")}"></div>
+        <div class="field"><label>拒绝时间</label><input type="datetime-local" name="rejected_at" value="${esc(job.rejected_at || "")}"></div>
+        <div class="field wide"><label>备注</label><textarea name="notes" rows="3">${esc(job.notes || "")}</textarea></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+        <button class="btn btn-primary" type="submit">保存</button>
+      </div>
+    </form>`;
+}
+
+/* 编辑岗位弹窗表单。vocabulary 需含 statuses / job_functions / seniorities
+ * 列表（由调用方从 events.js vocabularyList 传入，保持本模块无 DOM 依赖）。 */
+export function jobEditFormHtml(job, vocabulary = {}) {
+  const statusOptions = options(vocabulary.statuses || JOB_STATUSES, job.status);
+  const functionOptions =
+    `<option value="">未分类</option>${options(vocabulary.job_functions || JOB_FUNCTIONS, job.job_function || "")}`;
+  const seniorityOptions =
+    `<option value="">未知</option>${options(vocabulary.seniorities || SENIORITIES, job.seniority || "")}`;
+  return `<form data-form="job-edit">
+      <input type="hidden" name="job_id" value="${esc(job.job_id)}">
+      <div class="form-grid">
+        <div class="field"><label>标题</label><input type="text" name="title" value="${esc(job.title)}"></div>
+        <div class="field"><label>公司</label><input type="text" name="company" value="${esc(job.company || "")}"></div>
+        <div class="field"><label>城市</label><input type="text" name="location" value="${esc(job.location || "")}"></div>
+        <div class="field"><label>状态</label><select name="status">${statusOptions}</select></div>
+        <div class="field"><label>职能</label><select name="job_function">${functionOptions}</select></div>
+        <div class="field"><label>级别</label><select name="seniority">${seniorityOptions}</select></div>
+        <div class="field"><label>最低薪资（月，元）</label><input type="number" name="salary_min" value="${job.salary_min ?? ""}"></div>
+        <div class="field"><label>最高薪资（月，元）</label><input type="number" name="salary_max" value="${job.salary_max ?? ""}"></div>
+        <div class="field wide"><label>技术标签（逗号分隔）</label><input type="text" name="tech_tags" value="${esc((job.tech_tags || []).join(", "))}"></div>
+        <div class="field wide"><label>JD 文本</label><textarea name="jd_text" rows="8">${esc(job.jd_text)}</textarea></div>
+      </div>
+      <div class="actions"><button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+        <button class="btn btn-secondary" type="button" data-action="reclassify-job" data-id="${esc(job.job_id)}">重新分类</button>
+        <button class="btn btn-primary" type="submit">保存</button></div>
+    </form>`;
 }

@@ -6,6 +6,7 @@ import {
   onboardingSteps,
   parseNextStepDate,
   reminderDueLabel,
+  reminderWhen,
   renderOnboardingCard,
   renderReminderBanner,
   renderReminderStrip,
@@ -140,6 +141,101 @@ test("dueReminders accepts a timestamp string as now", () => {
     NOW.toISOString(),
   );
   assert.equal(reminders.length, 1);
+});
+
+/* F6: 结构化 next_step_due_at 优先于 next_step 自由文本正则 */
+test("dueReminders prefers structured next_step_due_at over free text", () => {
+  /* 自由文本无日期、结构化字段有日期 → 提醒来自结构化字段 */
+  const fromStructured = dueReminders(
+    [
+      {
+        job_id: "a",
+        title: "岗位 a",
+        next_step: "等 HR 通知",
+        next_step_due_at: "2026-08-11 09:00",
+      },
+    ],
+    NOW,
+  );
+  assert.equal(fromStructured.length, 1);
+  assert.equal(fromStructured[0].dueAt.getHours(), 9);
+
+  /* 两者都有日期但冲突 → 以结构化字段为准（不回退到自由文本） */
+  const conflict = dueReminders(
+    [
+      {
+        job_id: "b",
+        title: "岗位 b",
+        next_step: "2026-08-09 10:00", /* 已过期，会被旧逻辑命中 */
+        next_step_due_at: "2026-08-20 10:00", /* 48h 外 → 不应提醒 */
+      },
+    ],
+    NOW,
+  );
+  assert.deepEqual(conflict, []);
+
+  /* 结构化字段为空 → 回退自由文本正则（保留旧行为） */
+  const fallback = dueReminders(
+    [
+      {
+        job_id: "c",
+        title: "岗位 c",
+        next_step: "面试 2026-08-10 18:00",
+        next_step_due_at: "",
+      },
+    ],
+    NOW,
+  );
+  assert.equal(fallback.length, 1);
+  assert.equal(fallback[0].dueAt.getDate(), 10);
+});
+
+test("dueReminders carries the interview stage on reminders", () => {
+  const reminders = dueReminders(
+    [
+      {
+        job_id: "a",
+        title: "岗位 a",
+        next_step: "二面",
+        next_step_due_at: "2026-08-11 09:00",
+        interview_stage: "二面",
+      },
+      {
+        job_id: "b",
+        title: "岗位 b",
+        next_step: "2026-08-11 10:00",
+        next_step_due_at: "2026-08-11 10:00",
+        interview_stage: null,
+      },
+    ],
+    NOW,
+  );
+  assert.equal(reminders[0].stage, "二面");
+  assert.equal(reminders[1].stage, null);
+});
+
+test("reminderWhen formats stage + local due time, or time only", () => {
+  const withStage = dueReminders(
+    [
+      {
+        job_id: "a",
+        title: "岗位 a",
+        next_step_due_at: "2026-08-10 15:00",
+        interview_stage: "二面",
+      },
+    ],
+    NOW,
+  );
+  assert.equal(reminderWhen(withStage[0]), "二面 · 8/10 15:00");
+
+  const timeOnly = dueReminders(
+    [{ job_id: "b", title: "岗位 b", next_step: "2026-08-09 15:00" }],
+    NOW,
+  );
+  assert.equal(reminderWhen(timeOnly[0]), "8/9 15:00");
+
+  assert.equal(reminderWhen(null), "");
+  assert.equal(reminderWhen({}), "");
 });
 
 /* ------------------------------------------------------------------ */
@@ -318,8 +414,8 @@ test("renderReminderStrip renders amber badges linking to the workspace", () => 
   assert.match(html, /class="badge badge-amber"/);
   assert.match(html, /href="#\/workspace\/j1"/);
   assert.match(html, /href="#\/workspace\/j2"/);
-  assert.match(html, /岗位 j1 · 已过期 26h/);
-  assert.match(html, /岗位 j2 · 21h 内到期/);
+  assert.match(html, /岗位 j1 · 8\/9 10:00 · 已过期 26h/);
+  assert.match(html, /岗位 j2 · 8\/11 09:00 · 21h 内到期/);
   assert.match(html, /title="2026-08-09 10:00"/); /* raw next_step as tooltip */
 });
 
@@ -346,5 +442,22 @@ test("renderReminderBanner renders the active job follow-up line", () => {
   const html = renderReminderBanner(reminders[0]);
   assert.match(html, /data-reminder-banner/);
   assert.match(html, /面试跟进/);
-  assert.match(html, /「岗位 j9」已过期 21h：2026-08-09 15:00 二面/);
+  assert.match(html, /「岗位 j9」已过期 21h：8\/9 15:00/);
+});
+
+test("renderReminderBanner shows structured stage + due time", () => {
+  const reminders = dueReminders(
+    [
+      {
+        job_id: "j9",
+        title: "岗位 j9",
+        next_step: "等 HR 通知",
+        next_step_due_at: "2026-08-10 18:00",
+        interview_stage: "二面",
+      },
+    ],
+    NOW,
+  );
+  const html = renderReminderBanner(reminders[0]);
+  assert.match(html, /「岗位 j9」6h 内到期：二面 · 8\/10 18:00/);
 });

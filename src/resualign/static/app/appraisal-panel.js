@@ -24,24 +24,20 @@ export function renderJdProfilePanel() {
     </div>`;
 }
 
-export async function renderAppraisal(app) {
-  const panel = $("[data-appraisal-panel]");
-  if (!panel || !state.wbJob) return;
-  renderJdProfilePanel();
-  try {
-    const appraisal = await api(`/api/jobs/${encodeURIComponent(state.wbJob.job_id)}/appraisal`);
-    state.wbAppraisal = { job_id: state.wbJob.job_id, ...appraisal };
-    const verdictClass =
-      appraisal.verdict === "投递" ? "badge-green" : appraisal.verdict === "考虑" ? "badge-amber" : "badge-red";
-    const ringClass =
-      appraisal.score >= 80
-        ? "score-ring--high"
-        : appraisal.score >= 60
-          ? "score-ring--mid"
-          : "score-ring--low";
-    const benchmark = benchmarkSourceBadge(appraisal);
-    panel.innerHTML = `
-      <h3>投递价值评估</h3>
+/* Body-only appraisal HTML (no <h3>: collapsible canvases keep the title
+ * in their <summary>, classic panels get the <h3> from the filler). */
+export function appraisalBodyHtml(appraisal) {
+  const verdictClass =
+    appraisal.verdict === "投递" ? "badge-green" : appraisal.verdict === "考虑" ? "badge-amber" : "badge-red";
+  const ringClass =
+    appraisal.score >= 80
+      ? "score-ring--high"
+      : appraisal.score >= 60
+        ? "score-ring--mid"
+        : "score-ring--low";
+  const benchmark = benchmarkSourceBadge(appraisal);
+  const radar = renderAppraisalRadar(appraisal.components || {});
+  return `
       <div class="appraisal-score">
         <div class="score-ring ${ringClass}" style="--score:${appraisal.score}"><span>${Math.round(appraisal.score)}</span></div>
         <div>
@@ -57,18 +53,59 @@ export async function renderAppraisal(app) {
         <span class="badge ${benchmark.className}">${esc(benchmark.label)}</span>
         <span class="small muted">${esc(benchmark.detail)}</span>
       </div>
+      ${radar ? `<div class="appraisal-radar">${radar}</div>` : ""}
+      ${appraisal.conclusion ? `<div class="appraisal-conclusion">${esc(appraisal.conclusion)}</div>` : ""}
       <ul style="margin:10px 0 0 18px">${(appraisal.reasons || []).map((reason) => `<li class="small">${esc(reason)}</li>`).join("")}</ul>`;
+}
 
-    const radarBox = document.createElement("div");
-    radarBox.className = "appraisal-radar";
-    radarBox.innerHTML = renderAppraisalRadar(appraisal.components || {});
-    const conclusion = document.createElement("div");
-    conclusion.className = "appraisal-conclusion";
-    conclusion.textContent = appraisal.conclusion || "";
-    const reasonsList = panel.querySelector("ul");
-    panel.insertBefore(radarBox, reasonsList);
-    panel.insertBefore(conclusion, reasonsList);
+/* Fill a [data-appraisal-panel] node. Collapsible canvases put the title
+ * in <summary> and a [data-appraisal-body] placeholder inside; classic
+ * panels keep their own <h3>. */
+export function fillAppraisalPanel(panel, appraisal) {
+  const body = panel.querySelector("[data-appraisal-body]");
+  const html = appraisalBodyHtml(appraisal);
+  if (body) {
+    body.innerHTML = html;
+    return;
+  }
+  panel.innerHTML = `<h3>投递价值评估</h3>${html}`;
+}
+
+function renderAppraisalError(panel, message) {
+  const body = panel.querySelector("[data-appraisal-body]");
+  const html = `<p class="muted">${esc(message)}</p>`;
+  if (body) {
+    body.innerHTML = html;
+    return;
+  }
+  panel.innerHTML = `<h3>投递价值评估</h3>${html}`;
+}
+
+/* Render cached appraisal content without a network call. Returns true
+ * when a cache entry for jobId exists (used by re-rendering canvases so
+ * the panel survives SSE-driven repaints without hammering the API). */
+export function renderAppraisalSync(panel, jobId) {
+  if (!panel) return false;
+  if (state.wbAppraisal && state.wbAppraisal.job_id === jobId) {
+    fillAppraisalPanel(panel, state.wbAppraisal);
+    return true;
+  }
+  return false;
+}
+
+export async function renderAppraisal(app) {
+  const panel = $("[data-appraisal-panel]");
+  if (!panel || !state.wbJob) return;
+  renderJdProfilePanel();
+  if (state.wbAppraisal && state.wbAppraisal.job_id === state.wbJob.job_id) {
+    fillAppraisalPanel(panel, state.wbAppraisal);
+    return;
+  }
+  try {
+    const appraisal = await api(`/api/jobs/${encodeURIComponent(state.wbJob.job_id)}/appraisal`);
+    state.wbAppraisal = { job_id: state.wbJob.job_id, ...appraisal };
+    fillAppraisalPanel(panel, appraisal);
   } catch (error) {
-    panel.innerHTML = `<h3>投递价值评估</h3><p class="muted">${esc(error.message)}</p>`;
+    renderAppraisalError(panel, error.message);
   }
 }

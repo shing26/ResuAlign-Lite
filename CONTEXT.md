@@ -81,6 +81,8 @@ A version of the Master Resume rewritten for a specific JD. Every change traces 
 
 **Eval Score**
 Quality metric from LLM-as-Judge: how well the tailored resume matches the JD, whether any hallucination was detected, and what fraction of gaps were addressed.
+UI 中称「对齐评估」，区别于「投递评估」（Worth Appraisal）。默认关闭，可在设置页设全局默认、工作台按次勾选。
+_Avoid_: 投递评估 (Worth Appraisal), evaluation tab
 
 **Engine / Pipeline**
 The core orchestration. In the minimal version: parse → diagnose → align → output. In the full version: ingest → profile → gap → tailor → evaluate. Accepts a \ResuAlignConfig\ and returns a \Report\. Frontend-agnostic.
@@ -90,6 +92,13 @@ A candidate's professional profile, submitted as a file in PDF, DOCX, or plain-t
 
 **Diagnosis** *(minimal version)*
 An LLM-produced evaluation of a resume, containing a score (0–100), a list of detected skills, and a list of textual issues/improvement suggestions. Produced without any JD context.
+UI 中称「诊断分」，不再用作「匹配度」。
+
+**Match Score**
+The resume-to-JD fit percentage shown on jobs and workbench. Primary source
+is the Gap Report's gap match score; when alignment evaluation (Eval) ran,
+the Eval Score's jd_match_score is used and labeled "来自对齐评估".
+_Avoid_: 匹配率, fit score (ambiguous with Worth Appraisal)
 
 **Alignment** *(minimal version)*
 The process of comparing a resume with a specific JD and generating suggested edits.
@@ -253,6 +262,8 @@ _Avoid_: salary database, pay grade
 An async no-JD pipeline run against one Master Resume, producing a 0-100
 score, skills, issues, and suggestions. The resume record keeps the latest
 diagnosis job id so archive refreshes restore the most recent result.
+诊断结果会被 Single-Job Workspace 复用（诊断缓存复用）：同一主简历在工作台
+rerun 时跳过 diagnose 阶段的 LLM 调用。
 _Avoid_: analyze-only page, report history
 
 **Final Draft**
@@ -284,6 +295,22 @@ A lightweight per-job lifecycle marker: not applied, applied, interviewing,
 offered, or declined. The Single-Job Workspace is the one-stop entry for
 appraisal and status updates.
 _Avoid_: pipeline stage, funnel state
+
+**Interview Stage**
+The interview-process phase marker on a Job (first round, second round, HR
+round, offer talk). Orthogonal to Application Status: status is the funnel
+bucket, interview stage is the follow-up anchor inside "interviewing".
+_Avoid_: interview phase, round number
+
+**Follow-up**
+A Job's structured follow-up information: a free-text next action, an
+optional due datetime, and an Interview Stage. Drives the due reminders.
+_Avoid_: next step (ambiguous with Batch Decision), reminder entry
+
+**Batch Decision**
+The per-job conclusion shown in the batch alignment matrix (apply, consider,
+skip). Distinct from Follow-up despite sharing the label "下一步" in the UI.
+_Avoid_: next step (ambiguous with Follow-up)
 
 **Single-Job Workspace**
 The per-job working page combining JD analysis, worth appraisal, status, and

@@ -276,6 +276,38 @@ test("alignmentControls shows progress when running", () => {
   assert.match(html, /disabled/);
 });
 
+test("alignmentControls shows cancel button while queued/running only", () => {
+  const running = alignmentControls(
+    { alignment: { status: "running", stage: "tailoring" } },
+    [],
+    "job-9",
+  );
+  assert.match(running, /data-action="cancel-align-job"/);
+  assert.doesNotMatch(running, /cancel-align-job" hidden/);
+  const queued = alignmentControls(
+    { alignment: { status: "queued" } },
+    [],
+    "job-9",
+  );
+  assert.doesNotMatch(queued, /cancel-align-job" hidden/);
+  const idle = alignmentControls({ alignment: { status: "idle" } }, [], "job-9");
+  assert.match(idle, /cancel-align-job" hidden/);
+  const failed = alignmentControls({ alignment: { status: "failed", error: "x" } }, [], "job-9");
+  assert.match(failed, /cancel-align-job" hidden/);
+});
+
+test("alignmentControls offers rerun on failure and keeps run button enabled", () => {
+  const html = alignmentControls(
+    { alignment: { status: "failed", error: "LLM 超时" } },
+    [],
+    "job-9",
+  );
+  assert.match(html, /重新运行对齐/);
+  assert.match(html, /任务失败：LLM 超时/);
+  assert.doesNotMatch(html, /data-align-run" disabled/);
+  assert.doesNotMatch(html, /data-align-progress/);
+});
+
 /* ------------------------------------------------------------------ */
 /* exportDock                                                          */
 /* ------------------------------------------------------------------ */
@@ -339,6 +371,75 @@ test("renderBoardCard renders job-board card with check and edit actions", () =>
     renderBoardCard({ job_id: "j1", title: "T", status: "x", classification_pending: true }),
     /board-card--pending/,
   );
+});
+
+/* F10: 看板卡片匹配徽章 title 标注来源（job.match_score 来自工作台评估） */
+test("boardCard match badge title discloses the score source", () => {
+  const html = boardCard({
+    job_id: "j1",
+    title: "后端",
+    status: "applied",
+    match_score: 80,
+  });
+  assert.match(html, /class="match-badge match--high" title="匹配度 · 来自对齐评估">80<\/span>/);
+  assert.match(
+    boardCard({ job_id: "j2", title: "T", status: "draft" }),
+    /class="match-badge match-badge--empty" title="尚未分析">待分析<\/span>/,
+  );
+});
+
+test("renderBoardCard match badge carries the source title", () => {
+  const html = renderBoardCard({
+    job_id: "j1",
+    title: "前端",
+    status: "applied",
+    match_score: 66,
+  });
+  assert.match(html, /class="match-badge match--mid" title="匹配度 · 来自对齐评估">66<\/span>/);
+  const empty = renderBoardCard({ job_id: "j2", title: "T", status: "draft" });
+  assert.match(empty, /class="match-badge match-badge--empty" title="尚未分析">待分析<\/span>/);
+});
+
+/* F2: 分类待定徽章可点击重分类（badge → button，带 aria-label） */
+test("boardCard classification-pending badge is a reclassify button", () => {
+  const html = boardCard({
+    job_id: "j1",
+    title: "后端",
+    status: "applied",
+    classification_pending: true,
+  });
+  assert.match(
+    html,
+    /<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="j1" aria-label="重新分类">分类待定<\/button>/,
+  );
+  assert.doesNotMatch(
+    boardCard({ job_id: "j2", title: "T", status: "draft" }),
+    /data-action="reclassify-job"/,
+  );
+});
+
+test("renderBoardCard classification-pending badge is a reclassify button", () => {
+  const html = renderBoardCard({
+    job_id: "j1",
+    title: "前端",
+    status: "applied",
+    classification_pending: true,
+  });
+  assert.match(
+    html,
+    /<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="j1" aria-label="重新分类">分类待定<\/button>/,
+  );
+  assert.doesNotMatch(
+    renderBoardCard({ job_id: "j2", title: "T", status: "draft" }),
+    /data-action="reclassify-job"/,
+  );
+});
+
+/* U11: 时间线按钮与岗位详情弹窗标题统一为「详情」 */
+test("boardCard timeline action label is unified as 详情", () => {
+  const html = boardCard({ job_id: "j1", title: "后端", status: "applied" });
+  assert.match(html, /data-action="open-job-timeline" data-id="j1">详情<\/button>/);
+  assert.doesNotMatch(html, />时间线<\/button>/);
 });
 
 /* ------------------------------------------------------------------ */

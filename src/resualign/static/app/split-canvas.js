@@ -11,6 +11,7 @@ import {
   download,
   ensureVocabulary,
   esc,
+  formatDate,
   formatSalary,
   jobStatusLabel,
   state,
@@ -27,13 +28,15 @@ import {
   diffList,
   exportDock,
   jdProfileSummary,
-  matchTone,
+  matchBadgeInfo,
   radarHtml,
   renderGap,
   renderJobStatsHtml,
+  renderMatchBadge,
   renderSkills,
   stageStepper,
 } from "./format.js";
+import { renderAppraisal, renderAppraisalSync } from "./appraisal-panel.js";
 
 let activeSession = null;
 let activeSessionUrl = null;
@@ -49,6 +52,10 @@ let alignmentStartedAt = 0;
 let workbenchJobs = [];
 let autoAnalyzedJd = false;
 let canvasRenderHooks = [];
+/* #B4: once the alignment state has been reconciled against the real job
+   (terminal status, expired job, or poll terminal), late replayed SSE
+   events must not flip the session back to a phantom "running" state. */
+let alignmentReconciled = false;
 
 /* Render hooks let main.js attach extras (batch panel, etc.) after a
    canvas view is painted. Kept as a list so future views can register
@@ -63,8 +70,19 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const gap = (session && session.gap) || {};
   const profile = jd.profile || {};
   const summary = jdProfileSummary(profile);
-  const score = gap.score != null ? gap.score : job.match_score;
+  /* F10/U11: 匹配分取 eval_score.jd_match_score → gap.score → job.match_score，
+   * 徽章旁标注来源（renderMatchBadge 渲染徽章 + 来源旁注）。 */
+  const score = matchBadgeInfo(session, job).score ?? (gap.score != null ? gap.score : job.match_score);
   const jobId = job.job_id || "";
+  /* Mirror the legacy workbench contract so renderFinalDraftPanel /
+     record-application work identically on the live canvas. */
+  state.wbFinalDraft = job.final_draft
+    ? {
+        draft: job.final_draft,
+        version: job.final_draft_version || 1,
+        updated_at: job.final_draft_updated_at,
+      }
+    : null;
   const previous = {
     resumeId: $("[data-form='split-align'] [name='master_resume_id']")?.value,
     granularity: $("[data-form='split-align'] [name='granularity']")?.value,
@@ -82,7 +100,7 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <select class="workbench-job-switcher" data-job-switcher aria-label="切换岗位">
             ${jobs.map((item) => `<option value="${esc(item.job_id)}" ${item.job_id === jobId ? "selected" : ""}>${esc(item.title)}${item.company ? ` · ${esc(item.company)}` : ""}</option>`).join("")}
           </select>
-          ${score != null ? `<span class="match-badge ${matchTone(score)}" data-match-badge>匹配 ${Math.round(score)}</span>` : ""}
+          ${renderMatchBadge(session, job)}
           ${job.source_url ? `<a class="btn btn-outline btn-sm" href="${esc(job.source_url)}" target="_blank" rel="noopener">原岗位链接</a>` : ""}
         </div>
       </div>
@@ -127,6 +145,13 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           </div>
           ${alignmentControls(session, resumes, jobId)}
           ${exportDock(jobId, session)}
+          <div class="panel panel-card panel--success final-draft-panel" data-final-draft-panel hidden></div>
+          <details class="panel panel-card panel--info appraisal-panel split-appraisal" data-appraisal-panel open>
+            <summary>投递价值评估</summary>
+            <div class="appraisal-body" data-appraisal-body>
+              <div class="muted small">运行一次对齐分析后生成</div>
+            </div>
+          </details>
           <div class="split-pane__match">${score != null ? radarHtml(score) : `<div class="small muted" style="padding:10px 0">运行预分析后生成匹配雷达。</div>`}</div>
           <div class="split-diff-area">${diffList(session, jobId)}</div>
         </section>
@@ -138,9 +163,61 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
     const granularity = form.querySelector('[name="granularity"]');
     const focus = form.querySelector('[name="prompt_focus"]');
     if (previous.resumeId && resumeSelect) resumeSelect.value = previous.resumeId;
+    else if (resumeSelect && state.route && state.route.resumeId) {
+      /* F4: 深链 #/workspace[/<jobId>]?resume=<id> 预选主简历（用户在画布
+       * 上手动切换后 previous.resumeId 优先，不再覆盖用户选择）。 */
+      const match = resumes.find(
+        (item) => item.resume_id === state.route.resumeId,
+      );
+      if (match) resumeSelect.value = match.resume_id;
+    }
     if (previous.granularity && granularity) granularity.value = previous.granularity;
     if (previous.focus && focus) focus.value = previous.focus;
   }
+  renderCanvasExtras();
+}
+
+/* Re-render the cached appraisal body and the final-draft panel after
+ * every canvas repaint (SSE events replace #app.innerHTML wholesale, so
+ * the panels would otherwise fall back to their placeholder states). */
+function renderCanvasExtras() {
+  const app = $("#app");
+  if (!app) return;
+  renderFinalDraftPanel(app);
+  const appraisalPanel = $("[data-appraisal-panel]", app);
+  if (appraisalPanel && activeJobId) renderAppraisalSync(appraisalPanel, activeJobId);
+}
+
+/* 定稿面板（与遗留 renderWorkspaceView 的 renderFinalDraftPanel 同构）。
+ * 记录投递/导出等按钮复用 main.js 的 document 级 data-action 委托，
+ * 无需在 live 画布内重复绑定（B5）。 */
+function renderFinalDraftPanel(app) {
+  const panel = $("[data-final-draft-panel]");
+  if (!panel) return;
+  const draft = state.wbFinalDraft;
+  if (!draft || !draft.draft) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+    return;
+  }
+  panel.hidden = false;
+  panel.innerHTML = `
+    <div class="final-draft-head">
+      <div>
+        <h3>定稿简历</h3>
+        <div class="draft-meta">
+          <span class="badge badge-green">已保存</span>
+          <span class="small muted">${formatDate(draft.updated_at)} · 第 ${draft.version} 版</span>
+        </div>
+      </div>
+    </div>
+    <div class="pre draft-preview">${esc(draft.draft)}</div>
+    <div class="row final-draft-actions">
+      <button class="btn btn-primary btn-sm" data-action="record-application">记录投递</button>
+      <button class="btn btn-outline btn-sm" data-action="export-final-draft">导出 PDF</button>
+      <button class="btn btn-outline btn-sm" data-action="export-final-draft-md">导出 Markdown</button>
+      <button class="btn btn-secondary btn-sm" data-action="save-as-new-resume">另存为新主简历</button>
+    </div>`;
 }
 
 export async function renderOptimizerCanvas(app, jobId) {
@@ -150,11 +227,14 @@ export async function renderOptimizerCanvas(app, jobId) {
   if (!jobId) {
     if (workbenchJobs.length) {
       const targetId = workbenchJobs[0].job_id;
-      state.route = { name: "workspace", jobId: targetId };
+      const resumeId = state.route && state.route.resumeId;
+      state.route = { name: "workspace", jobId: targetId, resumeId };
       window.history.replaceState(
         null,
         "",
-        `#/workspace/${encodeURIComponent(targetId)}`,
+        resumeId
+          ? `#/workspace/${encodeURIComponent(targetId)}?resume=${encodeURIComponent(resumeId)}`
+          : `#/workspace/${encodeURIComponent(targetId)}`,
       );
       return renderOptimizerCanvas(app, targetId);
     }
@@ -179,6 +259,18 @@ export async function renderOptimizerCanvas(app, jobId) {
     app.innerHTML = `<div class="panel panel-card"><h3>工作台会话不存在</h3><p class="muted">岗位可能已删除或会话已过期。</p><div class="row"><button class="btn btn-primary" data-action="back-to-jobs">返回岗位库</button></div></div>`;
     return;
   }
+  /* #B5: the session job snapshot can be stale (created before the last
+     final-draft save); refresh the draft fields from the fresh job list
+     so the live canvas renders the current 定稿 + 记录投递 button. */
+  const freshJob = workbenchJobs.find((item) => item.job_id === jobId);
+  if (freshJob && session.job) {
+    session.job = {
+      ...session.job,
+      final_draft: freshJob.final_draft,
+      final_draft_version: freshJob.final_draft_version,
+      final_draft_updated_at: freshJob.final_draft_updated_at,
+    };
+  }
   activeSession = session;
   activeSessionUrl = session.meta && session.meta.event_url;
   activeJobId = (session.job && session.job.job_id) || jobId;
@@ -189,6 +281,9 @@ export async function renderOptimizerCanvas(app, jobId) {
   startEventStream(session);
   resumeAlignmentProgress();
   autoAnalyzeJd(session);
+  /* 投递价值评估挂到 live 工作台（#B5）：首次进入按需拉取，
+     之后的画布重绘由 renderCanvasExtras 用缓存填充，不再重复请求。 */
+  renderAppraisal(app);
 }
 
 async function autoAnalyzeJd(session) {
@@ -325,6 +420,22 @@ async function pollSessionFallback(sessionId) {
     const nextEtag = updated.meta && updated.meta.etag;
     if (nextEtag === fallbackEtag) return;
     fallbackEtag = nextEtag || "";
+    /* #B4: the store session never mirrors frontend event interpretation
+       of alignment (its alignment stays idle), and any session update
+       (e.g. autoAnalyzeJd) bumps the etag. A poll must therefore not let
+       a stale "idle" alignment resurrect a locally reconciled terminal
+       task (failed/canceled/succeeded). */
+    if (
+      activeSession &&
+      activeSession.alignment &&
+      ["failed", "canceled", "succeeded"].includes(
+        activeSession.alignment.status,
+      ) &&
+      updated.alignment &&
+      !["failed", "canceled", "succeeded"].includes(updated.alignment.status)
+    ) {
+      updated.alignment = { ...updated.alignment, ...activeSession.alignment };
+    }
     activeSession = updated;
     const app = $("#app");
     if (app) {
@@ -368,6 +479,7 @@ function handleEvent(eventName, data) {
       activeSession.job = { ...(activeSession.job || {}), job_id: data.job_id };
     }
     if (data.workbench) {
+      if (alignmentReconciled) return;
       activeSession.alignment = {
         ...(activeSession.alignment || {}),
         status: "running",
@@ -445,6 +557,7 @@ function stopOptimizerStreams() {
   }
   activePollJobId = null;
   alignmentStartedAt = 0;
+  alignmentReconciled = false;
   activeSession = null;
   activeSessionUrl = null;
   activeJobId = null;
@@ -465,6 +578,18 @@ async function resumeAlignmentProgress() {
   try {
     snapshot = await api(`/api/jobs/${encodeURIComponent(analysisId)}`);
   } catch {
+    /* #B4: the referenced analysis job is gone (cleaned up after TTL).
+     * Session event replay may have set alignment to "running"; without
+     * this fallback the workspace would stay stuck on a phantom task. */
+    setAlignmentTerminal({
+      status: "failed",
+      error: "对齐任务已过期或已被清理，请重新运行",
+    });
+    return;
+  }
+  if (snapshot.status === "failed" || snapshot.status === "canceled") {
+    /* Terminal job: surface the failure instead of replaying "running". */
+    setAlignmentTerminal(snapshot);
     return;
   }
   if (["queued", "running"].includes(snapshot.status)) {
@@ -476,6 +601,98 @@ async function resumeAlignmentProgress() {
   }
 }
 
+/* Reset the alignment state to a terminal status (failed/canceled) and
+ * repaint, so the run button becomes usable again ("重新运行对齐"). */
+function setAlignmentTerminal(snapshot) {
+  stopAlignmentPoll();
+  alignmentReconciled = true;
+  if (!activeSession) return;
+  const status = snapshot.status === "canceled" ? "canceled" : "failed";
+  activeSession.alignment = {
+    ...(activeSession.alignment || {}),
+    status,
+    stage: status,
+    error:
+      snapshot.error ||
+      (status === "canceled" ? "对齐任务已取消" : "对齐任务失败，请重新运行"),
+    diffs: (snapshot.result && snapshot.result.diffs) || [],
+    invalid_diffs: (snapshot.result && snapshot.result.invalid_diffs) || [],
+    draft: (snapshot.result && snapshot.result.draft) || null,
+    eval_score: (snapshot.result && snapshot.result.eval_score) || null,
+  };
+  rerenderActiveCanvas();
+  toast(
+    status === "canceled"
+      ? "对齐任务已取消"
+      : "对齐任务失败或已过期，可重新运行",
+    status === "canceled" ? "info" : "error",
+  );
+}
+
+async function rerenderActiveCanvas() {
+  if (!activeSession) return;
+  const app = $("#app");
+  if (!app) return;
+  let resumes = [];
+  try {
+    resumes = await api("/api/master-resumes");
+  } catch {
+    /* keep the empty list; the canvas still renders */
+  }
+  renderSplitCanvas(app, activeSession, resumes, workbenchJobs);
+}
+
+/* Cancel the active alignment task. Backend cancel only applies to queued
+ * jobs; for running jobs we stop the local wait and release the form so
+ * the user can retry (#B4). */
+export async function cancelActiveAlignment() {
+  const jobId = activePollJobId;
+  if (!jobId) {
+    toast("当前没有可取消的对齐任务", "error");
+    return;
+  }
+  let snapshot;
+  try {
+    snapshot = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+  } catch {
+    setAlignmentTerminal({
+      status: "failed",
+      error: "对齐任务已过期或已被清理，请重新运行",
+    });
+    return;
+  }
+  if (!["queued", "running"].includes(snapshot.status)) {
+    toast("当前没有可取消的对齐任务", "error");
+    return;
+  }
+  if (snapshot.status === "queued") {
+    try {
+      await api(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, {
+        method: "POST",
+      });
+      setAlignmentTerminal({ status: "canceled", error: null });
+      toast("对齐任务已取消", "success");
+    } catch (error) {
+      toast(error.message, "error");
+    }
+    return;
+  }
+  /* running: cancel is a no-op server-side; stop local waiting and reset
+     to idle so the workspace is not stuck with a disabled run button. */
+  stopAlignmentPoll();
+  alignmentReconciled = false;
+  if (activeSession) {
+    activeSession.alignment = {
+      ...(activeSession.alignment || {}),
+      status: "idle",
+      stage: "",
+      error: null,
+    };
+    rerenderActiveCanvas();
+  }
+  toast("任务运行中无法中断，已停止本地等待", "info");
+}
+
 export async function startAlignmentRun(jobId, resumeId, granularity, focus) {
   const result = await api(`/api/jobs/${encodeURIComponent(jobId)}/workbench`, {
     method: "POST",
@@ -485,6 +702,7 @@ export async function startAlignmentRun(jobId, resumeId, granularity, focus) {
       prompt_focus: focus || "balanced",
     }),
   });
+  alignmentReconciled = false;
   if (activeSession) {
     activeSession.alignment = {
       ...(activeSession.alignment || {}),
@@ -550,6 +768,7 @@ async function pollAlignmentJob() {
       };
       if (["succeeded", "failed", "canceled"].includes(snapshot.status)) {
         stopAlignmentPoll();
+        alignmentReconciled = true;
         if (snapshot.status === "succeeded") {
           const reloadTarget =
             activeJobId ||
@@ -598,7 +817,20 @@ async function pollAlignmentJob() {
       if (runButton) runButton.disabled = true;
     }
   } catch {
+    /* #B4: a poll failure mid-flight must not leave the workspace stuck
+     * in "running" with no recovery path. */
     stopAlignmentPoll();
+    alignmentReconciled = true;
+    if (activeSession) {
+      activeSession.alignment = {
+        ...(activeSession.alignment || {}),
+        status: "failed",
+        stage: "failed",
+        error: "对齐任务查询失败，请重试",
+      };
+      rerenderActiveCanvas();
+    }
+    toast("对齐任务查询失败，请重试", "error");
   }
 }
 

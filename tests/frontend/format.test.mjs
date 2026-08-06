@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  applyAcceptedDiffsToDraft,
+  applyDiffToDraft,
   benchmarkSourceBadge,
   buildDiagnosisMarkdownFrom,
   buildWbResultHtmlFrom,
@@ -11,8 +13,11 @@ import {
   formatSalary,
   inlineDiff,
   isJdUrl,
+  jobEditFormHtml,
   jobStatusLabel,
+  jobTimelineFormHtml,
   lineDiff,
+  matchBadgeInfo,
   matchTone,
   normalizeVocabulary,
   normalizeVocabularyList,
@@ -20,6 +25,7 @@ import {
   parseHashValue,
   parseImportText,
   renderInlineDiffSide,
+  renderMatchBadge,
   tokenizeInline,
 } from "../../src/resualign/static/app/format.js";
 
@@ -192,6 +198,7 @@ test("parseHashValue resolves workspace and resume routes with ids", () => {
   assert.deepEqual(parseHashValue("#/workspace/job-123"), {
     name: "workspace",
     jobId: "job-123",
+    resumeId: null,
   });
   assert.deepEqual(parseHashValue("#/resume/r-1"), {
     name: "resume",
@@ -204,6 +211,30 @@ test("parseHashValue decodes URI components in ids", () => {
   assert.deepEqual(parseHashValue("#/workspace/abc%20def"), {
     name: "workspace",
     jobId: "abc def",
+    resumeId: null,
+  });
+});
+
+test("parseHashValue parses ?resume= deep-link query into resumeId", () => {
+  assert.deepEqual(parseHashValue("#/workspace/job-1?resume=r-42"), {
+    name: "workspace",
+    jobId: "job-1",
+    resumeId: "r-42",
+  });
+  assert.deepEqual(parseHashValue("#/workspace?resume=r-42"), {
+    name: "workspace",
+    jobId: null,
+    resumeId: "r-42",
+  });
+  assert.deepEqual(parseHashValue("#/workspace/job-1?resume=r%2042"), {
+    name: "workspace",
+    jobId: "job-1",
+    resumeId: "r 42",
+  });
+  assert.deepEqual(parseHashValue("#/workspace?other=1"), {
+    name: "workspace",
+    jobId: null,
+    resumeId: null,
   });
 });
 
@@ -464,4 +495,139 @@ test("buildDiagnosisMarkdownFrom renders full diagnosis markdown", () => {
 test("buildDiagnosisMarkdownFrom handles empty diagnosis gracefully", () => {
   const md = buildDiagnosisMarkdownFrom({}, "简历诊断", "");
   assert.equal(md, "# 简历诊断\n\n> 诊断分：— / 100 · 模型：未知\n");
+});
+
+/* ------------------------------------------------------------------ */
+/* U7 diff 应用纯函数                                                   */
+/* ------------------------------------------------------------------ */
+
+test("applyDiffToDraft applies modify / add / remove diffs", () => {
+  const modify = applyDiffToDraft("负责系统开发", {
+    type: "modify",
+    original: "负责系统开发",
+    proposed: "负责高并发系统开发",
+  });
+  assert.equal(modify, "负责高并发系统开发");
+
+  const add = applyDiffToDraft("已有行", { type: "add", proposed: "新增行" });
+  assert.equal(add, "已有行\n新增行");
+
+  const remove = applyDiffToDraft("A行\nB行", {
+    type: "remove",
+    original: "B行",
+  });
+  assert.equal(remove, "A行\n");
+
+  assert.equal(applyDiffToDraft("原样", { type: "unknown" }), "原样");
+  assert.equal(applyDiffToDraft("原样", null), "原样");
+  assert.equal(applyDiffToDraft(undefined, { type: "add", proposed: "x" }), "\nx");
+});
+
+test("applyAcceptedDiffsToDraft applies only the accepted diff set", () => {
+  const diffs = [
+    { diff_id: "a1", type: "modify", original: "旧技能", proposed: "新技能" },
+    { diff_id: "b2", type: "add", proposed: "量化成果" },
+    { diff_id: "c3", type: "remove", original: "冗余行" },
+  ];
+  const draft = applyAcceptedDiffsToDraft("旧技能\n冗余行", diffs, ["b2"]);
+  assert.equal(draft, "旧技能\n冗余行\n量化成果");
+
+  const none = applyAcceptedDiffsToDraft("旧技能\n冗余行", diffs, []);
+  assert.equal(none, "旧技能\n冗余行");
+
+  const all = applyAcceptedDiffsToDraft("旧技能\n冗余行", diffs, ["a1", "b2", "c3"]);
+  assert.equal(all, "新技能\n\n量化成果");
+
+  /* 不存在的 id 忽略 */
+  const unknown = applyAcceptedDiffsToDraft("旧技能", diffs, ["zzz"]);
+  assert.equal(unknown, "旧技能");
+});
+
+test("applyAcceptedDiffsToDraft falls back to diff-index keys", () => {
+  const diffs = [
+    { type: "add", proposed: "X" },
+    { type: "add", proposed: "Y" },
+  ];
+  const draft = applyAcceptedDiffsToDraft("底稿", diffs, ["diff-1"]);
+  assert.equal(draft, "底稿\nY");
+});
+
+/* ------------------------------------------------------------------ */
+/* F10/U11 匹配度来源标注                                               */
+/* ------------------------------------------------------------------ */
+
+test("matchBadgeInfo prefers eval score, then gap, then persisted job score", () => {
+  const session = {
+    alignment: { eval_score: { jd_match_score: 88 } },
+    gap: { score: 60 },
+  };
+  assert.deepEqual(matchBadgeInfo(session, { match_score: 50 }), {
+    score: 88,
+    source: "来自对齐评估",
+  });
+
+  assert.deepEqual(
+    matchBadgeInfo({ gap: { score: 60 } }, { match_score: 50 }),
+    { score: 60, source: "来自差距分析" },
+  );
+
+  assert.deepEqual(matchBadgeInfo({}, { match_score: 50 }), {
+    score: 50,
+    source: "来自对齐评估",
+  });
+
+  assert.deepEqual(matchBadgeInfo({}, {}), { score: null, source: "" });
+  assert.deepEqual(matchBadgeInfo(null, null), { score: null, source: "" });
+});
+
+test("renderMatchBadge renders score, source title and muted source label", () => {
+  const html = renderMatchBadge(
+    { alignment: { eval_score: { jd_match_score: 82.4 } } },
+    {},
+  );
+  assert.match(html, /class="match-badge match--high" data-match-badge/);
+  assert.match(html, /title="来自对齐评估"/);
+  assert.match(html, />匹配 82</);
+  assert.match(html, /data-match-source>来自对齐评估</);
+
+  assert.equal(renderMatchBadge({}, {}), "");
+});
+
+/* ------------------------------------------------------------------ */
+/* F6/U10 时间线弹窗 / 编辑弹窗表单 HTML                                 */
+/* ------------------------------------------------------------------ */
+
+test("jobTimelineFormHtml includes structured follow-up fields", () => {
+  const html = jobTimelineFormHtml({
+    job_id: "j1",
+    status: "interview",
+    next_step_due_at: "2026-08-10T14:30",
+    interview_stage: "二面",
+  });
+  assert.match(html, /data-form="job-detail-edit"/);
+  assert.match(html, /type="datetime-local" name="next_step_due_at" value="2026-08-10T14:30"/);
+  assert.match(html, /name="interview_stage"/);
+  assert.match(html, /<option value=""\s*>无<\/option>/);
+  assert.match(html, /<option value="一面"\s*>一面<\/option>/);
+  assert.match(html, /<option value="二面" selected>二面<\/option>/);
+  assert.match(html, /<option value="HR面"\s*>HR面<\/option>/);
+  assert.match(html, /<option value="谈薪"\s*>谈薪<\/option>/);
+  assert.match(html, /<option value="笔试"\s*>笔试<\/option>/);
+  assert.match(html, /<option value="其他"\s*>其他<\/option>/);
+  /* 未设置阶段时默认“无” */
+  const empty = jobTimelineFormHtml({ job_id: "j2", status: "draft" });
+  assert.match(empty, /name="interview_stage"><option value="" selected>无<\/option>/);
+  assert.match(empty, /type="datetime-local" name="next_step_due_at" value=""/);});
+
+test("jobEditFormHtml adds the reclassify secondary action", () => {
+  const html = jobEditFormHtml(
+    { job_id: "j1", title: "后端", jd_text: "JD", tech_tags: ["Go"] },
+    { statuses: ["面试中"], job_functions: ["后端"], seniorities: ["高级"] },
+  );
+  assert.match(html, /data-form="job-edit"/);
+  assert.match(html, /data-action="reclassify-job" data-id="j1">重新分类<\/button>/);
+  assert.match(html, /type="submit">保存<\/button>/);
+  /* 未传 vocabulary 时回退内置列表 */
+  const fallback = jobEditFormHtml({ job_id: "j2", title: "T", jd_text: "" });
+  assert.match(fallback, /<option value="后端" >后端<\/option>/);
 });

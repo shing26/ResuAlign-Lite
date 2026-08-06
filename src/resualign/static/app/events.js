@@ -89,6 +89,10 @@ export const state = {
   batchResumes: [],
   wbFinalDraft: null,
   wbRawJdOpen: false,
+  /* U7: 工作台工作草稿——采纳/应用基于当前草稿增量合并，连续采纳不丢前一条。
+   * wbWorkingDraft = { jobId, draft }；wbAcceptedBullets = { [jobId]: [diffId] } */
+  wbWorkingDraft: null,
+  wbAcceptedBullets: {},
   diagnosis: null,
   diagnosisPolling: null,
   diagnosisResumeId: null,
@@ -453,6 +457,7 @@ export function renderDiagnosisResult(snapshot) {
       </div>
     </div>
     <div class="row" style="margin-top:12px">
+      <button class="btn btn-primary btn-sm" data-action="diagnosis-to-align" data-id="${state.diagnosisResumeId || ""}">用这份简历去对齐</button>
       <button class="btn btn-outline btn-sm" data-action="rerun-diagnosis" data-id="${state.diagnosisResumeId || ""}">重新诊断</button>
     </div>`;
   const diagnoseBtn = $("[data-action='diagnose-resume']", panel);
@@ -558,6 +563,19 @@ export function renderWbProgress(snapshot) {
   elapsed.textContent = `${snapshot.elapsed_seconds || 0}s`;
   const cancel = $("[data-wb-cancel]");
   if (cancel) cancel.hidden = snapshot.status !== "queued" && snapshot.status !== "running";
+}
+
+/* F5: 移动端工作台 tab 切换（controls / diff / appraisal）。激活指定 pane：
+ * 更新 [data-wb-tab] 的 aria-selected 与 [data-wb-pane] 的 is-active。 */
+export function setWbMobilePane(pane) {
+  const target = ["controls", "diff", "appraisal"].includes(pane) ? pane : "controls";
+  state.wbMobilePane = target;
+  $$("[data-wb-tab]").forEach((tab) =>
+    tab.setAttribute("aria-selected", String(tab.dataset.wbTab === target)),
+  );
+  $$("[data-wb-pane]").forEach((paneNode) => {
+    paneNode.classList.toggle("is-active", paneNode.dataset.wbPane === target);
+  });
 }
 
 export function stopWbPolling() {

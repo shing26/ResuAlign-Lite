@@ -67,9 +67,29 @@ test("reminder strip DOM: badges link to workspace and carry due labels", () => 
   const links = [...strip.querySelectorAll("a.badge")];
   assert.equal(links.length, 2);
   assert.equal(links[0].getAttribute("href"), "#/workspace/j1");
-  assert.equal(links[0].textContent, "后端开发 · 已过期 26h");
+  assert.equal(links[0].textContent, "后端开发 · 8/9 10:00 · 已过期 26h");
   assert.equal(links[0].getAttribute("title"), "2026-08-09 10:00 二面");
-  assert.equal(links[1].textContent, "前端开发 · 21h 内到期");
+  assert.equal(links[1].textContent, "前端开发 · 8/11 09:00 · 21h 内到期");
+});
+
+test("reminder strip DOM: structured fields render stage badge with due time", () => {
+  const reminders = dueReminders(
+    [
+      {
+        job_id: "j3",
+        title: "数据工程师",
+        next_step: "等 HR 通知",
+        next_step_due_at: "2026-08-10 18:00",
+        interview_stage: "二面",
+      },
+    ],
+    NOW,
+  );
+  assert.equal(reminders.length, 1);
+  assert.equal(reminders[0].stage, "二面");
+  const body = bodyFrom(renderReminderStrip(reminders));
+  const link = body.querySelector("a.badge");
+  assert.equal(link.textContent, "数据工程师 · 二面 · 8/10 18:00 · 6h 内到期");
 });
 
 test("reminder banner DOM: shows active job follow-up", () => {
@@ -82,5 +102,23 @@ test("reminder banner DOM: shows active job follow-up", () => {
   assert.ok(banner);
   assert.ok(banner.textContent.includes("算法工程师"));
   assert.ok(banner.textContent.includes("已过期 21h"));
-  assert.ok(banner.textContent.includes("三面"));
+  assert.ok(banner.textContent.includes("8/9 15:00"));
+});
+
+test("reminder banner DOM: structured stage shows as 阶段 · 到期时间", () => {
+  const reminders = dueReminders(
+    [
+      {
+        job_id: "j9",
+        title: "算法工程师",
+        next_step: "准备系统设计",
+        next_step_due_at: "2026-08-11 14:00",
+        interview_stage: "HR面",
+      },
+    ],
+    NOW,
+  );
+  const body = bodyFrom(renderReminderBanner(reminders[0]));
+  const banner = body.querySelector("[data-reminder-banner]");
+  assert.ok(banner.textContent.includes("HR面 · 8/11 14:00"));
 });

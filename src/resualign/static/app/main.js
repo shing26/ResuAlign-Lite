@@ -3,20 +3,18 @@ import {
   $$,
   api,
   buildDiagnosisMarkdown,
-  canonicalJobStatus,
   closeModal,
   download,
   esc,
   formatDate,
   formatSalary,
-  JOB_STATUS_CANONICAL,
-  JOB_STATUS_LABELS,
   normalizeVocabulary,
   options,
   recoverDiagnosis,
   renderBatchResults,
   renderDiagnosisError,
   renderDiagnosisProgress,
+  setWbMobilePane,
   showModal,
   startBatchPolling,
   startDiagnosisPolling,
@@ -37,6 +35,7 @@ import {
 import {
   analyzeActiveJd,
   activeSessionForExport,
+  cancelActiveAlignment,
   closeSplitCanvas,
   copyAlignMarkdown,
   exportAlignJson,
@@ -47,6 +46,8 @@ import {
   startAlignmentRun,
 } from "./split-canvas.js";
 import {
+  applyAcceptedDiffsToDraft,
+  applyDiffToDraft,
   applyJdParseError,
   applyJdParseResult,
   backupRestoreGuide,
@@ -54,6 +55,8 @@ import {
   batchRowsToCsv,
   buildJobsBackup,
   dueReminders,
+  jobEditFormHtml,
+  jobTimelineFormHtml,
   jobsToCsv,
   lineDiff,
   onboardingSteps,
@@ -328,23 +331,11 @@ async function openResumeEditor(resumeId) {
 function openJobEditor(job) {
   showModal(
     `编辑「${job.title}」`,
-    `<form data-form="job-edit">
-      <input type="hidden" name="job_id" value="${job.job_id}">
-      <div class="form-grid">
-        <div class="field"><label>标题</label><input type="text" name="title" value="${esc(job.title)}"></div>
-        <div class="field"><label>公司</label><input type="text" name="company" value="${esc(job.company || "")}"></div>
-        <div class="field"><label>城市</label><input type="text" name="location" value="${esc(job.location || "")}"></div>
-        <div class="field"><label>状态</label><select name="status">${options(vocabularyList("statuses"), job.status)}</select></div>
-        <div class="field"><label>职能</label><select name="job_function"><option value="">未分类</option>${options(vocabularyList("job_functions"), job.job_function || "")}</select></div>
-        <div class="field"><label>级别</label><select name="seniority"><option value="">未知</option>${options(vocabularyList("seniorities"), job.seniority || "")}</select></div>
-        <div class="field"><label>最低薪资（月，元）</label><input type="number" name="salary_min" value="${job.salary_min ?? ""}"></div>
-        <div class="field"><label>最高薪资（月，元）</label><input type="number" name="salary_max" value="${job.salary_max ?? ""}"></div>
-        <div class="field wide"><label>技术标签（逗号分隔）</label><input type="text" name="tech_tags" value="${esc((job.tech_tags || []).join(", "))}"></div>
-        <div class="field wide"><label>JD 文本</label><textarea name="jd_text" rows="8">${esc(job.jd_text)}</textarea></div>
-      </div>
-      <div class="actions"><button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
-        <button class="btn btn-primary" type="submit">保存</button></div>
-    </form>`,
+    jobEditFormHtml(job, {
+      statuses: vocabularyList("statuses"),
+      job_functions: vocabularyList("job_functions"),
+      seniorities: vocabularyList("seniorities"),
+    }),
   );
 }
 
@@ -392,24 +383,7 @@ const JOB_IMPORT_FORM_HTML = `
     </form>`;
 
 async function openJobDetail(job) {
-  showModal(
-    `岗位详情 · ${job.title}`,
-    `<form data-form="job-detail-edit">
-      <input type="hidden" name="job_id" value="${job.job_id}">
-      <div class="form-grid">
-        <div class="field"><label>状态</label><select name="status">${JOB_STATUS_CANONICAL.map((value) => `<option value="${value}" ${canonicalJobStatus(job.status) === value ? "selected" : ""}>${esc(JOB_STATUS_LABELS[value])}</option>`).join("")}</select></div>
-        <div class="field"><label>投递时间</label><input type="datetime-local" name="applied_at" value="${esc(job.applied_at || "")}"></div>
-        <div class="field"><label>下一步</label><input type="text" name="next_step" value="${esc(job.next_step || "")}"></div>
-        <div class="field"><label>Offer 时间</label><input type="datetime-local" name="offer_at" value="${esc(job.offer_at || "")}"></div>
-        <div class="field"><label>拒绝时间</label><input type="datetime-local" name="rejected_at" value="${esc(job.rejected_at || "")}"></div>
-        <div class="field wide"><label>备注</label><textarea name="notes" rows="3">${esc(job.notes || "")}</textarea></div>
-      </div>
-      <div class="actions">
-        <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
-        <button class="btn btn-primary" type="submit">保存</button>
-      </div>
-    </form>`,
-  );
+  showModal(`岗位详情 · ${job.title}`, jobTimelineFormHtml(job));
 }
 
 async function showDuplicateJobGuide(payload) {
@@ -514,6 +488,7 @@ async function renderWorkspaceView(app) {
     <div class="workbench-3col ${state.wbAppraisalOpen ? "is-appraisal-open" : ""}" data-workbench-layout>
       <div class="wb-mobile-tabs segmented" role="tablist" aria-label="工作台面板">
         <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="controls" aria-selected="${state.wbMobilePane === "controls"}">调优</button>
+        <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="diff" aria-selected="${state.wbMobilePane === "diff"}">结果</button>
         <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="appraisal" aria-selected="${state.wbMobilePane === "appraisal"}">评估</button>
       </div>
       <div class="workbench-column workbench-controls ${state.wbMobilePane === "controls" ? "is-active" : ""}" data-wb-pane="controls">
@@ -562,7 +537,7 @@ async function renderWorkspaceView(app) {
           <div class="small"><strong data-wb-stage>排队中</strong> · <span class="muted" data-wb-message></span></div>
         </div>
       </div>
-      <div class="workbench-column workbench-diff" data-wb-pane="diff">
+      <div class="workbench-column workbench-diff ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff">
         <div class="panel panel-card panel--info" data-wb-result hidden></div>
         <div class="panel panel-card panel--success final-draft-panel" data-final-draft-panel hidden></div>
       </div>
@@ -650,6 +625,8 @@ async function pollWbJob(jobId) {
     if (["succeeded", "failed", "canceled"].includes(snapshot.status)) {
       const app = state.wbPolling ? state.wbPolling.app : $("#app");
       stopWbPolling();
+      /* F5: 任务结束自动切到「结果」tab，让移动端用户直接看到 diff 面板。 */
+      setWbMobilePane("diff");
       if (snapshot.status === "succeeded") {
         state.wbResult = snapshot.result;
         renderWbResult(app);
@@ -837,15 +814,8 @@ function toggleAppraisalDrawer(button) {
   }
 }
 
-function setWbMobilePane(button) {
-  state.wbMobilePane = button.dataset.wbTab;
-  $$("[data-wb-tab]").forEach((tab) =>
-    tab.setAttribute("aria-selected", String(tab.dataset.wbTab === state.wbMobilePane)),
-  );
-  $$("[data-wb-pane='controls'], [data-wb-pane='appraisal']").forEach((pane) => {
-    pane.classList.toggle("is-active", pane.dataset.wbPane === state.wbMobilePane);
-  });
-}
+/* setWbMobilePane 实现在 events.js（F5：controls / diff / appraisal 三面板），
+ * 供 delegation 与 pollWbJob 终态自动切 tab 共用。 */
 
 async function printTarget(kind) {
   const printNode = $("#print-root");
@@ -1151,9 +1121,28 @@ const actions = {
     const panel = wrap || document.querySelector("[data-batch-wrap]");
     if (panel) panel.hidden = !panel.hidden;
   },
-  "delete-job": async (button) => {
-    if (!window.confirm("确定删除这个岗位？")) return;
-    await api(`/api/jobs/${encodeURIComponent(button.dataset.id)}`, { method: "DELETE" });
+  "delete-job": (button) => {
+    /* #U9: replace window.confirm with the in-app modal. The confirm
+       button reuses the document-level action delegation via a custom
+       data-action so modal content needs no extra wiring. */
+    const job = (state.jobs || []).find(
+      (item) => item.job_id === button.dataset.id,
+    );
+    const title = job && job.title ? job.title : "该岗位";
+    showModal(
+      "删除岗位",
+      `<p>确定删除「${esc(title)}」？此操作不可恢复。</p>
+       <div class="actions">
+         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+         <button class="btn btn-danger" type="button" data-action="confirm-delete-job" data-id="${esc(button.dataset.id)}">确认删除</button>
+       </div>`,
+    );
+  },
+  "confirm-delete-job": async (button) => {
+    const jobId = button.dataset.id;
+    if (!jobId) return;
+    closeModal();
+    await api(`/api/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" });
     toast("岗位已删除", "success");
     render();
   },
@@ -1284,6 +1273,26 @@ const actions = {
     }
   },
   "open-optimizer": (button) => navigate("workspace", button.dataset.id),
+  /* F4: 简历诊断结果 → 用这份简历去对齐。跳到最近一个岗位的工作台并带上
+   * ?resume= 深链参数（split-canvas 会预选该主简历）；岗位库为空时跳到
+   * #/workspace?resume=<id>，工作台空态让用户先建/选岗位。 */
+  "diagnosis-to-align": async (button) => {
+    const resumeId = button.dataset.id;
+    if (!resumeId) {
+      toast("缺少简历信息，请重试诊断", "error");
+      return;
+    }
+    let target = "";
+    try {
+      const jobs = await api("/api/jobs?limit=1");
+      if (Array.isArray(jobs) && jobs.length) target = jobs[0].job_id;
+    } catch {
+      /* fall through to the job-less route */
+    }
+    window.location.hash = target
+      ? `#/workspace/${encodeURIComponent(target)}?resume=${encodeURIComponent(resumeId)}`
+      : `#/workspace?resume=${encodeURIComponent(resumeId)}`;
+  },
   "accept-bullet": async (button) => {
     const jobId = button.dataset.id;
     const diffId = button.dataset.diffId;
@@ -1293,25 +1302,33 @@ const actions = {
       toast("请先运行一次对齐以固定主简历", "error");
       return;
     }
-    const resume = await api(`/api/master-resumes/${encodeURIComponent(resumeId)}`);
     const diffs = job.diffs || [];
-    const accepted = diffs.filter((diff) => diff.diff_id === diffId);
-    const indices = accepted.length
-      ? [diffs.indexOf(accepted[0])]
-      : [];
-    if (!indices.length) {
+    const diff = diffs.find((item) => item.diff_id === diffId);
+    if (!diff) {
       toast("该条建议不在当前对齐结果中", "error");
       return;
     }
-    let draft = resume.content || "";
-    const diff = accepted[0];
-    if (diff.type === "modify" && diff.original && diff.proposed) {
-      draft = draft.split(diff.original).join(diff.proposed);
-    } else if (diff.type === "add" && diff.proposed) {
-      draft = `${draft}\n${diff.proposed}`;
-    } else if (diff.type === "remove" && diff.original) {
-      draft = draft.split(diff.original).join("");
+    /* U7: 每条采纳都在当前工作草稿上增量合并，不再从原始简历重建，
+     * 连续采纳多条时前一条不会丢失。 */
+    const accepted = new Set(state.wbAcceptedBullets[jobId] || []);
+    if (accepted.has(diffId)) {
+      toast("该条已采纳过", "info");
+      return;
     }
+    const resume = await api(`/api/master-resumes/${encodeURIComponent(resumeId)}`);
+    const base =
+      (state.wbWorkingDraft && state.wbWorkingDraft.jobId === jobId
+        ? state.wbWorkingDraft.draft
+        : null) ||
+      job.final_draft ||
+      resume.content ||
+      "";
+    const draft = applyDiffToDraft(base, diff);
+    state.wbWorkingDraft = { jobId, draft };
+    state.wbAcceptedBullets = {
+      ...state.wbAcceptedBullets,
+      [jobId]: [...accepted, diffId],
+    };
     await api(`/api/jobs/${encodeURIComponent(jobId)}/final-draft`, {
       method: "POST",
       body: JSON.stringify({ draft }),
@@ -1362,22 +1379,27 @@ const actions = {
       toast("没有可应用的对齐结果", "error");
       return;
     }
-    const resume = await api(`/api/master-resumes/${encodeURIComponent(resumeId)}`);
-    let draft = resume.content || "";
-    for (const diff of diffs) {
-      if (diff.type === "modify" && diff.original && diff.proposed) {
-        draft = draft.split(diff.original).join(diff.proposed);
-      } else if (diff.type === "add" && diff.proposed) {
-        draft = `${draft}\n${diff.proposed}`;
-      } else if (diff.type === "remove" && diff.original) {
-        draft = draft.split(diff.original).join("");
-      }
+    /* U7: 只应用被采纳（accepted）的 diff 集合，而非全量 diff。 */
+    const acceptedIds = state.wbAcceptedBullets[jobId] || [];
+    if (!acceptedIds.length) {
+      toast("还没有已采纳的建议，先逐条点「采纳」", "error");
+      return;
     }
+    const resume = await api(`/api/master-resumes/${encodeURIComponent(resumeId)}`);
+    const base =
+      (state.wbWorkingDraft && state.wbWorkingDraft.jobId === jobId
+        ? state.wbWorkingDraft.draft
+        : null) ||
+      job.final_draft ||
+      resume.content ||
+      "";
+    const draft = applyAcceptedDiffsToDraft(base, diffs, acceptedIds);
+    state.wbWorkingDraft = { jobId, draft };
     await api(`/api/jobs/${encodeURIComponent(jobId)}/final-draft`, {
       method: "POST",
       body: JSON.stringify({ draft }),
     });
-    toast("已应用全部可采纳建议", "success");
+    toast("已应用已采纳建议", "success");
     await refreshOptimizerFromJob(jobId);
   },
   "copy-align-markdown": () => copyAlignMarkdown(
@@ -1444,7 +1466,7 @@ const actions = {
   },
   "toggle-theme": () => toggleTheme(),
   "toggle-appraisal-drawer": (button) => toggleAppraisalDrawer(button),
-  "set-wb-tab": (button) => setWbMobilePane(button),
+  "set-wb-tab": (button) => setWbMobilePane(button.dataset.wbTab),
   "cancel-workbench": async () => {
     const snapshot = state.wbJob && state.wbJob.workbench_job_id
       ? await api(`/api/jobs/${encodeURIComponent(state.wbJob.workbench_job_id)}`)
@@ -1467,6 +1489,7 @@ const actions = {
     const form = $('[data-form="wb-run"]');
     if (form) form.dispatchEvent(new Event("submit", { cancelable: true }));
   },
+  "cancel-align-job": () => cancelActiveAlignment(),
   "toggle-wb-view": (button) => toggleWbView(button),
   "accept-diffs": () => acceptSelectedDiffs(),
   "save-final-draft": async () => {
@@ -1843,26 +1866,43 @@ async function handleForm(formName, data, form) {
       render();
       break;
     case "job-create": {
-      const payload = {
-        title: data.title || null,
-        jd_text: data.jd_text || null,
-        jd_url: data.jd_url || null,
-        company: data.company || null,
-        location: data.location || null,
-        salary_min: data.salary_min ? Number(data.salary_min) : null,
-        salary_max: data.salary_max ? Number(data.salary_max) : null,
-        salary_currency: data.salary_currency || null,
-        source_url: data.source_url || null,
-      };
+      /* #U8: submitting runs the job through classification (~2 min);
+         disable the button and show progress instead of a silent wait. */
+      const submitBtn = form && form.querySelector('button[type="submit"]');
+      const originalText = submitBtn ? submitBtn.textContent : "";
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "保存并分类中...";
+        submitBtn.classList.add("is-loading");
+      }
       try {
-        await api("/api/jobs", { method: "POST", body: JSON.stringify(payload) });
-        toast("岗位已添加", "success");
-        render();
-      } catch (error) {
-        if (error.status === 409) {
-          await showDuplicateJobGuide(payload);
-        } else {
-          throw error;
+        const payload = {
+          title: data.title || null,
+          jd_text: data.jd_text || null,
+          jd_url: data.jd_url || null,
+          company: data.company || null,
+          location: data.location || null,
+          salary_min: data.salary_min ? Number(data.salary_min) : null,
+          salary_max: data.salary_max ? Number(data.salary_max) : null,
+          salary_currency: data.salary_currency || null,
+          source_url: data.source_url || null,
+        };
+        try {
+          await api("/api/jobs", { method: "POST", body: JSON.stringify(payload) });
+          toast("岗位已添加", "success");
+          render();
+        } catch (error) {
+          if (error.status === 409) {
+            await showDuplicateJobGuide(payload);
+          } else {
+            throw error;
+          }
+        }
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalText;
+          submitBtn.classList.remove("is-loading");
         }
       }
       break;
@@ -1897,6 +1937,10 @@ async function handleForm(formName, data, form) {
         notes: data.notes || null,
         offer_at: data.offer_at || null,
         rejected_at: data.rejected_at || null,
+        /* F6/U10: 结构化跟进字段。空串经 `|| null` 以 null 发送，后端将
+         * null/"" 统一转成 NULL 写入（清除语义，无需前端特判）。 */
+        next_step_due_at: data.next_step_due_at || null,
+        interview_stage: data.interview_stage || null,
       };
       await api(`/api/jobs/${encodeURIComponent(data.job_id)}`, {
         method: "PATCH",
@@ -2102,8 +2146,12 @@ function readOnboardingSkipped() {
 }
 
 async function loadResumesForOnboarding() {
-  if (Array.isArray(state.resumes)) return state.resumes;
-  if (Array.isArray(state.batchResumes)) return state.batchResumes;
+  if (Array.isArray(state.resumes) && state.resumes.length > 0) {
+    return state.resumes;
+  }
+  if (Array.isArray(state.batchResumes) && state.batchResumes.length > 0) {
+    return state.batchResumes;
+  }
   try {
     const resumes = await api("/api/master-resumes");
     state.resumes = resumes;
@@ -2203,7 +2251,9 @@ setCanvasRenderHook(async (app) => {
   const toolbar = app.querySelector(".board-toolbar");
   if (!toolbar || app.querySelector("[data-batch-wrap]")) return;
   let resumes = state.batchResumes;
-  if (!resumes) {
+  /* #B2: state.batchResumes starts as [] (truthy), so the old `if (!resumes)`
+     guard never re-fetched and the panel was stuck on "先到简历中心创建主简历". */
+  if (!Array.isArray(resumes) || resumes.length === 0) {
     try {
       resumes = await api("/api/master-resumes");
       state.batchResumes = resumes;
