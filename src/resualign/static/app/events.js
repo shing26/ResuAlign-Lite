@@ -1,6 +1,13 @@
 /* Runtime helpers, modal handling, and progress/polling events. */
 
 import {
+  focusInitial,
+  lockBodyScroll,
+  restoreFocus,
+  trapTabKey,
+  unlockBodyScroll,
+} from "./focus-trap.js";
+import {
   DEFAULT_VOCABULARY,
   STAGE_LABELS,
   buildDiagnosisMarkdownFrom,
@@ -204,8 +211,15 @@ export async function api(path, options = {}) {
   return response.json();
 }
 
+let modalReturnFocus = null;
+let modalKeydownHandler = null;
+
 export function showModal(title, bodyHtml) {
   closeModal();
+  modalReturnFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   backdrop.setAttribute("role", "dialog");
@@ -216,11 +230,29 @@ export function showModal(title, bodyHtml) {
     if (event.target === backdrop) closeModal();
   });
   document.body.append(backdrop);
+  lockBodyScroll(document.body);
+  modalKeydownHandler = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeModal();
+      return;
+    }
+    trapTabKey(backdrop, event, document.activeElement);
+  };
+  document.addEventListener("keydown", modalKeydownHandler);
+  window.setTimeout(() => focusInitial(backdrop), 0);
 }
 
 export function closeModal() {
   const backdrop = $(".modal-backdrop");
   if (backdrop) backdrop.remove();
+  if (modalKeydownHandler) {
+    document.removeEventListener("keydown", modalKeydownHandler);
+    modalKeydownHandler = null;
+  }
+  unlockBodyScroll(document.body);
+  restoreFocus(modalReturnFocus);
+  modalReturnFocus = null;
 }
 
 export function openLoginModal() {
