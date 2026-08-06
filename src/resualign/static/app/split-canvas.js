@@ -106,8 +106,13 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
       </div>
       ${crawlStatusLine(session)}
       ${stageStepper(session)}
+      <div class="wb-mobile-tabs segmented" role="tablist" aria-label="工作台面板">
+        <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="controls" aria-selected="${state.wbMobilePane === "controls"}">调优</button>
+        <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="diff" aria-selected="${state.wbMobilePane === "diff"}">结果</button>
+        <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="appraisal" aria-selected="${state.wbMobilePane === "appraisal"}">评估</button>
+      </div>
       <div class="split-layout">
-        <section class="split-pane split-pane--jd" data-jd-canvas>
+        <section class="split-pane split-pane--jd ${state.wbMobilePane === "controls" ? "is-active" : ""}" data-wb-pane="controls" data-jd-canvas>
           <div class="split-pane__head">
             <div>
               <div class="split-section-title">JD 智能解析</div>
@@ -136,7 +141,7 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
             <div class="pre raw-jd">${esc(job.jd_text || "")}</div>
           </details>
         </section>
-        <section class="split-pane split-pane--resume" data-resume-canvas>
+        <section class="split-pane split-pane--resume ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-resume-canvas>
           <div class="split-pane__head">
             <div>
               <div class="split-section-title">简历对齐画布</div>
@@ -146,16 +151,16 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           ${alignmentControls(session, resumes, jobId)}
           ${exportDock(jobId, session)}
           <div class="panel panel-card panel--success final-draft-panel" data-final-draft-panel hidden></div>
-          <details class="panel panel-card panel--info appraisal-panel split-appraisal" data-appraisal-panel open>
-            <summary>投递价值评估</summary>
-            <div class="appraisal-body" data-appraisal-body>
-              <div class="muted small">运行一次对齐分析后生成</div>
-            </div>
-          </details>
           <div class="split-pane__match">${score != null ? radarHtml(score) : `<div class="small muted" style="padding:10px 0">运行预分析后生成匹配雷达。</div>`}</div>
           <div class="split-diff-area">${diffList(session, jobId)}</div>
         </section>
       </div>
+      <details class="panel panel-card panel--info appraisal-panel split-appraisal ${state.wbMobilePane === "appraisal" ? "is-active" : ""}" data-wb-pane="appraisal" data-appraisal-panel open>
+        <summary>投递价值评估</summary>
+        <div class="appraisal-body" data-appraisal-body>
+          <div class="muted small">运行一次对齐分析后生成</div>
+        </div>
+      </details>
     </div>`;
   const form = $("[data-form='split-align']");
   if (form) {

@@ -3915,6 +3915,29 @@ select,
   display: none;
 }
 
+/* F5: live workbench (split-canvas) mobile pane switching. The tabs bar
+   surfaces on narrow screens and toggles [data-wb-pane] visibility. */
+.split-canvas .wb-mobile-tabs {
+  display: none;
+}
+
+.split-canvas .split-appraisal {
+  margin-top: 14px;
+}
+
+@media (max-width: 640px) {
+  .split-canvas .wb-mobile-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .split-canvas [data-wb-pane]:not(.is-active) {
+    display: none;
+  }
+}
+
 .appraisal-drawer-toggle {
   display: none;
 }
