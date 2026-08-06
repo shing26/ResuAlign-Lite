@@ -1103,6 +1103,32 @@ select {
   color: var(--diff-modify-ink);
 }
 
+.cmp-line-num {
+  display: inline-block;
+  min-width: 2.4em;
+  margin-right: 8px;
+  color: var(--text-muted);
+  font-size: 0.76em;
+  font-weight: 400;
+  text-align: right;
+  user-select: none;
+}
+
+.diff-char-del {
+  background: var(--error-soft);
+  color: var(--error-deep);
+  text-decoration: line-through;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+.diff-char-ins {
+  background: var(--success-soft);
+  color: var(--success-deep);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
 .cmp-check {
   display: inline-flex;
   align-items: center;

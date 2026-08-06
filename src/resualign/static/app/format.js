@@ -968,6 +968,10 @@ export function buildWbResultHtmlFrom(result, diffs, accepted, originalContent, 
   );
   const modifyOriginal = new Set();
   const modifyProposed = new Set();
+  /* Trimmed modify pairs so modified lines can carry character-level
+   * marks: trimmed original -> proposed text, and the reverse. */
+  const modifyPairOriginal = new Map();
+  const modifyPairProposed = new Map();
   const proposedIndex = new Map();
   const removeIndex = new Map();
   diffs.forEach((diff, index) => {
@@ -976,27 +980,54 @@ export function buildWbResultHtmlFrom(result, diffs, accepted, originalContent, 
     if (diff.type === "modify") {
       if (orig) modifyOriginal.add(orig);
       if (prop) modifyProposed.add(prop);
+      if (orig && prop) {
+        modifyPairOriginal.set(orig, prop);
+        modifyPairProposed.set(prop, orig);
+      }
     }
     if (diff.type !== "remove" && prop) proposedIndex.set(prop, index);
     if (diff.type === "remove" && orig) removeIndex.set(orig, index);
   });
+  /* Line-level semantics are kept (diff-remove / diff-add for whole-line
+   * changes); modified lines use diff-modify and additionally mark the
+   * changed characters inline (diff-char-del / diff-char-ins). Every
+   * line is addressable via data-line (0-based) + a visible 1-based
+   * .cmp-line-num. */
   const originalHtml =
     String(originalText)
       .split("\n")
-      .map((line) => {
+      .map((line, index) => {
         const trimmed = line.trim();
-        const changed = removedLines.has(trimmed) || modifyOriginal.has(trimmed);
-        return `<div class="cmp-line ${changed ? "diff-remove" : ""}">${changed ? "−" : ""}${esc(line)}</div>`;
+        if (modifyOriginal.has(trimmed)) {
+          const proposed = modifyPairOriginal.get(trimmed);
+          const content = proposed
+            ? renderInlineDiffSide(line, proposed, "original")
+            : esc(line);
+          return cmpLineHtml(index, "diff-modify", "", content);
+        }
+        if (removedLines.has(trimmed)) {
+          return cmpLineHtml(index, "diff-remove", "−", esc(line));
+        }
+        return cmpLineHtml(index, "", "", esc(line));
       })
       .join("") || '<div class="muted small">原版内容不可用</div>';
   const optimizedHtml =
     optimizedText
       .split("\n")
-      .map((line) => {
+      .map((line, index) => {
         const trimmed = line.trim();
-        if (!trimmed) return '<div class="cmp-line">&nbsp;</div>';
-        const changed = addedLines.has(trimmed) || modifyProposed.has(trimmed);
-        return `<div class="cmp-line ${changed ? "diff-add" : ""}">${changed ? "＋" : ""}${esc(line)}</div>`;
+        if (!trimmed) return cmpLineHtml(index, "", "", "&nbsp;");
+        if (modifyProposed.has(trimmed)) {
+          const original = modifyPairProposed.get(trimmed);
+          const content = original
+            ? renderInlineDiffSide(original, line, "proposed")
+            : esc(line);
+          return cmpLineHtml(index, "diff-modify", "", content);
+        }
+        if (addedLines.has(trimmed)) {
+          return cmpLineHtml(index, "diff-add", "＋", esc(line));
+        }
+        return cmpLineHtml(index, "", "", esc(line));
       })
       .join("") || '<div class="muted small">暂无优化内容</div>';
   const sideView = `
@@ -1310,4 +1341,93 @@ export function buildJobsBackup(jobs) {
     restore_steps: [...BACKUP_RESTORE_STEPS],
     jobs: list,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Inline (token/character-level) diff                                 */
+/* ------------------------------------------------------------------ */
+
+/* Tokenization for inline diffs: each CJK character is its own token,
+ * ASCII runs (words/numbers/underscores) stay one token, whitespace runs
+ * and any other single character are tokens too. This keeps the LCS
+ * table small while still highlighting single-character edits in Chinese
+ * resumes (e.g. "负责系统开发" -> "负责高并发系统开发" marks 高并发). */
+const INLINE_TOKEN_RE = /[\u4e00-\u9fff]|[A-Za-z0-9_]+|\s+|./g;
+
+export function tokenizeInline(text) {
+  return String(text ?? "").match(INLINE_TOKEN_RE) || [];
+}
+
+/* Longest common subsequence over inline tokens. Returns aligned
+ * segments: { type: "same" | "del" | "ins", text } where "del" tokens
+ * exist only in the original and "ins" only in the proposed. Consecutive
+ * segments of the same type are merged so callers get one span per
+ * changed word. Identical inputs yield a single "same" segment. */
+export function inlineDiff(original, proposed) {
+  const a = tokenizeInline(original);
+  const b = tokenizeInline(proposed);
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      dp[i][j] =
+        a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const segments = [];
+  let i = 0;
+  let j = 0;
+  while (i < m && j < n) {
+    if (a[i] === b[j]) {
+      segments.push({ type: "same", text: a[i] });
+      i += 1;
+      j += 1;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      segments.push({ type: "del", text: a[i] });
+      i += 1;
+    } else {
+      segments.push({ type: "ins", text: b[j] });
+      j += 1;
+    }
+  }
+  while (i < m) segments.push({ type: "del", text: a[i++] });
+  while (j < n) segments.push({ type: "ins", text: b[j++] });
+  const merged = [];
+  for (const segment of segments) {
+    const last = merged[merged.length - 1];
+    if (last && last.type === segment.type) last.text += segment.text;
+    else merged.push({ type: segment.type, text: segment.text });
+  }
+  return merged;
+}
+
+/* Render one side of an inline diff as escaped HTML:
+ * - side "original" keeps same + del segments (the deleted characters),
+ * - side "proposed" keeps same + ins segments (the inserted characters).
+ * Unchanged text stays plain, so only the actually changed words receive
+ * .diff-char-del / .diff-char-ins spans. */
+export function renderInlineDiffSide(original, proposed, side) {
+  return inlineDiff(original, proposed)
+    .filter((segment) =>
+      side === "original" ? segment.type !== "ins" : segment.type !== "del",
+    )
+    .map((segment) => {
+      if (segment.type === "del") {
+        return `<span class="diff-char-del">${esc(segment.text)}</span>`;
+      }
+      if (segment.type === "ins") {
+        return `<span class="diff-char-ins">${esc(segment.text)}</span>`;
+      }
+      return esc(segment.text);
+    })
+    .join("");
+}
+
+/* One addressable .cmp-line row. data-line carries the 0-based index
+ * (stable for programmatic anchoring), the visible number is 1-based.
+ * `content` must already be escaped (plain esc() or renderInlineDiffSide). */
+export function cmpLineHtml(lineIndex, className = "", prefix = "", content = "") {
+  const classes = `cmp-line${className ? ` ${className}` : ""}`;
+  return `<div class="${classes}" data-line="${lineIndex}"><span class="cmp-line-num">${lineIndex + 1}</span>${prefix}${content}</div>`;
 }

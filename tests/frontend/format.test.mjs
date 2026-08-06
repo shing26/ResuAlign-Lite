@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import {
   benchmarkSourceBadge,
   buildDiagnosisMarkdownFrom,
+  buildWbResultHtmlFrom,
   canonicalJobStatus,
+  cmpLineHtml,
   esc,
   formatDate,
   formatSalary,
+  inlineDiff,
   isJdUrl,
   jobStatusLabel,
   lineDiff,
@@ -16,6 +19,8 @@ import {
   options,
   parseHashValue,
   parseImportText,
+  renderInlineDiffSide,
+  tokenizeInline,
 } from "../../src/resualign/static/app/format.js";
 
 /* ------------------------------------------------------------------ */
@@ -234,6 +239,149 @@ test("lineDiff ignores blank lines and returns [] for identical input", () => {
 test("lineDiff compares by trimmed content", () => {
   const rows = lineDiff("a  ", "a");
   assert.deepEqual(rows, []);
+});
+
+/* ------------------------------------------------------------------ */
+/* Inline diff (token-level) + cmp line HTML                           */
+/* ------------------------------------------------------------------ */
+
+test("tokenizeInline splits CJK chars and keeps ASCII words/whitespace runs", () => {
+  assert.deepEqual(tokenizeInline("负责系统开发"), ["负", "责", "系", "统", "开", "发"]);
+  assert.deepEqual(tokenizeInline("Redis 缓存3年"), ["Redis", " ", "缓", "存", "3", "年"]);
+  assert.deepEqual(tokenizeInline(""), []);
+  assert.deepEqual(tokenizeInline(null), []);
+});
+
+test("inlineDiff marks only the changed word on single-word edits", () => {
+  const segments = inlineDiff("负责系统开发", "负责高并发系统开发");
+  assert.deepEqual(segments, [
+    { type: "same", text: "负责" },
+    { type: "ins", text: "高并发" },
+    { type: "same", text: "系统开发" },
+  ]);
+});
+
+test("inlineDiff merges consecutive segments and handles full replacement", () => {
+  assert.deepEqual(inlineDiff("负责系统开发", "负责系统开发"), [
+    { type: "same", text: "负责系统开发" },
+  ]);
+  assert.deepEqual(inlineDiff("abc", "xyz"), [
+    { type: "del", text: "abc" },
+    { type: "ins", text: "xyz" },
+  ]);
+});
+
+test("inlineDiff handles insertions at the start and deletions at the end", () => {
+  assert.deepEqual(inlineDiff("系统", "高并发系统"), [
+    { type: "ins", text: "高并发" },
+    { type: "same", text: "系统" },
+  ]);
+  assert.deepEqual(inlineDiff("系统", "系"), [
+    { type: "same", text: "系" },
+    { type: "del", text: "统" },
+  ]);
+  // ASCII words are single tokens: "React" -> "React Native" inserts " Native".
+  assert.deepEqual(inlineDiff("React", "React Native"), [
+    { type: "same", text: "React" },
+    { type: "ins", text: " Native" },
+  ]);
+});
+
+test("renderInlineDiffSide shows del on original side and ins on proposed side", () => {
+  // Pure insertion: original side stays plain, proposed side marks 高并发.
+  const originalSide = renderInlineDiffSide("负责系统开发", "负责高并发系统开发", "original");
+  assert.equal(originalSide, "负责系统开发");
+  assert.ok(!originalSide.includes("diff-char"));
+  const proposedSide = renderInlineDiffSide("负责系统开发", "负责高并发系统开发", "proposed");
+  assert.ok(proposedSide.includes('<span class="diff-char-ins">高并发</span>'));
+  assert.ok(!proposedSide.includes("diff-char-del"));
+  // Pure deletion: original side marks 高并发, proposed side stays plain.
+  const deletedSide = renderInlineDiffSide("负责高并发系统开发", "负责系统开发", "original");
+  assert.ok(deletedSide.includes('<span class="diff-char-del">高并发</span>'));
+  assert.ok(!deletedSide.includes("diff-char-ins"));
+  assert.equal(renderInlineDiffSide("负责高并发系统开发", "负责系统开发", "proposed"), "负责系统开发");
+});
+
+test("renderInlineDiffSide escapes text inside and outside marks", () => {
+  const html = renderInlineDiffSide("<b>x", "<b>y", "proposed");
+  assert.ok(html.includes("&lt;b&gt;"));
+  assert.ok(!html.includes("<b>"));
+  assert.ok(html.includes('<span class="diff-char-ins">y</span>'));
+});
+
+test("cmpLineHtml emits addressable rows with 1-based visible numbers", () => {
+  assert.equal(
+    cmpLineHtml(0, "diff-add", "＋", "abc"),
+    '<div class="cmp-line diff-add" data-line="0"><span class="cmp-line-num">1</span>＋abc</div>',
+  );
+  assert.ok(cmpLineHtml(9, "", "", "x").includes('data-line="9"'));
+  assert.ok(cmpLineHtml(9, "", "", "x").includes(">10<"));
+  assert.ok(cmpLineHtml(0, "diff-modify", "", "x").includes('class="cmp-line diff-modify"'));
+});
+
+/* ------------------------------------------------------------------ */
+/* buildWbResultHtmlFrom side view (line-level + char-level marks)     */
+/* ------------------------------------------------------------------ */
+
+const WB_RESULT = {
+  tailored_resume: { sections: { a: "负责高并发系统开发" } },
+  score: 70,
+  model: "deepseek-chat",
+  elapsed_seconds: 3,
+};
+
+test("buildWbResultHtmlFrom marks modify rows with char-level spans and line numbers", () => {
+  const html = buildWbResultHtmlFrom(
+    WB_RESULT,
+    [{ type: "modify", original: "负责系统开发", proposed: "负责高并发系统开发" }],
+    new Set(),
+    "负责系统开发",
+    "side",
+  );
+  assert.ok(html.includes('class="cmp-line diff-modify" data-line="0"'));
+  assert.ok(html.includes('<span class="cmp-line-num">1</span>'));
+  assert.ok(html.includes('<span class="diff-char-ins">高并发</span>'));
+});
+
+test("buildWbResultHtmlFrom keeps diff-remove/diff-add line semantics", () => {
+  const html = buildWbResultHtmlFrom(
+    WB_RESULT,
+    [{ type: "add", original: "", proposed: "负责高并发系统开发" }],
+    new Set(),
+    "旧行",
+    "side",
+  );
+  assert.ok(html.includes('class="cmp-line diff-remove" data-line="0"'));
+  assert.ok(html.includes("−"));
+  assert.ok(html.includes('class="cmp-line diff-add" data-line="0"'));
+  assert.ok(html.includes("＋"));
+});
+
+test("buildWbResultHtmlFrom leaves unchanged lines plain", () => {
+  const html = buildWbResultHtmlFrom(
+    WB_RESULT,
+    [],
+    new Set(),
+    "负责高并发系统开发",
+    "side",
+  );
+  assert.ok(html.includes('class="cmp-line" data-line="0"'));
+  assert.ok(!html.includes("diff-remove"));
+  assert.ok(!html.includes("diff-add"));
+  assert.ok(!html.includes("diff-char"));
+});
+
+test("buildWbResultHtmlFrom list view omits compare columns", () => {
+  const html = buildWbResultHtmlFrom(
+    WB_RESULT,
+    [{ type: "modify", original: "负责系统开发", proposed: "负责高并发系统开发" }],
+    new Set(),
+    "负责系统开发",
+    "list",
+  );
+  assert.ok(!html.includes("cmp-column"));
+  assert.ok(html.includes("diff-line diff-remove"));
+  assert.ok(html.includes("diff-line diff-add"));
 });
 
 /* ------------------------------------------------------------------ */
