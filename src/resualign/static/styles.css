@@ -10,62 +10,89 @@
   display: none !important;
 }
 
+/* =================================================================== */
+/* 设计 token（合并收敛：#8）                                            */
+/* 单一基础 :root = 浅色最终生效值（原 Phase0-16 基础 + Phase18 motion/  */
+/* card + T5 重定义 + :root[data-theme="light"] 覆盖 + Phase20），       */
+/* 单一 [data-theme="dark"] = 深色最终生效值（原 T5 dark + Phase20 dark）。*/
+/* 原 :root[data-theme="light"] 块值已并入本基础块（差异见注释），已删除。 */
+/* =================================================================== */
+
 :root {
+  color-scheme: light;
+
+  /* ---- T5 原始通道（light attr 生效值） ---- */
+  --bg: #f3f6fa;              /* T5 原 #f4f7fb，light attr 覆盖为 #f3f6fa */
+  --surface: #ffffff;
+  --surface-2: #f2f5f9;       /* T5 原 #f1f5f9，light attr 覆盖 */
+  --text: #17212b;
+  --muted: #4d5c6c;           /* T5 原 #5f6f7d，light attr 覆盖 */
+  --border: #d5dde7;          /* T5 原 #d7dfe9，light attr 覆盖 */
+  --accent: #2563eb;
+  --accent-2: #0f766e;
+  --danger: #dc2626;          /* light attr 生效值；原 Phase20 :root 的 #b42318
+                                 被 :root[data-theme="light"] 特异性压制，仅无属性状态可见 */
+  --success: #16a34a;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.07), 0 1px 1px rgba(15, 23, 42, 0.05);
+  --transition-fast: 140ms cubic-bezier(0.2, 0.7, 0.2, 1);
+
   /* 背景分层 */
-  --bg-canvas: #f4f0e8;
-  --bg-inset: #e9efed;
-  --bg-rail: #17222e;
-  --bg-rail-soft: #22303d;
-  --bg-header: #17222e;
+  --bg-canvas: var(--bg);
+  --bg-inset: var(--surface-2);
+  --bg-rail: #101b2c;
+  --bg-rail-soft: #1b2b40;
+  --bg-header: #101b2c;
 
   /* 表面分层 */
-  --surface-panel: #fffdf8;
-  --surface-raised: #ffffff;
-  --surface-tint: #eef4f7;
-  --surface-success: #e8f6ee;
-  --surface-pending: #fff4e2;
-  --surface-error: #fdeeed;
-  --surface-info: #e9f0fc;
-  --surface-teal: #e4f5f1;
+  --surface-panel: var(--surface);
+  --surface-raised: var(--surface);
+  --surface-tint: var(--surface-2);
+  --surface-success: #ecfdf5;
+  --surface-pending: #fffbeb;
+  --surface-error: #fef2f2;
+  --surface-info: #eff6ff;
+  --surface-teal: #ecfdf8;
 
   /* 文字 */
-  --ink-strong: #17212b;
-  --ink: #243140;
-  --ink-2: #3d4b5c;
-  --text-muted: #5f6d7d;
-  --text-faint: #8b98a7;
+  --ink-strong: var(--text);
+  --ink: #1e293b;
+  --ink-2: #334155;
+  --text-muted: var(--muted);
+  --text-faint: #77869a;      /* T5 原 #94a3b8，light attr 覆盖 */
 
   /* 边框 */
-  --border: #d7dce3;
-  --border-strong: #aab6c4;
-  --border-soft: #e6e2d8;
+  --border-strong: #a3b1c2;   /* T5 原 #aab8c8，light attr 覆盖 */
+  --border-soft: #e6edf5;
 
   /* 品牌与主行动色 */
-  --brand: #c63b26;
+  --brand: #c2410c;
   --brand-soft: #fdeae5;
-  --primary: #1656e8;
-  --primary-hover: #0f3fd0;
-  --primary-active: #0c319e;
-  --primary-soft: #e4ecfc;
-  --teal: #087f74;
-  --teal-hover: #06645d;
+  --primary: var(--accent);
+  --primary-hover: #1d4ed8;
+  --primary-active: #1e40af;
+  --primary-soft: #e3edfd;
+  --teal: var(--accent-2);
+  --teal-hover: #0b5f58;
   --teal-soft: #dff4f0;
 
   /* 语义色 */
-  --success: #177a47;
   --success-soft: #e6f5ec;
-  --success-deep: #0f5c34;
-  --pending: #a65a08;
-  --pending-soft: #fff1dc;
-  --pending-deep: #87430a;
-  --error: #b42318;
-  --error-soft: #fbeae9;
-  --error-deep: #8a1c12;
-  --info: #1f5fd8;
-  --info-soft: #e7eefc;
-  --info-deep: #1a3f8f;
-  --neutral: #5a6878;
-  --neutral-soft: #edf0f3;
+  --success-deep: #14532d;
+  --pending: #b45309;
+  --pending-soft: #fffbeb;
+  --pending-deep: #92400e;
+  --error: var(--danger);
+  --error-soft: #fef2f2;
+  --error-deep: #991b1b;
+  --info: #2563eb;
+  --info-soft: #eff6ff;
+  --info-deep: #1e3a8a;
+  --neutral: #64748b;
+  --neutral-soft: #eef2f6;
+  --warning: #b45309;         /* Phase20 */
 
   /* 字体 */
   --font-ui: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
@@ -91,9 +118,10 @@
   --space-8: 32px;
   --space-12: 48px;
   --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
   --radius-pill: 999px;
+  --radius-4: 4px;            /* Phase20 */
+  --radius-6: 6px;            /* Phase20 */
+  --radius-8: 8px;            /* Phase20 */
   --shadow-1: 0 1px 2px rgba(23, 34, 46, 0.06), 0 1px 1px rgba(23, 34, 46, 0.04);
   --shadow-2: 0 4px 12px rgba(23, 34, 46, 0.09);
   --shadow-3: 0 10px 24px rgba(23, 34, 46, 0.13);
@@ -105,10 +133,72 @@
   --dur-base: 180ms;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 
+  /* ---- Phase 18: motion tokens（原独立 :root 块并入） ---- */
+  --dur-settle: 260ms;
+  --dur-enter: 220ms;
+  --dur-enter-max: 320ms;
+  --dur-progress: 400ms;
+  --dur-loading: 900ms;
+  --dur-toast: 240ms;
+  --dur-stagger: 30ms;
+  --dur-stagger-mobile: 20ms;
+  --ease-standard: var(--ease);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+  --ease-linear: linear;
+  --move-0: 2px;
+  --move-1: 4px;
+  --move-2: 6px;
+  --move-3: 8px;
+  --move-4: 12px;
+  --move-scale-hover: 1.01;
+  --move-scale-active: 0.99;
+  --move-scale-entrance: 0.985;
+  --stagger-step: 28ms;
+
+  /* ---- Phase 18: card tokens ---- */
+  --card-bg-rest: var(--surface-panel);
+  --card-bg-raised: var(--surface-raised);
+  --card-bg-inset: var(--surface-tint);
+  --card-border-rest: var(--border);
+  --card-border-hover: #b7c3d0;
+  --card-border-selected: var(--primary);
+  --card-radius-rest: var(--radius-md);
+  --card-radius-inner: var(--radius-sm);
+  --card-pad-lg: 18px;
+  --card-pad-md: 16px;
+  --card-pad-sm: 12px;
+  --card-gap: 12px;
+  --card-gap-lg: 14px;
+  --card-shadow-rest: var(--shadow-1);
+  --card-shadow-hover: var(--shadow-2);
+  --card-shadow-lift: 0 6px 16px rgba(23, 34, 46, 0.12);
+  --card-shadow-selected: 0 0 0 3px rgba(22, 86, 232, 0.22), var(--shadow-2);
+  --card-shadow-active: inset 0 1px 0 rgba(23, 34, 46, 0.04), var(--shadow-1);
+  --card-lift-distance: 2px;
+  --card-transition: border-color 140ms var(--ease), box-shadow 180ms var(--ease), transform 140ms var(--ease);
+  --touch-min: 44px;
+  --touch-min-safe: 40px;
+
+  /* ---- Phase 20: glass / workbench / match tokens（浅色值） ---- */
+  --glass-surface: rgba(255, 255, 255, 0.82);
+  --glass-border: rgba(15, 23, 42, 0.1);
+  --glass-blur: 14px;
+  --surface-glass: rgba(255, 255, 255, 0.82);
+  --surface-glass-deep: rgba(255, 255, 255, 0.92);
+  --border-glass: rgba(15, 23, 42, 0.1);
+  --workbench-bg: #eef2f7;
+  --workbench-bg-deep: #f7f9fc;
+  --emerald: #059669;
+  --amber-token: #d97706;
+  --purple-token: #7c3aed;
+  --match: #2563eb;
+  --match-high: #16a34a;
+  --match-mid: #d97706;
+  --match-low: #b42318;
+  --provenance: #7c3aed;
+
   /* 旧变量别名，兼容存量规则 */
-  --bg: var(--bg-canvas);
-  --surface: var(--surface-panel);
-  --muted: var(--text-muted);
   --line: var(--border);
   --line-strong: var(--border-strong);
   --primary-dark: var(--primary-hover);
@@ -118,9 +208,12 @@
   --red-soft: var(--error-soft);
   --green: var(--success);
   --green-soft: var(--success-soft);
-  --radius: var(--radius-md);
-  --shadow: var(--shadow-1);
-  --focus: var(--focus-ring);
+  --radius: var(--radius-lg);
+  --shadow: var(--shadow-sm);
+  --focus: 0 0 0 3px rgba(37, 99, 235, 0.28);
+  --panel: #edf1f6;           /* 原仅 :root[data-theme="light"] 定义 */
+  --card: #ffffff;            /* 原仅 :root[data-theme="light"] 定义 */
+
   /* 语义 hover/代码/状态点 token（AX6：暗色主题下不再用硬编码浅色） */
   --surface-hover: #f8fafc;
   --code-bg: #eef2f6;
@@ -134,6 +227,124 @@
   --dot-withdrawn: #64748b;
   --diff-modify-bg: #e0f2fe;
   --diff-modify-ink: #1e3a8a;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* T5 dark 原始通道 */
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --surface-2: #243248;
+  --text: #e8eef6;
+  --muted: #94a3b8;
+  --border: #334155;
+  --accent: #60a5fa;
+  --accent-2: #2dd4bf;
+  --danger: #f87171;
+  --success: #4ade80;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.22);
+  --transition-fast: 140ms cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* 背景分层 */
+  --bg-canvas: var(--bg);
+  --bg-inset: var(--surface-2);
+  --bg-rail: #0b1220;
+  --bg-rail-soft: #16233a;
+  --bg-header: #0b1220;
+
+  /* 表面分层 */
+  --surface-panel: var(--surface);
+  --surface-raised: #263348;
+  --surface-tint: var(--surface-2);
+  --surface-success: #123526;
+  --surface-pending: #3a2e17;
+  --surface-error: #3a1d1d;
+  --surface-info: #1b2d4d;
+  --surface-teal: #113b34;
+
+  /* 文字 */
+  --ink-strong: var(--text);
+  --ink: #dbe4ef;
+  --ink-2: #c1cddc;
+  --text-muted: var(--muted);
+  --text-faint: #64748b;
+
+  /* 边框 */
+  --border-strong: #4b5a6f;
+  --border-soft: #27364a;
+
+  /* 品牌与主行动色 */
+  --brand: #f97316;
+  --primary: var(--accent);
+  --primary-hover: #3b82f6;
+  --primary-active: #2563eb;
+  --primary-soft: #1d3154;
+  --teal: var(--accent-2);
+  --teal-hover: #5eead4;
+  --teal-soft: #113b34;
+
+  /* 语义色 */
+  --success-soft: #123526;
+  --success-deep: #86efac;
+  --pending: #fbbf24;
+  --pending-soft: #3a2e17;
+  --pending-deep: #fcd34d;
+  --error: var(--danger);
+  --error-soft: #3a1d1d;
+  --error-deep: #fca5a5;
+  --info: #93c5fd;
+  --info-soft: #1b2d4d;
+  --info-deep: #bfdbfe;
+  --neutral: #94a3b8;
+  --neutral-soft: #243248;
+  --warning: #fbbf24;         /* Phase20 dark */
+
+  /* Phase 20 dark: glass / workbench / match tokens */
+  --glass-surface: rgba(15, 23, 42, 0.82);
+  --glass-border: rgba(148, 163, 184, 0.22);
+  --surface-glass: rgba(22, 30, 49, 0.65);
+  --surface-glass-deep: rgba(7, 10, 16, 0.6);
+  --border-glass: rgba(255, 255, 255, 0.08);
+  --workbench-bg: #0b0f19;
+  --workbench-bg-deep: #0d1420;
+  --emerald: #10b981;
+  --amber-token: #f59e0b;
+  --purple-token: #8b5cf6;
+  --match: #60a5fa;
+  --match-high: #4ade80;
+  --match-mid: #fbbf24;
+  --match-low: #f87171;
+  --provenance: #a78bfa;
+
+  /* 别名（dark 值） */
+  --panel: var(--surface-2);
+  --card: var(--surface);
+  --radius: var(--radius-lg);
+  --shadow: var(--shadow-sm);
+  --line: var(--border);
+  --line-strong: var(--border-strong);
+  --amber: var(--pending);
+  --amber-soft: var(--pending-soft);
+  --red: var(--error);
+  --red-soft: var(--error-soft);
+  --green: var(--success);
+  --green-soft: var(--success-soft);
+  --focus: 0 0 0 3px rgba(96, 165, 250, 0.34);
+
+  /* 语义 hover/代码/状态点 token（dark 值） */
+  --surface-hover: #263348;
+  --code-bg: #243248;
+  --btn-secondary-hover: #2b3d5c;
+  --btn-outline-hover-border: #4b5a6f;
+  --btn-danger-hover: #4a2525;
+  --dot-draft: #94a3b8;
+  --dot-applied: #60a5fa;
+  --dot-interview: #fbbf24;
+  --dot-offer: #4ade80;
+  --dot-withdrawn: #7d8ba0;
+  --diff-modify-bg: #1b2d4d;
+  --diff-modify-ink: #bfdbfe;
 }
 
 body {
@@ -2403,56 +2614,8 @@ table.data th {
 
 /* =================================================================== */
 /* Phase 18: card system + component motion overlay                     */
+/* （token 定义已并入文件顶部基础 :root，此处仅保留规则层）              */
 /* =================================================================== */
-
-:root {
-  /* motion tokens */
-  --dur-settle: 260ms;
-  --dur-enter: 220ms;
-  --dur-enter-max: 320ms;
-  --dur-progress: 400ms;
-  --dur-loading: 900ms;
-  --dur-toast: 240ms;
-  --dur-stagger: 30ms;
-  --dur-stagger-mobile: 20ms;
-  --ease-standard: var(--ease);
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
-  --ease-linear: linear;
-  --move-0: 2px;
-  --move-1: 4px;
-  --move-2: 6px;
-  --move-3: 8px;
-  --move-4: 12px;
-  --move-scale-hover: 1.01;
-  --move-scale-active: 0.99;
-  --move-scale-entrance: 0.985;
-  --stagger-step: 28ms;
-
-  /* card tokens */
-  --card-bg-rest: var(--surface-panel);
-  --card-bg-raised: var(--surface-raised);
-  --card-bg-inset: var(--surface-tint);
-  --card-border-rest: var(--border);
-  --card-border-hover: #b7c3d0;
-  --card-border-selected: var(--primary);
-  --card-radius-rest: var(--radius-md);
-  --card-radius-inner: var(--radius-sm);
-  --card-pad-lg: 18px;
-  --card-pad-md: 16px;
-  --card-pad-sm: 12px;
-  --card-gap: 12px;
-  --card-gap-lg: 14px;
-  --card-shadow-rest: var(--shadow-1);
-  --card-shadow-hover: var(--shadow-2);
-  --card-shadow-lift: 0 6px 16px rgba(23, 34, 46, 0.12);
-  --card-shadow-selected: 0 0 0 3px rgba(22, 86, 232, 0.22), var(--shadow-2);
-  --card-shadow-active: inset 0 1px 0 rgba(23, 34, 46, 0.04), var(--shadow-1);
-  --card-lift-distance: 2px;
-  --card-transition: border-color 140ms var(--ease), box-shadow 180ms var(--ease), transform 140ms var(--ease);
-  --touch-min: 44px;
-  --touch-min-safe: 40px;
-}
 
 .panel-card {
   padding: var(--card-pad-lg);
@@ -3514,235 +3677,10 @@ select {
 
 /* =================================================================== */
 /* T5 design tokens + three-column workbench                            */
+/* （token 定义已并入文件顶部基础 :root 与 [data-theme="dark"]，          */
+/*   原 :root[data-theme="light"] 已删除：其值并入基础 :root，            */
+/*   color-scheme: light 移至基础 :root。此处仅保留规则层）              */
 /* =================================================================== */
-
-:root {
-  --bg: #f4f7fb;
-  --surface: #ffffff;
-  --surface-2: #f1f5f9;
-  --text: #17212b;
-  --muted: #5f6f7d;
-  --border: #d7dfe9;
-  --accent: #2563eb;
-  --accent-2: #0f766e;
-  --danger: #dc2626;
-  --success: #16a34a;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 1px rgba(15, 23, 42, 0.04);
-  --transition-fast: 140ms cubic-bezier(0.2, 0.7, 0.2, 1);
-  --font-ui: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, "Courier New", monospace;
-
-  --bg-canvas: var(--bg);
-  --bg-inset: var(--surface-2);
-  --bg-rail: #101b2c;
-  --bg-rail-soft: #1b2b40;
-  --bg-header: #101b2c;
-  --surface-panel: var(--surface);
-  --surface-raised: var(--surface);
-  --surface-tint: var(--surface-2);
-  --surface-success: #ecfdf5;
-  --surface-pending: #fffbeb;
-  --surface-error: #fef2f2;
-  --surface-info: #eff6ff;
-  --surface-teal: #ecfdf8;
-  --ink-strong: var(--text);
-  --ink: #1e293b;
-  --ink-2: #334155;
-  --text-muted: var(--muted);
-  --text-faint: #94a3b8;
-  --border-strong: #aab8c8;
-  --border-soft: #e6edf5;
-  --brand: #c2410c;
-  --primary: var(--accent);
-  --primary-hover: #1d4ed8;
-  --primary-active: #1e40af;
-  --primary-soft: #e3edfd;
-  --teal: var(--accent-2);
-  --teal-hover: #0b5f58;
-  --teal-soft: #dff4f0;
-  --success-deep: #14532d;
-  --pending: #b45309;
-  --pending-soft: #fffbeb;
-  --pending-deep: #92400e;
-  --error: var(--danger);
-  --error-soft: #fef2f2;
-  --error-deep: #991b1b;
-  --info: #2563eb;
-  --info-soft: #eff6ff;
-  --info-deep: #1e3a8a;
-  --neutral: #64748b;
-  --neutral-soft: #eef2f6;
-  --radius: var(--radius-lg);
-  --shadow: var(--shadow-sm);
-  --line: var(--border);
-  --line-strong: var(--border-strong);
-  --amber: var(--pending);
-  --amber-soft: var(--pending-soft);
-  --red: var(--error);
-  --red-soft: var(--error-soft);
-  --green: var(--success);
-  --green-soft: var(--success-soft);
-  --focus: 0 0 0 3px rgba(37, 99, 235, 0.28);
-}
-
-[data-theme="dark"] {
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --surface-2: #243248;
-  --text: #e8eef6;
-  --muted: #94a3b8;
-  --border: #334155;
-  --accent: #60a5fa;
-  --accent-2: #2dd4bf;
-  --danger: #f87171;
-  --success: #4ade80;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.22);
-  --transition-fast: 140ms cubic-bezier(0.2, 0.7, 0.2, 1);
-
-  --bg-canvas: var(--bg);
-  --bg-inset: var(--surface-2);
-  --bg-rail: #0b1220;
-  --bg-rail-soft: #16233a;
-  --bg-header: #0b1220;
-  --surface-panel: var(--surface);
-  --surface-raised: #263348;
-  --surface-tint: var(--surface-2);
-  --surface-success: #123526;
-  --surface-pending: #3a2e17;
-  --surface-error: #3a1d1d;
-  --surface-info: #1b2d4d;
-  --surface-teal: #113b34;
-  --ink-strong: var(--text);
-  --ink: #dbe4ef;
-  --ink-2: #c1cddc;
-  --text-muted: var(--muted);
-  --text-faint: #64748b;
-  --border-strong: #4b5a6f;
-  --border-soft: #27364a;
-  --brand: #f97316;
-  --primary: var(--accent);
-  --primary-hover: #3b82f6;
-  --primary-active: #2563eb;
-  --primary-soft: #1d3154;
-  --teal: var(--accent-2);
-  --teal-hover: #5eead4;
-  --teal-soft: #113b34;
-  --success-soft: #123526;
-  --success-deep: #86efac;
-  --pending: #fbbf24;
-  --pending-soft: #3a2e17;
-  --pending-deep: #fcd34d;
-  --error: var(--danger);
-  --error-soft: #3a1d1d;
-  --error-deep: #fca5a5;
-  --info: #93c5fd;
-  --info-soft: #1b2d4d;
-  --info-deep: #bfdbfe;
-  --neutral: #94a3b8;
-  --neutral-soft: #243248;
-  --panel: var(--surface-2);
-  --card: var(--surface);
-  --radius: var(--radius-lg);
-  --shadow: var(--shadow-sm);
-  --line: var(--border);
-  --line-strong: var(--border-strong);
-  --amber: var(--pending);
-  --amber-soft: var(--pending-soft);
-  --red: var(--error);
-  --red-soft: var(--error-soft);
-  --green: var(--success);
-  --green-soft: var(--success-soft);
-  --focus: 0 0 0 3px rgba(96, 165, 250, 0.34);
-  --surface-hover: #263348;
-  --code-bg: #243248;
-  --btn-secondary-hover: #2b3d5c;
-  --btn-outline-hover-border: #4b5a6f;
-  --btn-danger-hover: #4a2525;
-  --dot-draft: #94a3b8;
-  --dot-applied: #60a5fa;
-  --dot-interview: #fbbf24;
-  --dot-offer: #4ade80;
-  --dot-withdrawn: #7d8ba0;
-  --diff-modify-bg: #1b2d4d;
-  --diff-modify-ink: #bfdbfe;
-  color-scheme: dark;
-}
-
-:root[data-theme="light"] {
-  --bg: #f3f6fa;
-  --surface: #ffffff;
-  --surface-2: #f2f5f9;
-  --text: #17212b;
-  --muted: #4d5c6c;
-  --border: #d5dde7;
-  --accent: #2563eb;
-  --accent-2: #0f766e;
-  --danger: #dc2626;
-  --success: #16a34a;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.07), 0 1px 1px rgba(15, 23, 42, 0.05);
-  --transition-fast: 140ms cubic-bezier(0.2, 0.7, 0.2, 1);
-
-  --bg-canvas: var(--bg);
-  --bg-inset: var(--surface-2);
-  --bg-rail: #101b2c;
-  --bg-rail-soft: #1b2b40;
-  --bg-header: #101b2c;
-  --surface-panel: var(--surface);
-  --surface-raised: var(--surface);
-  --surface-tint: var(--surface-2);
-  --surface-success: #ecfdf5;
-  --surface-pending: #fffbeb;
-  --surface-error: #fef2f2;
-  --surface-info: #eff6ff;
-  --surface-teal: #ecfdf8;
-  --ink-strong: var(--text);
-  --ink: #1e293b;
-  --ink-2: #334155;
-  --text-muted: var(--muted);
-  --text-faint: #77869a;
-  --border-strong: #a3b1c2;
-  --border-soft: #e6edf5;
-  --brand: #c2410c;
-  --primary: var(--accent);
-  --primary-hover: #1d4ed8;
-  --primary-active: #1e40af;
-  --primary-soft: #e3edfd;
-  --teal: var(--accent-2);
-  --teal-hover: #0b5f58;
-  --teal-soft: #dff4f0;
-  --success-deep: #14532d;
-  --pending: #b45309;
-  --pending-soft: #fffbeb;
-  --pending-deep: #92400e;
-  --error: var(--danger);
-  --error-soft: #fef2f2;
-  --error-deep: #991b1b;
-  --info: #2563eb;
-  --info-soft: #eff6ff;
-  --info-deep: #1e3a8a;
-  --neutral: #64748b;
-  --neutral-soft: #eef2f6;
-  --panel: #edf1f6;
-  --card: #ffffff;
-  --radius: var(--radius-lg);
-  --shadow: var(--shadow-sm);
-  --line: var(--border);
-  --line-strong: var(--border-strong);
-  --amber: var(--pending);
-  --amber-soft: var(--pending-soft);
-  --red: var(--error);
-  --red-soft: var(--error-soft);
-  --green: var(--success);
-  --green-soft: var(--success-soft);
-  --focus: 0 0 0 3px rgba(37, 99, 235, 0.28);
-  color-scheme: light;
-}
 
 body {
   font-family: var(--font-ui);
@@ -4037,51 +3975,9 @@ body.is-printing #print-root {
 
 /* =================================================================== */
 /* Phase 20: Copilot command bar + Split-Canvas Optimizer              */
+/* （token 定义已并入文件顶部基础 :root 与 [data-theme="dark"]，          */
+/*   此处仅保留规则层）                                                 */
 /* =================================================================== */
-
-:root {
-  --glass-surface: rgba(255, 255, 255, 0.82);
-  --glass-border: rgba(15, 23, 42, 0.1);
-  --glass-blur: 14px;
-  --surface-glass: rgba(255, 255, 255, 0.82);
-  --surface-glass-deep: rgba(255, 255, 255, 0.92);
-  --border-glass: rgba(15, 23, 42, 0.1);
-  --workbench-bg: #eef2f7;
-  --workbench-bg-deep: #f7f9fc;
-  --emerald: #059669;
-  --amber-token: #d97706;
-  --purple-token: #7c3aed;
-  --match: #2563eb;
-  --match-high: #16a34a;
-  --match-mid: #d97706;
-  --match-low: #b42318;
-  --warning: #b45309;
-  --danger: #b42318;
-  --provenance: #7c3aed;
-  --radius-4: 4px;
-  --radius-6: 6px;
-  --radius-8: 8px;
-}
-
-[data-theme="dark"] {
-  --glass-surface: rgba(15, 23, 42, 0.82);
-  --glass-border: rgba(148, 163, 184, 0.22);
-  --surface-glass: rgba(22, 30, 49, 0.65);
-  --surface-glass-deep: rgba(7, 10, 16, 0.6);
-  --border-glass: rgba(255, 255, 255, 0.08);
-  --workbench-bg: #0b0f19;
-  --workbench-bg-deep: #0d1420;
-  --emerald: #10b981;
-  --amber-token: #f59e0b;
-  --purple-token: #8b5cf6;
-  --match: #60a5fa;
-  --match-high: #4ade80;
-  --match-mid: #fbbf24;
-  --match-low: #f87171;
-  --warning: #fbbf24;
-  --danger: #f87171;
-  --provenance: #a78bfa;
-}
 
 .command-bar {
   flex: 1 1 360px;
