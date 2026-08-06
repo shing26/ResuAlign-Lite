@@ -4,9 +4,22 @@ from unittest.mock import patch
 import pytest
 
 from resualign.cli import _parse_args, main
-from resualign.config import build_config
+from resualign.config import _STORED_LLM_PROVIDER, build_config
 from resualign.crawler import CrawlError
 from resualign.models import Report, ResuAlignConfig
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_stored_llm():
+    """Keep build_config tests deterministic when the API layer registered a
+    stored-settings provider (settings router registration is process-wide,
+    so CLI tests must not observe persisted UI settings)."""
+    saved = _STORED_LLM_PROVIDER
+    import resualign.config as config_module
+
+    config_module._STORED_LLM_PROVIDER = None
+    yield
+    config_module._STORED_LLM_PROVIDER = saved
 
 
 def test_parse_args_minimal():

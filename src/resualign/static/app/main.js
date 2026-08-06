@@ -54,6 +54,12 @@ import {
   parseHashValue,
   renderMarkdown,
 } from "./format.js";
+import {
+  apiKeyFieldHint,
+  buildSettingsLlmPayload,
+  buildTestConnectionPayload,
+  testConnectionResultHtml,
+} from "./settings-form.js";
 
 const ROUTE_LABELS = {
   resume: "简历中心",
@@ -102,9 +108,38 @@ async function render() {
     else if (state.route.name === "workspace") await renderOptimizerCanvas(app, state.route.jobId);
     else await renderSettingsView(app);
   } catch (error) {
+    if (isApiKeyUnconfigured(error)) {
+      renderApiKeyGuide(app);
+      return;
+    }
     app.innerHTML = `<div class="panel"><h3>出错了</h3><p class="muted">${esc(error.message)}</p>
       <div class="row" style="margin-top:12px"><button class="btn btn-primary" data-action="reload">重试</button></div></div>`;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* API-key guidance empty state                                       */
+/* ------------------------------------------------------------------ */
+
+function isApiKeyUnconfigured(error) {
+  return (
+    error &&
+    error.status === 503 &&
+    /API key not configured/i.test(error.message || "")
+  );
+}
+
+function renderApiKeyGuide(app) {
+  app.innerHTML = `
+    <div class="page-header page-header--workspace"><div><h2>单岗位工作台</h2>
+      <div class="sub">先配置 LLM，再开始对齐分析</div></div></div>
+    <div class="panel panel-card empty-state">
+      <div class="big">尚未配置 API Key</div>
+      <div>工作台的分析、对齐与改写需要调用大模型 API。到设置页填入 Key 并保存后即可开始。</div>
+      <div class="actions">
+        <a href="#/settings" class="btn btn-primary">去设置页配置 LLM</a>
+      </div>
+    </div>`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -704,6 +739,15 @@ async function renderSettingsView(app) {
   state.settings = settings;
   const vocabulary = settings.classification_vocabulary;
   state.vocabulary = normalizeVocabulary(vocabulary);
+  const storedLlm = settings.llm || {};
+  const savedKeyMasked = storedLlm.api_key || null; // server already masks
+  const llm = {
+    provider: storedLlm.provider || status.provider,
+    model: storedLlm.model || status.model,
+    baseUrl: storedLlm.base_url || "",
+    apiKeyConfigured: Boolean(savedKeyMasked),
+    apiKeyMasked: savedKeyMasked,
+  };
   app.innerHTML = `
     <div class="page-header page-header--settings"><div><h2>设置</h2><div class="sub">内置默认配置可直接使用，按需调整后保存立即生效</div></div></div>
     <section class="panel panel-card settings-status">
@@ -727,19 +771,30 @@ async function renderSettingsView(app) {
     </section>
     <div class="grid-2">
       <form class="panel panel-card" data-form="settings-llm">
-        <h3>LLM 模型</h3>
+        <h3>LLM 模型与 API Key</h3>
         <div class="form-grid">
           <div class="field"><label>服务商</label>
             <select name="llm_provider">
-              <option value="deepseek" ${status.provider === "deepseek" ? "selected" : ""}>DeepSeek</option>
-              <option value="openrouter" ${status.provider === "openrouter" ? "selected" : ""}>OpenRouter</option>
-              <option value="ollama" ${status.provider === "ollama" ? "selected" : ""}>Ollama</option>
+              <option value="deepseek" ${llm.provider === "deepseek" ? "selected" : ""}>DeepSeek</option>
+              <option value="openrouter" ${llm.provider === "openrouter" ? "selected" : ""}>OpenRouter</option>
+              <option value="ollama" ${llm.provider === "ollama" ? "selected" : ""}>Ollama</option>
             </select></div>
           <div class="field"><label>模型名称</label>
-            <input type="text" name="llm_model" value="${esc(status.model)}" placeholder="例如 deepseek-chat"></div>
+            <input type="text" name="llm_model" value="${esc(llm.model || "")}" placeholder="例如 deepseek-chat"></div>
         </div>
-        <div class="small muted">保存后立即生效，无需重启；API Key 仍从 .env 或环境变量读取。</div>
-        <div class="row" style="margin-top:10px"><button class="btn btn-primary" type="submit">保存并切换</button></div>
+        <div class="field"><label>API Key</label>
+          <input type="password" name="llm_api_key" value="" autocomplete="new-password" placeholder="${llm.apiKeyConfigured ? "已保存，留空保持不变" : "输入 API Key（可选，默认读取 .env）"}">
+          <div class="small muted">${apiKeyFieldHint(llm.apiKeyMasked)}</div>
+        </div>
+        <div class="field"><label>Base URL（可选）</label>
+          <input type="text" name="llm_base_url" value="${esc(llm.baseUrl || "")}" placeholder="留空使用服务商默认地址"></div>
+        <div class="small muted">保存后立即生效；未保存的字段继续使用 .env 或环境变量。</div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn btn-primary" type="submit">保存</button>
+          <button class="btn btn-outline btn-sm" type="button" data-action="test-llm-connection">测试连接</button>
+          ${llm.apiKeyConfigured ? '<button class="btn btn-ghost btn-sm" type="button" data-action="clear-llm-key">清除已保存 Key</button>' : ""}
+        </div>
+        <div data-llm-test-result></div>
       </form>
       <form class="panel panel-card" data-form="settings-vocabulary">
         <h3>分类词表</h3>
@@ -1175,12 +1230,44 @@ const actions = {
     toast("已恢复默认设置", "success");
     render();
   },
+  "test-llm-connection": async () => {
+    const form = $("[data-form='settings-llm']");
+    const resultNode = form && form.querySelector("[data-llm-test-result]");
+    if (!form || !resultNode) return;
+    const button = form.querySelector('[data-action="test-llm-connection"]');
+    resultNode.innerHTML = '<div class="form-success" role="status">正在测试连接…</div>';
+    if (button) button.disabled = true;
+    try {
+      const data = Object.fromEntries(new FormData(form).entries());
+      const body = await api("/api/settings/test-connection", {
+        method: "POST",
+        body: JSON.stringify(buildTestConnectionPayload(data)),
+      });
+      resultNode.innerHTML = testConnectionResultHtml(body);
+    } catch (error) {
+      resultNode.innerHTML = `<div class="form-error" role="alert">${esc(error.message)}</div>`;
+    } finally {
+      if (button) button.disabled = false;
+    }
+  },
+  "clear-llm-key": async () => {
+    await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ llm: { api_key: null } }),
+    });
+    toast("已清除保存的 API Key，后续将读取 .env 或环境变量", "success");
+    render();
+  },
   "analyze-jd": async () => {
     try {
       await analyzeActiveJd();
       toast("已开始解析 JD", "success");
     } catch (error) {
-      toast(error.message || "JD 解析失败", "error");
+      if (isApiKeyUnconfigured(error)) {
+        renderApiKeyGuide($("#app"));
+      } else {
+        toast(error.message || "JD 解析失败", "error");
+      }
     }
   },
   "open-optimizer": (button) => navigate("workspace", button.dataset.id),
@@ -1549,7 +1636,11 @@ document.addEventListener("click", async (event) => {
   try {
     await action(button, event);
   } catch (error) {
-    toast(error.message, "error");
+    if (isApiKeyUnconfigured(error)) {
+      renderApiKeyGuide($("#app"));
+    } else {
+      toast(error.message, "error");
+    }
   }
 });
 
@@ -1608,7 +1699,11 @@ document.addEventListener("submit", async (event) => {
     const data = Object.fromEntries(new FormData(form).entries());
     await handleForm(formName, data, form);
   } catch (error) {
-    toast(error.message, "error");
+    if (isApiKeyUnconfigured(error)) {
+      renderApiKeyGuide($("#app"));
+    } else {
+      toast(error.message, "error");
+    }
   } finally {
     if (submitBtn) submitBtn.classList.remove("is-loading");
   }
@@ -1827,12 +1922,9 @@ async function handleForm(formName, data, form) {
     case "settings-llm": {
       await api("/api/settings", {
         method: "PUT",
-        body: JSON.stringify({
-          llm_provider: data.llm_provider,
-          llm_model: data.llm_model,
-        }),
+        body: JSON.stringify({ llm: buildSettingsLlmPayload(data) }),
       });
-      toast("模型已切换，后续任务立即生效", "success");
+      toast("LLM 配置已保存，后续任务立即生效", "success");
       render();
       break;
     }

@@ -98,12 +98,42 @@ class JobImportRequest(BaseModel):
     jobs: list[dict[str, Any]] | None = None
     csv_text: str | None = Field(default=None, max_length=_CSV_TEXT_MAX)
 
+_LLM_KEY_MAX = 2_000
+
+
+class LLMSettingsUpdate(BaseModel):
+    """Editable LLM configuration persisted per user.
+
+    ``api_key`` is accepted only on writes; reads return a masked hint.
+    Omitted keys keep their stored value; explicit ``null`` clears a field.
+    """
+
+    provider: Literal["deepseek", "openrouter", "ollama"] | None = None
+    model: str | None = Field(default=None, max_length=_TITLE_MAX)
+    api_key: str | None = Field(default=None, max_length=_LLM_KEY_MAX)
+    base_url: str | None = Field(default=None, max_length=_URL_MAX)
+
+
+class SettingsTestConnectionRequest(BaseModel):
+    """Optional in-form values used by the connectivity probe.
+
+    Empty fields fall back to the persisted store, then .env / env vars,
+    mirroring the real pipeline resolution order.
+    """
+
+    provider: Literal["deepseek", "openrouter", "ollama"] | None = None
+    model: str | None = Field(default=None, max_length=_TITLE_MAX)
+    api_key: str | None = Field(default=None, max_length=_LLM_KEY_MAX)
+    base_url: str | None = Field(default=None, max_length=_URL_MAX)
+
+
 class SettingsUpdateRequest(BaseModel):
     salary_reference: list[dict[str, Any]] | None = None
     appraisal_weights: dict[str, float] | None = None
     classification_vocabulary: dict[str, list[str]] | None = None
     llm_provider: str | None = None
     llm_model: str | None = None
+    llm: LLMSettingsUpdate | None = None
 
 class WorkbenchRunRequest(BaseModel):
     master_resume_id: str

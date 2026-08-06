@@ -131,13 +131,53 @@ def test_settings_store_migrates_legacy_db(tmp_path):
     settings = store.get_settings("t1")
     assert settings["llm_provider"] is None
     assert settings["llm_model"] is None
+    assert settings["llm"] == {
+        "provider": None,
+        "model": None,
+        "api_key": None,
+        "base_url": None,
+    }
 
     updated = store.update_settings(
         "t1", {"llm_provider": "deepseek", "llm_model": "deepseek-chat"}
     )
     assert updated["llm_provider"] == "deepseek"
     assert updated["llm_model"] == "deepseek-chat"
-    assert _migrated_versions(store) == {1, 2}
+    assert updated["llm"]["provider"] == "deepseek"
+    assert updated["llm"]["model"] == "deepseek-chat"
+    assert _migrated_versions(store) == {1, 2, 3}
+
+
+def test_settings_store_backfills_llm_from_legacy_columns(tmp_path):
+    """Rows written before the llm_json column still surface as llm dict."""
+    db = tmp_path / "legacy-llm-columns.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        """
+        CREATE TABLE user_settings (
+            tenant_id TEXT PRIMARY KEY,
+            salary_reference_json TEXT NOT NULL DEFAULT '[]',
+            appraisal_weights_json TEXT NOT NULL DEFAULT '{}',
+            classification_vocabulary_json TEXT NOT NULL DEFAULT '{}',
+            llm_provider TEXT,
+            llm_model TEXT,
+            updated_at REAL NOT NULL
+        );
+        INSERT INTO user_settings (
+            tenant_id, llm_provider, llm_model, updated_at
+        ) VALUES ('t1', 'openrouter', 'old-model', 1.0);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = SettingsStore(db_path=db)
+    settings = store.get_settings("t1")
+    assert settings["llm_provider"] == "openrouter"
+    assert settings["llm_model"] == "old-model"
+    assert settings["llm"]["provider"] == "openrouter"
+    assert settings["llm"]["model"] == "old-model"
+    assert settings["llm"]["api_key"] is None
 
 
 def test_master_resume_store_migrates_legacy_db(tmp_path):

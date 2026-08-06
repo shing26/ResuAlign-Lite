@@ -2020,6 +2020,55 @@
         }
       }
     },
+    "/api/settings/test-connection": {
+      "post": {
+        "summary": "Test Llm Connection",
+        "description": "Probe the LLM provider with a minimal one-token chat request.\n\nResolution matches the real pipeline: submitted form values > persisted\nstore > .env / env vars. Returns ``{ok, message}`` with a readable\nfailure reason (auth, model missing, timeout, network).",
+        "operationId": "test_llm_connection_api_settings_test_connection_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsTestConnectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/reset": {
       "post": {
         "summary": "Reset Settings",
@@ -3385,6 +3434,65 @@
         ],
         "title": "KanbanBulkStatusResultItem"
       },
+      "LLMSettingsUpdate": {
+        "properties": {
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "deepseek",
+                  "openrouter",
+                  "ollama"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          }
+        },
+        "type": "object",
+        "title": "LLMSettingsUpdate",
+        "description": "Editable LLM configuration persisted per user.\n\n``api_key`` is accepted only on writes; reads return a masked hint.\nOmitted keys keep their stored value; explicit ``null`` clears a field."
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -3449,6 +3557,65 @@
           "content"
         ],
         "title": "MasterResumeUpdateRequest"
+      },
+      "SettingsTestConnectionRequest": {
+        "properties": {
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "deepseek",
+                  "openrouter",
+                  "ollama"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          }
+        },
+        "type": "object",
+        "title": "SettingsTestConnectionRequest",
+        "description": "Optional in-form values used by the connectivity probe.\n\nEmpty fields fall back to the persisted store, then .env / env vars,\nmirroring the real pipeline resolution order."
       },
       "SettingsUpdateRequest": {
         "properties": {
@@ -3519,6 +3686,16 @@
               }
             ],
             "title": "Llm Model"
+          },
+          "llm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LLMSettingsUpdate"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

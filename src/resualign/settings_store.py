@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     classification_vocabulary_json TEXT NOT NULL DEFAULT '{}',
     llm_provider TEXT,
     llm_model TEXT,
+    llm_json TEXT,
     updated_at REAL NOT NULL
 );
 """
@@ -64,7 +65,17 @@ def default_settings() -> dict[str, Any]:
         },
         "llm_provider": None,
         "llm_model": None,
+        "llm": {
+            "provider": None,
+            "model": None,
+            "api_key": None,
+            "base_url": None,
+        },
     }
+
+
+def _default_llm() -> dict[str, Any]:
+    return dict(default_settings()["llm"])
 
 
 class SettingsStore(_SqliteStore):
@@ -73,6 +84,7 @@ class SettingsStore(_SqliteStore):
     MIGRATIONS = (
         (1, "ALTER TABLE user_settings ADD COLUMN llm_provider TEXT"),
         (2, "ALTER TABLE user_settings ADD COLUMN llm_model TEXT"),
+        (3, "ALTER TABLE user_settings ADD COLUMN llm_json TEXT"),
     )
 
     def get_settings(self, tenant_id: str) -> dict[str, Any]:
@@ -82,13 +94,21 @@ class SettingsStore(_SqliteStore):
             with self._connect() as conn:
                 row = conn.execute(
                     "SELECT salary_reference_json, appraisal_weights_json, "
-                    "classification_vocabulary_json, llm_provider, llm_model "
+                    "classification_vocabulary_json, llm_provider, llm_model, "
+                    "llm_json "
                     "FROM user_settings "
                     "WHERE tenant_id = ?",
                     (tenant_id,),
                 ).fetchone()
         if row is None:
             return defaults
+        llm = _parse_llm_json(row["llm_json"])
+        # Backfill from the legacy llm_provider/llm_model columns so rows
+        # written before the llm_json column existed keep working.
+        if not llm.get("provider") and row["llm_provider"]:
+            llm["provider"] = row["llm_provider"]
+        if not llm.get("model") and row["llm_model"]:
+            llm["model"] = row["llm_model"]
         settings = {
             "salary_reference": json.loads(
                 row["salary_reference_json"] or "[]"
@@ -99,8 +119,9 @@ class SettingsStore(_SqliteStore):
             "classification_vocabulary": json.loads(
                 row["classification_vocabulary_json"] or "{}"
             ),
-            "llm_provider": row["llm_provider"],
-            "llm_model": row["llm_model"],
+            "llm_provider": llm.get("provider"),
+            "llm_model": llm.get("model"),
+            "llm": llm,
         }
         return _merge_defaults(defaults, settings)
 
@@ -119,8 +140,8 @@ class SettingsStore(_SqliteStore):
                     "INSERT INTO user_settings ("
                     "tenant_id, salary_reference_json, "
                     "appraisal_weights_json, classification_vocabulary_json, "
-                    "llm_provider, llm_model, updated_at"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?) "
+                    "llm_provider, llm_model, llm_json, updated_at"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(tenant_id) DO UPDATE SET "
                     "salary_reference_json = excluded.salary_reference_json, "
                     "appraisal_weights_json = "
@@ -129,6 +150,7 @@ class SettingsStore(_SqliteStore):
                     "excluded.classification_vocabulary_json, "
                     "llm_provider = excluded.llm_provider, "
                     "llm_model = excluded.llm_model, "
+                    "llm_json = excluded.llm_json, "
                     "updated_at = excluded.updated_at",
                     (
                         tenant_id,
@@ -142,8 +164,9 @@ class SettingsStore(_SqliteStore):
                             merged["classification_vocabulary"],
                             ensure_ascii=False,
                         ),
-                        merged.get("llm_provider"),
-                        merged.get("llm_model"),
+                        merged["llm"].get("provider"),
+                        merged["llm"].get("model"),
+                        json.dumps(merged["llm"], ensure_ascii=False),
                         now,
                     ),
                 )
@@ -153,9 +176,55 @@ class SettingsStore(_SqliteStore):
         super()._ensure_initialized(_SETTINGS_SCHEMA)
 
 
+def _parse_llm_json(raw: str | None) -> dict[str, Any]:
+    """Parse the llm_json column, tolerating missing/corrupt values."""
+    llm: dict[str, Any] = {}
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            llm = parsed
+    return {key: llm.get(key) for key in _default_llm()}
+
+
+def _merge_llm(current: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    """Merge llm settings with legacy llm_provider/llm_model updates.
+
+    The ``llm`` dict (new UI) is authoritative for the keys it carries; the
+    legacy top-level ``llm_provider``/``llm_model`` keys still fold in when
+    the llm dict does not mention them, so older clients keep working.
+    """
+    merged = dict(current)
+    llm_update = updates.get("llm")
+    if isinstance(llm_update, dict):
+        for key in merged:
+            if key in llm_update:
+                merged[key] = llm_update[key]
+        # The llm dict is authoritative; legacy top-level keys only act as
+        # aliases when they carry a real value (explicit nulls belong in the
+        # llm dict).
+        if "provider" not in llm_update and updates.get("llm_provider") not in (None,):
+            merged["provider"] = updates["llm_provider"]
+        if "model" not in llm_update and updates.get("llm_model") not in (None,):
+            merged["model"] = updates["llm_model"]
+    else:
+        if "llm_provider" in updates:
+            merged["provider"] = updates["llm_provider"]
+        if "llm_model" in updates:
+            merged["model"] = updates["llm_model"]
+    # Normalize empty strings to None so the store keeps one canonical
+    # "unset" representation and build_config can fall through to .env.
+    return {key: (value if value != "" else None) for key, value in merged.items()}
+
+
 def _merge_defaults(
     defaults: dict[str, Any], updates: dict[str, Any]
 ) -> dict[str, Any]:
+    merged_llm = _merge_llm(
+        defaults.get("llm") or _default_llm(), updates
+    )
     merged = {
         "salary_reference": list(
             updates.get("salary_reference", defaults["salary_reference"])
@@ -172,10 +241,9 @@ def _merge_defaults(
             )
             for key in defaults["classification_vocabulary"]
         },
-        "llm_provider": updates.get(
-            "llm_provider", defaults.get("llm_provider")
-        ),
-        "llm_model": updates.get("llm_model", defaults.get("llm_model")),
+        "llm_provider": merged_llm.get("provider"),
+        "llm_model": merged_llm.get("model"),
+        "llm": merged_llm,
     }
     return merged
 
@@ -195,6 +263,28 @@ def _validate_settings(settings: dict[str, Any]) -> None:
         raise UserStoreError("llm_model must be a non-empty string")
     if model is not None and provider is None:
         raise UserStoreError("llm_provider is required when setting llm_model")
+
+    llm = settings.get("llm") or {}
+    llm_provider = llm.get("provider")
+    if llm_provider is not None and llm_provider not in (
+        "deepseek",
+        "openrouter",
+        "ollama",
+    ):
+        raise UserStoreError(
+            "llm.provider must be one of deepseek, openrouter, ollama"
+        )
+    llm_model = llm.get("model")
+    if llm_model is not None and (
+        not isinstance(llm_model, str) or not llm_model.strip()
+    ):
+        raise UserStoreError("llm.model must be a non-empty string")
+    if llm_model is not None and llm_provider is None:
+        raise UserStoreError("llm.provider is required when setting llm.model")
+    for key in ("api_key", "base_url"):
+        value = llm.get(key)
+        if value is not None and not isinstance(value, str):
+            raise UserStoreError(f"llm.{key} must be a string or null")
 
     weights = settings.get("appraisal_weights") or {}
     missing = set(DEFAULT_WEIGHTS) - set(weights)
