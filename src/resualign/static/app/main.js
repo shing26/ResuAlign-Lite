@@ -49,7 +49,11 @@ import {
 import {
   applyJdParseError,
   applyJdParseResult,
+  backupRestoreGuide,
   batchPanelHtml,
+  batchRowsToCsv,
+  buildJobsBackup,
+  jobsToCsv,
   lineDiff,
   parseHashValue,
   renderMarkdown,
@@ -1380,6 +1384,55 @@ const actions = {
     state.route.jobId,
     activeSessionForExport(),
   ),
+  "export-jobs-csv": () => {
+    if (!state.jobs.length) {
+      toast("岗位库为空，暂无可导出的岗位", "error");
+      return;
+    }
+    download("resualign-jobs.csv", jobsToCsv(state.jobs), "text/csv;charset=utf-8");
+    toast(`已导出 ${state.jobs.length} 条岗位`, "success");
+  },
+  "export-jobs-backup": async () => {
+    const jobs = await api("/api/jobs?limit=500");
+    if (!jobs.length) {
+      toast("岗位库为空，暂无可备份的岗位", "error");
+      return;
+    }
+    download(
+      `resualign-jobs-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      JSON.stringify(buildJobsBackup(jobs), null, 2),
+      "application/json",
+    );
+    toast(`已备份 ${jobs.length} 条岗位`, "success");
+  },
+  "show-backup-guide": () => {
+    showModal(
+      "整库备份与还原",
+      `<pre class="pre small" style="white-space:pre-wrap">${esc(backupRestoreGuide())}</pre>`,
+    );
+  },
+  "export-batch-csv": () => {
+    if (!state.batchAlign) {
+      toast("暂无批量对比结果", "error");
+      return;
+    }
+    download(
+      "resualign-batch-compare.csv",
+      batchRowsToCsv(state.batchAlign),
+      "text/csv;charset=utf-8",
+    );
+    toast("对比 CSV 已导出", "success");
+  },
+  "show-last-batch": () => {
+    if (!state.batchAlign) {
+      toast("当前会话暂无历史批次", "error");
+      return;
+    }
+    renderBatchResults(state.batchAlign);
+    const panel = $("[data-batch-wrap]");
+    if (panel) panel.hidden = false;
+    toast("已恢复最近一次批次结果", "success");
+  },
   "toggle-theme": () => toggleTheme(),
   "toggle-appraisal-drawer": (button) => toggleAppraisalDrawer(button),
   "set-wb-tab": (button) => setWbMobilePane(button),

@@ -740,6 +740,10 @@ export function batchPanelHtml(jobs, resumes) {
         <button class="btn btn-danger" type="button" data-action="cancel-batch-align" data-batch-cancel hidden>取消排队</button>
         <span class="small muted" data-batch-status></span>
       </div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn btn-ghost btn-sm" type="button" data-action="show-last-batch">查看最近一次批次</button>
+        <span class="small muted">后端暂无批次列表接口，仅保留当前会话最近一次结果</span>
+      </div>
       <div data-batch-results></div>
     </form>`;
 }
@@ -755,14 +759,30 @@ export function renderBatchMatrixHtml(batch) {
       )
       .join("")}</div>`;
   }
+  const barColor = (score) =>
+    score >= 75 ? "var(--success)" : score >= 55 ? "var(--warning)" : "var(--danger)";
   const bars = rows
     .filter((row) => row.summary && row.summary.score != null)
     .map((row) => {
       const score = Math.max(0, Math.min(100, Number(row.summary.score) || 0));
-      return `<div class="batch-bar" data-batch-bar>
-        <span class="batch-bar__label">${esc(row.title || row.job_id)}</span>
-        <div class="batch-bar__track"><div class="batch-bar__fill ${matchTone(score)}" style="width:${score}%"></div></div>
-        <span class="batch-bar__score">${esc(score)}</span>
+      const title = row.title || row.job_id || "未命名岗位";
+      return `<div class="batch-bar" data-batch-bar style="display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px,2fr) 40px;gap:10px;align-items:center">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(title)}">${esc(title)}${row.company ? `<span class="small muted"> · ${esc(row.company)}</span>` : ""}</span>
+        <div style="background:var(--surface-2);border-radius:6px;height:10px;overflow:hidden" data-batch-bar-track>
+          <div data-batch-bar-fill style="width:${score}%;height:100%;background:${barColor(score)};border-radius:6px;transition:width .4s ease"></div>
+        </div>
+        <span data-batch-bar-score style="text-align:right;font-variant-numeric:tabular-nums">${esc(score)}</span>
+      </div>`;
+    })
+    .join("");
+  const gapColumns = rows
+    .map((row) => {
+      const summary = row.summary || {};
+      const gaps = (summary.key_gaps || []).slice(0, 5);
+      const title = row.title || row.job_id || "未命名岗位";
+      return `<div class="batch-gap-col" data-batch-gap-col>
+        <div class="small" style="font-weight:600;margin-bottom:6px">${esc(title)}${row.company ? `<span class="small muted"> · ${esc(row.company)}</span>` : ""}</div>
+        ${gaps.length ? `<div class="chips" style="display:flex;flex-wrap:wrap;gap:6px">${gaps.map((gap) => `<span class="gap-tag gap-tag--warn" data-batch-gap>${esc(gap)}</span>`).join("")}</div>` : `<span class="small muted">暂无缺口数据</span>`}
       </div>`;
     })
     .join("");
@@ -782,7 +802,13 @@ export function renderBatchMatrixHtml(batch) {
       </tr>`;
     })
     .join("");
-  return `<div class="batch-bars">${bars || '<div class="small muted">暂无已完成岗位</div>'}</div>
+  return `<div class="split-section-title">匹配分对比</div>
+    <div class="batch-bars" data-batch-bars>${bars || '<div class="small muted">暂无已完成岗位</div>'}</div>
+    <div class="split-section-title" style="margin-top:12px">关键缺口对比</div>
+    <div class="batch-gaps" data-batch-gaps style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">${gapColumns}</div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn btn-outline btn-sm" type="button" data-action="export-batch-csv">导出对比 CSV</button>
+    </div>
     <div class="table-wrap"><table class="data batch-matrix">
       <thead><tr><th>岗位</th><th>分数</th><th>关键缺口</th><th>结论</th><th>下一步</th><th>操作</th></tr></thead>
       <tbody>${tableRows}</tbody></table></div>`;
@@ -1141,4 +1167,147 @@ export function applyJdParseError(status, detail) {
   status.className = "jd-parse-status form-error";
   status.setAttribute("role", "alert");
   status.innerHTML = jdParseErrorHtml(detail);
+}
+
+/* ------------------------------------------------------------------ */
+/* Job library stats + CSV export + whole-library backup (DOM-tested)  */
+/* ------------------------------------------------------------------ */
+
+/* Funnel semantics (documented for the acceptance tests):
+ * - total      = every library job
+ * - 投递/总数  = jobs that reached submission (applied + interview + offer) / total
+ * - 面试/投递  = jobs that reached interview (interview + offer) / submission count
+ * - Offer/面试 = jobs that reached offer (offer) / interview count
+ * Withdrawn jobs are excluded from the funnel (their pre-abandon stage is
+ * unknown); they still appear in the five-state counts. Any zero denominator
+ * yields null, which the UI renders as "—". */
+export function funnelPercent(numerator, denominator) {
+  const bottom = Number(denominator);
+  if (!Number.isFinite(bottom) || bottom <= 0) return null;
+  return Math.round((Number(numerator) / bottom) * 100);
+}
+
+export function computeJobStats(jobs) {
+  const list = Array.isArray(jobs) ? jobs : [];
+  const counts = { draft: 0, applied: 0, interview: 0, offer: 0, withdrawn: 0 };
+  for (const job of list) {
+    const key = canonicalJobStatus(job.status);
+    if (key in counts) counts[key] += 1;
+  }
+  const applied = counts.applied + counts.interview + counts.offer;
+  const interview = counts.interview + counts.offer;
+  const offer = counts.offer;
+  const total = list.length;
+  return {
+    total,
+    counts,
+    funnel: {
+      applied,
+      interview,
+      offer,
+      applyRate: funnelPercent(applied, total),
+      interviewRate: funnelPercent(interview, applied),
+      offerRate: funnelPercent(offer, interview),
+    },
+  };
+}
+
+export function renderJobStatsHtml(stats) {
+  const data = stats || computeJobStats([]);
+  const counts = data.counts || {};
+  const funnel = data.funnel || {};
+  const percent = (value) => (value == null ? "—" : `${value}%`);
+  const dot = (key) =>
+    `<span class="board-dot--${key}" aria-hidden="true" style="display:inline-block;width:8px;height:8px;border-radius:50%;flex:none"></span>`;
+  const countChips = JOB_STATUS_CANONICAL.map(
+    (key) =>
+      `<span class="badge" style="display:inline-flex;gap:6px;align-items:center">${dot(key)}${esc(JOB_STATUS_LABELS[key])}<strong data-stat-count="${key}">${counts[key] ?? 0}</strong></span>`,
+  ).join("");
+  return `
+    <div class="board-stats" data-board-stats role="group" aria-label="求职漏斗统计" style="display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;margin:10px 0 14px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center" data-board-stats-counts>${countChips}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center" data-board-stats-funnel>
+        <span class="small muted">转化</span>
+        <span class="badge badge-blue" title="已投递及以上阶段 ÷ 岗位总数">添加→投递 <strong data-stat-rate="applyRate">${percent(funnel.applyRate)}</strong></span>
+        <span class="badge badge-amber" title="进入面试及以上阶段 ÷ 已投递">投递→面试 <strong data-stat-rate="interviewRate">${percent(funnel.interviewRate)}</strong></span>
+        <span class="badge badge-green" title="拿到 Offer ÷ 进入面试">面试→Offer <strong data-stat-rate="offerRate">${percent(funnel.offerRate)}</strong></span>
+      </div>
+    </div>`;
+}
+
+/* CSV export helpers (RFC 4180-ish: quote fields containing , " CR or LF;
+ * embedded quotes are doubled). Output carries a UTF-8 BOM so Excel opens
+ * the Chinese columns correctly. */
+
+export function csvEscape(value) {
+  const text = value == null ? "" : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+export const JOB_CSV_HEADERS = ["岗位", "公司", "城市", "薪资", "状态", "匹配分", "定稿版本"];
+
+export function jobsToCsv(jobs) {
+  const rows = (Array.isArray(jobs) ? jobs : []).map((job) => [
+    job.title || "",
+    job.company || "",
+    job.location || "",
+    formatSalary(job),
+    jobStatusLabel(job.status),
+    job.match_score != null ? String(Math.round(job.match_score)) : "",
+    job.final_draft_version != null ? String(job.final_draft_version) : "",
+  ]);
+  const lines = [JOB_CSV_HEADERS, ...rows].map((row) => row.map(csvEscape).join(","));
+  return `\uFEFF${lines.join("\r\n")}`;
+}
+
+export const BATCH_CSV_HEADERS = ["岗位", "公司", "匹配分", "关键缺口", "结论", "下一步"];
+
+export function batchRowsToCsv(batch) {
+  const rows = ((batch && batch.rows) || []).map((row) => {
+    const summary = row.summary || {};
+    const score = summary.score;
+    const verdict =
+      score == null ? "" : score >= 75 ? "投递" : score >= 55 ? "考虑" : "放弃";
+    return [
+      row.title || row.job_id || "",
+      row.company || "",
+      score != null ? String(score) : "",
+      (summary.key_gaps || []).join("；"),
+      verdict,
+      summary.next_step || row.status || "",
+    ];
+  });
+  const lines = [BATCH_CSV_HEADERS, ...rows].map((row) => row.map(csvEscape).join(","));
+  return `\uFEFF${lines.join("\r\n")}`;
+}
+
+/* Whole-library JSON backup: the payload embeds machine-usable restore
+ * steps so the file itself documents how to recover (script steps below
+ * mirror the real POST /api/jobs/import contract). */
+
+export const BACKUP_RESTORE_STEPS = [
+  "1. 备份：岗位库 →「整库备份 JSON」下载全部岗位；「导出 CSV」可作明细备份。",
+  "2. 还原 JSON：调用 POST /api/jobs/import，body 为 {\"jobs\": <备份中的 jobs 数组>}，重复岗位自动跳过。PowerShell 示例：",
+  "   $body = Get-Content resualign-jobs-backup.json -Raw | ConvertFrom-Json;",
+  "   $payload = @{ jobs = $body.jobs } | ConvertTo-Json -Depth 8;",
+  "   Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/jobs/import -ContentType 'application/json' -Body $payload",
+  "3. 还原 CSV：岗位库 →「批量导入」粘贴导出的 CSV 内容（列顺序：岗位,公司,城市,薪资,状态,匹配分,定稿版本）。",
+  "4. 还原只重建岗位基础字段；匹配分/定稿版本等派生字段不会自动重算，可在工作台对关键岗位重新运行预分析。",
+];
+
+export function backupRestoreGuide() {
+  return ["# 整库备份与还原", "", ...BACKUP_RESTORE_STEPS].join("\n");
+}
+
+export function buildJobsBackup(jobs) {
+  const list = Array.isArray(jobs) ? jobs : [];
+  return {
+    app: "ResuAlign-Lite",
+    type: "jobs-backup",
+    version: 1,
+    exported_at: new Date().toISOString(),
+    count: list.length,
+    restore_steps: [...BACKUP_RESTORE_STEPS],
+    jobs: list,
+  };
 }

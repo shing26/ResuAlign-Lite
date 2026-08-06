@@ -30,20 +30,20 @@ for (const f of files) {
 let failures = 0;
 for (const f of files) {
   const src = readFileSync(join(dir, f), "utf8");
-  for (const m of src.matchAll(/from\s+"\.\/(\w+)\.js"/g)) {
-    const dep = `${m[1]}.js`;
+  // Match complete import statements so multi-import modules (e.g. events.js
+  // importing from both ./focus-trap.js and ./format.js) are attributed to
+  // the correct dependency instead of a fixed window around `from "..."`.
+  for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s+"\.\/(\w+)\.js"/g)) {
+    const dep = `${m[2]}.js`;
     if (!exports.has(dep)) {
       console.log(`MISSING MODULE: ${f} imports ./${dep}`);
       failures++;
       continue;
     }
-    const local = src.slice(Math.max(0, m.index - 600), m.index);
-    const importMatch = [...local.matchAll(/import\s*\{([^}]+)\}/g)].pop();
-    if (!importMatch) continue;
-    for (const n of importMatch[1].split(",")) {
-      const name = n.trim().split(/\s+as\s+/).pop();
+    for (const raw of m[1].split(",")) {
+      const name = raw.trim().split(/\s+as\s+/).pop();
       if (name && !exports.get(dep).has(name) && !exports.get(dep).has("*")) {
-        console.log(`MISSING EXPORT: ${f} imports '${name}' from ./${m[1]}.js`);
+        console.log(`MISSING EXPORT: ${f} imports '${name}' from ./${dep}`);
         failures++;
       }
     }

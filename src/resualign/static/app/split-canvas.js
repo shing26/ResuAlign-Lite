@@ -21,6 +21,7 @@ import {
   alignProgressPercent,
   alignmentControls,
   boardCard,
+  computeJobStats,
   crawlStatusLine,
   diffCard,
   diffList,
@@ -29,6 +30,7 @@ import {
   matchTone,
   radarHtml,
   renderGap,
+  renderJobStatsHtml,
   renderSkills,
   stageStepper,
 } from "./format.js";
@@ -665,8 +667,12 @@ export async function renderCopilotBoard(app) {
       </div>
       <div class="row">
         <button class="btn btn-primary" data-action="open-command-panel">粘贴 JD / 链接</button>
+        <button class="btn btn-ghost btn-sm" data-action="export-jobs-csv">导出 CSV</button>
+        <button class="btn btn-ghost btn-sm" data-action="export-jobs-backup">整库备份</button>
+        <button class="btn btn-ghost btn-sm" data-action="show-backup-guide">备份说明</button>
       </div>
     </div>
+    ${renderJobStatsHtml(computeJobStats(state.jobs))}
     <form class="panel panel-card filter-bar" data-form="copilot-filter">
       <div class="field"><label>关键词</label><input type="search" name="search" value="${esc(state.filters.search)}" placeholder="标题 / 公司 / JD"></div>
       <div class="field"><label>职能</label><select name="job_function"><option value="">全部</option>${vocabulary.job_functions.map((value) => `<option value="${esc(value)}" ${value === state.filters.job_function ? "selected" : ""}>${esc(value)}</option>`).join("")}</select></div>
@@ -676,7 +682,7 @@ export async function renderCopilotBoard(app) {
       <button class="btn btn-ghost" type="button" data-action="clear-filters">清空</button>
     </form>
     <div class="board-toolbar panel panel-card">
-      <span class="small muted">拖拽卡片到目标列，或使用卡片内下拉菜单（键盘可达）。</span>
+      <span class="small muted">拖拽卡片到目标列；触屏 / 键盘：使用卡片内下拉菜单移动状态。</span>
     </div>
     <div id="job-board" class="pipeline-board" data-pipeline-board>${columns}</div>`;
   bindBoardDrag(app);
@@ -689,8 +695,23 @@ export async function renderCopilotBoard(app) {
   });
 }
 
+function prefersCoarsePointer() {
+  return (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(pointer: coarse)").matches
+  );
+}
+
 function bindBoardDrag(root) {
+  const touchOnly = prefersCoarsePointer();
   $$("[data-board-drag]", root).forEach((card) => {
+    if (touchOnly) {
+      /* HTML5 drag & drop is mouse-only; on touch devices the card's
+         status <select> is the supported interaction (#5). Disabling
+         draggable also stops long-press drag ghosts on mobile Safari. */
+      card.draggable = false;
+      return;
+    }
     card.addEventListener("dragstart", (event) => {
       draggingJobId = card.dataset.jobId;
       card.classList.add("is-dragging");
@@ -707,6 +728,7 @@ function bindBoardDrag(root) {
       );
     });
   });
+  if (touchOnly) return;
   $$("[data-board-drop]", root).forEach((column) => {
     column.addEventListener("dragover", (event) => {
       event.preventDefault();
