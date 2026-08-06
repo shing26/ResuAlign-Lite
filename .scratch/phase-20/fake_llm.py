@@ -24,6 +24,17 @@ app = FastAPI(title="phase20-fake-llm")
 STAGE_HITS: Counter[str] = Counter()
 UNKNOWN_PROMPTS: list[str] = []
 
+# E2E control: while E2E_CLASSIFY_FAILS_LEFT > 0, every classifier call
+# whose user message carries the marker below fails with HTTP 500, so the
+# tests/e2e suite can construct a classification-pending job through the
+# real API path (POST /api/jobs catches LLMResponseError and stores the job
+# with classification_pending=1). The app retries failed LLM calls
+# max_retries+1 = 3 times, so the test sets fails_left=3 before creating the
+# job; later calls (reclassify) succeed. The phase-20 smoke never sends the
+# marker, so its REQUIRED_STAGES gate is unaffected.
+E2E_CLASSIFY_FAIL_MARKER = "__E2E_CLASSIFY_FAIL__"
+E2E_CLASSIFY_FAILS_LEFT: int = 0
+
 # Stages the phase-20 key-path smoke must exercise at least once:
 #  - job classifier        : session pipeline classification
 #  - resume auditor        : workbench diagnosis (no-JD run)
@@ -50,6 +61,12 @@ def fake_llm_response(system: str, user: str) -> dict | None:
 
     ``None`` marks an unknown system prompt: the caller returns HTTP 500.
     """
+    global E2E_CLASSIFY_FAILS_LEFT
+    if "job classifier" in system and E2E_CLASSIFY_FAIL_MARKER in user:
+        if E2E_CLASSIFY_FAILS_LEFT > 0:
+            E2E_CLASSIFY_FAILS_LEFT -= 1
+            STAGE_HITS["e2e classify fail"] += 1
+            return None
     if "job classifier" in system:
         STAGE_HITS["job classifier"] += 1
         return {
@@ -159,6 +176,14 @@ async def assert_stages() -> dict:
             },
         )
     return {"ok": True, "stage_hits": dict(STAGE_HITS)}
+
+
+@app.post("/control/classify-fail")
+async def control_classify_fail(times: int = 1) -> dict:
+    """Set how many classifier calls carrying the E2E marker must fail."""
+    global E2E_CLASSIFY_FAILS_LEFT
+    E2E_CLASSIFY_FAILS_LEFT = max(0, times)
+    return {"ok": True, "fails_left": E2E_CLASSIFY_FAILS_LEFT}
 
 
 @app.post("/v1/chat/completions")

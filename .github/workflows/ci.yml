@@ -97,6 +97,16 @@ jobs:
         run: python .scratch/phase-20/playwright_smoke.py
         env:
           PYTHONPATH: src
+      - name: E2E suite (settings / import / reclassify)
+        run: python -m pytest tests/e2e -v --e2e --tb=short
+        env:
+          PYTHONPATH: src
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: tests/e2e/artifacts/
       - name: Upload Playwright artifacts
         uses: actions/upload-artifact@v4
         if: always()

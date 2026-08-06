@@ -53,6 +53,9 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "e2e: browser E2E suite (requires Playwright + Chromium, run with --e2e)",
+]
 
 [tool.coverage.run]
 source = ["src/resualign"]
