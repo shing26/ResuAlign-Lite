@@ -1071,3 +1071,74 @@ export function previewFor(value) {
       <div class="command-preview__body">${previewLines.map((line) => `<div>${esc(line)}</div>`).join("")}${lines.length > 5 ? `<div class="small muted">… 其余 ${lines.length - 5} 行</div>` : ""}</div>
     </div>`;
 }
+
+/* ------------------------------------------------------------------ */
+/* JD parse form filling + error HTML (DOM-tested)                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Fill the job-create form fields from a parse-jd response, only where
+ * the user has not typed anything yet. Returns a per-field summary of
+ * what was filled.
+ */
+export function applyJdParseResult(form, parsed) {
+  const summary = {};
+  const field = (name) => form.querySelector(`[name="${name}"]`);
+  const fillText = (name, value) => {
+    const input = field(name);
+    const ok = Boolean(
+      input &&
+        !(input.value || "").trim() &&
+        value != null &&
+        String(value).trim() !== "",
+    );
+    if (ok) input.value = value;
+    summary[name] = ok;
+    return ok;
+  };
+  fillText("title", parsed.title);
+  fillText("jd_text", parsed.jd_text);
+  fillText("company", parsed.company);
+  fillText("location", parsed.city);
+  fillText("source_url", parsed.source_url);
+
+  const min = field("salary_min");
+  const fillMin = Boolean(min && min.value === "" && parsed.salary_min != null);
+  if (fillMin) min.value = parsed.salary_min;
+  summary.salary_min = fillMin;
+
+  const max = field("salary_max");
+  const fillMax = Boolean(max && max.value === "" && parsed.salary_max != null);
+  if (fillMax) max.value = parsed.salary_max;
+  summary.salary_max = fillMax;
+
+  const cur = field("salary_currency");
+  const fillCur = Boolean(
+    cur && !(cur.value || "").trim() && parsed.salary_currency,
+  );
+  if (fillCur) cur.value = parsed.salary_currency;
+  summary.salary_currency = fillCur;
+
+  return summary;
+}
+
+/** Error state HTML for the JD parse status area. */
+export function jdParseErrorHtml(detail) {
+  const reason =
+    detail && detail.reason ? detail.reason : "未能从该链接提取岗位内容";
+  const action =
+    detail && detail.action ? detail.action : "可改用粘贴 JD 或稍后重试";
+  return `
+    <div class="jd-parse-error-text"><strong>解析失败</strong>：${esc(reason)}，${esc(action)}</div>
+    <div class="row">
+      <button class="btn btn-secondary btn-sm" type="button" data-action="use-paste-mode">改用粘贴 JD</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-action="retry-parse-jd">重新解析</button>
+    </div>`;
+}
+
+/** Apply the JD parse failure state to the status area element. */
+export function applyJdParseError(status, detail) {
+  status.className = "jd-parse-status form-error";
+  status.setAttribute("role", "alert");
+  status.innerHTML = jdParseErrorHtml(detail);
+}

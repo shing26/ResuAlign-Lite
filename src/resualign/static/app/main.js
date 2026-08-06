@@ -47,6 +47,8 @@ import {
   startAlignmentRun,
 } from "./split-canvas.js";
 import {
+  applyJdParseError,
+  applyJdParseResult,
   batchPanelHtml,
   lineDiff,
   parseHashValue,
@@ -994,50 +996,7 @@ const actions = {
         method: "POST",
         body: JSON.stringify({ jd_url: url }),
       });
-      const titleInput = form.querySelector('input[name="title"]');
-      if (titleInput && !(titleInput.value || "").trim()) {
-        titleInput.value = parsed.title || "";
-      }
-      const jdText = form.querySelector('textarea[name="jd_text"]');
-      if (jdText && !(jdText.value || "").trim()) {
-        jdText.value = parsed.jd_text || "";
-      }
-      const companyInput = form.querySelector('input[name="company"]');
-      if (companyInput && !(companyInput.value || "").trim()) {
-        companyInput.value = parsed.company || "";
-      }
-      const locationInput = form.querySelector('input[name="location"]');
-      if (locationInput && !(locationInput.value || "").trim()) {
-        locationInput.value = parsed.city || "";
-      }
-      const sourceInput = form.querySelector('input[name="source_url"]');
-      if (sourceInput && !(sourceInput.value || "").trim()) {
-        sourceInput.value = parsed.source_url || "";
-      }
-      const salaryMinInput = form.querySelector('input[name="salary_min"]');
-      const salaryMaxInput = form.querySelector('input[name="salary_max"]');
-      const currencyInput = form.querySelector('input[name="salary_currency"]');
-      if (
-        salaryMinInput &&
-        salaryMinInput.value === "" &&
-        parsed.salary_min != null
-      ) {
-        salaryMinInput.value = parsed.salary_min;
-      }
-      if (
-        salaryMaxInput &&
-        salaryMaxInput.value === "" &&
-        parsed.salary_max != null
-      ) {
-        salaryMaxInput.value = parsed.salary_max;
-      }
-      if (
-        currencyInput &&
-        !(currencyInput.value || "").trim() &&
-        parsed.salary_currency
-      ) {
-        currencyInput.value = parsed.salary_currency;
-      }
+      applyJdParseResult(form, parsed);
       setJdInputMode("paste");
       if (status) {
         status.className = "jd-parse-status form-success";
@@ -1560,18 +1519,7 @@ function clearJdParseStatus(status) {
 }
 
 function renderJdParseError(status, detail) {
-  status.className = "jd-parse-status form-error";
-  status.setAttribute("role", "alert");
-  const reason =
-    detail && detail.reason ? detail.reason : "未能从该链接提取岗位内容";
-  const action =
-    detail && detail.action ? detail.action : "可改用粘贴 JD 或稍后重试";
-  status.innerHTML = `
-    <div class="jd-parse-error-text"><strong>解析失败</strong>：${esc(reason)}，${esc(action)}</div>
-    <div class="row">
-      <button class="btn btn-secondary btn-sm" type="button" data-action="use-paste-mode">改用粘贴 JD</button>
-      <button class="btn btn-ghost btn-sm" type="button" data-action="retry-parse-jd">重新解析</button>
-    </div>`;
+  applyJdParseError(status, detail);
 }
 
 function setSegmented(selector, active) {

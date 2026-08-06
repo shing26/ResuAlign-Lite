@@ -42,7 +42,9 @@ jobs:
           fi
         shell: bash
       - name: Frontend unit tests (node:test)
-        run: node --test tests/frontend/*.test.mjs
+        run: |
+          npm install --prefix tests/frontend --no-audit --no-fund
+          node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs
         shell: bash
       - name: Frontend ESM import graph check
         run: node tests/frontend/imports-check.mjs

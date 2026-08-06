@@ -42,6 +42,9 @@ w.py
 build/
 dist/
 
+# Frontend test deps
+tests/frontend/node_modules/
+
 # Editors and OS
 .idea/
 .vscode/
