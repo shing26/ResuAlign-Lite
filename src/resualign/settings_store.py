@@ -74,6 +74,62 @@ def default_settings() -> dict[str, Any]:
     }
 
 
+def _repair_classification_vocabulary(
+    vocabulary: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    """Repair the classification vocabulary against the built-in whitelists.
+
+    ``statuses`` must be a subset of ``JOB_STATUSES``: values missing from
+    the canonical five are backfilled, and any stored value outside the
+    whitelist (e.g. a corrupted ``["待定", "已投递"]`` list) resets the whole
+    status list to the built-in five (B1). ``job_functions``/``seniorities``
+    are tenant-editable; they are only replaced when they are not usable
+    (missing/empty/corrupt).
+
+    Returns ``(repaired, changed)`` so callers can persist the repair once
+    instead of re-running it on every read (idempotent self-healing).
+    """
+    if not isinstance(vocabulary, dict):
+        return dict(default_settings()["classification_vocabulary"]), True
+    builtin = default_settings()["classification_vocabulary"]
+    repaired: dict[str, Any] = {}
+    changed = False
+
+    statuses = vocabulary.get("statuses")
+    if isinstance(statuses, list):
+        valid = [str(s) for s in statuses if str(s or "").strip() in JOB_STATUSES]
+        if len(valid) != len(statuses):
+            # Corrupt values present: fall back to the built-in five.
+            valid = list(JOB_STATUSES)
+            changed = True
+        for status in JOB_STATUSES:
+            if status not in valid:
+                valid.append(status)
+                changed = True
+        repaired["statuses"] = valid
+    else:
+        repaired["statuses"] = list(JOB_STATUSES)
+        changed = True
+
+    for key in ("job_functions", "seniorities"):
+        values = vocabulary.get(key)
+        if isinstance(values, list):
+            cleaned = [
+                str(value)
+                for value in values
+                if str(value or "").strip()
+            ]
+            if not cleaned:
+                repaired[key] = list(builtin[key])
+                changed = True
+            else:
+                repaired[key] = cleaned
+        else:
+            repaired[key] = list(builtin[key])
+            changed = True
+    return repaired, changed
+
+
 def _default_llm() -> dict[str, Any]:
     return dict(default_settings()["llm"])
 
@@ -123,7 +179,28 @@ class SettingsStore(_SqliteStore):
             "llm_model": llm.get("model"),
             "llm": llm,
         }
-        return _merge_defaults(defaults, settings)
+        settings = _merge_defaults(defaults, settings)
+        repaired, changed = _repair_classification_vocabulary(
+            settings["classification_vocabulary"]
+        )
+        if changed:
+            # Persist the repaired vocabulary so the fix is durable without
+            # a manual migration (idempotent self-healing, B1).
+            settings["classification_vocabulary"] = repaired
+            with self._lock:
+                self._ensure_initialized()
+                with self._connect() as conn:
+                    conn.execute(
+                        "UPDATE user_settings SET "
+                        "classification_vocabulary_json = ?, updated_at = ? "
+                        "WHERE tenant_id = ?",
+                        (
+                            json.dumps(repaired, ensure_ascii=False),
+                            time.time(),
+                            tenant_id,
+                        ),
+                    )
+        return settings
 
     def update_settings(
         self, tenant_id: str, updates: dict[str, Any]
@@ -324,3 +401,15 @@ def _validate_settings(settings: dict[str, Any]) -> None:
             raise UserStoreError(
                 f"Classification vocabulary {key} contains empty values"
             )
+    statuses = vocabulary.get("statuses") or []
+    invalid = [
+        str(value)
+        for value in statuses
+        if str(value or "").strip() not in JOB_STATUSES
+    ]
+    if invalid:
+        raise UserStoreError(
+            "Classification vocabulary statuses contains invalid values: "
+            + ", ".join(invalid)
+            + f" (allowed: {', '.join(JOB_STATUSES)})"
+        )

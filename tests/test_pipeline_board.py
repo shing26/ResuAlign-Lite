@@ -141,7 +141,8 @@ def test_timeline_fields_round_trip_via_api():
     assert body["next_step"] == "\u51c6\u5907\u9762\u8bd5"
     assert body["notes"] == "\u5df2\u6295\u9012\u5185\u63a8"
     assert body["offer_at"] == "2026-08-10T12:00"
-    assert body["rejected_at"] == ""
+    # U10: an empty string clears a timeline field (NULL in storage, None out).
+    assert body["rejected_at"] is None
 
 
 def test_bulk_status_endpoint_validates_tenant_ownership():

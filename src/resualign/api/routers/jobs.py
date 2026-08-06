@@ -147,8 +147,14 @@ async def update_library_job(job_id: str, req: JobUpdateRequest, request: Reques
     """Update editable job fields such as tags, salary, and status."""
     job_functions, seniorities = api_module._settings_vocabulary(user['user_id'])
     timeline = await api_module._read_timeline_extras(request)
+    # Explicit null and empty string both clear a timeline field (U10);
+    # the store turns "" into a NULL write while None stays "unchanged".
+    timeline = {
+        key: ("" if value is None else value)
+        for key, value in timeline.items()
+    }
     try:
-        job = api_module._jobs.update_job(user['user_id'], job_id, title=req.title, jd_text=req.jd_text, company=req.company, location=req.location, salary_min=req.salary_min, salary_max=req.salary_max, salary_currency=req.salary_currency, source_type=req.source_type, source_url=req.source_url, job_function=req.job_function, seniority=req.seniority, tech_tags=req.tech_tags, status=req.status, posting_date=req.posting_date, applied_at=timeline.get('applied_at'), next_step=timeline.get('next_step'), notes=timeline.get('notes'), offer_at=timeline.get('offer_at'), rejected_at=timeline.get('rejected_at'), tailor_granularity=req.tailor_granularity, tailor_focus=req.tailor_focus, custom_prompt=req.custom_prompt, allowed_job_functions=job_functions, allowed_seniorities=seniorities)
+        job = api_module._jobs.update_job(user['user_id'], job_id, title=req.title, jd_text=req.jd_text, company=req.company, location=req.location, salary_min=req.salary_min, salary_max=req.salary_max, salary_currency=req.salary_currency, source_type=req.source_type, source_url=req.source_url, job_function=req.job_function, seniority=req.seniority, tech_tags=req.tech_tags, status=req.status, posting_date=req.posting_date, applied_at=timeline.get('applied_at'), next_step=timeline.get('next_step'), notes=timeline.get('notes'), offer_at=timeline.get('offer_at'), rejected_at=timeline.get('rejected_at'), next_step_due_at=timeline.get('next_step_due_at'), interview_stage=timeline.get('interview_stage'), tailor_granularity=req.tailor_granularity, tailor_focus=req.tailor_focus, custom_prompt=req.custom_prompt, allowed_job_functions=job_functions, allowed_seniorities=seniorities)
     except api_module.UserStoreError as exc:
         if 'Duplicate job' in str(exc):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -287,7 +293,9 @@ def _preanalyze_cache_hit(
     try:
         if (resume_text or '').strip():
             content = f"{resume_text}\n\n{jd_text}"
-            prompt_version = 'jd-analysis-v1'
+            from resualign.jd_analysis import JD_ANALYSIS_PROMPT_VERSION
+
+            prompt_version = JD_ANALYSIS_PROMPT_VERSION
         else:
             content = jd_text
             from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION

@@ -359,7 +359,10 @@ def test_failed_job_carries_error():
     data = client.get(f"/api/jobs/{job_id}", headers=_auth_headers()).json()
 
     assert data["status"] == "failed"
-    assert data["error"] == "Analysis failed after an internal error"
+    # B3: failures carry the pipeline stage plus a readable reason instead
+    # of the old generic message.
+    assert "阶段失败" in data["error"]
+    assert "boom" in data["error"]
     assert data["result"] is None
 
 

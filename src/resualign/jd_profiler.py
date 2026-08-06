@@ -4,6 +4,18 @@ from .schema_registry import JDProfileSchema
 
 JD_PROFILER_PROMPT_VERSION = "1"
 
+# Fields the current JDProfile model accepts. Cached payloads are filtered
+# against this whitelist on read so legacy/extra keys never reach the
+# dataclass constructor (B3 hardening).
+_JD_PROFILE_FIELDS = (
+    "must_have_skills",
+    "nice_to_have_skills",
+    "soft_skills",
+    "business_scenarios",
+    "min_years_experience",
+    "education_requirements",
+)
+
 
 JD_PROFILER_PROMPT = (
     "You are a job description analyst. Given a job description, "
@@ -43,7 +55,13 @@ def profile_jd(
             jd_text,
         )
         if cached is not None:
-            return JDProfile(**cached)
+            return JDProfile(
+                **{
+                    key: cached[key]
+                    for key in _JD_PROFILE_FIELDS
+                    if key in cached
+                }
+            )
 
     result = _structured_or_json(
         client,

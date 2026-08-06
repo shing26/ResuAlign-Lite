@@ -53,7 +53,17 @@ def test_settings_vocabulary_custom_words_are_persisted():
     )
     assert response.status_code == 200
     saved = response.json()["classification_vocabulary"]
-    assert saved == custom
+    # Tenant-editable lists round-trip exactly...
+    assert saved["job_functions"] == ["架构", "后端"]
+    assert saved["seniorities"] == ["资深", "高级"]
+    # ...while statuses are a whitelist that gets backfilled to the built-in
+    # five on read (B1), keeping the saved subset in front.
+    assert saved["statuses"][:2] == ["已投递", "已拿Offer"]
+    assert set(saved["statuses"]) == set(job_library.JOB_STATUSES)
 
     again = client.get("/api/settings").json()
-    assert again["classification_vocabulary"] == custom
+    assert again["classification_vocabulary"]["job_functions"] == ["架构", "后端"]
+    assert again["classification_vocabulary"]["seniorities"] == ["资深", "高级"]
+    assert set(again["classification_vocabulary"]["statuses"]) == set(
+        job_library.JOB_STATUSES
+    )

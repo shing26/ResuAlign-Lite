@@ -3257,6 +3257,28 @@
             ],
             "title": "Posting Date"
           },
+          "next_step_due_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Step Due At"
+          },
+          "interview_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Stage"
+          },
           "tailor_granularity": {
             "anyOf": [
               {

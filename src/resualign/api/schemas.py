@@ -86,6 +86,8 @@ class JobUpdateRequest(BaseModel):
     tech_tags: list[str] | None = None
     status: str | None = None
     posting_date: str | None = None
+    next_step_due_at: str | None = None
+    interview_stage: str | None = None
     tailor_granularity: Literal['fine', 'medium', 'coarse'] | None = None
     tailor_focus: Literal['balanced', 'quantified', 'skills'] | None = None
     custom_prompt: str | None = Field(default=None, max_length=_CUSTOM_PROMPT_MAX)

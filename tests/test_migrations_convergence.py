@@ -128,8 +128,10 @@ def test_job_library_migrates_legacy_db_and_keeps_data(tmp_path):
     assert job["diffs"] == []
     assert job["final_draft_version"] == 0
     assert job["applied_at"] is None
+    assert job["next_step_due_at"] is None
+    assert job["interview_stage"] is None
     # Every historical ALTER recorded exactly once.
-    assert _migrated_versions(store) == set(range(1, 26))
+    assert _migrated_versions(store) == set(range(1, 28))
 
 
 def test_fresh_job_library_db_records_migrations_as_applied(tmp_path):
@@ -138,7 +140,7 @@ def test_fresh_job_library_db_records_migrations_as_applied(tmp_path):
         tenant_id="t1", title="Fresh", jd_text="Python backend."
     )
     assert job["alignment_status"] == "idle"
-    assert _migrated_versions(store) == set(range(1, 26))
+    assert _migrated_versions(store) == set(range(1, 28))
 
 
 def test_migrated_legacy_db_supports_workbench_columns(tmp_path):

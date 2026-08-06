@@ -278,7 +278,8 @@ class JobRegistry(_SqliteStore):
                     extra={"job_id": job_id, "outcome": "succeeded"},
                 )
 
-    def fail(self, job_id: str, error: str) -> None:
+    def fail(self, job_id: str, error: str, stage: str | None = None) -> None:
+        """Mark a job failed, optionally recording the failing pipeline stage."""
         now = self._clock()
         with self._lock:
             self._ensure_initialized()
@@ -290,6 +291,11 @@ class JobRegistry(_SqliteStore):
                     (error, now, job_id),
                 )
                 updated = cursor.rowcount > 0
+                if updated and stage:
+                    conn.execute(
+                        "UPDATE jobs SET stage = ? WHERE job_id = ?",
+                        (stage, job_id),
+                    )
             if updated:
                 log_event(
                     logger,

@@ -84,7 +84,15 @@ _MAX_RESUME_UPLOAD_BYTES = 10 * 1024 * 1024
 _MAX_BODY_BYTES = 8 * 1024 * 1024
 _import_batches: dict[str, dict[str, Any]] = {}
 _batch_store = BatchAlignStore()
-_TIMELINE_FIELDS = ("applied_at", "next_step", "notes", "offer_at", "rejected_at")
+_TIMELINE_FIELDS = (
+    "applied_at",
+    "next_step",
+    "notes",
+    "offer_at",
+    "rejected_at",
+    "next_step_due_at",
+    "interview_stage",
+)
 
 
 _registry = JobRegistry(db_path=_env_settings.resualign_job_db or None)

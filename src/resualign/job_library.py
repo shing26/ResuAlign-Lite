@@ -134,6 +134,8 @@ CREATE TABLE IF NOT EXISTS library_jobs (
     notes TEXT,
     offer_at TEXT,
     rejected_at TEXT,
+    next_step_due_at TEXT,
+    interview_stage TEXT,
     workbench_job_id TEXT,
     workbench_resume_id TEXT,
     tailor_granularity TEXT,
@@ -259,6 +261,14 @@ class JobLibraryStore(_SqliteStore):
         (23, "ALTER TABLE library_jobs ADD COLUMN notes TEXT"),
         (24, "ALTER TABLE library_jobs ADD COLUMN offer_at TEXT"),
         (25, "ALTER TABLE library_jobs ADD COLUMN rejected_at TEXT"),
+        (
+            26,
+            "ALTER TABLE library_jobs ADD COLUMN next_step_due_at TEXT",
+        ),
+        (
+            27,
+            "ALTER TABLE library_jobs ADD COLUMN interview_stage TEXT",
+        ),
     )
 
     def validate_status(self, status: str) -> str:
@@ -291,6 +301,8 @@ class JobLibraryStore(_SqliteStore):
         notes: str | None = None,
         offer_at: str | None = None,
         rejected_at: str | None = None,
+        next_step_due_at: str | None = None,
+        interview_stage: str | None = None,
         jd_profile: dict[str, Any] | None = None,
         gap_report: dict[str, Any] | None = None,
         match_score: float | None = None,
@@ -366,15 +378,16 @@ class JobLibraryStore(_SqliteStore):
                         "classification_pending, final_draft, "
                         "final_draft_updated_at, final_draft_version, "
                         "posting_date, applied_at, next_step, notes, "
-                        "offer_at, rejected_at, jd_profile_json, "
+                        "offer_at, rejected_at, next_step_due_at, "
+                        "interview_stage, jd_profile_json, "
                         "gap_report_json, match_score, alignment_status, "
                         "diffs_json, invalid_diffs_json, draft, "
                         "eval_score_json, model, prompt_version, "
                         "generated_at, dedupe_key, created_at, updated_at"
                         ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
                         "?, "
-                        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
                             job_id,
                             tenant_id,
@@ -401,6 +414,8 @@ class JobLibraryStore(_SqliteStore):
                             notes,
                             offer_at,
                             rejected_at,
+                            next_step_due_at,
+                            interview_stage,
                             json.dumps(jd_profile, ensure_ascii=False)
                             if jd_profile is not None
                             else None,
@@ -564,6 +579,8 @@ class JobLibraryStore(_SqliteStore):
         notes: str | None = None,
         offer_at: str | None = None,
         rejected_at: str | None = None,
+        next_step_due_at: str | None = None,
+        interview_stage: str | None = None,
         jd_profile: dict[str, Any] | None = None,
         gap_report: dict[str, Any] | None = None,
         match_score: float | None = None,
@@ -583,7 +600,14 @@ class JobLibraryStore(_SqliteStore):
         allowed_job_functions: Sequence[str] | None = None,
         allowed_seniorities: Sequence[str] | None = None,
     ) -> Optional[dict[str, Any]]:
-        """Update editable fields. None-valued fields are left unchanged."""
+        """Update editable fields. None-valued fields are left unchanged.
+
+        Timeline fields (``applied_at``, ``next_step``, ``notes``,
+        ``offer_at``, ``rejected_at``, ``next_step_due_at``,
+        ``interview_stage``) follow the clear-on-empty contract: an empty
+        string clears the stored value to NULL (U10), while None leaves it
+        untouched.
+        """
         functions = _effective_choices(JOB_FUNCTIONS, allowed_job_functions)
         seniorities = _effective_choices(SENIORITIES, allowed_seniorities)
         if job_function is not None and job_function not in functions:
@@ -673,21 +697,49 @@ class JobLibraryStore(_SqliteStore):
         if posting_date is not None:
             sets.append("posting_date = ?")
             values.append(posting_date)
+        # Timeline fields: None = unchanged, "" = clear to NULL (U10).
         if applied_at is not None:
-            sets.append("applied_at = ?")
-            values.append(applied_at)
+            if applied_at == "":
+                sets.append("applied_at = NULL")
+            else:
+                sets.append("applied_at = ?")
+                values.append(applied_at)
         if next_step is not None:
-            sets.append("next_step = ?")
-            values.append(next_step)
+            if next_step == "":
+                sets.append("next_step = NULL")
+            else:
+                sets.append("next_step = ?")
+                values.append(next_step)
         if notes is not None:
-            sets.append("notes = ?")
-            values.append(notes)
+            if notes == "":
+                sets.append("notes = NULL")
+            else:
+                sets.append("notes = ?")
+                values.append(notes)
         if offer_at is not None:
-            sets.append("offer_at = ?")
-            values.append(offer_at)
+            if offer_at == "":
+                sets.append("offer_at = NULL")
+            else:
+                sets.append("offer_at = ?")
+                values.append(offer_at)
         if rejected_at is not None:
-            sets.append("rejected_at = ?")
-            values.append(rejected_at)
+            if rejected_at == "":
+                sets.append("rejected_at = NULL")
+            else:
+                sets.append("rejected_at = ?")
+                values.append(rejected_at)
+        if next_step_due_at is not None:
+            if next_step_due_at == "":
+                sets.append("next_step_due_at = NULL")
+            else:
+                sets.append("next_step_due_at = ?")
+                values.append(next_step_due_at)
+        if interview_stage is not None:
+            if interview_stage == "":
+                sets.append("interview_stage = NULL")
+            else:
+                sets.append("interview_stage = ?")
+                values.append(interview_stage)
         if jd_profile is not None:
             sets.append("jd_profile_json = ?")
             values.append(
@@ -1201,11 +1253,13 @@ class JobLibraryStore(_SqliteStore):
             "final_draft_updated_at": row["final_draft_updated_at"],
             "final_draft_version": row["final_draft_version"],
             "posting_date": row["posting_date"],
-            "applied_at": row["applied_at"],
-            "next_step": row["next_step"],
-            "notes": row["notes"],
-            "offer_at": row["offer_at"],
-            "rejected_at": row["rejected_at"],
+            "applied_at": row["applied_at"] or None,
+            "next_step": row["next_step"] or None,
+            "notes": row["notes"] or None,
+            "offer_at": row["offer_at"] or None,
+            "rejected_at": row["rejected_at"] or None,
+            "next_step_due_at": row["next_step_due_at"] or None,
+            "interview_stage": row["interview_stage"] or None,
             "workbench_job_id": row["workbench_job_id"],
             "workbench_resume_id": row["workbench_resume_id"],
             "tailor_granularity": row["tailor_granularity"],

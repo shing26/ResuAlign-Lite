@@ -380,3 +380,78 @@ def test_workbench_success_persists_alignment():
     assert persisted["gap_report"]["missing_keywords"] == ["Redis"]
     assert persisted["draft"] == "Built FastAPI with Redis caching"
     assert persisted["model"] == "test-model"
+
+
+def test_workspace_session_hydrates_persisted_results_after_restart():
+    """B6: reopening a job renders the persisted alignment, not empty state."""
+    job = _create_job()
+    resume = _create_resume()
+    diff = DiffItem(
+        type="modify",
+        original="Python developer.",
+        proposed="Python developer with Redis caching.",
+        reason="JD match",
+        confidence="high",
+        provenance="Python developer.",
+    )
+    report = Report(
+        score=84,
+        skills=["Python"],
+        model="test-model",
+        jd_profile=JDProfile(
+            must_have_skills=["Python"],
+            nice_to_have_skills=["Redis"],
+        ),
+        gap_report=GapReport(
+            missing_keywords=["Redis"],
+            strength_matches=["Python"],
+        ),
+        tailored_resume=TailoredResume(
+            sections={"experience": "Built FastAPI with Redis caching"},
+            diffs=[diff],
+        ),
+        diffs=[diff],
+        eval_score=EvalScore(
+            jd_match_score=90,
+            improvement=6,
+            hallucination_detected=False,
+            gap_coverage=0.8,
+        ),
+    )
+    with patch("resualign.api._run_job"), patch(
+        "resualign.api.build_config", return_value=_config()
+    ):
+        queued = client.post(
+            f"/api/jobs/{job['job_id']}/workbench",
+            json={"master_resume_id": resume["resume_id"]},
+            headers=_auth_headers(),
+        )
+    analysis_job_id = queued.json()["job_id"]
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api.run", return_value=report
+    ):
+        api_module._run_job(analysis_job_id)
+
+    persisted = client.get(
+        f"/api/jobs/{job['job_id']}", headers=_auth_headers()
+    ).json()
+    assert persisted["analysis_ready"] is True
+
+    # Simulate a restart: no live session exists for this job.
+    api_module._session_store = (
+        api_module._workbench_service.WorkstationSessionStore()
+    )
+    r = client.get(
+        f"/api/workspace/session/{job['job_id']}",
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 200
+    state = r.json()
+    assert state["jd"]["profile"]["must_have_skills"] == ["Python"]
+    assert state["gap"]["gap_report"]["missing_keywords"] == ["Redis"]
+    assert state["gap"]["score"] == 90
+    assert state["alignment"]["status"] == "succeeded"
+    assert state["alignment"]["diffs"][0]["proposed"] == (
+        "Python developer with Redis caching."
+    )
+    assert state["alignment"]["draft"] == "Built FastAPI with Redis caching"

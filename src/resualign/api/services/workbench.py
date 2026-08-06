@@ -448,6 +448,47 @@ def _gap_score(gap_report: Any) -> Optional[float]:
     return max(30.0, 100.0 - missing * 15.0)
 
 
+def _session_sections_from_job(
+    job: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Hydrate session sections from a library job's persisted products.
+
+    Terminal alignment products live in SQLite (save_alignment); sessions are
+    only runtime state. Reopening a job after a restart must render the
+    persisted jd/gap/alignment sections instead of empty placeholders (B6).
+    """
+    alignment_status = job.get("alignment_status") or "idle"
+    return {
+        "jd": {
+            "profile": job.get("jd_profile"),
+            # "ready" matches the read-only workspace contract: the job
+            # exists; a missing profile simply means nothing was analyzed
+            # yet (the analyze endpoint re-queues from this state).
+            "status": "ready",
+            "error": None,
+        },
+        "gap": {
+            "status": (
+                "ready" if job.get("gap_report") else "blocked"
+            ),
+            "score": job.get("match_score"),
+            "gap_report": job.get("gap_report"),
+            "cache_hit": False,
+            "error": None,
+        },
+        "alignment": {
+            "status": alignment_status,
+            "stage": (
+                "done" if alignment_status == "succeeded" else ""
+            ),
+            "diffs": job.get("diffs") or [],
+            "invalid_diffs": job.get("invalid_diffs") or [],
+            "draft": job.get("draft"),
+            "eval_score": job.get("eval_score"),
+        },
+    }
+
+
 def _profile_cache_hit(jd_text: str) -> bool:
     try:
         config = api_module.build_config()

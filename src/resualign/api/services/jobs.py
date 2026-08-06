@@ -15,6 +15,29 @@ from ..schemas import JobImportRequest
 
 logger = logging.getLogger(__name__)
 
+_STAGE_LABELS = {
+    "diagnose": "简历诊断",
+    "jd_analysis": "JD 画像与差距分析",
+    "tailoring": "简历定制",
+    "evaluation": "效果评估",
+    "extract": "JD 内容提取",
+}
+
+
+def _job_failure_detail(stage: str, exc: BaseException) -> str:
+    """Return a readable, stage-aware failure reason for an analysis job.
+
+    Replaces the old generic ``Analysis failed after an internal error`` so
+    the workbench can show *where* the run died and why.
+    """
+    stage_label = _STAGE_LABELS.get(stage, stage or "未知阶段")
+    message = str(exc) or exc.__class__.__name__
+    if isinstance(exc, api_module.LLMResponseError):
+        reason = "模型服务暂时不可用或返回异常，请检查 API Key 与网络连接后重试"
+    else:
+        reason = message[:300] or "内部错误"
+    return f"对齐分析在「{stage_label}」阶段失败：{reason}"
+
 def _settings_vocabulary(user_id: str) -> tuple[list[str], list[str]]:
     """Return the tenant's editable classification vocabulary."""
     vocabulary = api_module._settings_store.get_settings(user_id)['classification_vocabulary']
@@ -231,7 +254,11 @@ def _run_job(job_id: str) -> None:
                 # Another worker already claimed this job; do not double-run.
                 return
 
+            failed_stage: str = ''
+
             def on_stage(stage: str, message: str) -> None:
+                nonlocal failed_stage
+                failed_stage = stage
                 api_module._registry.update_progress(job_id, stage, message)
                 library_id = payload.get('library_job_id')
                 if library_id:
@@ -382,13 +409,15 @@ def _run_job(job_id: str) -> None:
                         application_id,
                         job_id,
                     )
-        except Exception:
+        except Exception as exc:
             logger.exception('Analysis job %s failed', job_id)
             if payload.get('diagnosis'):
                 error = '诊断任务暂时失败：模型服务不可用或返回异常，请检查 API Key 与网络连接后重试'
             else:
-                error = 'Analysis failed after an internal error'
-            api_module._registry.fail(job_id, error)
+                error = api_module._job_failure_detail(
+                    failed_stage, exc
+                )
+            api_module._registry.fail(job_id, error, stage=failed_stage or None)
             if application_id:
                 try:
                     api_module._applications.set_application_job(tenant_id, application_id, job_id, 'failed')

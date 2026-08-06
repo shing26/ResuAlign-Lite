@@ -85,17 +85,18 @@ def init_workbench_session(
                         return api_module._workbench_service.public_state(
                             session
                         )
+                    sections = (
+                        api_module._workbench_service._session_sections_from_job(
+                            existing
+                        )
+                    )
                     return api_module._workbench_service.public_state(
                         api_module._session_store.create(
                             user["user_id"],
                             session_id=f"job:{existing['job_id']}",
                             status="ready",
                             job=existing,
-                            jd={
-                                "profile": existing.get("jd_profile"),
-                                "status": "ready",
-                                "error": None,
-                            },
+                            jd=sections["jd"],
                             resume={
                                 "selected_resume_id": existing.get(
                                     "workbench_resume_id"
@@ -105,17 +106,8 @@ def init_workbench_session(
                                 ),
                                 "content_ref": None,
                             },
-                            gap={
-                                "status": (
-                                    "ready"
-                                    if existing.get("gap_report")
-                                    else "blocked"
-                                ),
-                                "score": existing.get("match_score"),
-                                "gap_report": existing.get("gap_report"),
-                                "cache_hit": False,
-                                "error": None,
-                            },
+                            gap=sections["gap"],
+                            alignment=sections["alignment"],
                             crawl={
                                 "crawl_id": None,
                                 "status": "idle",
@@ -225,12 +217,15 @@ def get_workspace_session(
         raise HTTPException(status_code=404, detail="Job not found")
     session = api_module._session_store.find_by_job(job_id, user["user_id"])
     if session is None:
+        sections = (
+            api_module._workbench_service._session_sections_from_job(job)
+        )
         session = api_module._session_store.create(
             user["user_id"],
             session_id=f"job:{job_id}",
             status="ready",
             job=job,
-            jd={"profile": None, "status": "ready", "error": None},
+            jd=sections["jd"],
             resume={
                 "selected_resume_id": job.get("workbench_resume_id"),
                 "available_resumes": api_module._workbench_service._available_resumes(
@@ -238,15 +233,8 @@ def get_workspace_session(
                 ),
                 "content_ref": None,
             },
-            gap={
-                "status": "blocked"
-                if not job.get("workbench_resume_id")
-                else "queued",
-                "score": None,
-                "gap_report": None,
-                "cache_hit": False,
-                "error": None,
-            },
+            gap=sections["gap"],
+            alignment=sections["alignment"],
             crawl={
                 "crawl_id": None,
                 "status": "idle",

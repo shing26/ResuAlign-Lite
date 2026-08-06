@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 import resualign.api as api_module
 
 from ...config import clear_runtime_llm, register_stored_llm_provider, set_runtime_llm
+from ...job_library import JOB_STATUSES
 from ...llm import _DEFAULT_PROVIDER_URLS
 from ...settings_store import default_settings
 from ..deps import get_current_user
@@ -77,6 +78,51 @@ def _http_error_detail(exc: httpx.HTTPStatusError) -> str:
     return str(exc)
 
 
+def _validate_vocabulary_update(req: SettingsUpdateRequest) -> None:
+    """Reject corrupted classification vocabulary updates with a 422.
+
+    ``statuses`` is a controlled whitelist (must be a subset of the built-in
+    five values); ``job_functions``/``seniorities`` must stay non-empty
+    lists. The store re-validates the merged result as a second line of
+    defense.
+    """
+    vocabulary = req.classification_vocabulary
+    if vocabulary is None:
+        return
+    statuses = vocabulary.get("statuses")
+    if statuses is not None:
+        if not isinstance(statuses, list) or not statuses:
+            raise HTTPException(
+                status_code=422,
+                detail="classification_vocabulary.statuses 必须是非空列表",
+            )
+        invalid = [
+            str(value)
+            for value in statuses
+            if str(value or "").strip() not in JOB_STATUSES
+        ]
+        if invalid:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "classification_vocabulary.statuses 包含非法值："
+                    + ", ".join(invalid)
+                    + f"（仅允许：{'、'.join(JOB_STATUSES)}）"
+                ),
+            )
+    for key in ("job_functions", "seniorities"):
+        values = vocabulary.get(key)
+        if values is not None and (
+            not isinstance(values, list) or not values
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"classification_vocabulary.{key} 必须是非空列表"
+                ),
+            )
+
+
 @router.get('/api/settings')
 def get_settings(user: dict[str, Any]=Depends(get_current_user)):
     """Return the current user's editable workbench settings."""
@@ -87,6 +133,7 @@ def get_settings(user: dict[str, Any]=Depends(get_current_user)):
 @router.put('/api/settings')
 def update_settings(req: SettingsUpdateRequest, user: dict[str, Any]=Depends(get_current_user)):
     """Persist validated settings updates for the current user."""
+    _validate_vocabulary_update(req)
     payload = req.model_dump()
     updates = {
         key: value

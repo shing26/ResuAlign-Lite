@@ -254,6 +254,7 @@ _run_import = _jobs_service._run_import
 _prune_import_batches = _jobs_service._prune_import_batches
 _queue_job = _jobs_service._queue_job
 _run_job = _jobs_service._run_job
+_job_failure_detail = _jobs_service._job_failure_detail
 
 _report_to_dict = _workbench_service._report_to_dict
 _build_diagnosis_section = _workbench_service._build_diagnosis_section
