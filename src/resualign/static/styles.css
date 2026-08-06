@@ -3972,12 +3972,14 @@ select,
   }
 
   .workbench-controls,
-  .workbench-appraisal {
+  .workbench-appraisal,
+  .workbench-diff {
     display: none;
   }
 
   .workbench-controls.is-active,
-  .workbench-appraisal.is-active {
+  .workbench-appraisal.is-active,
+  .workbench-diff.is-active {
     display: flex;
     grid-column: 1;
   }
@@ -5040,4 +5042,31 @@ body.command-palette-open {
   .onboarding-steps {
     grid-template-columns: 1fr;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Split canvas: appraisal panel (投递价值评估) + final draft panel      */
+/* ------------------------------------------------------------------ */
+
+.split-appraisal summary {
+  cursor: pointer;
+  color: var(--ink-strong);
+  font-size: var(--text-16);
+  font-weight: 800;
+}
+
+.split-appraisal summary:hover {
+  color: var(--primary);
+}
+
+.split-appraisal[open] summary {
+  margin-bottom: 10px;
+}
+
+.split-appraisal .appraisal-body {
+  min-width: 0;
+}
+
+.split-pane .final-draft-panel {
+  margin-bottom: 0;
 }
