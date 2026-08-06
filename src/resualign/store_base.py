@@ -100,23 +100,50 @@ class _SqliteStore:
             self._initialized = True
 
     def _apply_migrations(self, conn: sqlite3.Connection) -> None:
-        """Apply pending versioned migrations exactly once.
+        """Apply pending versioned migrations exactly once, per store.
 
-        A migration whose ALTER fails because the column already exists is
-        recorded as applied: the current CREATE schema already carries it,
-        so the historical upgrade is a no-op for this database.
+        Every store's MIGRATIONS are numbered from 1, so the migration
+        journal is scoped by store name. A migration whose ALTER fails
+        because the column already exists is recorded as applied: the
+        current CREATE schema already carries it, so the historical
+        upgrade is a no-op for this database.
+
+        Legacy journals (single shared ``version`` primary key, no store
+        column) are rebuilt: old rows cannot be attributed to a store, and
+        replaying them is safe because every script is idempotent
+        (``CREATE ... IF NOT EXISTS`` or duplicate-column swallowing).
         """
         migrations = type(self).MIGRATIONS or ()
         if not migrations:
             return
+        store = type(self).__name__
         conn.execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations ("
-            "version INTEGER PRIMARY KEY, applied_at REAL NOT NULL)"
+            "store TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL, "
+            "applied_at REAL NOT NULL, PRIMARY KEY (store, version))"
         )
+        columns = {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA table_info(schema_migrations)"
+            ).fetchall()
+        }
+        if "store" not in columns:
+            conn.execute(
+                "ALTER TABLE schema_migrations "
+                "RENAME TO schema_migrations_legacy"
+            )
+            conn.execute(
+                "CREATE TABLE schema_migrations ("
+                "store TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL, "
+                "applied_at REAL NOT NULL, PRIMARY KEY (store, version))"
+            )
+            conn.execute("DROP TABLE schema_migrations_legacy")
         applied = {
             row["version"]
             for row in conn.execute(
-                "SELECT version FROM schema_migrations"
+                "SELECT version FROM schema_migrations WHERE store = ?",
+                (store,),
             ).fetchall()
         }
         for version, script in sorted(migrations):
@@ -128,9 +155,9 @@ class _SqliteStore:
                 if "duplicate column" not in str(exc).lower():
                     raise
             conn.execute(
-                "INSERT INTO schema_migrations (version, applied_at) "
-                "VALUES (?, ?)",
-                (version, time.time()),
+                "INSERT INTO schema_migrations (store, version, applied_at) "
+                "VALUES (?, ?, ?)",
+                (store, version, time.time()),
             )
 
     @contextmanager

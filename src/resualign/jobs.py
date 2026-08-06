@@ -53,10 +53,6 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (
         1,
         """
-        CREATE TABLE IF NOT EXISTS schema_migrations (
-            version INTEGER PRIMARY KEY,
-            applied_at REAL NOT NULL
-        );
         CREATE TABLE IF NOT EXISTS job_payloads (
             job_id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL DEFAULT '',

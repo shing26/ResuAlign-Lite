@@ -44,6 +44,65 @@ def _migrated_versions(store) -> set[int]:
         }
 
 
+def test_legacy_shared_journal_is_rebuilt_per_store(tmp_path):
+    """A legacy journal (single shared version key) must not suppress
+    another store's migrations that happen to use the same version numbers.
+
+    Regression: settings versions 1..3 were skipped because JobLibrary's
+    1..25 already occupied the shared journal, so llm_json never got added
+    to existing databases.
+    """
+    db = tmp_path / "legacy-journal.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        """
+        CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            applied_at REAL NOT NULL
+        );
+        CREATE TABLE user_settings (
+            tenant_id TEXT PRIMARY KEY,
+            salary_reference_json TEXT NOT NULL DEFAULT '[]',
+            appraisal_weights_json TEXT NOT NULL DEFAULT '{}',
+            classification_vocabulary_json TEXT NOT NULL DEFAULT '{}',
+            updated_at REAL NOT NULL
+        );
+        INSERT INTO schema_migrations (version, applied_at)
+        VALUES (1, 1.0), (2, 1.0), (3, 1.0);
+        INSERT INTO user_settings (tenant_id, updated_at) VALUES ('t1', 1.0);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = SettingsStore(db_path=db)
+    settings = store.get_settings("t1")
+    assert settings["llm"] == {
+        "provider": None,
+        "model": None,
+        "api_key": None,
+        "base_url": None,
+    }
+
+    with store._connect() as conn:
+        columns = {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA table_info(schema_migrations)"
+            ).fetchall()
+        }
+        assert "store" in columns
+        rows = {
+            (row["store"], row["version"])
+            for row in conn.execute(
+                "SELECT store, version FROM schema_migrations"
+            ).fetchall()
+        }
+    assert ("SettingsStore", 1) in rows
+    assert ("SettingsStore", 2) in rows
+    assert ("SettingsStore", 3) in rows
+
+
 def test_job_library_migrates_legacy_db_and_keeps_data(tmp_path):
     db = tmp_path / "legacy-library.db"
     conn = sqlite3.connect(str(db))
