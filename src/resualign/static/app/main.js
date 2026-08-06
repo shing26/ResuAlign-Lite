@@ -53,10 +53,15 @@ import {
   batchPanelHtml,
   batchRowsToCsv,
   buildJobsBackup,
+  dueReminders,
   jobsToCsv,
   lineDiff,
+  onboardingSteps,
   parseHashValue,
   renderMarkdown,
+  renderOnboardingCard,
+  renderReminderBanner,
+  renderReminderStrip,
 } from "./format.js";
 import {
   apiKeyFieldHint,
@@ -109,8 +114,11 @@ async function render() {
       await renderResumeDetailView(app, state.route.resumeId);
     } else if (state.route.name === "resume") await renderResumeView(app);
     else if (state.route.name === "jobs") await renderCopilotBoard(app);
-    else if (state.route.name === "workspace") await renderOptimizerCanvas(app, state.route.jobId);
-    else await renderSettingsView(app);
+    else if (state.route.name === "workspace") {
+      await renderOptimizerCanvas(app, state.route.jobId);
+      /* #11: 工作台顶部挂载当前岗位的面试/下一步到期提醒横幅 */
+      mountWorkspaceReminder(app);
+    } else await renderSettingsView(app);
   } catch (error) {
     if (isApiKeyUnconfigured(error)) {
       renderApiKeyGuide(app);
@@ -624,6 +632,7 @@ async function refreshWbJob(app = $("#app")) {
 
 async function refreshOptimizerFromJob(jobId) {
   await renderOptimizerCanvas($("#app"), jobId);
+  mountWorkspaceReminder($("#app"));
 }
 
 function startWbPolling(jobId, app = $("#app")) {
@@ -1631,6 +1640,26 @@ const actions = {
     toast(`已取消 ${result.canceled} 个排队任务`, "success");
   },
   "close-modal": closeModal,
+  "skip-onboarding-step": (button) => {
+    const step = button.dataset.step;
+    if (!step) return;
+    const skipped = readOnboardingSkipped();
+    if (!skipped.includes(step)) {
+      skipped.push(step);
+      try {
+        localStorage.setItem(ONBOARDING_SKIPPED_KEY, JSON.stringify(skipped));
+      } catch {
+        /* storage unavailable: keep the in-page removal only */
+      }
+    }
+    const card = $("[data-onboarding-card]");
+    if (card) {
+      const item = card.querySelector(`[data-step="${CSS.escape(step)}"]`);
+      if (item) item.remove();
+      if (!card.querySelector(".onboarding-step")) card.remove();
+    }
+    toast("已跳过该步骤，之后不再提示", "info");
+  },
 };
 
 function setJdInputMode(mode) {
@@ -2051,6 +2080,119 @@ async function submitImport(data, form) {
       statusNode.textContent = `导入失败：${error.message}`;
     }
   }, 800);
+}
+
+/* ------------------------------------------------------------------ */
+/* #11 Onboarding card + next-step reminders (DOM mounting)            */
+/* 纯函数在 format.js 末尾（onboardingSteps / dueReminders /           */
+/* renderOnboardingCard / renderReminderStrip / renderReminderBanner）  */
+/* ------------------------------------------------------------------ */
+
+const ONBOARDING_SKIPPED_KEY = "resualign_onboarding_skipped";
+
+function readOnboardingSkipped() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(ONBOARDING_SKIPPED_KEY) || "[]");
+    return Array.isArray(raw)
+      ? raw.filter((item) => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+async function loadResumesForOnboarding() {
+  if (Array.isArray(state.resumes)) return state.resumes;
+  if (Array.isArray(state.batchResumes)) return state.batchResumes;
+  try {
+    const resumes = await api("/api/master-resumes");
+    state.resumes = resumes;
+    return resumes;
+  } catch {
+    return [];
+  }
+}
+
+/* 岗位库顶部：提醒条（任何岗位数下，有到期岗位即显示）+ 三步引导卡
+   （仅当存在未完成且未跳过的步骤）。通过第二个 canvas hook 挂载，
+   不动 split-canvas.js 的 renderCopilotBoard。 */
+setCanvasRenderHook(async (app) => {
+  if (
+    !app.querySelector(".page-header") ||
+    app.querySelector("[data-reminder-strip]") ||
+    app.querySelector("[data-onboarding-card]")
+  ) {
+    return;
+  }
+  const header = app.querySelector(".page-header");
+  const fragments = [];
+  const strip = renderReminderStrip(dueReminders(state.jobs || [], new Date()));
+  if (strip) fragments.push(strip);
+  const card = renderOnboardingCard(
+    onboardingSteps({
+      resumes: await loadResumesForOnboarding(),
+      jobs: state.jobs || [],
+      skipped: readOnboardingSkipped(),
+    }),
+  );
+  if (card) fragments.push(card);
+  if (!fragments.length) return;
+  const wrap = document.createElement("div");
+  wrap.innerHTML = fragments.join("");
+  while (wrap.firstChild) header.before(wrap.firstChild);
+});
+
+/* 工作台：当前岗位的面试/下一步到期提醒横幅（挂在 page-header 之后）。
+   workspace session 返回的是岗位快照（next_step 可能过期），因此先取实时
+   job 再判定；请求失败时回退到会话快照。SSE 驱动的画布重绘会整体替换
+   #app.innerHTML 冲掉横幅，故用 MutationObserver 在有提醒时自动重挂。 */
+let wsReminderState = { jobId: null, due: false, fetching: false };
+let wsReminderObserver = null;
+
+function mountWorkspaceReminder(app) {
+  if (!app) return;
+  const jobId = state.wbJob && state.wbJob.job_id;
+  if (!jobId) return;
+  if (wsReminderState.jobId !== jobId) {
+    wsReminderState = { jobId, due: false, fetching: false };
+  }
+  const insert = (job) => {
+    if (!app.isConnected) return;
+    const [reminder] = dueReminders([job], new Date());
+    wsReminderState = {
+      jobId: (job && job.job_id) || jobId,
+      due: Boolean(reminder),
+      fetching: false,
+    };
+    if (app.querySelector("[data-reminder-banner]")) return;
+    const banner = renderReminderBanner(reminder);
+    if (!banner) return;
+    const header = app.querySelector(".page-header");
+    if (header) header.insertAdjacentHTML("afterend", banner);
+    else app.insertAdjacentHTML("afterbegin", banner);
+  };
+  const load = (target) => {
+    if (wsReminderState.fetching) return;
+    wsReminderState.fetching = true;
+    api(`/api/jobs/${encodeURIComponent(target)}`)
+      .then((job) => insert(job))
+      .catch(() => {
+        wsReminderState.fetching = false;
+        insert(state.wbJob);
+      });
+  };
+  if (!wsReminderObserver) {
+    wsReminderObserver = new MutationObserver(() => {
+      if (state.route.name !== "workspace") return;
+      const current = state.wbJob && state.wbJob.job_id;
+      if (!current) return;
+      if (app.querySelector("[data-reminder-banner]")) return;
+      if (wsReminderState.jobId === current && !wsReminderState.due) return;
+      load(current);
+    });
+    wsReminderObserver.observe(app, { childList: true, subtree: true });
+  }
+  load(jobId);
 }
 
 /* ------------------------------------------------------------------ */

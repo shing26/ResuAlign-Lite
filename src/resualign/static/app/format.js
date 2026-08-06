@@ -1431,3 +1431,190 @@ export function cmpLineHtml(lineIndex, className = "", prefix = "", content = ""
   const classes = `cmp-line${className ? ` ${className}` : ""}`;
   return `<div class="${classes}" data-line="${lineIndex}"><span class="cmp-line-num">${lineIndex + 1}</span>${prefix}${content}</div>`;
 }
+
+/* ------------------------------------------------------------------ */
+/* #11 New-user onboarding steps + next-step due reminders (pure)      */
+/* ------------------------------------------------------------------ */
+/* DOM-free helpers for the three-step onboarding card (岗位库空态) and
+ * the interview/follow-up reminders (岗位库 + 工作台). Callers in main.js
+ * own the DOM mounting; these functions only derive state and build HTML.
+ */
+
+/* 三步引导定义。isDone 接收 { resumes, jobs } 上下文，返回该步是否已完成。
+ * skipped 由调用方从 localStorage 传入（每步可跳过，跳过即不再展示）。 */
+export const ONBOARDING_STEPS = [
+  {
+    key: "resume",
+    order: 1,
+    title: "创建主简历",
+    body: "在简历中心录入工作经历与项目亮点，作为所有对齐稿的底稿。",
+    actionLabel: "去创建主简历",
+    href: "#/resume",
+    action: "",
+    isDone: ({ resumes }) => resumes.length > 0,
+  },
+  {
+    key: "jd",
+    order: 2,
+    title: "粘贴首个 JD",
+    body: "用顶部输入框粘贴岗位描述或链接，自动建库并预分析 JD 画像。",
+    actionLabel: "粘贴 JD / 链接",
+    href: "",
+    action: "open-command-panel",
+    isDone: ({ jobs }) => jobs.length > 0,
+  },
+  {
+    key: "align",
+    order: 3,
+    title: "跑首次对齐",
+    body: "进入岗位工作台选择主简历，点击「一键生成对齐简历」，逐条采纳 AI 改写建议。",
+    actionLabel: "打开工作台",
+    href: "#/workspace",
+    action: "",
+    isDone: ({ jobs }) =>
+      jobs.some(
+        (job) =>
+          job &&
+          (job.alignment_status === "succeeded" || job.final_draft_version != null),
+      ),
+  },
+];
+
+export function onboardingSteps(input = {}) {
+  const { resumes = [], jobs = [], skipped = [] } = input || {};
+  const ctx = {
+    resumes: Array.isArray(resumes) ? resumes : [],
+    jobs: Array.isArray(jobs) ? jobs : [],
+  };
+  const skippedSet = new Set(Array.isArray(skipped) ? skipped : []);
+  return ONBOARDING_STEPS.filter(
+    (step) => !step.isDone(ctx) && !skippedSet.has(step.key),
+  ).map((step) => ({
+    key: step.key,
+    order: step.order,
+    title: step.title,
+    body: step.body,
+    actionLabel: step.actionLabel,
+    href: step.href,
+    action: step.action,
+  }));
+}
+
+/* 从 next_step 自由文本中解析本地时间日期（时间线弹窗的 datetime-local
+ * 语义：无时区 -> 本地时间）。支持：
+ *   "2026-08-10" / "2026-8-10 14:30" / "2026-08-10T14:30:00" 及前后缀文字
+ * 解析不到日期返回 null（纯文本“等通知”之类不产生提醒）。 */
+export function parseNextStepDate(text) {
+  const value = String(text || "").trim();
+  if (!value) return null;
+  const match = value.match(
+    /(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?)?/,
+  );
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = match[4] != null ? Number(match[4]) : 0;
+  const minute = match[5] != null ? Number(match[5]) : 0;
+  const second = match[6] != null ? Number(match[6]) : 0;
+  const date = new Date(year, month - 1, day, hour, minute, second);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null; /* impossible date (e.g. 2026-02-31) rolls over -> reject */
+  }
+  return date;
+}
+
+export const REMINDER_WINDOW_MS = 48 * 60 * 60 * 1000; /* 48h */
+
+/* 到期提醒：next_step 非空且含日期、且 <=48h 内或已过期（diffMs <= 窗口）。
+ * 返回按紧迫度升序（最早到期在前）的列表：{ job, dueAt, overdue, hoursUntil } */
+export function dueReminders(jobs, now = new Date()) {
+  const ref = now instanceof Date ? now : new Date(now);
+  const list = Array.isArray(jobs) ? jobs : [];
+  const reminders = [];
+  for (const job of list) {
+    if (!job || typeof job !== "object") continue;
+    if (!String(job.next_step || "").trim()) continue;
+    const dueAt = parseNextStepDate(job.next_step);
+    if (!dueAt) continue;
+    const diffMs = dueAt.getTime() - ref.getTime();
+    if (diffMs > REMINDER_WINDOW_MS) continue;
+    reminders.push({
+      job,
+      dueAt,
+      overdue: diffMs < 0,
+      hoursUntil: Math.ceil(diffMs / (60 * 60 * 1000)),
+    });
+  }
+  reminders.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
+  return reminders;
+}
+
+export function reminderDueLabel(reminder) {
+  if (!reminder) return "";
+  if (reminder.overdue) return `已过期 ${Math.abs(reminder.hoursUntil)}h`;
+  return reminder.hoursUntil <= 1 ? "1h 内到期" : `${reminder.hoursUntil}h 内到期`;
+}
+
+/* 引导卡 HTML；没有剩余步骤时返回空字符串（调用方不应挂载）。 */
+export function renderOnboardingCard(steps) {
+  if (!steps || !steps.length) return "";
+  const items = steps
+    .map(
+      (step) => `
+        <li class="onboarding-step" data-step="${esc(step.key)}">
+          <span class="onboarding-step__index" aria-hidden="true">${Number(step.order) || "·"}</span>
+          <div class="onboarding-step__title">${esc(step.title)}</div>
+          <div class="onboarding-step__body">${esc(step.body)}</div>
+          <div class="onboarding-step__actions">
+            ${step.href
+              ? `<a class="btn btn-primary btn-sm" href="${esc(step.href)}">${esc(step.actionLabel)}</a>`
+              : `<button class="btn btn-primary btn-sm" type="button" data-action="${esc(step.action)}">${esc(step.actionLabel)}</button>`}
+            <button class="btn btn-ghost btn-sm" type="button" data-action="skip-onboarding-step" data-step="${esc(step.key)}">跳过</button>
+          </div>
+        </li>`,
+    )
+    .join("");
+  return `
+    <section class="onboarding-card" data-onboarding-card role="region" aria-label="新用户三步引导">
+      <div class="onboarding-card__head">
+        <div>
+          <div class="onboarding-card__title">三步上手 ResuAlign</div>
+          <div class="small muted">建主简历 → 粘贴 JD → 跑首次对齐，先完成最小闭环</div>
+        </div>
+        <span class="badge badge-amber badge-pending">新手引导</span>
+      </div>
+      <ol class="onboarding-steps">${items}</ol>
+    </section>`;
+}
+
+/* 岗位库顶部提醒条；无到期岗位返回空字符串。 */
+export function renderReminderStrip(reminders) {
+  if (!reminders || !reminders.length) return "";
+  const items = reminders
+    .map((reminder) => {
+      const job = reminder.job || {};
+      return `<a class="badge badge-amber" href="#/workspace/${encodeURIComponent(job.job_id || "")}" title="${esc(job.next_step || "")}">${esc(job.title || job.job_id || "未命名岗位")} · ${esc(reminderDueLabel(reminder))}</a>`;
+    })
+    .join("");
+  return `
+    <div class="reminder-strip" data-reminder-strip role="status" aria-label="面试跟进提醒">
+      <span class="reminder-strip__label">待跟进 ${reminders.length}</span>
+      ${items}
+    </div>`;
+}
+
+/* 工作台单岗位提醒横幅；无到期提醒返回空字符串。 */
+export function renderReminderBanner(reminder) {
+  if (!reminder) return "";
+  const job = reminder.job || {};
+  return `
+    <div class="reminder-banner" data-reminder-banner role="status" aria-label="面试跟进提醒">
+      <span class="reminder-strip__label">面试跟进</span>
+      <span>「${esc(job.title || job.job_id || "该岗位")}」${esc(reminderDueLabel(reminder))}：${esc(job.next_step || "")}</span>
+    </div>`;
+}

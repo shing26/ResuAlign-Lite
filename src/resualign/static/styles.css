@@ -98,7 +98,8 @@
   --font-ui: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, "Courier New", monospace;
 
-  --text-11: 0.6875rem;
+  /* #10 小字下限 12px：--text-11 是唯一低于 12px 的文字 token，从 11px 上调 */
+  --text-11: 0.75rem;
   --text-12: 0.75rem;
   --text-13: 0.8125rem;
   --text-14: 0.875rem;
@@ -347,11 +348,13 @@
   --diff-modify-ink: #bfdbfe;
 }
 
+/* #10 中文排版：显式 16px 基准 + 正文行高 1.7（后续 T5 body 块保持同一套值） */
 body {
   font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
   background: var(--bg);
   color: var(--ink);
-  line-height: 1.55;
+  font-size: 16px;
+  line-height: 1.7;
   min-height: 100vh;
 }
 
@@ -895,7 +898,10 @@ select {
   color: var(--teal);
 }
 
-.badge-amber {
+/* #10：badge-pending 是 badge-amber 的语义别名。JS/Playwright 测试仍使用
+   两个 class 名（不能改），此处合并为一份定义，避免双份维护。 */
+.badge-amber,
+.badge-pending {
   background: var(--amber-soft);
   color: var(--amber);
 }
@@ -969,7 +975,9 @@ select {
 .pre {
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
+  /* #10：JD/简历正文用 UI 字体而非等宽（中文等宽无阅读意义）；
+     diff/代码（.cmp-column/.cmp-line、code）仍保持 --font-mono */
+  font-family: var(--font-ui);
   font-size: 0.82rem;
   background: var(--surface-hover);
   border: 1px solid var(--line);
@@ -1976,7 +1984,9 @@ h6 {
 }
 
 .btn-danger-solid:hover:not(:disabled) {
-  background: #991f15;
+  /* #10：hover 走 token（color-mix 基于 --error 在明暗两套主题下取色），
+     不再硬编码 #991f15（暗色主题下会与白字失去对比） */
+  background: color-mix(in srgb, var(--error) 88%, #000);
 }
 
 .btn-ghost {
@@ -2063,7 +2073,9 @@ h6 {
   border-color: rgba(180, 35, 24, 0.18);
 }
 
-.badge-amber {
+/* #10：badge-pending 合并进 badge-amber（见基础块注释），样式只维护一份 */
+.badge-amber,
+.badge-pending {
   background: var(--pending-soft);
   color: var(--pending-deep);
   border-color: rgba(166, 90, 8, 0.18);
@@ -2243,7 +2255,8 @@ select {
   background: var(--surface-tint);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
+  /* #10：JD/简历正文走 UI 字体（基础块同改），diff/代码保持等宽 */
+  font-family: var(--font-ui);
 }
 
 .drawer {
@@ -2414,7 +2427,8 @@ select {
   background: var(--surface-hover);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  font-family: var(--font-mono);
+  /* #10：定稿/草稿属于简历正文，用 UI 字体 */
+  font-family: var(--font-ui);
   font-size: var(--text-13);
 }
 
@@ -3748,6 +3762,8 @@ body {
   font-family: var(--font-ui);
   background: var(--bg);
   color: var(--text);
+  font-size: 16px;
+  line-height: 1.7;
 }
 
 .topbar-actions {
@@ -4904,5 +4920,124 @@ body.command-palette-open {
   .split-step.is-active .split-step__dot,
   .crawl-status__dot {
     animation: none;
+  }
+}
+
+/* =================================================================== */
+/* #11 新用户三步引导卡 + 面试/下一步到期提醒（全部使用现有 token）       */
+/* =================================================================== */
+
+/* 引导卡（岗位库空态顶部；badge 复用合并后的 badge-amber/badge-pending） */
+.onboarding-card {
+  padding: var(--card-pad-lg);
+  margin-bottom: 16px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--teal);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.onboarding-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.onboarding-card__title {
+  font-size: var(--text-16);
+  font-weight: 800;
+  color: var(--ink-strong);
+}
+
+.onboarding-steps {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--card-gap-lg);
+  margin-top: var(--card-gap-lg);
+  padding: 0;
+}
+
+.onboarding-step {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--card-pad-md);
+  background: var(--surface-tint);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.onboarding-step__index {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-active);
+  font-size: var(--text-12);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.onboarding-step__title {
+  font-size: var(--text-14);
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+
+.onboarding-step__body {
+  font-size: var(--text-13);
+  line-height: 1.6;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.onboarding-step__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+/* 提醒条（岗位库顶部）与提醒横幅（工作台岗位页）共用同一套 amber 样式 */
+.reminder-strip,
+.reminder-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  background: var(--surface-pending);
+  border: 1px solid rgba(180, 83, 9, 0.22);
+  border-left: 3px solid var(--pending);
+  border-radius: var(--radius-md);
+  color: var(--pending-deep);
+  font-size: var(--text-13);
+}
+
+.reminder-strip__label {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.reminder-strip a.badge {
+  text-decoration: none;
+}
+
+.reminder-strip a.badge:hover {
+  filter: brightness(0.96);
+}
+
+@media (max-width: 900px) {
+  .onboarding-steps {
+    grid-template-columns: 1fr;
   }
 }
