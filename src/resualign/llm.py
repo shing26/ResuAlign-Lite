@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import time
 from abc import ABC, abstractmethod
@@ -7,7 +8,49 @@ from typing import Any, ClassVar, Optional, Type
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from .observability import CallStats, log_event
+
 STRUCTURED_MAX_EXTRA_RETRIES = 2
+
+_logger = logging.getLogger(__name__)
+
+# In-memory aggregation of LLM call outcomes for /api/ops/metrics. Kept at
+# module level because OpenAIClient instances are short-lived (one per job).
+_LLM_CALL_STATS = CallStats(window_size=200)
+
+
+def llm_metrics_snapshot() -> dict[str, Any]:
+    """Return aggregated LLM call metrics for /api/ops/metrics."""
+    return _LLM_CALL_STATS.snapshot()
+
+
+def _observe_llm_call(
+    *,
+    stage: str,
+    provider: str,
+    model: str,
+    duration_ms: float,
+    attempts: int,
+    status: str,
+    mode: Optional[str] = None,
+) -> None:
+    """Record one LLM call in memory and emit a structured ``llm.call`` event."""
+    _LLM_CALL_STATS.record(duration_ms, status)
+    extra: dict[str, Any] = {
+        "provider": provider,
+        "model": model,
+        "stage": stage,
+        "attempts": attempts,
+        "status": status,
+    }
+    if mode is not None:
+        extra["mode"] = mode
+    log_event(
+        _logger,
+        "llm.call",
+        duration_ms=duration_ms,
+        extra=extra,
+    )
 
 
 def _parse_json_object(content: str) -> dict[str, Any]:
@@ -92,6 +135,7 @@ class OpenAIClient(LLMClient):
             provider in {"openai", "azure"}
             or "api.openai.com" in self.base_url
         )
+        self.provider = provider or "unknown"
         self.max_retries = self.DEFAULT_MAX_RETRIES
         self._client = httpx.Client(
             timeout=timeout if timeout is not None else self.DEFAULT_TIMEOUT,
@@ -122,49 +166,65 @@ class OpenAIClient(LLMClient):
         }
 
         max_tokens = self.DEFAULT_MAX_TOKENS
-        for attempt in range(self.max_retries + 1):
-            try:
-                payload = {**body, "max_tokens": max_tokens}
-                if attempt == 0:
-                    payload["response_format"] = {"type": "json_object"}
-
-                r = self._client.post(
-                    f"{self.base_url.rstrip('/')}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
-                r.raise_for_status()
-                response = r.json()
-                message = response["choices"][0]["message"]
-                content = message.get("content") or ""
-                finish_reason = response["choices"][0].get("finish_reason")
-
-                start = content.find("{")
-                if start < 0:
-                    if attempt == self.max_retries:
-                        raise LLMResponseError("No JSON object found in response")
-                    if finish_reason == "length" and max_tokens < 65536:
-                        max_tokens = min(max_tokens * 2, 65536)
-                    time.sleep(1)
-                    continue
+        _t0 = time.monotonic()
+        attempts = 0
+        status = "failed"
+        try:
+            for attempt in range(self.max_retries + 1):
+                attempts += 1
                 try:
-                    return _parse_json_object(content)
-                except Exception:
-                    if attempt == self.max_retries:
-                        raise
-                    if finish_reason == "length" and max_tokens < 65536:
-                        max_tokens = min(max_tokens * 2, 65536)
-                    time.sleep(1)
-                    continue
+                    payload = {**body, "max_tokens": max_tokens}
+                    if attempt == 0:
+                        payload["response_format"] = {"type": "json_object"}
 
-            except LLMResponseError:
-                raise
-            except Exception as e:
-                if attempt == self.max_retries:
-                    raise LLMResponseError(
-                        f"LLM call failed after {self.max_retries + 1} attempts: {e}"
-                    ) from e
-                time.sleep(1)
+                    r = self._client.post(
+                        f"{self.base_url.rstrip('/')}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                    )
+                    r.raise_for_status()
+                    response = r.json()
+                    message = response["choices"][0]["message"]
+                    content = message.get("content") or ""
+                    finish_reason = response["choices"][0].get("finish_reason")
+
+                    start = content.find("{")
+                    if start < 0:
+                        if attempt == self.max_retries:
+                            raise LLMResponseError("No JSON object found in response")
+                        if finish_reason == "length" and max_tokens < 65536:
+                            max_tokens = min(max_tokens * 2, 65536)
+                        time.sleep(1)
+                        continue
+                    try:
+                        result = _parse_json_object(content)
+                    except Exception:
+                        if attempt == self.max_retries:
+                            raise
+                        if finish_reason == "length" and max_tokens < 65536:
+                            max_tokens = min(max_tokens * 2, 65536)
+                        time.sleep(1)
+                        continue
+                    status = "ok"
+                    return result
+
+                except LLMResponseError:
+                    raise
+                except Exception as e:
+                    if attempt == self.max_retries:
+                        raise LLMResponseError(
+                            f"LLM call failed after {self.max_retries + 1} attempts: {e}"
+                        ) from e
+                    time.sleep(1)
+        finally:
+            _observe_llm_call(
+                stage="chat_json",
+                provider=self.provider,
+                model=model or self.model,
+                duration_ms=(time.monotonic() - _t0) * 1000,
+                attempts=attempts,
+                status=status,
+            )
 
     def chat_structured(
         self,
@@ -207,45 +267,62 @@ class OpenAIClient(LLMClient):
                 },
             },
         }
-        for attempt in range(self.max_retries + 1):
-            try:
-                r = self._client.post(
-                    f"{self.base_url.rstrip('/')}/chat/completions",
-                    headers=headers,
-                    json=body,
-                )
-                r.raise_for_status()
-                response = r.json()
-                message = response["choices"][0]["message"]
-                content = message.get("content") or ""
-                return schema_model.model_validate(
-                    _parse_json_object(content)
-                ).model_dump()
-            except httpx.HTTPStatusError as exc:
-                if exc.response is not None and exc.response.status_code == 400:
-                    return self._chat_structured_json_mode(
-                        system, user, schema_model, model=model
+        _t0 = time.monotonic()
+        attempts = 0
+        status = "failed"
+        try:
+            for attempt in range(self.max_retries + 1):
+                attempts += 1
+                try:
+                    r = self._client.post(
+                        f"{self.base_url.rstrip('/')}/chat/completions",
+                        headers=headers,
+                        json=body,
                     )
-                if attempt == self.max_retries:
-                    raise LLMResponseError(
-                        "Structured LLM call failed after "
-                        f"{self.max_retries + 1} attempts: {exc}"
-                    ) from exc
-                time.sleep(1)
-            except (ValidationError, json.JSONDecodeError, LLMResponseError) as exc:
-                if attempt == self.max_retries:
-                    raise LLMResponseError(
-                        "Structured response failed validation after "
-                        f"{self.max_retries + 1} attempts: {exc}"
-                    ) from exc
-                time.sleep(1)
-            except Exception as exc:
-                if attempt == self.max_retries:
-                    raise LLMResponseError(
-                        "Structured LLM call failed after "
-                        f"{self.max_retries + 1} attempts: {exc}"
-                    ) from exc
-                time.sleep(1)
+                    r.raise_for_status()
+                    response = r.json()
+                    message = response["choices"][0]["message"]
+                    content = message.get("content") or ""
+                    result = schema_model.model_validate(
+                        _parse_json_object(content)
+                    ).model_dump()
+                    status = "ok"
+                    return result
+                except httpx.HTTPStatusError as exc:
+                    if exc.response is not None and exc.response.status_code == 400:
+                        return self._chat_structured_json_mode(
+                            system, user, schema_model, model=model
+                        )
+                    if attempt == self.max_retries:
+                        raise LLMResponseError(
+                            "Structured LLM call failed after "
+                            f"{self.max_retries + 1} attempts: {exc}"
+                        ) from exc
+                    time.sleep(1)
+                except (ValidationError, json.JSONDecodeError, LLMResponseError) as exc:
+                    if attempt == self.max_retries:
+                        raise LLMResponseError(
+                            "Structured response failed validation after "
+                            f"{self.max_retries + 1} attempts: {exc}"
+                        ) from exc
+                    time.sleep(1)
+                except Exception as exc:
+                    if attempt == self.max_retries:
+                        raise LLMResponseError(
+                            "Structured LLM call failed after "
+                            f"{self.max_retries + 1} attempts: {exc}"
+                        ) from exc
+                    time.sleep(1)
+        finally:
+            _observe_llm_call(
+                stage="chat_structured",
+                provider=self.provider,
+                model=model or self.model,
+                duration_ms=(time.monotonic() - _t0) * 1000,
+                attempts=attempts,
+                status=status,
+                mode="json_schema",
+            )
 
     def _chat_structured_json_mode(
         self,
@@ -266,36 +343,53 @@ class OpenAIClient(LLMClient):
             "response_format": {"type": "json_object"},
         }
         last_error: Optional[Exception] = None
-        for attempt in range(STRUCTURED_MAX_EXTRA_RETRIES + 1):
-            try:
-                r = self._client.post(
-                    f"{self.base_url.rstrip('/')}/chat/completions",
-                    headers=headers,
-                    json=body,
-                )
-                r.raise_for_status()
-                response = r.json()
-                message = response["choices"][0]["message"]
-                content = message.get("content") or ""
-                return schema_model.model_validate(
-                    _parse_json_object(content)
-                ).model_dump()
-            except (ValidationError, json.JSONDecodeError, LLMResponseError) as exc:
-                last_error = exc
-                if attempt >= STRUCTURED_MAX_EXTRA_RETRIES:
-                    raise LLMResponseError(
-                        "Structured response failed schema validation after "
-                        f"{STRUCTURED_MAX_EXTRA_RETRIES + 1} attempts: {last_error}"
-                    ) from exc
-                time.sleep(1)
-            except Exception as exc:
-                last_error = exc
-                if attempt >= STRUCTURED_MAX_EXTRA_RETRIES:
-                    raise LLMResponseError(
-                        "Structured LLM call failed after "
-                        f"{STRUCTURED_MAX_EXTRA_RETRIES + 1} attempts: {last_error}"
-                    ) from exc
-                time.sleep(1)
+        _t0 = time.monotonic()
+        attempts = 0
+        status = "failed"
+        try:
+            for attempt in range(STRUCTURED_MAX_EXTRA_RETRIES + 1):
+                attempts += 1
+                try:
+                    r = self._client.post(
+                        f"{self.base_url.rstrip('/')}/chat/completions",
+                        headers=headers,
+                        json=body,
+                    )
+                    r.raise_for_status()
+                    response = r.json()
+                    message = response["choices"][0]["message"]
+                    content = message.get("content") or ""
+                    result = schema_model.model_validate(
+                        _parse_json_object(content)
+                    ).model_dump()
+                    status = "ok"
+                    return result
+                except (ValidationError, json.JSONDecodeError, LLMResponseError) as exc:
+                    last_error = exc
+                    if attempt >= STRUCTURED_MAX_EXTRA_RETRIES:
+                        raise LLMResponseError(
+                            "Structured response failed schema validation after "
+                            f"{STRUCTURED_MAX_EXTRA_RETRIES + 1} attempts: {last_error}"
+                        ) from exc
+                    time.sleep(1)
+                except Exception as exc:
+                    last_error = exc
+                    if attempt >= STRUCTURED_MAX_EXTRA_RETRIES:
+                        raise LLMResponseError(
+                            "Structured LLM call failed after "
+                            f"{STRUCTURED_MAX_EXTRA_RETRIES + 1} attempts: {last_error}"
+                        ) from exc
+                    time.sleep(1)
+        finally:
+            _observe_llm_call(
+                stage="chat_structured",
+                provider=self.provider,
+                model=model or self.model,
+                duration_ms=(time.monotonic() - _t0) * 1000,
+                attempts=attempts,
+                status=status,
+                mode="json_object",
+            )
 
 
 DIAG_PROMPT = (

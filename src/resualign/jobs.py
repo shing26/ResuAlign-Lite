@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 import uuid
@@ -10,11 +11,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from .observability import log_event
 from .store_base import (
     _SqliteStore,
     default_job_db_path,  # noqa: F401  (re-exported for external callers)
     resolve_data_dir,  # noqa: F401  (re-exported for external callers)
 )
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_JOBS = 100
 DEFAULT_JOB_TTL_SECONDS = 60 * 60
@@ -146,6 +150,11 @@ class JobRegistry(_SqliteStore):
                     ),
                 )
             self._enforce_cap()
+            log_event(
+                logger,
+                "job.queued",
+                extra={"job_id": job.job_id, "tenant_id": job.tenant_id},
+            )
             return job
 
     def get_payload(
@@ -208,7 +217,10 @@ class JobRegistry(_SqliteStore):
                     "WHERE job_id = ? AND status = 'queued'",
                     (now, job_id),
                 )
-                return cursor.rowcount > 0
+                claimed = cursor.rowcount > 0
+            if claimed:
+                log_event(logger, "job.claimed", extra={"job_id": job_id})
+            return claimed
 
     def mark_running(self, job_id: str) -> None:
         """Backward-compatible running transition that ignores double claims."""
@@ -224,16 +236,26 @@ class JobRegistry(_SqliteStore):
                     "WHERE job_id = ? AND status = 'running'",
                     (job_id,),
                 )
-                return cursor.rowcount > 0
+                requeued = cursor.rowcount > 0
+            if requeued:
+                log_event(logger, "job.requeued", extra={"job_id": job_id})
+            return requeued
 
     def update_progress(self, job_id: str, stage: str, message: str) -> None:
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
-                conn.execute(
+                cursor = conn.execute(
                     "UPDATE jobs SET stage = ?, message = ? "
                     "WHERE job_id = ? AND status = 'running'",
                     (stage, message, job_id),
+                )
+                updated = cursor.rowcount > 0
+            if updated:
+                log_event(
+                    logger,
+                    "job.stage",
+                    extra={"job_id": job_id, "stage": stage, "message": message},
                 )
 
     def succeed(self, job_id: str, result: dict[str, Any]) -> None:
@@ -246,11 +268,18 @@ class JobRegistry(_SqliteStore):
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
-                conn.execute(
+                cursor = conn.execute(
                     "UPDATE jobs SET status = 'succeeded', result_json = ?, "
                     "finished_at = ? "
                     "WHERE job_id = ? AND status IN ('queued', 'running')",
                     (result_json, now, job_id),
+                )
+                updated = cursor.rowcount > 0
+            if updated:
+                log_event(
+                    logger,
+                    "job.finished",
+                    extra={"job_id": job_id, "outcome": "succeeded"},
                 )
 
     def fail(self, job_id: str, error: str) -> None:
@@ -258,11 +287,22 @@ class JobRegistry(_SqliteStore):
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
-                conn.execute(
+                cursor = conn.execute(
                     "UPDATE jobs SET status = 'failed', error = ?, "
                     "finished_at = ? "
                     "WHERE job_id = ? AND status IN ('queued', 'running')",
                     (error, now, job_id),
+                )
+                updated = cursor.rowcount > 0
+            if updated:
+                log_event(
+                    logger,
+                    "job.finished",
+                    extra={
+                        "job_id": job_id,
+                        "outcome": "failed",
+                        "error": error,
+                    },
                 )
 
     def cancel(self, job_id: str) -> bool:
@@ -277,7 +317,14 @@ class JobRegistry(_SqliteStore):
                     "WHERE job_id = ? AND status = 'queued'",
                     (now, job_id),
                 )
-                return cursor.rowcount > 0
+                canceled = cursor.rowcount > 0
+            if canceled:
+                log_event(
+                    logger,
+                    "job.finished",
+                    extra={"job_id": job_id, "outcome": "canceled"},
+                )
+            return canceled
 
     def delete(self, job_id: str, tenant_id: str | None = None) -> bool:
         """Delete a job and its payload, scoped to the tenant."""
@@ -333,6 +380,52 @@ class JobRegistry(_SqliteStore):
             self._ensure_initialized()
             with self._connect() as conn:
                 return int(conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
+
+    def queue_depth(self) -> int:
+        """Return the number of queued or running jobs."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM jobs "
+                    "WHERE status IN ('queued', 'running')"
+                ).fetchone()
+                return int(row[0])
+
+    def oldest_waiting_seconds(self) -> Optional[float]:
+        """Seconds the oldest queued job has been waiting, or None."""
+        now = self._clock()
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT created_at FROM jobs WHERE status = 'queued' "
+                    "ORDER BY created_at ASC, rowid ASC LIMIT 1"
+                ).fetchone()
+                if row is None:
+                    return None
+                return round(max(0.0, now - row["created_at"]), 1)
+
+    def outcome_stats(self) -> dict[str, int]:
+        """Count jobs grouped by status for /api/ops/metrics."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT status, COUNT(*) AS n FROM jobs GROUP BY status"
+                ).fetchall()
+                return {row["status"]: int(row["n"]) for row in rows}
+
+    def ping(self) -> bool:
+        """Readiness probe: True when the underlying database is readable."""
+        try:
+            with self._lock:
+                self._ensure_initialized()
+                with self._connect() as conn:
+                    conn.execute("SELECT 1").fetchone()
+            return True
+        except Exception:
+            return False
 
     def _ensure_initialized(self) -> None:
         if self._initialized:

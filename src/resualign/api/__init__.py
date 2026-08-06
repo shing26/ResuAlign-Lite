@@ -332,6 +332,11 @@ from .routers import batch as _batch_router
 app.include_router(_batch_router.router)
 
 
+from .routers import ops as _ops_router
+
+app.include_router(_ops_router.router)
+
+
 from .routers import (
     analyze as _analyze_router,
 )

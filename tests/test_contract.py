@@ -184,7 +184,9 @@ def test_health_contract():
     client = TestClient(app)
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    body = r.json()
+    assert body["status"] == "ok"
+    assert set(body["checks"]) == {"db", "cache"}
 
 
 def test_job_library_response_shape_is_additive():
