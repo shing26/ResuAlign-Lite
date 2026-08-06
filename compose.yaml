@@ -21,6 +21,13 @@ services:
       # (Docker Desktop on Windows/macOS maps host permissions automatically.)
       - ./data:/app/data
     restart: unless-stopped
+    # Bounded container log retention: 10 MB per file, 5 rotated files
+    # (mirrors the host-side RotatingFileHandler policy, Ticket #13).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # Give the in-process analysis daemon thread time to finish in-flight jobs.
     stop_grace_period: 30s
     # Mirrors the Dockerfile HEALTHCHECK (compose overrides it when both exist,

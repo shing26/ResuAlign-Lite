@@ -14,6 +14,8 @@ Provides:
 from __future__ import annotations
 
 import logging
+import logging.config
+import os
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,7 +36,14 @@ from ..job_library import CrawlTaskStore
 from ..jobs import JobRegistry, resolve_data_dir
 from ..llm import LLMResponseError, OpenAIClient
 from ..models import Report
-from ..observability import log_event, log_slow_call, new_request_id
+from ..observability import (
+    RedactingFilter,
+    log_event,
+    log_sample_rate,
+    log_slow_call,
+    new_request_id,
+    should_sample,
+)
 from ..parser import (
     SUPPORTED_EXTENSIONS,
     FileParseError,
@@ -140,6 +149,77 @@ __all__ = [
 
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Logging configuration (Ticket #13)
+# ---------------------------------------------------------------------------
+# Process-wide dictConfig applied exactly once at import time (NOT in the
+# lifespan, which tests trigger repeatedly). Root logger gets a console
+# handler (INFO) and a UTF-8 rotating file handler at
+# ``<RESUALIGN_LOG_DIR>/app.log`` (10 MB x 5 backups, default
+# ``<data dir>/logs``). Every structured ``log_event`` line passes through a
+# redacting filter before it is emitted, and http.request events are sampled
+# per request via RESUALIGN_LOG_SAMPLE_RATE (see ``_request_id_and_slow_log``).
+
+_LOGGING_CONFIGURED = False
+_APP_LOG_MAX_BYTES = 10 * 1024 * 1024
+_APP_LOG_BACKUP_COUNT = 5
+
+
+def _configure_logging() -> None:
+    """Configure process-wide logging, idempotently (runs once per process).
+
+    Re-entry safe: repeated calls and repeated module imports never stack
+    extra handlers. The log directory is created on demand.
+    """
+    global _LOGGING_CONFIGURED
+    if _LOGGING_CONFIGURED:
+        return
+    _LOGGING_CONFIGURED = True
+    log_dir = Path(
+        os.environ.get("RESUALIGN_LOG_DIR") or (resolve_data_dir() / "logs")
+    )
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "app.log"
+    logging.config.dictConfig(
+        {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "default": {
+                    "format": "%(asctime)s %(levelname)s %(name)s %(message)s",
+                },
+            },
+            "filters": {
+                "redact": {"()": RedactingFilter},
+            },
+            "handlers": {
+                "console": {
+                    "class": "logging.StreamHandler",
+                    "level": "INFO",
+                    "formatter": "default",
+                    "filters": ["redact"],
+                },
+                "app_file": {
+                    "class": "logging.handlers.RotatingFileHandler",
+                    "level": "INFO",
+                    "formatter": "default",
+                    "filters": ["redact"],
+                    "filename": str(log_file),
+                    "maxBytes": _APP_LOG_MAX_BYTES,
+                    "backupCount": _APP_LOG_BACKUP_COUNT,
+                    "encoding": "utf-8",
+                },
+            },
+            "root": {
+                "level": "INFO",
+                "handlers": ["console", "app_file"],
+            },
+        }
+    )
+
+
+_configure_logging()
 
 # Process-wide state (store singletons, rate limiters, constants) lives in
 # state.py and is re-exported here so `api_module._registry` and friends keep
@@ -301,17 +381,21 @@ async def _request_id_and_slow_log(request: Request, call_next):
     response = await call_next(request)
     duration_ms = (_time.monotonic() - start) * 1000
     response.headers["X-Request-Id"] = request_id
-    log_event(
-        logger,
-        "http.request",
-        request_id=request_id,
-        duration_ms=duration_ms,
-        extra={
-            "method": request.method,
-            "path": request.url.path,
-            "status": response.status_code,
-        },
-    )
+    extra = {
+        "method": request.method,
+        "path": request.url.path,
+        "status": response.status_code,
+    }
+    # http.request is sampled (default 1%) to keep log volume bounded;
+    # http.slow is always recorded so slow requests are never lost.
+    if should_sample(log_sample_rate()):
+        log_event(
+            logger,
+            "http.request",
+            request_id=request_id,
+            duration_ms=duration_ms,
+            extra=extra,
+        )
     log_slow_call(
         logger,
         "http.slow",

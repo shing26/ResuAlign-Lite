@@ -11,6 +11,8 @@ htmlcov/
 
 # Local runtime data: personal resumes, jobs, sessions, settings
 data/
+# Rotated application logs (under the runtime data dir)
+data/logs/
 
 # Local agent/tool configuration
 .codex/

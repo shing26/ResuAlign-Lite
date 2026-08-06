@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import random
+import re
 import threading
 import uuid
 from collections import deque
@@ -11,6 +14,12 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
+
+# Log governance (Ticket #13)
+# `sk-` + word chars (+ hyphens for sk-proj-... style keys) -> masked token.
+_API_KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9-]+")
+_MAX_ERROR_LEN = 500
+_DEFAULT_SAMPLE_RATE = 0.01
 
 _request_id_context: ContextVar[str | None] = ContextVar(
     "resualign_request_id", default=None
@@ -96,6 +105,84 @@ def log_slow_call(
         extra=details,
     )
     return True
+
+
+def redact_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of event fields with secrets masked and long errors truncated.
+
+    Applied recursively so nested ``extra`` payloads are covered:
+
+    - any ``sk-...`` API-key-like token in a string value becomes ``sk-***``
+      (covers ``llm.call`` model/error fields and ``job.finished`` error text);
+    - string values under the key ``error`` are truncated to 500 chars with a
+      ``[truncated]`` marker.
+
+    The input dict is never mutated.
+    """
+    redacted: dict[str, Any] = {}
+    for key, value in fields.items():
+        if isinstance(value, dict):
+            redacted[key] = redact_fields(value)
+        elif isinstance(value, str):
+            text = _API_KEY_PATTERN.sub("sk-***", value)
+            if key == "error" and len(text) > _MAX_ERROR_LEN:
+                text = text[:_MAX_ERROR_LEN] + "[truncated]"
+            redacted[key] = text
+        else:
+            redacted[key] = value
+    return redacted
+
+
+class RedactingFilter(logging.Filter):
+    """logging.Filter that redacts structured JSON events before emission.
+
+    Attach to handlers so every ``log_event`` line (which is a single-line
+    JSON payload) is scrubbed of API-key-like tokens and oversized error
+    values at write time, without touching the emitting modules.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        if not (message.startswith("{") and message.endswith("}")):
+            return True
+        try:
+            payload = json.loads(message)
+        except (ValueError, TypeError):
+            return True
+        if isinstance(payload, dict):
+            record.msg = json.dumps(
+                redact_fields(payload), ensure_ascii=False, default=str
+            )
+            record.args = ()
+        return True
+
+
+def should_sample(rate: float) -> bool:
+    """Decide whether to emit a sampled event for the given rate.
+
+    ``rate=1`` always samples, ``rate=0`` never samples, values in between
+    sample with that probability.
+    """
+    if rate >= 1.0:
+        return True
+    if rate <= 0.0:
+        return False
+    return random.random() < rate
+
+
+def log_sample_rate() -> float:
+    """Return the configured http.request sampling rate, clamped to [0, 1].
+
+    Reads ``RESUALIGN_LOG_SAMPLE_RATE`` (default 0.01, i.e. 1%). Invalid
+    values fall back to the default so a bad env var can never disable or
+    flood request logging.
+    """
+    raw = os.environ.get("RESUALIGN_LOG_SAMPLE_RATE", str(_DEFAULT_SAMPLE_RATE))
+    try:
+        rate = float(raw)
+    except (TypeError, ValueError):
+        rate = _DEFAULT_SAMPLE_RATE
+    return max(0.0, min(1.0, rate))
 
 
 class CacheHitCounter:
