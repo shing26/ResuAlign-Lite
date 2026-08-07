@@ -188,6 +188,45 @@ def test_parse_jd_preview_returns_crawler_metadata():
     )
 
 
+def test_parse_jd_preview_prefers_jd_derived_title_over_site_meta():
+    """SPA pages (e.g. Alibaba campus-talent) expose the site name in
+    static meta.title while the rendered JD body has the position name;
+    the derived title must win."""
+    def fake_crawl(url, meta=None):
+        if meta is not None:
+            meta.update({"title": "阿里巴巴校园招聘"})
+        return (
+            "阿里巴巴校园招聘\n首页\n岗位\n职位\nAI应用研发工程师\n"
+            "发布于 2026-08-06\n聚焦业务场景应用 Agent 前沿技术…"
+        )
+
+    with patch("resualign.api._crawl_jd_or_502", side_effect=fake_crawl):
+        r = client.post(
+            "/api/jobs/parse-jd",
+            json={
+                "jd_url": "https://campus-talent.alibaba.com/campus/position/1"
+            },
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["title"] == "AI应用研发工程师"
+
+
+def test_parse_jd_preview_falls_back_to_meta_title_when_derivation_empty():
+    def fake_crawl(url, meta=None):
+        if meta is not None:
+            meta.update({"title": "Site Job Board"})
+        return ""
+
+    with patch("resualign.api._crawl_jd_or_502", side_effect=fake_crawl):
+        r = client.post(
+            "/api/jobs/parse-jd",
+            json={"jd_url": "https://example.com/job/1"},
+        )
+    assert r.status_code == 200
+    assert r.json()["title"] == "Site Job Board"
+
+
 def test_parse_jd_preview_requires_url():
     r = client.post("/api/jobs/parse-jd", json={"jd_url": ""})
 

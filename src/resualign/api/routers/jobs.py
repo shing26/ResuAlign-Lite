@@ -54,7 +54,17 @@ def parse_jd_preview(req: JDParseRequest, request: Request, user: dict[str, Any]
     jd_text = api_module._crawl_jd_or_502(jd_url, meta=meta)
     salary_min, salary_max = api_module.extract_salary_range(jd_text)
     has_salary = salary_min is not None or salary_max is not None
-    return {'title': meta.get('title') or api_module._derive_title(jd_text), 'jd_text': jd_text, 'company': meta.get('company'), 'city': meta.get('city'), 'salary_min': salary_min, 'salary_max': salary_max, 'salary_currency': 'CNY' if has_salary else None, 'source_url': jd_url}
+    # Prefer the title derived from the rendered JD text: for SPA pages the
+    # static <title>/og:title is often the site name (e.g. "阿里巴巴校园招聘"),
+    # while the rendered body carries the actual position name. meta.title is
+    # kept as a fallback when the JD text yields no recognisable title.
+    derived_title = api_module._derive_title(jd_text)
+    title = (
+        derived_title
+        if derived_title and derived_title != '未命名岗位'
+        else meta.get('title')
+    )
+    return {'title': title, 'jd_text': jd_text, 'company': meta.get('company'), 'city': meta.get('city'), 'salary_min': salary_min, 'salary_max': salary_max, 'salary_currency': 'CNY' if has_salary else None, 'source_url': jd_url}
 
 @router.post('/api/jobs/import')
 def import_library_jobs(req: JobImportRequest, request: Request, user: dict[str, Any]=Depends(get_current_user)):
