@@ -3709,6 +3709,17 @@
             ],
             "title": "Llm Model"
           },
+          "eval_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Default"
+          },
           "llm": {
             "anyOf": [
               {
@@ -3895,6 +3906,17 @@
               }
             ],
             "title": "Custom Prompt"
+          },
+          "run_eval": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Eval"
           }
         },
         "type": "object",

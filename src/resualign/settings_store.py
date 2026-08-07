@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     llm_provider TEXT,
     llm_model TEXT,
     llm_json TEXT,
+    eval_default INTEGER NOT NULL DEFAULT 0,
     updated_at REAL NOT NULL
 );
 """
@@ -65,6 +66,7 @@ def default_settings() -> dict[str, Any]:
         },
         "llm_provider": None,
         "llm_model": None,
+        "eval_default": False,
         "llm": {
             "provider": None,
             "model": None,
@@ -141,6 +143,11 @@ class SettingsStore(_SqliteStore):
         (1, "ALTER TABLE user_settings ADD COLUMN llm_provider TEXT"),
         (2, "ALTER TABLE user_settings ADD COLUMN llm_model TEXT"),
         (3, "ALTER TABLE user_settings ADD COLUMN llm_json TEXT"),
+        (
+            4,
+            "ALTER TABLE user_settings ADD COLUMN "
+            "eval_default INTEGER NOT NULL DEFAULT 0",
+        ),
     )
 
     def get_settings(self, tenant_id: str) -> dict[str, Any]:
@@ -151,7 +158,7 @@ class SettingsStore(_SqliteStore):
                 row = conn.execute(
                     "SELECT salary_reference_json, appraisal_weights_json, "
                     "classification_vocabulary_json, llm_provider, llm_model, "
-                    "llm_json "
+                    "llm_json, eval_default "
                     "FROM user_settings "
                     "WHERE tenant_id = ?",
                     (tenant_id,),
@@ -177,6 +184,7 @@ class SettingsStore(_SqliteStore):
             ),
             "llm_provider": llm.get("provider"),
             "llm_model": llm.get("model"),
+            "eval_default": bool(row["eval_default"]),
             "llm": llm,
         }
         settings = _merge_defaults(defaults, settings)
@@ -217,8 +225,8 @@ class SettingsStore(_SqliteStore):
                     "INSERT INTO user_settings ("
                     "tenant_id, salary_reference_json, "
                     "appraisal_weights_json, classification_vocabulary_json, "
-                    "llm_provider, llm_model, llm_json, updated_at"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                    "llm_provider, llm_model, llm_json, eval_default, updated_at"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(tenant_id) DO UPDATE SET "
                     "salary_reference_json = excluded.salary_reference_json, "
                     "appraisal_weights_json = "
@@ -228,6 +236,7 @@ class SettingsStore(_SqliteStore):
                     "llm_provider = excluded.llm_provider, "
                     "llm_model = excluded.llm_model, "
                     "llm_json = excluded.llm_json, "
+                    "eval_default = excluded.eval_default, "
                     "updated_at = excluded.updated_at",
                     (
                         tenant_id,
@@ -244,6 +253,7 @@ class SettingsStore(_SqliteStore):
                         merged["llm"].get("provider"),
                         merged["llm"].get("model"),
                         json.dumps(merged["llm"], ensure_ascii=False),
+                        int(merged["eval_default"]),
                         now,
                     ),
                 )
@@ -302,6 +312,7 @@ def _merge_defaults(
     merged_llm = _merge_llm(
         defaults.get("llm") or _default_llm(), updates
     )
+    eval_default = updates.get("eval_default")
     merged = {
         "salary_reference": list(
             updates.get("salary_reference", defaults["salary_reference"])
@@ -320,12 +331,18 @@ def _merge_defaults(
         },
         "llm_provider": merged_llm.get("provider"),
         "llm_model": merged_llm.get("model"),
+        "eval_default": (
+            defaults["eval_default"] if eval_default is None else eval_default
+        ),
         "llm": merged_llm,
     }
     return merged
 
 
 def _validate_settings(settings: dict[str, Any]) -> None:
+    eval_default = settings.get("eval_default")
+    if eval_default is not None and not isinstance(eval_default, bool):
+        raise UserStoreError("eval_default must be a boolean")
     provider = settings.get("llm_provider")
     if provider is not None and provider not in (
         "deepseek",

@@ -192,6 +192,7 @@ def test_settings_store_migrates_legacy_db(tmp_path):
     settings = store.get_settings("t1")
     assert settings["llm_provider"] is None
     assert settings["llm_model"] is None
+    assert settings["eval_default"] is False
     assert settings["llm"] == {
         "provider": None,
         "model": None,
@@ -206,7 +207,7 @@ def test_settings_store_migrates_legacy_db(tmp_path):
     assert updated["llm_model"] == "deepseek-chat"
     assert updated["llm"]["provider"] == "deepseek"
     assert updated["llm"]["model"] == "deepseek-chat"
-    assert _migrated_versions(store) == {1, 2, 3}
+    assert _migrated_versions(store) == {1, 2, 3, 4}
 
 
 def test_settings_store_backfills_llm_from_legacy_columns(tmp_path):

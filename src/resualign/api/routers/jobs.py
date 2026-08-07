@@ -213,7 +213,14 @@ def run_workbench(job_id: str, req: WorkbenchRunRequest, request: Request, user:
     if not config.api_key:
         raise HTTPException(status_code=503, detail='API key not configured. Set via .env file or environment variables.')
     cached_diagnosis = api_module._cached_diagnosis(resume, config, user['user_id'])
-    payload = {'resume_text': resume['content'], 'jd_text': job['jd_text'], 'jd_url': job.get('source_url'), 'run_eval': False, 'granularity': req.granularity, 'prompt_focus': req.prompt_focus, 'custom_prompt': req.custom_prompt, 'master_resume_id': req.master_resume_id, 'library_job_id': job_id}
+    # F1: per-run Eval switch. Explicit True/False from the request wins;
+    # None (not specified) falls back to the settings-page global default.
+    run_eval = req.run_eval
+    if run_eval is None:
+        run_eval = api_module._settings_store.get_settings(
+            user['user_id']
+        ).get('eval_default', False)
+    payload = {'resume_text': resume['content'], 'jd_text': job['jd_text'], 'jd_url': job.get('source_url'), 'run_eval': run_eval, 'granularity': req.granularity, 'prompt_focus': req.prompt_focus, 'custom_prompt': req.custom_prompt, 'master_resume_id': req.master_resume_id, 'library_job_id': job_id}
     if cached_diagnosis is not None:
         payload['precomputed_diagnosis'] = cached_diagnosis
     analysis_job_id = api_module._queue_job(user, payload, workbench=True)

@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 _JD_TEXT_MAX = 100_000
 _RESUME_TEXT_MAX = 200_000
@@ -135,6 +135,7 @@ class SettingsUpdateRequest(BaseModel):
     classification_vocabulary: dict[str, list[str]] | None = None
     llm_provider: str | None = None
     llm_model: str | None = None
+    eval_default: StrictBool | None = None
     llm: LLMSettingsUpdate | None = None
 
 class WorkbenchRunRequest(BaseModel):
@@ -142,6 +143,7 @@ class WorkbenchRunRequest(BaseModel):
     granularity: Literal['fine', 'medium', 'coarse'] = 'medium'
     prompt_focus: Literal['balanced', 'quantified', 'skills'] = 'balanced'
     custom_prompt: str | None = Field(default=None, max_length=_CUSTOM_PROMPT_MAX)
+    run_eval: bool | None = None
 
 class WorkbenchAcceptRequest(BaseModel):
     job_id: str
