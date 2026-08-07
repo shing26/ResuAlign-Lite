@@ -1828,6 +1828,39 @@ h6 {
   overflow-wrap: anywhere;
 }
 
+/* U12: 设置页薪资基准表格 + 投递评估权重 */
+.salary-ref-table td input[type="number"] {
+  width: 120px;
+  padding: 4px 6px;
+  font-size: var(--text-13);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-4);
+  background: var(--surface);
+  color: var(--ink-2);
+}
+
+.salary-ref-add {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin-top: 12px;
+}
+
+.salary-ref-add .field {
+  margin-bottom: 0;
+  min-width: 120px;
+}
+
+.weights-grid input[type="number"] {
+  width: 100%;
+}
+
+/* #17: 并排对比弹窗加宽，容纳双栏 diff */
+.modal--wide {
+  width: min(960px, 100%);
+}
+
 .panel {
   position: relative;
   padding: 18px;
@@ -5093,3 +5126,26 @@ body.command-palette-open {
 .split-pane .final-draft-panel {
   margin-bottom: 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* F1/B7 评估开关（设置页 + 工作台 per-run 勾选）                        */
+/* ------------------------------------------------------------------ */
+
+/* .field label 的默认 display:block 在这里被覆盖为行内 checkbox 布局。
+ * label.eval-option 与 .field label 特异性相同，靠后声明生效。 */
+label.eval-option,
+.eval-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.eval-option input[type="checkbox"] {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
