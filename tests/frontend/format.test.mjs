@@ -10,9 +10,14 @@ import {
   cmpLineHtml,
   esc,
   formatDate,
+  formatElapsed,
   formatSalary,
+  hasEvalResult,
   inlineDiff,
   isJdUrl,
+  isJunkJd,
+  jobCompleteness,
+  jobCompletenessBadge,
   jobEditFormHtml,
   jobStatusLabel,
   jobTimelineFormHtml,
@@ -26,6 +31,7 @@ import {
   parseImportText,
   renderInlineDiffSide,
   renderMatchBadge,
+  runEvalFromForm,
   tokenizeInline,
 } from "../../src/resualign/static/app/format.js";
 
@@ -630,4 +636,156 @@ test("jobEditFormHtml adds the reclassify secondary action", () => {
   /* 未传 vocabulary 时回退内置列表 */
   const fallback = jobEditFormHtml({ job_id: "j2", title: "T", jd_text: "" });
   assert.match(fallback, /<option value="后端" >后端<\/option>/);
+});
+
+/* ------------------------------------------------------------------ */
+/* B7 采集数据完整性：jobCompleteness / isJunkJd / jobCompletenessBadge */
+/* ------------------------------------------------------------------ */
+
+test("jobCompleteness returns [] for a complete job", () => {
+  assert.deepEqual(
+    jobCompleteness({
+      title: "后端",
+      company: "Acme",
+      salary_min: 20000,
+      salary_max: 30000,
+    }),
+    [],
+  );
+  /* salary 只有一界也算完整（面议/开口岗位） */
+  assert.deepEqual(
+    jobCompleteness({ title: "T", company: "C", salary_min: 20000 }),
+    [],
+  );
+});
+
+test("jobCompleteness lists missing title/company/salary", () => {
+  assert.deepEqual(jobCompleteness({ title: "T" }), ["company", "salary"]);
+  assert.deepEqual(jobCompleteness({ company: "C" }), ["title", "salary"]);
+  assert.deepEqual(
+    jobCompleteness({ title: "T", company: "C" }),
+    ["salary"],
+  );
+  assert.deepEqual(jobCompleteness({}), ["title", "company", "salary"]);
+  assert.deepEqual(jobCompleteness(null), ["title", "company", "salary"]);
+  assert.deepEqual(jobCompleteness(undefined), ["title", "company", "salary"]);
+  /* 空白 title 视为缺失 */
+  assert.deepEqual(
+    jobCompleteness({ title: "   ", company: "C", salary_max: 1 }),
+    ["title"],
+  );
+});
+
+test("isJunkJd detects whole-page JSON payloads", () => {
+  assert.equal(isJunkJd('{"pageConfig":{"title":"x"}}'), true);
+  assert.equal(isJunkJd('  [{"id":1},{"id":2}]'), true);
+  assert.equal(isJunkJd("{\n  \"name\": \"__NEXT_DATA__\"\n}"), true);
+});
+
+test("isJunkJd detects whole-page HTML with many scripts", () => {
+  const html = `<!DOCTYPE html><html><head></head><body>
+    <script>var a = 1;</script>
+    <script>var b = 2;</script>
+    <script>var c = 3;</script>
+    <div>岗位内容</div></body></html>`;
+  assert.equal(isJunkJd(html), true);
+});
+
+test("isJunkJd detects SPA inline state markers", () => {
+  assert.equal(
+    isJunkJd('<html><head></head><body><script>window.pageConfig = {}</script></body></html>'),
+    true,
+  );
+  assert.equal(
+    isJunkJd('<html>__NEXT_DATA__</html>'),
+    true,
+  );
+});
+
+test("isJunkJd passes normal JD text", () => {
+  assert.equal(
+    isJunkJd("岗位职责：负责后端服务开发。任职要求：3 年以上经验。"),
+    false,
+  );
+  /* 单个 script 标签（如岗位描述提及）不算整页 */
+  assert.equal(isJunkJd("我们需要熟悉 <script> 语法的工程师"), false);
+  assert.equal(isJunkJd(""), false);
+  assert.equal(isJunkJd(null), false);
+  assert.equal(isJunkJd(undefined), false);
+});
+
+test("jobCompletenessBadge returns empty for complete jobs", () => {
+  assert.equal(
+    jobCompletenessBadge({
+      title: "后端",
+      company: "Acme",
+      salary_min: 1,
+    }),
+    "",
+  );
+});
+
+test("jobCompletenessBadge shows 待补全 with missing detail on title", () => {
+  const html = jobCompletenessBadge({ title: "后端" });
+  assert.match(html, /badge-amber/);
+  assert.match(html, />待补全</);
+  assert.match(html, /title="缺少：公司、薪资"/);
+  const html2 = jobCompletenessBadge({ title: "后端", company: "Acme" });
+  assert.match(html2, /title="缺少：薪资"/);
+});
+
+test("jobCompletenessBadge prefers 抓取失败 for junk JD", () => {
+  const html = jobCompletenessBadge({
+    title: "后端",
+    company: "Acme",
+    jd_text: '{"pageConfig":{}}',
+  });
+  assert.match(html, />抓取失败，可重试</);
+  assert.doesNotMatch(html, />待补全</);
+});
+
+/* ------------------------------------------------------------------ */
+/* U5 耗时格式化：formatElapsed                                         */
+/* ------------------------------------------------------------------ */
+
+test("formatElapsed shows seconds under a minute", () => {
+  assert.equal(formatElapsed(0), "0s");
+  assert.equal(formatElapsed(5_000), "5s");
+  assert.equal(formatElapsed(59_999), "59s");
+});
+
+test("formatElapsed switches to 分:秒 after a minute", () => {
+  assert.equal(formatElapsed(60_000), "1:00");
+  assert.equal(formatElapsed(90_000), "1:30");
+  assert.equal(formatElapsed(3_600_000), "60:00");
+  assert.equal(formatElapsed(3_661_000), "61:01");
+});
+
+test("formatElapsed clamps negatives and handles missing input", () => {
+  assert.equal(formatElapsed(-1000), "0s");
+  assert.equal(formatElapsed(null), "0s");
+  assert.equal(formatElapsed(undefined), "0s");
+  assert.equal(formatElapsed("5000"), "5s");
+});
+
+/* ------------------------------------------------------------------ */
+/* F1 Eval 开关：hasEvalResult / runEvalFromForm                        */
+/* ------------------------------------------------------------------ */
+
+test("hasEvalResult is true when any eval field exists", () => {
+  assert.equal(hasEvalResult({ jd_match_score: 80 }), true);
+  assert.equal(hasEvalResult({ hallucination_detected: false }), true);
+  assert.equal(hasEvalResult({ improvement: 0 }), true);
+  assert.equal(hasEvalResult({ gap_coverage: "60%" }), true);
+  assert.equal(hasEvalResult({}), false);
+  assert.equal(hasEvalResult(null), false);
+  assert.equal(hasEvalResult(undefined), false);
+});
+
+test("runEvalFromForm maps checked to true, unchecked to undefined", () => {
+  assert.equal(runEvalFromForm({ run_eval: "on" }), true);
+  assert.equal(runEvalFromForm({ run_eval: true }), true);
+  assert.equal(runEvalFromForm({}), undefined);
+  assert.equal(runEvalFromForm({ run_eval: "off" }), undefined);
+  assert.equal(runEvalFromForm(null), undefined);
 });

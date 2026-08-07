@@ -46,6 +46,9 @@ import {
   startAlignmentRun,
 } from "./split-canvas.js";
 import {
+  bindColumnScrollSync,
+} from "./diff-editor.js";
+import {
   applyAcceptedDiffsToDraft,
   applyDiffToDraft,
   applyJdParseError,
@@ -54,7 +57,10 @@ import {
   batchPanelHtml,
   batchRowsToCsv,
   buildJobsBackup,
+  buildLiveCompareHtml,
   dueReminders,
+  formatElapsed,
+  jobCompletenessBadge,
   jobEditFormHtml,
   jobTimelineFormHtml,
   jobsToCsv,
@@ -65,12 +71,21 @@ import {
   renderOnboardingCard,
   renderReminderBanner,
   renderReminderStrip,
+  runEvalFromForm,
 } from "./format.js";
 import {
   apiKeyFieldHint,
+  appraisalWeightsPayload,
   buildSettingsLlmPayload,
   buildTestConnectionPayload,
+  evalDefaultFromForm,
+  normalizeAppraisalWeights,
+  salaryCityOptions,
+  salaryReferenceFromForm,
+  salaryReferenceRowsHtml,
   testConnectionResultHtml,
+  validateAppraisalWeights,
+  validateSalaryReference,
 } from "./settings-form.js";
 
 const ROUTE_LABELS = {
@@ -477,7 +492,7 @@ async function renderWorkspaceView(app) {
     <div class="page-header page-header--workspace">
       <div>
         <h2>${esc(job.title)}</h2>
-        <div class="sub">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)} · ${esc(job.status)}</div>
+        <div class="sub">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)} · ${esc(job.status)} ${jobCompletenessBadge(job)}</div>
       </div>
       <div class="row">
         <button class="btn btn-outline" data-action="toggle-raw-jd">${state.wbRawJdOpen ? "收起原始 JD" : "查看原始 JD"}</button>
@@ -523,6 +538,11 @@ async function renderWorkspaceView(app) {
             </div></div>
           <div class="field"><label>自定义补充要求（可选）</label>
             <textarea name="custom_prompt" rows="2" placeholder="例如：强调高并发缓存场景、突出量化结果">${esc(savedPrompt)}</textarea></div>
+          <label class="field eval-option">
+            <input type="checkbox" name="run_eval">
+            <span>本次运行评估（幻觉检测 / JD 匹配分）</span>
+          </label>
+          <div class="small muted" style="margin-top:-4px">每任务额外一次 LLM 调用；不勾选则按设置页默认执行。</div>
           <div class="row">
             <button class="btn btn-primary" type="submit" data-wb-run>一键生成对齐简历</button>
             <button class="btn btn-danger" type="button" data-action="cancel-workbench" data-wb-cancel hidden>取消任务</button>
@@ -612,6 +632,8 @@ async function refreshOptimizerFromJob(jobId) {
 
 function startWbPolling(jobId, app = $("#app")) {
   stopWbPolling();
+  /* U5: 前端计时起点，后端 elapsed_seconds 缺失时兜底显示运行时长。 */
+  state.wbElapsedStart = Date.now();
   state.wbPolling = { jobId, app, timer: window.setInterval(() => pollWbJob(jobId), 1000) };
   pollWbJob(jobId);
 }
@@ -738,6 +760,10 @@ async function renderSettingsView(app) {
     apiKeyConfigured: Boolean(savedKeyMasked),
     apiKeyMasked: savedKeyMasked,
   };
+  /* U12: 薪资基准 + 投递评估权重。权重总是回填四个默认键（老库可能只有
+   * 部分键），显示合计并让表单校验兜底。 */
+  const weights = normalizeAppraisalWeights(settings.appraisal_weights);
+  const weightsSum = Object.values(weights).reduce((acc, value) => acc + Number(value || 0), 0);
   app.innerHTML = `
     <div class="page-header page-header--settings"><div><h2>设置</h2><div class="sub">内置默认配置可直接使用，按需调整后保存立即生效</div></div></div>
     <section class="panel panel-card settings-status">
@@ -778,6 +804,11 @@ async function renderSettingsView(app) {
         </div>
         <div class="field"><label>Base URL（可选）</label>
           <input type="text" name="llm_base_url" value="${esc(llm.baseUrl || "")}" placeholder="留空使用服务商默认地址"></div>
+        <label class="field eval-option">
+          <input type="checkbox" name="eval_default" ${settings.eval_default ? "checked" : ""}>
+          <span>运行对齐时默认开启评估（幻觉检测 / JD 匹配分）</span>
+        </label>
+        <div class="small muted">每任务额外一次 LLM 调用；工作台可按次覆盖。</div>
         <div class="small muted">保存后立即生效；未保存的字段继续使用 .env 或环境变量。</div>
         <div class="row" style="margin-top:10px">
           <button class="btn btn-primary" type="submit">保存</button>
@@ -796,7 +827,56 @@ async function renderSettingsView(app) {
           <textarea name="statuses" rows="5">${esc(vocabulary.statuses.join("\n"))}</textarea></div>
         <div class="row"><button class="btn btn-primary" type="submit">保存词表</button></div>
       </form>
-    </div>`;
+    </div>
+    <form class="panel panel-card" data-form="settings-salary">
+      <h3>薪资基准</h3>
+      <div class="small muted">投递价值评估用它对岗位薪资做市场对比；p50 / p75 为税前月薪（元）。</div>
+      <div class="table-wrap">
+        <table class="data salary-ref-table">
+          <thead>
+            <tr><th>职能</th><th>城市</th><th>p50（元/月）</th><th>p75（元/月）</th><th></th></tr>
+          </thead>
+          <tbody data-salary-rows>${salaryReferenceRowsHtml(settings.salary_reference)}</tbody>
+        </table>
+      </div>
+      <div class="salary-ref-add">
+        <label class="field"><span class="small">职能</span>
+          <select name="salary_add_function">
+            <option value="">选择职能</option>${options(vocabulary.job_functions, "")}
+          </select></label>
+        <label class="field"><span class="small">城市</span>
+          <input type="text" name="salary_add_city" list="salary-city-options" placeholder="如 杭州"></label>
+        <datalist id="salary-city-options">${salaryCityOptions()}</datalist>
+        <label class="field"><span class="small">p50</span>
+          <input type="number" name="salary_add_p50" min="0" step="500" placeholder="28000"></label>
+        <label class="field"><span class="small">p75</span>
+          <input type="number" name="salary_add_p75" min="0" step="500" placeholder="42000"></label>
+        <button class="btn btn-outline btn-sm" type="button" data-action="add-salary-row">添加一行</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn btn-primary" type="submit">保存薪资基准</button>
+      </div>
+      <div data-salary-save-result></div>
+    </form>
+    <form class="panel panel-card" data-form="settings-weights">
+      <h3>投递评估权重</h3>
+      <div class="small muted">投递价值评估各维度权重，合计必须为 100。</div>
+      <div class="form-grid weights-grid">
+        <label class="field"><span class="small">匹配度（match）</span>
+          <input type="number" name="weight_match" min="0" max="100" step="1" value="${esc(weights.match)}"></label>
+        <label class="field"><span class="small">薪资（salary）</span>
+          <input type="number" name="weight_salary" min="0" max="100" step="1" value="${esc(weights.salary)}"></label>
+        <label class="field"><span class="small">硬性条件（hard_conditions）</span>
+          <input type="number" name="weight_hard_conditions" min="0" max="100" step="1" value="${esc(weights.hard_conditions)}"></label>
+        <label class="field"><span class="small">岗位质量（quality）</span>
+          <input type="number" name="weight_quality" min="0" max="100" step="1" value="${esc(weights.quality)}"></label>
+      </div>
+      <div class="small muted" data-weights-sum>合计：${esc(weightsSum)}%</div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn btn-primary" type="submit">保存权重</button>
+      </div>
+      <div data-weights-save-result></div>
+    </form>`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1232,6 +1312,46 @@ const actions = {
     toast("已恢复默认设置", "success");
     render();
   },
+  /* U12: 薪资基准表格新增/删除行（表单提交时统一解析为 salary_reference）。 */
+  "add-salary-row": () => {
+    const tbody = $("[data-salary-rows]");
+    const form = $("[data-form='settings-salary']");
+    if (!tbody || !form) return;
+    const jobFunction = String(
+      (form.querySelector('[name="salary_add_function"]') || {}).value || "",
+    ).trim();
+    const city = String(
+      (form.querySelector('[name="salary_add_city"]') || {}).value || "",
+    ).trim();
+    if (!jobFunction || !city) {
+      toast("请选择职能并填写城市", "error");
+      return;
+    }
+    const p50 = String(
+      (form.querySelector('[name="salary_add_p50"]') || {}).value || "",
+    ).trim();
+    const p75 = String(
+      (form.querySelector('[name="salary_add_p75"]') || {}).value || "",
+    ).trim();
+    if (p50 === "" || p75 === "") {
+      toast("请填写该行的 p50 与 p75 月薪", "error");
+      return;
+    }
+    tbody.insertAdjacentHTML(
+      "beforeend",
+      salaryReferenceRowsHtml([
+        { job_function: jobFunction, city, p50: Number(p50), p75: Number(p75) },
+      ]),
+    );
+    form.querySelector('[name="salary_add_city"]').value = "";
+    form.querySelector('[name="salary_add_p50"]').value = "";
+    form.querySelector('[name="salary_add_p75"]').value = "";
+    toast("已添加一行，保存后生效", "success");
+  },
+  "remove-salary-row": (button) => {
+    const row = button.closest("[data-salary-row]");
+    if (row) row.remove();
+  },
   "test-llm-connection": async () => {
     const form = $("[data-form='settings-llm']");
     const resultNode = form && form.querySelector("[data-llm-test-result]");
@@ -1273,6 +1393,42 @@ const actions = {
     }
   },
   "open-optimizer": (button) => navigate("workspace", button.dataset.id),
+  /* #17: live 工作台「并排对比」——复用 legacy result 的字符级并排视图
+   * （buildLiveCompareHtml -> buildCmpSideHtml），只读弹窗展示，不动卡片
+   * 的逐条采纳交互。 */
+  "toggle-live-compare": async () => {
+    const session = activeSessionForExport();
+    if (!session) {
+      toast("暂无对齐会话，请先运行一次对齐", "error");
+      return;
+    }
+    const alignment = session.alignment || {};
+    if (!(alignment.diffs || []).length) {
+      toast("暂无修改项可对比", "info");
+      return;
+    }
+    let originalContent = "";
+    const resumeId =
+      (session.resume && session.resume.selected_resume_id) || null;
+    if (resumeId) {
+      try {
+        const resume = await api(
+          `/api/master-resumes/${encodeURIComponent(resumeId)}`,
+        );
+        originalContent = resume.content || "";
+      } catch {
+        originalContent = "";
+      }
+    }
+    showModal(
+      "并排对比 · 原版 vs 优化版",
+      `${buildLiveCompareHtml(session, originalContent)}<div class="actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">关闭</button></div>`,
+    );
+    const modal = $(".modal-backdrop .modal");
+    if (modal) modal.classList.add("modal--wide");
+    const columns = $$(".modal .cmp-column");
+    if (columns.length >= 2) bindColumnScrollSync(columns);
+  },
   /* F4: 简历诊断结果 → 用这份简历去对齐。跳到最近一个岗位的工作台并带上
    * ?resume= 深链参数（split-canvas 会预选该主简历）；岗位库为空时跳到
    * #/workspace?resume=<id>，工作台空态让用户先建/选岗位。 */
@@ -1488,6 +1644,17 @@ const actions = {
   "retry-workbench": () => {
     const form = $('[data-form="wb-run"]');
     if (form) form.dispatchEvent(new Event("submit", { cancelable: true }));
+  },
+  /* F1: Eval 折叠块里的「重新运行（开启评估）」——先勾选 per-run 开关再提交。 */
+  "retry-workbench-eval": () => {
+    const form = $('[data-form="wb-run"]');
+    if (!form) {
+      toast("当前工作台无法重新运行", "error");
+      return;
+    }
+    const check = form.querySelector('[name="run_eval"]');
+    if (check) check.checked = true;
+    form.dispatchEvent(new Event("submit", { cancelable: true }));
   },
   "cancel-align-job": () => cancelActiveAlignment(),
   "toggle-wb-view": (button) => toggleWbView(button),
@@ -1791,6 +1958,25 @@ document.addEventListener("change", (event) => {
   if (target.matches("[data-job-switcher]") && target.value) {
     navigate("workspace", target.value);
   }
+  /* U12: 权重输入变化时实时刷新合计提示。 */
+  if (
+    target.matches('[data-form="settings-weights"] input[type="number"]')
+  ) {
+    const form = target.closest("[data-form='settings-weights']");
+    const sumNode = form && form.querySelector("[data-weights-sum]");
+    if (form && sumNode) {
+      const weights = appraisalWeightsPayload(
+        Object.fromEntries(new FormData(form).entries()),
+      );
+      const values = Object.values(weights);
+      const sum = values.some((value) => value == null)
+        ? "?"
+        : values.reduce((acc, value) => acc + value, 0);
+      const ok = Math.abs(sum - 100) < 1e-6;
+      sumNode.textContent = `合计：${sum}%`;
+      sumNode.className = `small muted${ok ? "" : " form-error"}`;
+    }
+  }
 });
 
 document.addEventListener("submit", async (event) => {
@@ -1844,6 +2030,7 @@ async function handleForm(formName, data, form) {
         data.master_resume_id,
         data.granularity || "medium",
         data.prompt_focus || "balanced",
+        runEvalFromForm(data),
       );
       toast(`对齐任务已排队：${result.job_id}`, "success");
       break;
@@ -2007,9 +2194,18 @@ async function handleForm(formName, data, form) {
       state.wbAcceptedIndices = null;
       state.wbCompareView = "list";
       state.wbRun = { masterResumeId, granularity, promptFocus, customPrompt };
+      /* F1: per-run 评估开关，勾选传 true，不勾选不传（后端回退全局默认）。 */
+      const runEval = runEvalFromForm(data);
+      const payload = {
+        master_resume_id: masterResumeId,
+        granularity,
+        prompt_focus: promptFocus,
+        custom_prompt: customPrompt,
+      };
+      if (runEval !== undefined) payload.run_eval = runEval;
       const result = await api(`/api/jobs/${encodeURIComponent(state.wbJob.job_id)}/workbench`, {
         method: "POST",
-        body: JSON.stringify({ master_resume_id: masterResumeId, granularity, prompt_focus: promptFocus, custom_prompt: customPrompt }),
+        body: JSON.stringify(payload),
       });
       $("[data-wb-progress-panel]").hidden = false;
       startWbPolling(result.job_id);
@@ -2048,7 +2244,10 @@ async function handleForm(formName, data, form) {
     case "settings-llm": {
       await api("/api/settings", {
         method: "PUT",
-        body: JSON.stringify({ llm: buildSettingsLlmPayload(data) }),
+        body: JSON.stringify({
+          llm: buildSettingsLlmPayload(data),
+          eval_default: evalDefaultFromForm(data),
+        }),
       });
       toast("LLM 配置已保存，后续任务立即生效", "success");
       render();
@@ -2066,6 +2265,48 @@ async function handleForm(formName, data, form) {
       });
       state.vocabulary = normalizeVocabulary(vocabulary);
       toast("分类词表已保存", "success");
+      render();
+      break;
+    }
+    case "settings-salary": {
+      const { rows, invalid } = salaryReferenceFromForm(form);
+      const resultNode = form && form.querySelector("[data-salary-save-result]");
+      if (invalid.length) {
+        const msg = `存在无法解析的薪资行：${invalid.map((r) => `${r.job_function} · ${r.city}`).join("、")}`;
+        if (resultNode) resultNode.innerHTML = `<div class="form-error" role="alert">${esc(msg)}</div>`;
+        toast(msg, "error");
+        return;
+      }
+      const validation = validateSalaryReference(rows);
+      if (!validation.ok) {
+        if (resultNode) resultNode.innerHTML = `<div class="form-error" role="alert">${esc(validation.message)}</div>`;
+        toast(validation.message, "error");
+        return;
+      }
+      await api("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({ salary_reference: rows }),
+      });
+      if (resultNode) resultNode.innerHTML = `<div class="form-success" role="status">已保存 ${rows.length} 行薪资基准</div>`;
+      toast(`薪资基准已保存（${rows.length} 行）`, "success");
+      render();
+      break;
+    }
+    case "settings-weights": {
+      const weights = appraisalWeightsPayload(data);
+      const validation = validateAppraisalWeights(weights);
+      const resultNode = form && form.querySelector("[data-weights-save-result]");
+      if (!validation.ok) {
+        if (resultNode) resultNode.innerHTML = `<div class="form-error" role="alert">${esc(validation.message)}</div>`;
+        toast(validation.message, "error");
+        return;
+      }
+      await api("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({ appraisal_weights: weights }),
+      });
+      if (resultNode) resultNode.innerHTML = `<div class="form-success" role="status">权重已保存（合计 100）</div>`;
+      toast("投递评估权重已保存", "success");
       render();
       break;
     }

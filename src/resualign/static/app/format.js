@@ -526,6 +526,20 @@ export function diffCard(diff, index, jobId) {
   const label = PROVENANCE_LABELS[stateKey] || "来源待核对";
   const invalid = type === "add" && !String(provenance || "").trim();
   const typeLabel = { modify: "改写", add: "新增", remove: "删除" }[type] || "改写";
+  const originalText = diff.original || "";
+  const proposedText = diff.proposed || "";
+  /* #17: modify diffs get character-level marks inside the card's 原文/优化
+   * blocks (diff-char-del on the original side, diff-char-ins on the
+   * proposed side); add/remove diffs have no counterpart so they stay plain.
+   * Card-level interactions (采纳/忽略/润色) are untouched. */
+  const originalHtml =
+    type === "modify" && proposedText
+      ? renderInlineDiffSide(originalText, proposedText, "original")
+      : esc(originalText);
+  const proposedHtml =
+    type === "modify" && originalText
+      ? renderInlineDiffSide(originalText, proposedText, "proposed")
+      : esc(proposedText);
   return `
     <article class="diff-card ${invalid ? "diff-card--invalid" : ""}" data-diff-id="${esc(diffId)}" data-diff-index="${index}">
       <div class="diff-card__head">
@@ -538,11 +552,11 @@ export function diffCard(diff, index, jobId) {
       <div class="diff-card__columns">
         <div class="diff-card__col diff-card__col--original">
           <div class="split-section-title">原文</div>
-          <div class="diff-card__text" data-diff-original>${esc(diff.original || "")}</div>
+          <div class="diff-card__text" data-diff-original>${originalHtml}</div>
         </div>
         <div class="diff-card__col diff-card__col--proposed">
           <div class="split-section-title">优化</div>
-          <div class="diff-card__text" data-diff-proposed>${esc(diff.proposed || "")}</div>
+          <div class="diff-card__text" data-diff-proposed>${proposedHtml}</div>
         </div>
       </div>
       ${diff.reason ? `<div class="diff-card__reason" data-diff-reason>${esc(diff.reason)}</div>` : ""}
@@ -618,6 +632,11 @@ export function alignmentControls(session, resumes, jobId) {
         <button class="btn btn-ghost btn-sm" type="button" data-action="apply-accepted-bullets" data-id="${esc(jobId)}" ${!alignment.draft ? "disabled" : ""}>应用已采纳</button>
         <span class="small muted" data-align-status>${alignment.status === "succeeded" ? "已生成对齐版本" : alignment.status === "failed" ? `任务失败：${esc(alignment.error || "请重试")}` : alignment.status === "running" || alignment.status === "queued" ? "正在生成..." : ""}</span>
       </div>
+      <label class="eval-option">
+        <input type="checkbox" name="run_eval">
+        <span>本次运行评估（幻觉检测 / JD 匹配分）</span>
+      </label>
+      <div class="small muted" style="margin:-4px 0 6px">每任务额外一次 LLM 调用；不勾选则按设置页默认执行。</div>
       ${running ? `
       <div class="align-progress" data-align-progress role="status" aria-live="polite">
         <div class="align-progress__track"><div class="align-progress__fill" style="width:${alignProgressPercent(alignment.stage)}%"></div></div>
@@ -662,6 +681,7 @@ export function boardCard(job) {
       <div class="board-card__tags">
         <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
         <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
+        ${jobCompletenessBadge(job)}
         ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
         ${job.alignment_status === "succeeded" ? '<span class="badge badge-green">已对齐</span>' : ""}
       </div>
@@ -703,6 +723,7 @@ export function renderBoardCard(job) {
       <div class="board-card__tags">
         <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
         <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
+        ${jobCompletenessBadge(job)}
         ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
       </div>
       <div class="board-card__timeline">
@@ -848,6 +869,20 @@ export function buildWbDetailHtml(result, diffs) {
     (items || []).map((item) => `<span class="chip">${esc(item)}</span>`).join("");
   const listItems = (items) =>
     (items || []).map((item) => `<li class="small">${esc(item)}</li>`).join("");
+  const evalDetails = hasEvalResult(evalScore)
+    ? `<div class="wb-detail__body">
+        <div class="row">
+          <span class="badge badge-blue">JD 匹配 ${evalScore.jd_match_score ?? "—"}</span>
+          <span class="badge badge-teal">提升 ${evalScore.improvement ?? "—"}</span>
+          <span class="badge ${evalScore.hallucination_detected ? "badge-red" : "badge-green"}">幻觉 ${evalScore.hallucination_detected ? "检出" : "未检出"}</span>
+          <span class="badge badge-gray">覆盖率 ${evalScore.gap_coverage ?? "—"}</span>
+        </div>
+        <ul style="margin:8px 0 0 18px">${listItems(evalScore.hallucination_details)}</ul>
+      </div>`
+    : `<div class="wb-detail__body">
+        <div class="muted small">本次未运行对齐评估（幻觉检测 / JD 匹配分）</div>
+        <button class="btn btn-secondary btn-sm" type="button" data-action="retry-workbench-eval">重新运行（开启评估）</button>
+      </div>`;
   const provenanceRows = diffs
     .map((diff, index) => {
       const quote = diff.provenance_quote || diff.provenance || "";
@@ -876,15 +911,7 @@ export function buildWbDetailHtml(result, diffs) {
     </details>
     <details class="wb-detail">
       <summary>Eval 评分</summary>
-      <div class="wb-detail__body">
-        <div class="row">
-          <span class="badge badge-blue">JD 匹配 ${evalScore.jd_match_score ?? "—"}</span>
-          <span class="badge badge-teal">提升 ${evalScore.improvement ?? "—"}</span>
-          <span class="badge ${evalScore.hallucination_detected ? "badge-red" : "badge-green"}">幻觉 ${evalScore.hallucination_detected ? "检出" : "未检出"}</span>
-          <span class="badge badge-gray">覆盖率 ${evalScore.gap_coverage ?? "—"}</span>
-        </div>
-        <ul style="margin:8px 0 0 18px">${listItems(evalScore.hallucination_details)}</ul>
-      </div>
+      ${evalDetails}
     </details>
     <details class="wb-detail">
       <summary>Provenance 来源</summary>
@@ -962,13 +989,14 @@ export function renderAppraisalRadar(components) {
   return `<svg class="radar-svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="Appraisal radar">${axes}${polygon ? `<polygon points="${polygon}" class="radar-polygon"></polygon>` : ""}${dots}${text}</svg>`;
 }
 
-/* Pure core of buildWbResultHtml: same HTML output, but the workbench
- * state (original content + compare view) is passed in explicitly. */
-export function buildWbResultHtmlFrom(result, diffs, accepted, originalContent, compareView) {
-  const sections = (result.tailored_resume || {}).sections || {};
-  const optimizedText =
-    Object.values(sections).join("\n\n") || result.tailored_resume || "";
-  const originalText = originalContent || "";
+/* Line-level + character-level side-by-side compare grid (原版 | 优化版).
+ *
+ * Shared by the legacy workbench result view and the live canvas 并排对比
+ * modal (#17): line-level semantics are kept (diff-remove / diff-add for
+ * whole-line changes); modified lines use diff-modify and additionally mark
+ * the changed characters inline (diff-char-del / diff-char-ins). Every line
+ * is addressable via data-line (0-based) + a visible 1-based .cmp-line-num. */
+export function buildCmpSideHtml(originalText, optimizedText, diffs) {
   const diffRows = lineDiff(originalText, optimizedText);
   const removedLines = new Set(
     diffRows
@@ -986,9 +1014,7 @@ export function buildWbResultHtmlFrom(result, diffs, accepted, originalContent, 
    * marks: trimmed original -> proposed text, and the reverse. */
   const modifyPairOriginal = new Map();
   const modifyPairProposed = new Map();
-  const proposedIndex = new Map();
-  const removeIndex = new Map();
-  diffs.forEach((diff, index) => {
+  (diffs || []).forEach((diff) => {
     const orig = String(diff.original || "").trim();
     const prop = String(diff.proposed || "").trim();
     if (diff.type === "modify") {
@@ -999,14 +1025,7 @@ export function buildWbResultHtmlFrom(result, diffs, accepted, originalContent, 
         modifyPairProposed.set(prop, orig);
       }
     }
-    if (diff.type !== "remove" && prop) proposedIndex.set(prop, index);
-    if (diff.type === "remove" && orig) removeIndex.set(orig, index);
   });
-  /* Line-level semantics are kept (diff-remove / diff-add for whole-line
-   * changes); modified lines use diff-modify and additionally mark the
-   * changed characters inline (diff-char-del / diff-char-ins). Every
-   * line is addressable via data-line (0-based) + a visible 1-based
-   * .cmp-line-num. */
   const originalHtml =
     String(originalText)
       .split("\n")
@@ -1026,7 +1045,7 @@ export function buildWbResultHtmlFrom(result, diffs, accepted, originalContent, 
       })
       .join("") || '<div class="muted small">原版内容不可用</div>';
   const optimizedHtml =
-    optimizedText
+    String(optimizedText)
       .split("\n")
       .map((line, index) => {
         const trimmed = line.trim();
@@ -1044,11 +1063,21 @@ export function buildWbResultHtmlFrom(result, diffs, accepted, originalContent, 
         return cmpLineHtml(index, "", "", esc(line));
       })
       .join("") || '<div class="muted small">暂无优化内容</div>';
-  const sideView = `
+  return `
     <div class="cmp-grid cmp-grid--workbench">
       <section class="cmp-column-wrap"><h4>原版</h4><div class="cmp-column motion-stagger">${originalHtml}</div></section>
       <section class="cmp-column-wrap"><h4>优化版</h4><div class="cmp-column motion-stagger">${optimizedHtml}</div></section>
     </div>`;
+}
+
+/* Pure core of buildWbResultHtml: same HTML output, but the workbench
+ * state (original content + compare view) is passed in explicitly. */
+export function buildWbResultHtmlFrom(result, diffs, accepted, originalContent, compareView) {
+  const sections = (result.tailored_resume || {}).sections || {};
+  const optimizedText =
+    Object.values(sections).join("\n\n") || result.tailored_resume || "";
+  const originalText = originalContent || "";
+  const sideView = buildCmpSideHtml(originalText, optimizedText, diffs);
   const diffCards = diffs
     .map(
       (diff, index) => `
@@ -1781,3 +1810,93 @@ export function jobEditFormHtml(job, vocabulary = {}) {
         <button class="btn btn-primary" type="submit">保存</button></div>
     </form>`;
 }
+
+/* ------------------------------------------------------------------ */
+/* B7 采集数据完整性 + U5 耗时格式化（纯）                              */
+/* ------------------------------------------------------------------ */
+
+/** 岗位采集完整性：返回缺失字段列表（title / company / salary）。
+ *  salary 只要 min/max 任一存在即视为完整（面议岗位常见缺一界）。 */
+export function jobCompleteness(job) {
+  const j = job || {};
+  const missing = [];
+  if (!String(j.title || "").trim()) missing.push("title");
+  if (!String(j.company || "").trim()) missing.push("company");
+  if (j.salary_min == null && j.salary_max == null) missing.push("salary");
+  return missing;
+}
+
+/** JD 文本是否为抓取失败残留（整页 JSON/HTML）。
+ *  - 以 `{`/`[` 开头视为整页 JSON（如页面内嵌配置）
+ *  - 含大量 <script> 标签视为整页 HTML
+ *  - pageConfig/__NEXT_DATA__ 等 SPA 内嵌特征配合 HTML 结构视为整页
+ */
+export function isJunkJd(jdText) {
+  const text = String(jdText || "").trim();
+  if (!text) return false;
+  if (/^\s*[{\[]/.test(text)) return true;
+  const scriptTags = (text.match(/<script[\s>]/gi) || []).length;
+  if (scriptTags >= 3) return true;
+  if (
+    /pageConfig|__NEXT_DATA__|__INITIAL_STATE__|application\/json/i.test(text) &&
+    /<html|<!doctype|<head/i.test(text)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** 岗位卡片完整性徽章：抓取失败优先显示「抓取失败，可重试」，
+ *  缺关键字段显示「待补全」（title 说明缺什么）。完整返回空串。 */
+export function jobCompletenessBadge(job) {
+  if (isJunkJd(job && job.jd_text)) {
+    return '<span class="badge badge-amber" title="JD 文本疑似整页 HTML/JSON，抓取可能失败">抓取失败，可重试</span>';
+  }
+  const missing = jobCompleteness(job);
+  if (!missing.length) return "";
+  const labels = { title: "标题", company: "公司", salary: "薪资" };
+  const detail = missing.map((key) => labels[key] || key).join("、");
+  return `<span class="badge badge-amber" title="缺少：${esc(detail)}">待补全</span>`;
+}
+
+/** 已用时长格式化：<60s 显示「Xs」，之后显示「分:秒」。 */
+export function formatElapsed(ms) {
+  const totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+/** Eval 评分是否真实运行过（存在任一评估结果字段）。 */
+export function hasEvalResult(evalScore) {
+  const score = evalScore || {};
+  return (
+    score.jd_match_score != null ||
+    score.improvement != null ||
+    score.hallucination_detected != null ||
+    score.gap_coverage != null
+  );
+}
+
+/** 工作台 per-run 评估开关：勾选传 true，不勾选不传（None 回退全局默认）。 */
+export function runEvalFromForm(data) {
+  const value = data && data.run_eval;
+  return value === "on" || value === true ? true : undefined;
+}
+
+/* ------------------------------------------------------------------ */
+/* #17 Live workbench: side-by-side compare from a live session        */
+/* ------------------------------------------------------------------ */
+/* The live canvas keeps the per-card 采纳/忽略/润色 interactions in
+ * diffList(); this builds the read-only 并排对比 view (the same
+ * buildCmpSideHtml used by the legacy result view) from the session's
+ * alignment draft + diffs, so the two workbenches share one rendering. */
+
+export function buildLiveCompareHtml(session, originalContent) {
+  const alignment = (session && session.alignment) || {};
+  const optimizedText = alignment.draft || "";
+  const diffs = alignment.diffs || [];
+  return buildCmpSideHtml(originalContent || "", optimizedText, diffs);
+}
+

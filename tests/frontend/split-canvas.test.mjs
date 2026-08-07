@@ -4,6 +4,8 @@ import {
   alignProgressPercent,
   alignmentControls,
   boardCard,
+  buildCmpSideHtml,
+  buildLiveCompareHtml,
   buildWbResultHtmlFrom,
   crawlStatusLine,
   diffCard,
@@ -238,6 +240,129 @@ test("diffList renders cards or the empty state", () => {
   const empty = diffList({}, "job-1");
   assert.match(empty, /data-resume-canvas-empty/);
   assert.match(empty, /还没有对齐结果/);
+});
+
+/* ------------------------------------------------------------------ */
+/* #17: live 工作台字符级高亮（卡片行内标记 + 并排对比视图）              */
+/* ------------------------------------------------------------------ */
+
+test("diffCard marks inserted characters on the proposed side", () => {
+  const html = diffCard(
+    { diff_id: "d2", type: "modify", original: "负责系统开发", proposed: "负责高并发系统开发" },
+    0,
+    "job-1",
+  );
+  // 采纳 interaction must survive the highlight change.
+  assert.match(html, /data-action="accept-bullet"/);
+  assert.match(html, /data-action="polish-bullet"/);
+  // Inserted 高并发 is wrapped, the shared prefix/suffix stay plain.
+  assert.match(html, /<span class="diff-char-ins">高并发<\/span>/);
+  assert.equal((html.match(/diff-char-del/g) || []).length, 0);
+  assert.match(html, /data-diff-original>负责系统开发<\/div>/);
+  assert.match(html, /data-diff-proposed>负责<span class="diff-char-ins">高并发<\/span>系统开发<\/div>/);
+});
+
+test("diffCard marks deleted characters on the original side", () => {
+  const html = diffCard(
+    { diff_id: "d3", type: "modify", original: "负责高并发系统开发", proposed: "负责系统开发" },
+    0,
+    "job-1",
+  );
+  assert.match(html, /<span class="diff-char-del">高并发<\/span>/);
+  assert.equal((html.match(/diff-char-ins/g) || []).length, 0);
+  assert.match(html, /data-diff-proposed>负责系统开发<\/div>/);
+});
+
+test("diffCard keeps add/remove diffs plain (no counterpart to mark)", () => {
+  const add = diffCard(
+    { type: "add", proposed: "新行", provenance: "来源" },
+    0,
+    "job-1",
+  );
+  assert.match(add, /data-diff-original><\/div>/);
+  assert.match(add, /data-diff-proposed>新行<\/div>/);
+  assert.doesNotMatch(add, /diff-char-/);
+  const remove = diffCard({ type: "remove", original: "旧行" }, 1, "job-1");
+  assert.match(remove, /data-diff-original>旧行<\/div>/);
+  assert.doesNotMatch(remove, /diff-char-/);
+});
+
+test("diffList renders cards with char-level marks and intact actions", () => {
+  const session = {
+    alignment: {
+      diffs: [
+        {
+          diff_id: "d1",
+          type: "modify",
+          original: "负责系统开发",
+          proposed: "负责高并发系统开发",
+          provenance: "来源：项目经历",
+          provenance_state: "verified",
+        },
+      ],
+    },
+  };
+  const html = diffList(session, "job-1");
+  assert.match(html, /data-diff-list/);
+  assert.match(html, /<span class="diff-char-ins">高并发<\/span>/);
+  assert.match(html, /data-action="accept-bullet"/);
+  assert.match(html, /data-action="reject-bullet"/);
+  assert.match(html, /data-action="polish-bullet"/);
+});
+
+test("diffList unchanged modify diffs produce no marks", () => {
+  const html = diffList(
+    {
+      alignment: {
+        diffs: [{ type: "modify", original: "完全一致", proposed: "完全一致" }],
+      },
+    },
+    "job-1",
+  );
+  assert.match(html, /data-diff-list/);
+  assert.doesNotMatch(html, /diff-char-/);
+});
+
+/* buildCmpSideHtml —— legacy result 视图与 live 并排对比共用的渲染核心 */
+
+test("buildCmpSideHtml renders addressable lines with char-level marks", () => {
+  const html = buildCmpSideHtml(
+    "负责系统开发\n相同行",
+    "负责高并发系统开发\n相同行",
+    [{ type: "modify", original: "负责系统开发", proposed: "负责高并发系统开发" }],
+  );
+  assert.match(html, /cmp-grid cmp-grid--workbench/);
+  assert.match(html, /data-line="0"/);
+  assert.match(html, /cmp-line-num">1<\/span>/);
+  assert.match(html, /<span class="diff-char-ins">高并发<\/span>/);
+  // the unchanged second line appears in both columns without marks
+  assert.equal((html.match(/相同行/g) || []).length, 2);
+});
+
+test("buildCmpSideHtml renders placeholder lines for empty input", () => {
+  const html = buildCmpSideHtml("", "", []);
+  assert.match(html, /cmp-grid/);
+  assert.match(html, /cmp-line/);
+});
+
+/* buildLiveCompareHtml —— live 会话（alignment.draft + diffs）驱动 */
+
+test("buildLiveCompareHtml builds compare from a live session", () => {
+  const session = {
+    alignment: {
+      draft: "负责高并发系统开发",
+      diffs: [{ type: "modify", original: "负责系统开发", proposed: "负责高并发系统开发" }],
+    },
+  };
+  const html = buildLiveCompareHtml(session, "负责系统开发");
+  assert.match(html, /cmp-grid/);
+  assert.match(html, /<span class="diff-char-ins">高并发<\/span>/);
+});
+
+test("buildLiveCompareHtml tolerates missing draft and diffs", () => {
+  const html = buildLiveCompareHtml({}, "");
+  assert.match(html, /cmp-grid/);
+  assert.match(html, /cmp-line/);
 });
 
 /* ------------------------------------------------------------------ */
@@ -509,4 +634,58 @@ test("buildWbResultHtmlFrom renders placeholder lines when content is empty", ()
   assert.match(html, /cmp-line/);
   assert.match(html, /无修改项/);
   assert.match(html, /暂无来源引用/);
+});
+
+/* ------------------------------------------------------------------ */
+/* F1 工作台调优表单 per-run 评估开关                                   */
+/* ------------------------------------------------------------------ */
+
+test("alignmentControls includes a run_eval checkbox (unchecked by default)", () => {
+  const html = alignmentControls(
+    { alignment: { status: "idle" } },
+    [],
+    "job-9",
+  );
+  assert.match(html, /<input type="checkbox" name="run_eval">/);
+  assert.match(html, /本次运行评估（幻觉检测 \/ JD 匹配分）/);
+  assert.match(html, /不勾选则按设置页默认执行/);
+  assert.doesNotMatch(html, /name="run_eval"[^>]*checked/);
+});
+
+/* ------------------------------------------------------------------ */
+/* B7 卡片徽章：待补全 / 抓取失败                                       */
+/* ------------------------------------------------------------------ */
+
+test("boardCard shows 待补全 badge when company/salary missing", () => {
+  const html = boardCard({ job_id: "j1", title: "后端", status: "applied" });
+  assert.match(html, /badge-amber/);
+  assert.match(html, />待补全</);
+  assert.match(html, /title="缺少：公司、薪资"/);
+});
+
+test("boardCard shows 抓取失败 for junk JD even when fields complete", () => {
+  const html = boardCard({
+    job_id: "j1",
+    title: "后端",
+    company: "Acme",
+    salary_min: 20000,
+    status: "applied",
+    jd_text: '{"pageConfig":{}}',
+  });
+  assert.match(html, />抓取失败，可重试</);
+  assert.doesNotMatch(html, />待补全</);
+});
+
+test("renderBoardCard shows 待补全 badge when title/company/salary missing", () => {
+  const html = renderBoardCard({ job_id: "j1", status: "draft" });
+  assert.match(html, />待补全</);
+  assert.match(html, /title="缺少：标题、公司、薪资"/);
+  const complete = renderBoardCard({
+    job_id: "j2",
+    title: "T",
+    company: "C",
+    salary_max: 1,
+    status: "draft",
+  });
+  assert.doesNotMatch(complete, />待补全</);
 });

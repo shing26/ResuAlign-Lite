@@ -27,7 +27,9 @@ import {
   diffCard,
   diffList,
   exportDock,
+  formatElapsed,
   jdProfileSummary,
+  jobCompletenessBadge,
   matchBadgeInfo,
   radarHtml,
   renderGap,
@@ -94,7 +96,7 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
         <div>
           <button class="btn btn-ghost btn-sm" data-action="back-to-jobs">← 返回岗位库</button>
           <h2 style="margin-top:6px">${esc(job.title || "岗位工作台")}</h2>
-          <div class="sub">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)} · ${esc(jobStatusLabel(job.status))}</div>
+          <div class="sub">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)} · ${esc(jobStatusLabel(job.status))} ${jobCompletenessBadge(job)}</div>
         </div>
         <div class="row">
           <select class="workbench-job-switcher" data-job-switcher aria-label="切换岗位">
@@ -147,6 +149,7 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
               <div class="split-section-title">简历对齐画布</div>
               <div class="small muted">逐条采纳 AI 改写建议，保留来源标记</div>
             </div>
+            ${((session && session.alignment && session.alignment.diffs) || []).length ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-live-compare">并排对比</button>` : ""}
           </div>
           ${alignmentControls(session, resumes, jobId)}
           ${exportDock(jobId, session)}
@@ -698,14 +701,17 @@ export async function cancelActiveAlignment() {
   toast("任务运行中无法中断，已停止本地等待", "info");
 }
 
-export async function startAlignmentRun(jobId, resumeId, granularity, focus) {
+export async function startAlignmentRun(jobId, resumeId, granularity, focus, runEval) {
+  const payload = {
+    master_resume_id: resumeId,
+    granularity: granularity || "medium",
+    prompt_focus: focus || "balanced",
+  };
+  /* F1: per-run 评估开关，勾选传 true，不勾选不传（None 回退全局默认）。 */
+  if (runEval !== undefined) payload.run_eval = runEval;
   const result = await api(`/api/jobs/${encodeURIComponent(jobId)}/workbench`, {
     method: "POST",
-    body: JSON.stringify({
-      master_resume_id: resumeId,
-      granularity: granularity || "medium",
-      prompt_focus: focus || "balanced",
-    }),
+    body: JSON.stringify(payload),
   });
   alignmentReconciled = false;
   if (activeSession) {
@@ -814,9 +820,9 @@ async function pollAlignmentJob() {
       if (fill) fill.style.width = `${alignProgressPercent(stageKey)}%`;
       const elapsed = $("[data-align-elapsed]");
       if (elapsed) {
-        elapsed.textContent = alignmentStartedAt
-          ? `${Math.round((Date.now() - alignmentStartedAt) / 1000)}s`
-          : "";
+        elapsed.textContent = formatElapsed(
+          alignmentStartedAt ? Date.now() - alignmentStartedAt : 0,
+        );
       }
       const runButton = $("[data-align-run]");
       if (runButton) runButton.disabled = true;

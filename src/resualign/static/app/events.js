@@ -12,6 +12,7 @@ import {
   STAGE_LABELS,
   buildDiagnosisMarkdownFrom,
   esc,
+  formatElapsed,
   normalizeVocabulary,
   normalizeVocabularyList,
   renderBatchMatrixHtml,
@@ -560,7 +561,13 @@ export function renderWbProgress(snapshot) {
   fill.style.width = `${Math.round(weight * 100)}%`;
   stage.textContent = STAGE_LABELS[snapshot.stage || snapshot.status] || snapshot.stage || snapshot.status;
   message.textContent = snapshot.message || "";
-  elapsed.textContent = `${snapshot.elapsed_seconds || 0}s`;
+  /* U5: 后端 elapsed_seconds 缺失/为 0 时用前端计时起点兜底，保证每秒刷新。 */
+  const backendMs = Number(snapshot.elapsed_seconds) > 0 ? Number(snapshot.elapsed_seconds) * 1000 : 0;
+  const elapsedMs =
+    backendMs > 0
+      ? backendMs
+      : Math.max(0, Date.now() - (state.wbElapsedStart || Date.now()));
+  elapsed.textContent = formatElapsed(elapsedMs);
   const cancel = $("[data-wb-cancel]");
   if (cancel) cancel.hidden = snapshot.status !== "queued" && snapshot.status !== "running";
 }

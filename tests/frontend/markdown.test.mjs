@@ -165,6 +165,35 @@ test("buildWbDetailHtml handles empty result", () => {
   assert.match(html, /暂无来源引用/);
 });
 
+/* F1: 未运行评估时 Eval 块折叠为提示 + 「重新运行（开启评估）」按钮 */
+test("buildWbDetailHtml folds Eval block when no eval ran", () => {
+  const html = buildWbDetailHtml(
+    {
+      jd_profile: { must_have_skills: ["Python"] },
+      gap_report: { missing_keywords: ["K8s"] },
+      eval_score: null,
+    },
+    [],
+  );
+  assert.match(html, /本次未运行对齐评估（幻觉检测 \/ JD 匹配分）/);
+  assert.match(html, /data-action="retry-workbench-eval"/);
+  assert.match(html, />重新运行（开启评估）</);
+  assert.doesNotMatch(html, /JD 匹配 /);
+  assert.doesNotMatch(html, /幻觉 未检出/);
+});
+
+test("buildWbDetailHtml shows eval scores when eval ran", () => {
+  const html = buildWbDetailHtml(
+    { eval_score: { jd_match_score: 72, improvement: 8, hallucination_detected: true, gap_coverage: "50%", hallucination_details: ["职责夸大"] } },
+    [],
+  );
+  assert.match(html, /JD 匹配 72/);
+  assert.match(html, />幻觉 检出</);
+  assert.match(html, /覆盖率 50%/);
+  assert.doesNotMatch(html, /本次未运行对齐评估/);
+  assert.doesNotMatch(html, /retry-workbench-eval/);
+});
+
 /* ------------------------------------------------------------------ */
 /* renderAppraisalRadar                                                */
 /* ------------------------------------------------------------------ */
