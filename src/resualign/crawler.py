@@ -55,7 +55,10 @@ _RETRYABLE_HTTP_ERRORS = (
     httpx.ReadError,
     httpx.TimeoutException,
 )
-_DYNAMIC_SITE_TOKENS = ("feishu", "moka", "mokahr", "zhipin", "boss", "linkedin")
+_DYNAMIC_SITE_TOKENS = (
+    "feishu", "moka", "mokahr", "zhipin", "boss", "linkedin",
+    "campus-talent",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +153,12 @@ def _proxy_url() -> str:
 def _playwright_enabled() -> bool:
     value = os.getenv("RESUALIGN_CRAWL_PLAYWRIGHT", "0").strip().lower()
     return value in {"1", "true", "yes", "on"}
+
+
+# A rendered page that yields less than this many chars of JD text is
+# treated as an SPA shell (data loaded by JS), triggering the Playwright
+# fallback for known dynamic sites.
+_MIN_JD_TEXT = 50
 
 
 def _is_dynamic_site(url: str) -> bool:
@@ -270,6 +279,23 @@ def crawl_jd(
         duration_ms=(time.monotonic() - started) * 1000,
         extra={"url": url},
     )
+    # SPA shells (e.g. Alibaba campus-talent) return 200 with near-empty
+    # static HTML; the JD text only exists after JS renders. When a known
+    # dynamic site yields too little text, retry with a rendered browser.
+    if len(text.strip()) < _MIN_JD_TEXT and _is_dynamic_site(url):
+        fallback_text = _playwright_fallback(
+            url, timeout=timeout, selector=selector, meta=meta,
+            request_id=request_id, force=True,
+        )
+        if fallback_text and len(fallback_text.strip()) > len(text.strip()):
+            text = fallback_text
+            log_event(
+                logger,
+                "crawler.playwright_success",
+                request_id=request_id,
+                duration_ms=(time.monotonic() - started) * 1000,
+                extra={"url": url, "reason": "short_static_text"},
+            )
     return text
 
 
@@ -527,6 +553,9 @@ def _playwright_fetch_html(
                     wait_until="domcontentloaded",
                     timeout=max(1000, timeout * 1000),
                 )
+                # SPA pages load the JD body after initial render via XHR;
+                # give async data a moment before reading the DOM.
+                page.wait_for_timeout(1500)
                 return page.content()
             finally:
                 browser.close()
@@ -547,9 +576,16 @@ def _playwright_fallback(
     selector: str | None,
     meta: dict | None,
     request_id: str | None,
+    force: bool = False,
 ) -> str | None:
-    """Optionally retry a dynamic-site failure with a rendered browser."""
-    if not _playwright_enabled():
+    """Optionally retry a dynamic-site failure with a rendered browser.
+
+    ``force=True`` bypasses the ``RESUALIGN_CRAWL_PLAYWRIGHT`` gate: it is
+    used when static extraction returned near-empty text from a known SPA
+    shell, where rendering is the only realistic path. If Playwright is not
+    installed the fetch helper degrades to None.
+    """
+    if not _playwright_enabled() and not force:
         return None
     _throttle(url)
     html_content = _playwright_fetch_html(url, timeout=timeout, request_id=request_id)

@@ -400,3 +400,116 @@ def test_ua_pool_from_env_rotates_across_redirects(monkeypatch):
 
 def test_default_ua_pool_is_seeded_from_base_headers():
     assert DEFAULT_UA_POOL[0] == HEADERS["User-Agent"]
+
+
+def _spa_shell_response():
+    """A 200 SPA shell: near-empty body (short non-empty text < 50 chars),
+    real JD text only appears after JS render."""
+    return _response("<html><body><div id='app'></div><p>加载中</p></body></html>")
+
+
+def _full_jd_response():
+    return _response(
+        "<html><body><main><h1>AI应用研发工程师</h1>"
+        "<p>聚焦业务场景应用 Agent 前沿技术推动 AI 落地。你将深入洞察业务系统全流程，"
+        "通过研发适配应用与工具，提升业务效率和有效性，实现从技术到业务价值转换，"
+        "并推动智能模型持续演进以实现业务价值最大化。</p></main></body></html>"
+    )
+
+
+def test_spa_short_text_triggers_playwright_fallback(monkeypatch):
+    """Alibaba-style SPA shell (campus-talent) with <50 chars must fall
+    back to a rendered browser even when static fetch succeeds."""
+    calls = []
+
+    def fake_stream(url, **kwargs):
+        return _FakeStream(_spa_shell_response())
+
+    def fake_fallback(url, timeout, selector, meta, request_id, force=False):
+        calls.append(force)
+        return "Rendered full JD: AI应用研发工程师 聚焦业务场景…"
+
+    monkeypatch.setattr("resualign.crawler._fetch_stream", fake_stream)
+    monkeypatch.setattr(
+        "resualign.crawler._playwright_fallback", fake_fallback
+    )
+
+    text = crawl_jd(
+        "https://campus-talent.alibaba.com/campus/position/199907620013"
+    )
+
+    assert text.startswith("Rendered full JD")
+    assert calls == [True], "SPA short-text fallback should force render"
+
+
+def test_short_text_no_fallback_for_static_site(monkeypatch):
+    def fake_stream(url, **kwargs):
+        return _FakeStream(_spa_shell_response())
+
+    def fake_fallback(url, timeout, selector, meta, request_id, force=False):
+        raise AssertionError("static site must not trigger Playwright")
+
+    monkeypatch.setattr("resualign.crawler._fetch_stream", fake_stream)
+    monkeypatch.setattr(
+        "resualign.crawler._playwright_fallback", fake_fallback
+    )
+
+    text = crawl_jd("https://example.com/job/123")
+    assert "加载中" in text
+
+
+def test_normal_text_no_fallback(monkeypatch):
+    def fake_stream(url, **kwargs):
+        return _FakeStream(_full_jd_response())
+
+    def fake_fallback(url, timeout, selector, meta, request_id, force=False):
+        raise AssertionError("full text must not trigger fallback")
+
+    monkeypatch.setattr("resualign.crawler._fetch_stream", fake_stream)
+    monkeypatch.setattr(
+        "resualign.crawler._playwright_fallback", fake_fallback
+    )
+
+    text = crawl_jd("https://campus-talent.alibaba.com/campus/position/x")
+    assert "AI应用研发工程师" in text
+
+
+def test_playwright_fallback_force_bypasses_enabled_gate(monkeypatch):
+    monkeypatch.setattr(
+        "resualign.crawler._playwright_enabled", lambda: False
+    )
+    monkeypatch.setattr(
+        "resualign.crawler._playwright_fetch_html",
+        lambda url, timeout, request_id: _full_jd_response().content.decode(
+            "utf-8"
+        ),
+    )
+    monkeypatch.setattr(
+        "resualign.crawler._proxy_url", lambda: None
+    )
+    monkeypatch.setattr(
+        "resualign.crawler._resolve_public_host",
+        lambda host: "93.184.216.34",
+    )
+
+    text = crawler._playwright_fallback(
+        "https://campus-talent.alibaba.com/campus/position/x",
+        timeout=30,
+        selector=None,
+        meta=None,
+        request_id="test",
+        force=True,
+    )
+    assert text is not None and "AI应用研发工程师" in text
+
+    assert (
+        crawler._playwright_fallback(
+            "https://campus-talent.alibaba.com/campus/position/x",
+            timeout=30,
+            selector=None,
+            meta=None,
+            request_id="test",
+            force=False,
+        )
+        is None
+    )
