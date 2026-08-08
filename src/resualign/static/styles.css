@@ -1122,19 +1122,27 @@ select {
   user-select: none;
 }
 
+.diff-char-del,
+.diff-char-ins {
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 600;
+}
+
+/* 红删绿增对比度微调：del 保持删除线，ins 加下划线强调插入；
+ * 均使用现有语义 token，明暗主题自动适配。 */
 .diff-char-del {
   background: var(--error-soft);
   color: var(--error-deep);
   text-decoration: line-through;
-  border-radius: 3px;
-  padding: 0 1px;
 }
 
 .diff-char-ins {
   background: var(--success-soft);
   color: var(--success-deep);
-  border-radius: 3px;
-  padding: 0 1px;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
 }
 
 .cmp-check {
@@ -3955,7 +3963,7 @@ select,
 }
 
 .split-canvas .split-appraisal {
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 @media (max-width: 640px) {
@@ -4306,14 +4314,14 @@ body.command-palette-open {
   grid-template-columns: minmax(340px, 35%) minmax(0, 65%);
   gap: 16px;
   align-items: start;
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 .split-pane {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   padding: 16px;
   background: var(--surface-glass);
   border: 1px solid var(--border-glass);
@@ -4326,13 +4334,13 @@ body.command-palette-open {
 .split-pane--jd .split-bento {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
   align-items: start;
 }
 
 .split-bento__cell {
   min-width: 0;
-  padding: 12px;
+  padding: 14px;
   background: var(--surface-glass-deep);
   border: 1px solid var(--border-glass);
   border-radius: var(--radius-8);
@@ -4343,7 +4351,7 @@ body.command-palette-open {
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  padding-bottom: 10px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -4369,9 +4377,12 @@ body.command-palette-open {
 }
 
 .split-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--text-12);
   font-weight: 800;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
   margin: 10px 0 6px;
 }
@@ -4389,7 +4400,7 @@ body.command-palette-open {
   align-items: center;
   gap: 4px;
   padding: 10px 12px;
-  margin-top: 12px;
+  margin-top: 14px;
   background: var(--surface-tint);
   border: 1px solid var(--border);
   border-radius: var(--radius-8);
@@ -4558,11 +4569,12 @@ body.command-palette-open {
 .align-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
+  gap: 12px;
+  padding: 14px;
   background: var(--surface-tint);
   border: 1px solid var(--border);
   border-radius: var(--radius-8);
+  box-shadow: var(--card-shadow-rest);
 }
 
 .align-form__row {
@@ -4620,7 +4632,7 @@ body.command-palette-open {
   gap: 8px;
   flex-wrap: wrap;
   padding: 8px 12px;
-  background: var(--surface);
+  background: var(--surface-tint);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-8);
 }
@@ -4629,7 +4641,11 @@ body.command-palette-open {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 8px 0;
+  padding: 14px;
+  background: var(--surface-glass-deep);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-8);
+  box-shadow: var(--card-shadow-rest);
 }
 
 .split-radar {
@@ -4694,6 +4710,8 @@ body.command-palette-open {
 
 .split-diff-area {
   min-width: 0;
+  padding-top: 2px;
+  border-top: 1px solid var(--border-soft);
 }
 
 .resume-empty {
@@ -4706,17 +4724,23 @@ body.command-palette-open {
 .diff-card-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .diff-card {
-  padding: 12px;
+  padding: 14px;
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--card-border-rest);
   border-left: 3px solid var(--info);
-  border-radius: var(--radius-8);
-  box-shadow: var(--shadow-sm);
-  transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--card-shadow-rest);
+  transition: var(--card-transition);
+}
+
+.diff-card:hover {
+  border-color: var(--card-border-hover);
+  box-shadow: var(--card-shadow-hover);
+  transform: translateY(-1px);
 }
 
 .diff-card--invalid {
@@ -4724,8 +4748,24 @@ body.command-palette-open {
   background: var(--surface-pending);
 }
 
+/* 采纳态：绿色左缘 + 浅绿底（前端先备好样式；采纳按钮已按需启用） */
+.diff-card.is-accepted {
+  border-left-color: var(--success);
+  background: var(--surface-success);
+  box-shadow: var(--card-shadow-rest);
+}
+
+/* 忽略态：降低透明度并去饱和，弱化视觉权重 */
 .diff-card.is-rejected {
-  opacity: 0.5;
+  opacity: 0.55;
+  filter: saturate(0.3);
+  border-left-color: var(--neutral);
+  box-shadow: none;
+}
+
+.diff-card.is-rejected:hover {
+  transform: none;
+  box-shadow: none;
 }
 
 .diff-card__head {
@@ -4740,6 +4780,16 @@ body.command-palette-open {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* T3: diff.section 徽章（format.js diffSectionBadge 渲染）。长区块名
+ * 截断显示，保持与 type 徽章同一行基线对齐。 */
+.diff-card__section {
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
 }
 
 .diff-card__columns {

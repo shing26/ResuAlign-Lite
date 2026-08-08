@@ -539,7 +539,7 @@ function handleEvent(eventName, data) {
         stage: "done",
         diffs: data.result.diffs || [],
         invalid_diffs: data.result.invalid_diffs || [],
-        draft: data.result.draft || null,
+        draft: data.result.draft || activeSession.alignment?.draft || null,
         eval_score: data.result.eval_score || null,
       };
     }
@@ -625,7 +625,7 @@ function setAlignmentTerminal(snapshot) {
       (status === "canceled" ? "对齐任务已取消" : "对齐任务失败，请重新运行"),
     diffs: (snapshot.result && snapshot.result.diffs) || [],
     invalid_diffs: (snapshot.result && snapshot.result.invalid_diffs) || [],
-    draft: (snapshot.result && snapshot.result.draft) || null,
+    draft: (snapshot.result && snapshot.result.draft) || activeSession.alignment?.draft || null,
     eval_score: (snapshot.result && snapshot.result.eval_score) || null,
   };
   rerenderActiveCanvas();
@@ -774,7 +774,7 @@ async function pollAlignmentJob() {
         error: snapshot.error || null,
         diffs: (snapshot.result && snapshot.result.diffs) || [],
         invalid_diffs: (snapshot.result && snapshot.result.invalid_diffs) || [],
-        draft: (snapshot.result && snapshot.result.draft) || null,
+        draft: (snapshot.result && snapshot.result.draft) || activeSession.alignment?.draft || null,
         eval_score: (snapshot.result && snapshot.result.eval_score) || null,
       };
       if (["succeeded", "failed", "canceled"].includes(snapshot.status)) {

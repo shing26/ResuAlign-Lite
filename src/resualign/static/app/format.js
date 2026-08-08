@@ -545,6 +545,7 @@ export function diffCard(diff, index, jobId) {
       <div class="diff-card__head">
         <div class="diff-card__type">
           <span class="badge ${invalid ? "badge-amber" : "badge-blue"}">${esc(typeLabel)}</span>
+          ${diffSectionBadge(diff)}
           <span class="small muted">${diff.confidence ? `置信度 ${esc(diff.confidence)}` : ""}</span>
         </div>
         <div class="provenance-badge provenance-badge--${esc(stateKey)}" data-provenance title="${esc(provenance)}">${esc(label)}</div>
@@ -1898,5 +1899,18 @@ export function buildLiveCompareHtml(session, originalContent) {
   const optimizedText = alignment.draft || "";
   const diffs = alignment.diffs || [];
   return buildCmpSideHtml(originalContent || "", optimizedText, diffs);
+}
+
+/* ------------------------------------------------------------------ */
+/* T3: diff section badge（与后端 DiffItem.section 契约，字符串，可空）  */
+/* ------------------------------------------------------------------ */
+/* 后端将为 DiffItem 增加可选 `section` 字段（如「工作经历」「项目经历」）
+ * 标识该条建议所属的简历区块。section 为空时不渲染任何节点；非空时在
+ * diffCard 头部 type 徽章旁渲染一个小徽章（.diff-card__section），
+ * diffList 经由 diffCard 自动透传。 */
+export function diffSectionBadge(diff) {
+  const section = diff && diff.section;
+  if (section == null || String(section).trim() === "") return "";
+  return `<span class="badge badge-gray diff-card__section">${esc(String(section).trim())}</span>`;
 }
 

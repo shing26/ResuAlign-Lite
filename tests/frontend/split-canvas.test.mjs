@@ -10,6 +10,7 @@ import {
   crawlStatusLine,
   diffCard,
   diffList,
+  diffSectionBadge,
   exportDock,
   jdProfileSummary,
   radarHtml,
@@ -240,6 +241,64 @@ test("diffList renders cards or the empty state", () => {
   const empty = diffList({}, "job-1");
   assert.match(empty, /data-resume-canvas-empty/);
   assert.match(empty, /还没有对齐结果/);
+});
+
+/* T3: diff.section 徽章（后端契约：DiffItem.section，字符串，可为空） */
+
+test("diffSectionBadge renders empty for missing or blank section", () => {
+  assert.equal(diffSectionBadge(null), "");
+  assert.equal(diffSectionBadge({}), "");
+  assert.equal(diffSectionBadge({ section: undefined }), "");
+  assert.equal(diffSectionBadge({ section: null }), "");
+  assert.equal(diffSectionBadge({ section: "" }), "");
+  assert.equal(diffSectionBadge({ section: "   " }), "");
+});
+
+test("diffSectionBadge renders an escaped badge for a non-empty section", () => {
+  assert.equal(
+    diffSectionBadge({ section: "工作经历" }),
+    '<span class="badge badge-gray diff-card__section">工作经历</span>',
+  );
+  assert.equal(
+    diffSectionBadge({ section: " <项目> & 技能" }),
+    '<span class="badge badge-gray diff-card__section">&lt;项目&gt; &amp; 技能</span>',
+  );
+});
+
+test("diffCard renders the section badge in the card head when section is set", () => {
+  const html = diffCard({ ...SAMPLE_DIFF, section: "项目经历" }, 0, "job-1");
+  assert.match(html, /<span class="badge badge-gray diff-card__section">项目经历<\/span>/);
+  /* 徽章紧跟 type 徽章，位于卡片头部 .diff-card__type 内 */
+  const typeGroup = html.match(/<div class="diff-card__type">([\s\S]*?)<\/div>/)[1];
+  assert.match(typeGroup, /badge-blue">改写<\/span>/);
+  assert.match(typeGroup, /diff-card__section">项目经历<\/span>/);
+  assert.match(typeGroup, /置信度 high/);
+});
+
+test("diffCard omits the section badge when section is blank", () => {
+  assert.doesNotMatch(diffCard({ ...SAMPLE_DIFF, section: "" }, 0, "job-1"), /diff-card__section/);
+  assert.doesNotMatch(diffCard(SAMPLE_DIFF, 0, "job-1"), /diff-card__section/);
+  assert.doesNotMatch(diffCard({ ...SAMPLE_DIFF, section: "   " }, 0, "job-1"), /diff-card__section/);
+});
+
+test("diffList carries section badges through diffCard and escapes them", () => {
+  const session = {
+    alignment: {
+      diffs: [
+        { ...SAMPLE_DIFF, section: "工作经历" },
+        { ...SAMPLE_DIFF, diff_id: "d2", section: "" },
+      ],
+    },
+  };
+  const html = diffList(session, "job-1");
+  assert.equal((html.match(/diff-card__section/g) || []).length, 1);
+  assert.match(html, /diff-card__section">工作经历<\/span>/);
+  const escaped = diffList(
+    { alignment: { diffs: [{ ...SAMPLE_DIFF, section: "<危险> & 技能" }] } },
+    "job-1",
+  );
+  assert.match(escaped, /diff-card__section">&lt;危险&gt; &amp; 技能<\/span>/);
+  assert.doesNotMatch(escaped, /<危险>/);
 });
 
 /* ------------------------------------------------------------------ */
