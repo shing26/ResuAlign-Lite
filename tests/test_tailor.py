@@ -64,6 +64,36 @@ def test_tailor_resume_normalizes_enum_values():
     assert result.diffs[0].confidence == "medium"
 
 
+def test_tailor_diff_section_filled_from_llm():
+    mock = MockLLM(result={
+        "sections": {"项目经历": "Built FastAPI services with Redis caching"},
+        "diffs": [{
+            "type": "modify",
+            "section": "项目经历",
+            "original": "Worked on backend",
+            "proposed": "Built FastAPI services with Redis caching",
+            "reason": "JD emphasizes performance",
+            "confidence": "high",
+            "provenance": "Worked on backend",
+        }],
+    })
+    result = tailor_resume(mock, "Resume", "Gap")
+    assert result.diffs[0].section == "项目经历"
+
+
+def test_tailor_diff_section_defaults_empty_when_absent():
+    mock = MockLLM()
+    result = tailor_resume(mock, "Resume", "Gap")
+    assert result.diffs[0].section == ""
+
+
+def test_tailor_prompt_instructs_section_per_diff():
+    mock = MockLLM()
+    tailor_resume(mock, "Resume", "Gap")
+    assert "section" in mock.last_system
+    assert "项目经历" in mock.last_system
+
+
 def test_tailor_granularity_fine_prompt():
     mock = MockLLM()
     tailor_resume(mock, "Resume", "Gap", granularity="fine")

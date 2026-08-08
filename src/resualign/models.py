@@ -5,6 +5,10 @@ from typing import Optional
 @dataclass
 class DiffItem:
     diff_id: str = ""
+    # Resume section the diff belongs to (e.g. "项目经历", "工作经历").
+    # Empty means "unknown/not grouped"; the frontend falls back to its own
+    # grouping when section is blank (additive contract field, default "").
+    section: str = ""
     type: str = "modify"
     original: str = ""
     proposed: str = ""

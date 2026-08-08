@@ -517,6 +517,7 @@ def rewrite_workbench_bullet(
 
     replacement = {
         'diff_id': target.get('diff_id'),
+        'section': target.get('section', ''),
         'type': target.get('type', 'modify'),
         'original': original,
         'proposed': rewritten.proposed,

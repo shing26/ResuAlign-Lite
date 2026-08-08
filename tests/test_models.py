@@ -1,3 +1,6 @@
+import json
+from dataclasses import asdict
+
 from resualign.models import Analysis, DiffItem, Report, ResuAlignConfig
 
 
@@ -9,6 +12,42 @@ def test_diffitem_defaults():
     assert d.reason == ""
     assert d.confidence == "medium"
     assert d.provenance == ""
+    assert d.section == ""
+
+
+def test_diffitem_section_default_is_empty_string():
+    # New additive contract field must default to "" for backward
+    # compatibility with every existing DiffItem(...) construction site.
+    d = DiffItem(
+        type="add", original="", proposed="New line",
+        reason="JD match", confidence="high",
+    )
+    assert d.section == ""
+
+
+def test_diffitem_section_roundtrip_serialization():
+    d = DiffItem(
+        diff_id="diff-1",
+        section="项目经历",
+        type="modify",
+        original="old",
+        proposed="new",
+        reason="JD match",
+        confidence="high",
+        provenance="old",
+        provenance_quote="old",
+        source_span=(0, 3),
+        provenance_state="verified",
+    )
+    # asdict -> JSON (the wire/persistence format) -> DiffItem(**data)
+    payload = json.dumps(asdict(d), ensure_ascii=False)
+    restored = DiffItem(**json.loads(payload))
+    assert restored.section == "项目经历"
+    assert restored.diff_id == "diff-1"
+    assert restored.provenance_state == "verified"
+    # JSON roundtrip converts the source_span tuple into a list, matching how
+    # persisted diffs look after json.loads in the stores.
+    assert list(restored.source_span) == [0, 3]
 
 
 def test_diffitem_full():

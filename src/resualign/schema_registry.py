@@ -44,6 +44,9 @@ class ClassifierResult(BaseModel):
 
 class DiffItem(BaseModel):
     diff_id: str = ""
+    # Resume section this diff belongs to (e.g. "项目经历"); the LLM fills it
+    # when it can, otherwise it stays "" (additive, backward-compatible).
+    section: str = ""
     type: Literal["modify", "add", "remove"] = "modify"
     original: str = ""
     proposed: str = ""

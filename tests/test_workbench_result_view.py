@@ -172,3 +172,60 @@ def test_workbench_result_three_level_payload():
     assert result["tailored_resume"]["sections"]["experience"] == (
         "Built FastAPI with Redis caching"
     )
+
+
+def test_workbench_result_diffs_carry_section_field():
+    """Every diff in the workbench result carries the additive section key."""
+    job = _create_job()
+    resume = _create_resume()
+    diff = DiffItem(
+        section="项目经历",
+        type="modify",
+        original="Python developer.",
+        proposed="Python developer with Redis caching.",
+        reason="JD match",
+        confidence="high",
+        provenance="Python developer.",
+    )
+    report = Report(
+        score=82,
+        skills=["Python"],
+        model="test-model",
+        tailored_resume=TailoredResume(
+            sections={"项目经历": "Built FastAPI with Redis caching"},
+            diffs=[diff],
+        ),
+        diffs=[diff],
+    )
+
+    with patch("resualign.api._run_job"), patch(
+        "resualign.api.build_config", return_value=_config()
+    ):
+        queued = client.post(
+            f"/api/jobs/{job['job_id']}/workbench",
+            json={"master_resume_id": resume["resume_id"]},
+            headers=_auth_headers(),
+        )
+    assert queued.status_code == 202
+    analysis_job_id = queued.json()["job_id"]
+
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api.run", return_value=report
+    ):
+        api_module._run_job(analysis_job_id)
+
+    snapshot = client.get(
+        f"/api/jobs/{analysis_job_id}", headers=_auth_headers()
+    ).json()
+    assert snapshot["status"] == "succeeded"
+    result = snapshot["result"]
+    diffs = result["diffs"]
+    assert diffs, "workbench result should carry diffs"
+    assert all("section" in diff for diff in diffs)
+    assert diffs[0]["section"] == "项目经历"
+
+    # The persisted library alignment keeps the section too.
+    library = client.get(
+        f"/api/jobs/{job['job_id']}", headers=_auth_headers()
+    ).json()
+    assert library["diffs"][0]["section"] == "项目经历"

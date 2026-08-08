@@ -69,8 +69,12 @@ TAILOR_PROMPT = (
     "    write 'FastAPI async endpoints' as well as the Chinese rendering).\n"
     "Return ONLY a JSON object with exactly two keys:\n"
     "sections (object mapping section_name to rewritten plain text),\n"
-    "diffs (list of objects with type in ['modify','add','remove'], original, \n"
-    "proposed, reason, confidence in ['high','medium','low'], provenance).\n"
+    "diffs (list of objects with type in ['modify','add','remove'], section, \n"
+    "original, proposed, reason, confidence in ['high','medium','low'], \n"
+    "provenance).\n"
+    "For each diff, section is the name of the resume section the diff \n"
+    "belongs to (e.g. '项目经历', '工作经历', '教育经历'); use the exact \n"
+    "section name as it appears in the resume.\n"
     "Output ONLY JSON."
 )
 
@@ -196,6 +200,7 @@ def parse_diff_with_provenance(
         provenance_state = "missing"
     diff = DiffItem(
         diff_id=str(item.get("diff_id") or uuid.uuid4().hex),
+        section=str(item.get("section") or ""),
         type=diff_type,
         original=original,
         proposed=item.get("proposed", ""),
