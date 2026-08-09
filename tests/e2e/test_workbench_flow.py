@@ -138,7 +138,10 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
         )
 
         # --- 2. 工作台打开该岗位 -------------------------------------------
-        card.locator('[data-action="open-optimizer"]', has_text="工作台").click()
+        # Navigate by hash instead of clicking the card button: the board
+        # re-renders on background polling (SSE/classification refresh), so
+        # the button can detach mid-click on slower CI runners.
+        page.evaluate("location.hash = '#/workspace/%s'" % job_id)
         page.wait_for_selector(WORKSPACE_SELECTOR, timeout=15000)
 
         # --- 3. 选主简历 + granularity（fine）→ 生成（wb-run）→ 轮询 succeeded

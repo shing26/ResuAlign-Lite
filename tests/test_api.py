@@ -1,8 +1,8 @@
 """Tests for the asynchronous FastAPI job API."""
 
+import sqlite3
 import threading
 import time
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -617,23 +617,37 @@ def test_payload_persisted_but_config_never_written_to_database():
         assert r.status_code == 202
         job_id = r.json()["job_id"]
 
+        # Payload is durable at queue time (job_payloads row carries the
+        # resume text), while the API key must never be written.
+        conn = sqlite3.connect(str(api_module._registry.db_path))
+        payload = conn.execute(
+            "SELECT payload_json FROM job_payloads WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        conn.close()
+        assert payload is not None and secret_resume in payload[0]
+        assert secret_key not in payload[0]
+
     with patch("resualign.api.run", return_value=report):
         api_module._run_job(job_id)
 
     data = client.get(f"/api/jobs/{job_id}", headers=_auth_headers()).json()
     assert data["status"] == "succeeded"
 
-    # WAL mode keeps recent writes in the -wal sidecar until a checkpoint;
-    # checkpoint is best-effort (busy if another connection holds the db),
-    # so scan both the main file and the sidecar for the secret. The API key
-    # must appear in neither.
-    db_path = api_module._registry.db_path
-    raw = db_path.read_bytes()
-    wal_path = Path(f"{db_path}-wal")
-    if wal_path.exists():
-        raw += wal_path.read_bytes()
-    assert secret_resume.encode("utf-8") in raw
-    assert secret_key.encode("utf-8") not in raw
+    # After the job finishes the one-shot payload is purged; the succeeded
+    # result is durable in the jobs table and still contains no API key.
+    conn = sqlite3.connect(str(api_module._registry.db_path))
+    job_row = conn.execute(
+        "SELECT result_json, error FROM jobs WHERE job_id = ?", (job_id,)
+    ).fetchone()
+    leftover = conn.execute(
+        "SELECT 1 FROM job_payloads WHERE job_id = ?", (job_id,)
+    ).fetchone()
+    conn.close()
+    assert leftover is None, "payload should be purged after the job runs"
+    assert job_row is not None and job_row[0]
+    job_text = " ".join(str(value) for value in job_row if value)
+    assert secret_key not in job_text
 
 
 def test_restart_recovery_requeues_pending_jobs():
