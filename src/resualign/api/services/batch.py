@@ -191,6 +191,7 @@ def cancel_batch_align(
     if batch is None:
         return None
     canceled = 0
+    failed = 0
     for row in batch['rows']:
         if row.get('status') != 'queued':
             continue
@@ -201,8 +202,13 @@ def cancel_batch_align(
             else None
         )
         if snapshot is None:
-            row['status'] = 'canceled'
-            canceled += 1
+            # The analysis job no longer exists (TTL-purged or lost on
+            # restart). That is an anomaly, not a user cancel: mark the row
+            # failed with a readable reason so the UI does not misreport it
+            # as "canceled" (which implies the user chose to stop it).
+            row['status'] = 'failed'
+            row['error'] = '分析任务已过期或丢失，请重新运行'
+            failed += 1
             continue
         if snapshot.status == 'queued' and api_module._registry.cancel(
             analysis_job_id
@@ -210,7 +216,12 @@ def cancel_batch_align(
             row['status'] = 'canceled'
             canceled += 1
     api_module._batch_store.update_rows(batch_id, tenant_id, batch['rows'])
-    return {'batch_id': batch_id, 'canceled': canceled, 'total': len(batch['rows'])}
+    return {
+        'batch_id': batch_id,
+        'canceled': canceled,
+        'failed': failed,
+        'total': len(batch['rows']),
+    }
 
 
 def _monitor_batch(batch_id: str, tenant_id: str) -> None:

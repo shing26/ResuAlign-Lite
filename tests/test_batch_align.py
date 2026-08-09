@@ -337,9 +337,16 @@ def test_batch_align_result_matrix_shape():
 def test_batch_align_cancel_queued_rows():
     resume = _create_resume()
     job_ids = _create_library_jobs(3)
-    with patch("resualign.api._queue_job", return_value="a-x"), patch(
-        "resualign.api.build_config", return_value=_config()
-    ):
+
+    def fake_queue(user, payload, application_id=None, workbench=False):
+        job = api_module._registry.create(
+            payload, None, tenant_id=user["user_id"]
+        )
+        return job.job_id
+
+    with patch(
+        "resualign.api._queue_job", side_effect=fake_queue
+    ), patch("resualign.api.build_config", return_value=_config()):
         r = client.post(
             "/api/batch-align",
             json=_queue_payloads(job_ids, resume["resume_id"]),
@@ -356,6 +363,37 @@ def test_batch_align_cancel_queued_rows():
     ).json()
     assert body["summary"]["canceled"] == 3
     assert all(row["status"] == "canceled" for row in body["rows"])
+
+
+def test_batch_align_cancel_marks_lost_analysis_as_failed_not_canceled():
+    """A row whose analysis job no longer exists (TTL-purged / lost on
+    restart) must read as failed with a reason, never as canceled -
+    'canceled' implies the user chose to stop it."""
+    resume = _create_resume()
+    job_ids = _create_library_jobs(2)
+    with patch("resualign.api._queue_job", return_value="gone-job"), patch(
+        "resualign.api.build_config", return_value=_config()
+    ):
+        r = client.post(
+            "/api/batch-align",
+            json=_queue_payloads(job_ids, resume["resume_id"]),
+            headers=_auth_headers(),
+        )
+    batch_id = r.json()["batch_id"]
+
+    r = client.post(
+        f"/api/batch-align/{batch_id}/cancel", headers=_auth_headers()
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["canceled"] == 0
+    assert body["failed"] == 2
+
+    rows = client.get(
+        f"/api/batch-align/{batch_id}", headers=_auth_headers()
+    ).json()["rows"]
+    assert all(row["status"] == "failed" for row in rows)
+    assert all("已过期或丢失" in (row["error"] or "") for row in rows)
 
 
 def test_batch_align_requires_api_key():
