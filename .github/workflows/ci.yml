@@ -85,19 +85,11 @@ jobs:
           pip install -e ".[dev]"
           pip install playwright
           python -m playwright install --with-deps chromium
-      - name: Phase 16 smoke
-        run: python .scratch/phase-16/playwright_smoke.py
-        env:
-          PYTHONPATH: src
-      - name: Phase 18 smoke
-        run: python .scratch/phase-18/playwright_smoke.py
-        env:
-          PYTHONPATH: src
       - name: Phase 20 key-path smoke
         run: python .scratch/phase-20/playwright_smoke.py
         env:
           PYTHONPATH: src
-      - name: E2E suite (settings / import / reclassify)
+      - name: E2E suite (settings / import / reclassify / workbench)
         run: python -m pytest tests/e2e -v --e2e --tb=short
         env:
           PYTHONPATH: src

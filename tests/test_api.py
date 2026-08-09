@@ -1,5 +1,6 @@
 """Tests for the asynchronous FastAPI job API."""
 
+import sqlite3
 import threading
 import time
 from unittest.mock import patch
@@ -622,7 +623,13 @@ def test_payload_persisted_but_config_never_written_to_database():
     data = client.get(f"/api/jobs/{job_id}", headers=_auth_headers()).json()
     assert data["status"] == "succeeded"
 
-    raw = api_module._registry.db_path.read_bytes()
+    # WAL mode keeps recent writes in the -wal sidecar until a checkpoint;
+    # force one so the resume text is visible in the main db file.
+    db_path = api_module._registry.db_path
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA wal_checkpoint(FULL)")
+    conn.close()
+    raw = db_path.read_bytes()
     assert secret_resume.encode("utf-8") in raw
     assert secret_key.encode("utf-8") not in raw
 

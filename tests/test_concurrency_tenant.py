@@ -12,6 +12,7 @@ test_phase20_qa_gates.py::test_concurrent_worker_wal_claims).
 
 from __future__ import annotations
 
+import time
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
@@ -233,9 +234,17 @@ def test_concurrent_jobs_share_one_sqlite_file_without_locking_errors():
     """Queue and run jobs for two tenants while a third client writes.
 
     Exercises the API worker path (registry claims + WAL) under contention
-    without any LLM call (engine run patched away).
+    without any LLM call. ``_queue_job`` spawns daemon threads that wait on
+    the bounded semaphore, so ``resualign.api.run`` must stay patched for the
+    whole test - otherwise a late thread would hit the real engine with the
+    fake (keyless) config and fail the job with 401.
     """
-    with patch("resualign.api._classify_job", return_value={}):
+    with patch("resualign.api._classify_job", return_value={}), patch(
+        "resualign.api.build_config", return_value=_config()
+    ), patch(
+        "resualign.api.run",
+        return_value=Report(score=80, skills=["Python"], model="test-model"),
+    ):
         created: dict[str, dict] = {}
 
         def queue_and_run(tenant: str, index: int) -> None:
@@ -271,21 +280,26 @@ def test_concurrent_jobs_share_one_sqlite_file_without_locking_errors():
             for future in futures:
                 future.result(timeout=60)
 
-    with patch(
-        "resualign.api.build_config", return_value=_config()
-    ), patch(
-        "resualign.api.run",
-        return_value=Report(score=80, skills=["Python"], model="test-model"),
-    ):
         for job_id in created:
             api_module._run_job(job_id)
 
-    # All 8 jobs finished; each user sees its own job succeeded.
-    for job_id, entry in created.items():
-        snap = client.get(
-            f"/api/jobs/{job_id}", headers=entry["headers"]
-        ).json()
-        assert snap["status"] == "succeeded"
+    # All 8 jobs must reach succeeded; the background daemon threads (also
+    # running patched engine.run) may still be draining, so poll for the
+    # terminal state instead of asserting immediately.
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        statuses = {
+            job_id: client.get(
+                f"/api/jobs/{job_id}", headers=entry["headers"]
+            ).json()["status"]
+            for job_id, entry in created.items()
+        }
+        if all(status == "succeeded" for status in statuses.values()):
+            return
+        time.sleep(0.2)
+    assert statuses == {
+        job_id: "succeeded" for job_id in created
+    }, statuses
 
 
 def test_parallel_signup_login_sessions_are_distinct():
