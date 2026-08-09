@@ -120,7 +120,13 @@ class OpenAIClient(LLMClient):
     # Defaults that can be overridden per instance or per subclass
     DEFAULT_MAX_TOKENS: ClassVar[int] = 16384
     DEFAULT_MAX_RETRIES: ClassVar[int] = 2
-    DEFAULT_TIMEOUT: ClassVar[float] = 180.0
+    # Per-request read timeout. Tailoring is a high-throughput structured
+    # task on standard instruction models (e.g. deepseek-chat): 60s bounds
+    # worst-case hangs (3 attempts x 60s = 180s) instead of the old
+    # 3 x 180s = 9min. Connect uses a short 10s window so unreachable
+    # hosts fail fast rather than blocking the pool.
+    DEFAULT_TIMEOUT: ClassVar[float] = 60.0
+    DEFAULT_CONNECT_TIMEOUT: ClassVar[float] = 10.0
     DEFAULT_TEMPERATURE: ClassVar[float] = 0.1
 
     def __init__(self, config, timeout: Optional[float] = None):
@@ -138,7 +144,10 @@ class OpenAIClient(LLMClient):
         self.provider = provider or "unknown"
         self.max_retries = self.DEFAULT_MAX_RETRIES
         self._client = httpx.Client(
-            timeout=timeout if timeout is not None else self.DEFAULT_TIMEOUT,
+            timeout=httpx.Timeout(
+                timeout if timeout is not None else self.DEFAULT_TIMEOUT,
+                connect=self.DEFAULT_CONNECT_TIMEOUT,
+            ),
             headers={"Content-Type": "application/json"},
         )
 
