@@ -787,13 +787,15 @@ export function batchPanelHtml(jobs, resumes) {
 export function renderBatchMatrixHtml(batch) {
   const rows = batch.rows || [];
   const hasSummary = rows.some((row) => row.summary);
+  const batchStatusBadge = (row) => {
+    const label = `${row.title || row.job_id}: ${row.status}`;
+    if (row.status === "failed" || row.status === "canceled") {
+      return `<span class="badge badge-red" data-batch-failed title="${esc(row.error || "模型响应异常，请检查 LLM 配置后重试")}">${esc(label)}</span>`;
+    }
+    return `<span class="badge badge-pending">${esc(label)}</span>`;
+  };
   if (!hasSummary) {
-    return `<div class="batch-progress">${rows
-      .map(
-        (row) =>
-          `<span class="badge badge-pending">${esc(row.title || row.job_id)}: ${esc(row.status)}</span>`,
-      )
-      .join("")}</div>`;
+    return `<div class="batch-progress">${rows.map(batchStatusBadge).join("")}</div>`;
   }
   const barColor = (score) =>
     score >= 75 ? "var(--success)" : score >= 55 ? "var(--warning)" : "var(--danger)";
@@ -828,12 +830,16 @@ export function renderBatchMatrixHtml(batch) {
       const score = summary.score;
       const verdict =
         score == null ? "—" : score >= 75 ? "投递" : score >= 55 ? "考虑" : "放弃";
+      const statusCell =
+        row.status === "failed" || row.status === "canceled"
+          ? `<span class="badge badge-red" data-batch-failed title="${esc(row.error || "模型响应异常，请检查 LLM 配置后重试")}">${esc(row.status)}</span>`
+          : esc(summary.next_step || row.status);
       return `<tr>
         <td>${esc(row.title || row.job_id)}</td>
         <td>${esc(score ?? "—")}</td>
         <td>${esc((summary.key_gaps || []).slice(0, 3).join("、") || "—")}</td>
         <td>${esc(verdict)}</td>
-        <td>${esc(summary.next_step || row.status)}</td>
+        <td>${statusCell}</td>
         <td><a class="btn btn-ghost btn-sm" href="#/workspace/${encodeURIComponent(row.job_id)}">打开工作台</a></td>
       </tr>`;
     })

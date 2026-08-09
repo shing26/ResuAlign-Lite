@@ -128,6 +128,37 @@ test("renderBatchMatrixHtml shows progress badges before summaries exist", () =>
   assert.equal(doc.querySelector("[data-batch-bar]"), null);
 });
 
+test("renderBatchMatrixHtml surfaces failure reason on progress badges", () => {
+  const doc = docFromHtml(
+    renderBatchMatrixHtml({
+      rows: [
+        { job_id: "j1", title: "A", status: "failed", error: "LLM 429: rate limited" },
+        { job_id: "j2", title: "B", status: "canceled", error: "Canceled by user" },
+      ],
+    }),
+  );
+  const failed = doc.querySelector("[data-batch-failed]");
+  assert.ok(failed);
+  assert.match(failed.getAttribute("title"), /LLM 429/);
+  assert.match(failed.textContent, /failed/);
+  assert.equal(doc.querySelectorAll("[data-batch-failed]").length, 2);
+});
+
+test("renderBatchMatrixHtml shows failure reason in result table rows", () => {
+  const doc = docFromHtml(
+    renderBatchMatrixHtml({
+      rows: [
+        { job_id: "j1", title: "A", status: "succeeded", summary: { score: 80, key_gaps: [] } },
+        { job_id: "j2", title: "B", status: "failed", error: "模型响应异常，请重试" },
+      ],
+    }),
+  );
+  const failed = doc.querySelector("tr [data-batch-failed]");
+  assert.ok(failed);
+  assert.match(failed.getAttribute("title"), /模型响应异常/);
+  assert.equal(doc.querySelectorAll("tr [data-batch-failed]").length, 1);
+});
+
 test("renderBatchMatrixHtml escapes user-controlled titles", () => {
   const doc = docFromHtml(
     renderBatchMatrixHtml({
