@@ -4,21 +4,6 @@ from __future__ import annotations
 
 import importlib
 from pathlib import Path
-from typing import Iterator
-
-
-def _iter_route_paths(routes) -> Iterator[str]:
-    """Yield every concrete route path, expanding nested router wrappers.
-
-    FastAPI 0.116+ wraps ``include_router`` in ``_IncludedRouter`` objects
-    (which expose ``.routes`` but no ``.path``), so a plain
-    ``route.path for route in app.routes`` crashes on modern FastAPI.
-    """
-    for route in routes:
-        if hasattr(route, "path"):
-            yield route.path
-        elif hasattr(route, "routes"):
-            yield from _iter_route_paths(route.routes)
 
 
 def test_resualign_api_is_a_package():
@@ -28,11 +13,16 @@ def test_resualign_api_is_a_package():
 
 
 def test_app_import_target_works():
+    from fastapi.testclient import TestClient
+
     from resualign.api import app
 
     assert app.title == "ResuAlign API"
     assert app.version == "0.3.0"
-    assert any(path == "/health" for path in _iter_route_paths(app.routes))
+    # Hit the route directly instead of scanning app.routes: modern FastAPI
+    # wraps included routers in _IncludedRouter objects whose exact nesting
+    # varies across versions, so a structural scan is version-fragile.
+    assert TestClient(app).get("/health").status_code == 200
 
 
 def test_patchable_state_names_remain_on_package():
