@@ -10,6 +10,7 @@ import {
 import {
   DEFAULT_VOCABULARY,
   STAGE_LABELS,
+  atsHealthCardHtml,
   buildDiagnosisMarkdownFrom,
   esc,
   formatElapsed,
@@ -359,6 +360,9 @@ export function renderDiagnosisIdle() {
     diagnoseBtn.disabled = false;
     diagnoseBtn.textContent = "诊断简历";
   }
+  /* Sprint 4 T3: 空闲态把右侧 ATS 卡重置为占位。 */
+  const atsNode = $("[data-ats-health-mount]");
+  if (atsNode) atsNode.innerHTML = atsHealthCardHtml(null);
 }
 
 export function renderDiagnosisProgress(snapshot) {
@@ -467,6 +471,9 @@ export function renderDiagnosisResult(snapshot) {
     diagnoseBtn.textContent = "诊断简历";
     diagnoseBtn.classList.remove("is-loading");
   }
+  /* Sprint 4 T3: 诊断完成同步刷新右侧 ATS 健康度卡。 */
+  const atsNode = $("[data-ats-health-mount]");
+  if (atsNode) atsNode.innerHTML = atsHealthCardHtml(diagnosis);
 }
 
 export function renderDiagnosisError(snapshot) {
@@ -502,6 +509,9 @@ export function renderDiagnosisError(snapshot) {
     diagnoseBtn.textContent = "诊断简历";
     diagnoseBtn.classList.remove("is-loading");
   }
+  /* Sprint 4 T3: 失败态清空右侧 ATS 卡，避免展示过期结果。 */
+  const atsNode = $("[data-ats-health-mount]");
+  if (atsNode) atsNode.innerHTML = atsHealthCardHtml(null);
 }
 
 export function buildDiagnosisMarkdown(originalContent = "") {

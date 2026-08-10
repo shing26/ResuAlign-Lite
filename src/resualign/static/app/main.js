@@ -55,6 +55,7 @@ import {
   applyDiffToDraft,
   applyJdParseError,
   applyJdParseResult,
+  atsHealthCardHtml,
   backupRestoreGuide,
   batchPanelHtml,
   batchRowsToCsv,
@@ -72,7 +73,6 @@ import {
   jobSelectOptionsHtml,
   jobTimelineFormHtml,
   jobsToCsv,
-  lineDiff,
   onboardingSteps,
   parseHashValue,
   quickContinueHtml,
@@ -82,6 +82,7 @@ import {
   renderReminderStrip,
   runEvalFromForm,
   skillGapHtml,
+  versionTimelineHtml,
 } from "./format.js";
 import {
   apiKeyFieldHint,
@@ -323,37 +324,17 @@ async function renderResumeView(app) {
 async function renderResumeDetailView(app, resumeId) {
   const resume = await api(`/api/master-resumes/${encodeURIComponent(resumeId)}`);
   const versions = resume.versions || [];
-  const versionCards = versions
-    .map((version, index) => {
-      const previous = versions[index - 1];
-      const diffRows = previous
-        ? lineDiff(previous.content, version.content)
-        : [{ type: "add", text: "初始版本" }];
-      const diffHtml =
-        diffRows
-          .map(
-            (row) =>
-              `<div class="diff-line ${row.type === "add" ? "diff-add" : "diff-remove"}">${
-                row.type === "add" ? "+" : "-"
-              } ${esc(row.text)}</div>`,
-          )
-          .join("") || `<div class="muted small">内容未变化</div>`;
-      return `
-        <div class="card version-card card-base card-hover-soft">
-          <div class="card-head">
-            <div class="card-title">v${version.version}</div>
-            <span class="badge ${version.version === resume.current_version ? "badge-green" : "badge-gray"}">${
-              version.version === resume.current_version ? "当前" : "历史"
-            }</span>
-          </div>
-          <div class="card-meta">创建于 ${formatDate(version.created_at)}</div>
-          <div style="margin:8px 0">${diffHtml}</div>
-          ${version.version !== resume.current_version
-            ? `<button class="btn btn-outline btn-sm" data-action="rollback-resume" data-id="${resumeId}" data-version="${version.version}">回滚到 v${version.version}</button>`
-            : ""}
-        </div>`;
-    })
-    .join("");
+  /* Sprint 4 T3: ATS 卡数据源 —— state.diagnosis 只在 job_id 与本简历最新诊断
+   * 任务一致时才可信（防止跨简历串数据）。renderDiagnosisResult 完成后还会
+   * 通过 [data-ats-health-mount] 实时刷新（见 events.js）。 */
+  const diagnosis =
+    state.diagnosis &&
+    resume.latest_diagnosis_job_id &&
+    state.diagnosis.job_id === resume.latest_diagnosis_job_id
+      ? diagnosisFromSnapshot(state.diagnosis)
+      : null;
+  state.resumeVersions = versions;
+  state.resumeCurrentContent = resume.content || "";
 
   app.innerHTML = `
     <div class="page-header page-header--resume">
@@ -364,9 +345,7 @@ async function renderResumeDetailView(app, resumeId) {
       </div>
       <div class="row">
         <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">诊断简历</button>
-        <button class="btn btn-primary btn-sm" data-action="print-resume">导出 PDF</button>
         <button class="btn btn-secondary btn-sm" data-action="export-resume-md" data-id="${resume.resume_id}">导出 Markdown</button>
-        <button class="btn btn-outline btn-sm" data-action="edit-resume" data-id="${resume.resume_id}">编辑</button>
         <button class="btn btn-danger btn-sm" data-action="delete-resume" data-id="${resume.resume_id}">删除</button>
       </div>
     </div>
@@ -391,17 +370,42 @@ async function renderResumeDetailView(app, resumeId) {
       <div class="form-error" data-diagnosis-error hidden></div>
     </section>
     <div class="resume-archive-grid">
-      <section class="panel panel-card">
-        <h3>完整简历</h3>
-        <div class="resume-doc">${renderMarkdown(resume.content)}</div>
+      <section class="panel panel-card resume-sheet" data-resume-sheet>
+        <div class="resume-sheet__bar">
+          <span class="resume-sheet__title">完整简历</span>
+          <div class="row">
+            <button class="btn btn-outline btn-sm" data-action="edit-resume" data-id="${resume.resume_id}">编辑</button>
+            <button class="btn btn-outline btn-sm" data-action="copy-resume-md" data-id="${resume.resume_id}">复制 MD</button>
+            <button class="btn btn-secondary btn-sm" data-action="print-resume">导出 PDF</button>
+          </div>
+        </div>
+        <div class="resume-preview-bar" data-resume-preview-bar hidden>
+          <span>正在预览 <strong data-preview-version></strong>，改动不会保存</span>
+          <button class="btn btn-ghost btn-sm" data-action="restore-current-preview">返回当前版本</button>
+        </div>
+        <div class="resume-doc resume-sheet__doc" data-resume-sheet-doc>${renderMarkdown(resume.content)}</div>
       </section>
-      <section class="panel panel-card">
-        <h3>版本历史</h3>
-        <div class="card-list motion-stagger">${versionCards || `<div class="muted small">暂无版本</div>`}</div>
-      </section>
+      <aside class="resume-detail-side">
+        <section class="panel panel-card ats-health-card" data-ats-health-card>
+          <h3>ATS 健康度</h3>
+          <div data-ats-health-mount>${atsHealthCardHtml(diagnosis)}</div>
+        </section>
+        <section class="panel panel-card version-timeline-card" data-version-timeline-card>
+          <h3>版本历史</h3>
+          ${versionTimelineHtml(versions, resume.current_version, resume.resume_id)}
+        </section>
+      </aside>
     </div>`;
   state.diagnosisResumeId = resumeId;
   await recoverDiagnosis(resume);
+}
+
+/* Sprint 4 T3: 从 state.diagnosis 快照提取 diagnosis 对象，与 events.js
+ * renderDiagnosisResult 的 result.diagnosis || result 语义保持一致。 */
+function diagnosisFromSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const result = snapshot.result || {};
+  return result.diagnosis || result || null;
 }
 
 async function openResumeEditor(resumeId) {
@@ -1090,6 +1094,33 @@ async function printTarget(kind) {
   }
 }
 
+/* Sprint 4 T3: 复制 Markdown 到剪贴板（navigator.clipboard + textarea 兜底，
+ * 复用 split-canvas.js fallbackCopy 的既有模式）。 */
+function copyMarkdownToClipboard(text) {
+  const onOk = () => toast("简历 Markdown 已复制", "success");
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(onOk, () => fallbackCopyMarkdown(text));
+  } else {
+    fallbackCopyMarkdown(text);
+  }
+}
+
+function fallbackCopyMarkdown(text) {
+  const node = document.createElement("textarea");
+  node.value = text;
+  node.style.position = "fixed";
+  node.style.opacity = "0";
+  document.body.append(node);
+  node.select();
+  try {
+    document.execCommand("copy");
+    toast("简历 Markdown 已复制", "success");
+  } catch {
+    toast("复制失败，请手动选择", "error");
+  }
+  node.remove();
+}
+
 const actions = {
   reload: () => render(),
   "new-resume": async () => {
@@ -1106,6 +1137,46 @@ const actions = {
   "back-resume-center": () => navigate("resume"),
   "print-resume": () => printTarget("resume"),
   "print-workbench": () => printTarget("workbench"),
+  /* Sprint 4 T3: 复制简历 Markdown（data-action=copy-resume-md，data-id=resume_id） */
+  "copy-resume-md": async (button) => {
+    const resumeId = button.dataset.id || (state.route && state.route.resumeId);
+    if (!resumeId) return;
+    try {
+      const resume = await api(`/api/master-resumes/${encodeURIComponent(resumeId)}`);
+      copyMarkdownToClipboard(resume.content || "");
+    } catch (error) {
+      toast(error.message || "简历加载失败，无法复制", "error");
+    }
+  },
+  /* Sprint 4 T3: 版本时间线预览 —— 切换主 Sheet 为所选版本内容。 */
+  "preview-version": (button) => {
+    const version = Number(button.dataset.version);
+    const target = (state.resumeVersions || []).find(
+      (item) => Number(item.version) === version,
+    );
+    if (!target) {
+      toast("未找到该版本", "error");
+      return;
+    }
+    const sheet = $("[data-resume-sheet-doc]");
+    const bar = $("[data-resume-preview-bar]");
+    const label = $("[data-preview-version]");
+    if (sheet) sheet.innerHTML = renderMarkdown(target.content);
+    if (bar) bar.hidden = false;
+    if (label) label.textContent = `v${version}`;
+    $$("[data-version-item]").forEach((item) => {
+      item.classList.toggle("is-active", Number(item.dataset.version) === version);
+    });
+    toast(`正在预览 v${version}`, "info");
+  },
+  "restore-current-preview": () => {
+    const sheet = $("[data-resume-sheet-doc]");
+    const bar = $("[data-resume-preview-bar]");
+    if (sheet) sheet.innerHTML = renderMarkdown(state.resumeCurrentContent || "");
+    if (bar) bar.hidden = true;
+    $$("[data-version-item]").forEach((item) => item.classList.remove("is-active"));
+    toast("已返回当前版本", "info");
+  },
   "export-diagnosis": () => printTarget("diagnosis"),
   "export-diagnosis-md": async () => {
     const resumeId =

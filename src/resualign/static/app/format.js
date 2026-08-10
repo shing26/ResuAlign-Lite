@@ -1299,19 +1299,33 @@ export function renderJobStatsHtml(stats) {
   const funnel = data.funnel || {};
   const percent = (value) => (value == null ? "—" : `${value}%`);
   const dot = (key) =>
-    `<span class="board-dot--${key}" aria-hidden="true" style="display:inline-block;width:8px;height:8px;border-radius:50%;flex:none"></span>`;
+    `<span class="board-dot board-dot--${key}" aria-hidden="true"></span>`;
   const countChips = JOB_STATUS_CANONICAL.map(
     (key) =>
-      `<span class="badge" style="display:inline-flex;gap:6px;align-items:center">${dot(key)}${esc(JOB_STATUS_LABELS[key])}<strong data-stat-count="${key}">${counts[key] ?? 0}</strong></span>`,
+      `<span class="badge board-stats-chip">${dot(key)}${esc(JOB_STATUS_LABELS[key])}<strong data-stat-count="${key}">${counts[key] ?? 0}</strong></span>`,
   ).join("");
+  /* Sprint 4 T2: 漏斗三段复用 S1 Dashboard KPI 视觉语言 —— 语义色顶条 +
+   * 圆角卡（info/warning/success），与 dashboard-kpi 卡贯通。 */
+  const funnelCards = [
+    { key: "applyRate", label: "添加→投递", tone: "info", hint: "已投递及以上阶段 ÷ 岗位总数" },
+    { key: "interviewRate", label: "投递→面试", tone: "warning", hint: "进入面试及以上阶段 ÷ 已投递" },
+    { key: "offerRate", label: "面试→Offer", tone: "success", hint: "拿到 Offer ÷ 进入面试" },
+  ]
+    .map(
+      (card) => `
+        <div class="board-stats-card board-stats-card--${card.tone}" title="${esc(card.hint)}">
+          <span class="board-stats-card__label">${card.label}</span>
+          <strong class="board-stats-card__rate" data-stat-rate="${card.key}">${percent(funnel[card.key])}</strong>
+        </div>`,
+    )
+    .join("");
   return `
-    <div class="board-stats" data-board-stats role="group" aria-label="求职漏斗统计" style="display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;margin:10px 0 14px">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center" data-board-stats-counts>${countChips}</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center" data-board-stats-funnel>
-        <span class="small muted">转化</span>
-        <span class="badge badge-blue" title="已投递及以上阶段 ÷ 岗位总数">添加→投递 <strong data-stat-rate="applyRate">${percent(funnel.applyRate)}</strong></span>
-        <span class="badge badge-amber" title="进入面试及以上阶段 ÷ 已投递">投递→面试 <strong data-stat-rate="interviewRate">${percent(funnel.interviewRate)}</strong></span>
-        <span class="badge badge-green" title="拿到 Offer ÷ 进入面试">面试→Offer <strong data-stat-rate="offerRate">${percent(funnel.offerRate)}</strong></span>
+    <div class="board-stats" data-board-stats role="group" aria-label="求职漏斗统计">
+      <div class="board-stats__counts" data-board-stats-counts>${countChips}</div>
+      <span class="board-stats__divider" aria-hidden="true"></span>
+      <div class="board-stats__funnel" data-board-stats-funnel>
+        <span class="small muted board-stats__label">转化</span>
+        ${funnelCards}
       </div>
     </div>`;
 }
@@ -2278,5 +2292,136 @@ export function blockerCountBadge(count) {
   const n = Math.max(0, Number(count) || 0);
   if (n <= 0) return "";
   return `<button type="button" class="blocker-badge" data-action="open-blockers" title="有 ${n} 条抓取阻断待处理" aria-label="打开抓取阻断队列：${n} 条待处理">阻断 <span class="blocker-badge__count">${n}</span></button>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Sprint 4: Resume Center（ATS 健康度卡 + 版本时间线，纯函数）           */
+/* ------------------------------------------------------------------ */
+/* 数据源契约（与 events.js renderDiagnosisResult / recoverDiagnosis 对齐）：
+ *   state.diagnosis = { job_id, status, result: { diagnosis } }
+ *   diagnosis 对象含 score / skills / issues / suggestions / model。
+ * 版本列表来自 GET /api/master-resumes/{id} 的内嵌字段 versions：
+ *   [{ version, content, created_at }]（按 version ASC）。
+ */
+
+/** ATS 健康度分级：≥85 优秀 / ≥70 良好 / <70 待提升。 */
+export function atsHealthScoreLevel(score) {
+  if (score >= 85) return "优秀";
+  if (score >= 70) return "良好";
+  return "待提升";
+}
+
+/** ATS 卡片视觉 tone：high / mid / low，对应 --success / --warning / --danger。 */
+export function atsHealthTone(score) {
+  if (score == null) return "low";
+  if (score >= 85) return "high";
+  if (score >= 70) return "mid";
+  return "low";
+}
+
+/** 简历诊断摘要卡。传入 diagnosis 对象（result.diagnosis || result）。
+ * 空诊断（无 score / skills / issues / suggestions）渲染「尚未诊断」占位。 */
+export function atsHealthCardHtml(diagnosis) {
+  const data = diagnosis && typeof diagnosis === "object" ? diagnosis : {};
+  const rawScore = Number(data.score);
+  const score = Number.isFinite(rawScore)
+    ? Math.max(0, Math.min(100, rawScore))
+    : null;
+  const skills = Array.isArray(data.skills)
+    ? data.skills.map((item) => String(item ?? "")).filter(Boolean)
+    : [];
+  const issues = Array.isArray(data.issues)
+    ? data.issues.map((item) => String(item ?? "")).filter(Boolean)
+    : [];
+  const suggestions = Array.isArray(data.suggestions)
+    ? data.suggestions.map((item) => String(item ?? "")).filter(Boolean)
+    : [];
+  const isEmpty =
+    score == null && !skills.length && !issues.length && !suggestions.length;
+  if (isEmpty) {
+    return `
+      <div class="ats-health ats-health--empty" data-ats-health>
+        <div class="ats-health__score"><span class="ats-health__value" data-ats-score>—</span><span class="ats-health__unit">/100</span></div>
+        <span class="badge badge-gray" data-ats-level>尚未诊断</span>
+        <div class="small muted ats-health__empty-hint">运行一次简历诊断即可获得 ATS 健康度评分、优势高光与改进建议。</div>
+      </div>`;
+  }
+  const level = score == null ? "待提升" : atsHealthScoreLevel(score);
+  const levelClass =
+    score == null
+      ? "badge-gray"
+      : score >= 85
+        ? "badge-green"
+        : score >= 70
+          ? "badge-amber"
+          : "badge-red";
+  const tone = atsHealthTone(score);
+  /* 优势高光：issues 里无（无问题）则展示 skills；改进建议取 issues / suggestions
+   * 前 3 条（优先 issues，缺省回退 suggestions）。 */
+  const highlights = issues.length ? [] : skills;
+  const improvements = (issues.length ? issues : suggestions).slice(0, 3);
+  return `
+    <div class="ats-health ats-health--${tone}" data-ats-health>
+      <div class="ats-health__score"><span class="ats-health__value" data-ats-score>${score ?? "—"}</span><span class="ats-health__unit">/100</span></div>
+      <div class="ats-health__level"><span class="badge ${levelClass}" data-ats-level>${esc(level)}</span><span class="small muted">ATS 健康度</span></div>
+      ${highlights.length ? `
+      <div class="ats-health__section" data-ats-highlights>
+        <h4>优势高光</h4>
+        <div class="chips">${highlights.slice(0, 4).map((item) => `<span class="chip">${esc(item)}</span>`).join("")}</div>
+      </div>` : ""}
+      ${improvements.length ? `
+      <div class="ats-health__section" data-ats-improvements>
+        <h4>改进建议</h4>
+        <ul class="ats-health__list">${improvements.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>
+      </div>` : ""}
+    </div>`;
+}
+
+/** 相邻版本变更摘要：取 lineDiff 前 2 行（+/- 前缀）；无差异 →「内容更新」；
+ *  无前版 → 以 add 行占位（"+ 初始版本"，与其它新增行前缀一致）。
+ *  超过 60 字符截断。返回原始文本，转义发生在渲染处。 */
+export function versionChangeSummary(previous, version) {
+  const rows = previous
+    ? lineDiff(previous.content, version.content).slice(0, 2)
+    : [{ type: "add", text: "初始版本" }];
+  if (!rows.length) return "内容更新";
+  const text = rows
+    .map((row) => `${row.type === "add" ? "+" : "-"} ${String(row.text).trim()}`)
+    .join("；");
+  return text.length > 60 ? `${text.slice(0, 60)}…` : text;
+}
+
+/** 版本时间线（竖线）：每条 vN + 创建时间 + 变更摘要 + 当前标记；非当前版本
+ *  提供「预览」（data-action=preview-version）与「回滚」（rollback-resume）。
+ *  resumeId 用于回滚按钮的 data-id。 */
+export function versionTimelineHtml(versions, currentVersion, resumeId = "") {
+  const list = Array.isArray(versions) ? versions : [];
+  if (!list.length) {
+    return `<div class="version-timeline" data-version-timeline><div class="muted small">暂无版本</div></div>`;
+  }
+  const items = list
+    .map((version, index) => {
+      const current = Number(version.version) === Number(currentVersion);
+      const summary = versionChangeSummary(list[index - 1], version);
+      return `
+    <div class="version-timeline-item${current ? " is-current" : ""}" data-version-item data-version="${esc(version.version)}">
+      <div class="version-timeline__dot" aria-hidden="true"></div>
+      <div class="version-timeline__body">
+        <div class="version-timeline__head">
+          <span class="version-timeline__no">v${esc(version.version)}</span>
+          ${current ? '<span class="badge badge-green" data-version-current>当前</span>' : ""}
+          <span class="small muted">${formatDate(version.created_at)}</span>
+        </div>
+        <div class="version-timeline__summary" data-version-summary>${esc(summary)}</div>
+        ${current ? "" : `
+        <div class="version-timeline__actions">
+          <button type="button" class="btn btn-outline btn-sm" data-action="preview-version" data-version="${esc(version.version)}">预览</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="rollback-resume" data-id="${esc(resumeId)}" data-version="${esc(version.version)}">回滚</button>
+        </div>`}
+      </div>
+    </div>`;
+    })
+    .join("");
+  return `<div class="version-timeline" data-version-timeline>${items}</div>`;
 }
 
