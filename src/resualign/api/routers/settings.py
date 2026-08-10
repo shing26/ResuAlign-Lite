@@ -1,4 +1,5 @@
 
+import time
 from typing import Any
 
 import httpx
@@ -27,11 +28,26 @@ def _stored_llm_snapshot() -> dict[str, Any]:
     multi-tenant mode the process-global pipeline config cannot be attributed
     to one tenant, so the stored layer is skipped (provider/model hot-swap
     via ``set_runtime_llm`` still works there).
+
+    The active ``llm_nodes`` entry wins over the legacy single-node ``llm``
+    settings field; the legacy field remains the fallback while the tenant
+    has no nodes. The callback is re-invoked per ``build_config()`` call, so
+    activating a different node hot-reloads the pipeline config.
     """
     store = getattr(api_module, "_settings_store", None)
     if store is None or not getattr(api_module, "_PERSONAL_MODE", False):
         return {}
     try:
+        nodes = getattr(api_module, "_llm_nodes", None)
+        if nodes is not None:
+            node = nodes.get_active_node("local")
+            if node is not None:
+                return {
+                    "provider": node.get("provider"),
+                    "model": node.get("model"),
+                    "api_key": node.get("api_key"),
+                    "base_url": node.get("base_url"),
+                }
         llm = store.get_settings("local").get("llm") or {}
     except Exception:
         return {}
@@ -179,48 +195,49 @@ def settings_status(user: dict[str, Any] = Depends(get_current_user)):
     }
 
 
-@router.post('/api/settings/test-connection')
-def test_llm_connection(
-    req: SettingsTestConnectionRequest,
-    user: dict[str, Any] = Depends(get_current_user),
-):
-    """Probe the LLM provider with a minimal one-token chat request.
+def probe_llm_connection(
+    *,
+    provider: str,
+    api_key: str | None,
+    model: str,
+    base_url: str | None,
+    timeout: float = _TEST_CONNECT_TIMEOUT,
+) -> dict[str, Any]:
+    """Probe an LLM provider with a minimal one-token chat request.
 
-    Resolution matches the real pipeline: submitted form values > persisted
-    store > .env / env vars. Returns ``{ok, message}`` with a readable
-    failure reason (auth, model missing, timeout, network).
+    Shared by ``/api/settings/test-connection`` (current effective config)
+    and ``/api/llm/nodes/{id}/test`` (a specific node). Returns
+    ``{ok, status, latency_ms, message}`` with a readable failure reason
+    (auth, model missing, timeout, network).
     """
-    config = api_module.build_config(
-        provider=req.provider,
-        api_key=req.api_key,
-        model=req.model,
-        base_url=req.base_url,
-    )
-    if not config.api_key and config.provider != "ollama":
+    if not api_key and provider != "ollama":
         return {
             "ok": False,
+            "status": "missing_key",
+            "latency_ms": None,
             "message": (
                 "尚未配置 API Key：请先在表单中填写并保存，或通过 .env 配置。"
             ),
         }
     headers: dict[str, str] = {}
-    if config.api_key:
-        headers["Authorization"] = f"Bearer {config.api_key}"
-    base_url = (
-        config.base_url
-        or _DEFAULT_PROVIDER_URLS.get(config.provider, "https://api.openai.com/v1")
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    base = (
+        base_url
+        or _DEFAULT_PROVIDER_URLS.get(provider, "https://api.openai.com/v1")
     )
     payload = {
-        "model": config.model,
+        "model": model,
         "messages": [{"role": "user", "content": "ping"}],
         "max_tokens": 1,
     }
+    start = time.monotonic()
     try:
         response = httpx.post(
-            f"{base_url.rstrip('/')}/chat/completions",
+            f"{base.rstrip('/')}/chat/completions",
             headers=headers,
             json=payload,
-            timeout=_TEST_CONNECT_TIMEOUT,
+            timeout=timeout,
         )
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
@@ -235,18 +252,60 @@ def test_llm_connection(
         message = readable.get(
             status, f"服务返回错误（HTTP {status}）：{_http_error_detail(exc)}"
         )
-        return {"ok": False, "message": message}
+        return {
+            "ok": False,
+            "status": f"http_{status}",
+            "latency_ms": (time.monotonic() - start) * 1000,
+            "message": message,
+        }
     except httpx.TimeoutException:
         return {
             "ok": False,
+            "status": "timeout",
+            "latency_ms": (time.monotonic() - start) * 1000,
             "message": (
-                f"连接超时（{int(_TEST_CONNECT_TIMEOUT)} 秒）："
+                f"连接超时（{int(timeout)} 秒）："
                 "请检查网络、Base URL 或服务可用性"
             ),
         }
     except httpx.HTTPError as exc:
-        return {"ok": False, "message": f"网络错误：{exc}"}
-    return {"ok": True, "message": f"连接成功：{config.provider} · {config.model}"}
+        return {
+            "ok": False,
+            "status": "network_error",
+            "latency_ms": (time.monotonic() - start) * 1000,
+            "message": f"网络错误：{exc}",
+        }
+    return {
+        "ok": True,
+        "status": "ok",
+        "latency_ms": (time.monotonic() - start) * 1000,
+        "message": f"连接成功：{provider} · {model}",
+    }
+
+
+@router.post('/api/settings/test-connection')
+def test_llm_connection(
+    req: SettingsTestConnectionRequest,
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Probe the current effective LLM config with a minimal chat request.
+
+    Resolution matches the real pipeline: submitted form values > persisted
+    store > .env / env vars. Returns ``{ok, status, latency_ms, message}``
+    with a readable failure reason (auth, model missing, timeout, network).
+    """
+    config = api_module.build_config(
+        provider=req.provider,
+        api_key=req.api_key,
+        model=req.model,
+        base_url=req.base_url,
+    )
+    return probe_llm_connection(
+        provider=config.provider,
+        api_key=config.api_key,
+        model=config.model,
+        base_url=config.base_url,
+    )
 
 
 @router.post('/api/settings/reset')

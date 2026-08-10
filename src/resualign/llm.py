@@ -121,11 +121,12 @@ class OpenAIClient(LLMClient):
     DEFAULT_MAX_TOKENS: ClassVar[int] = 16384
     DEFAULT_MAX_RETRIES: ClassVar[int] = 2
     # Per-request read timeout. Tailoring is a high-throughput structured
-    # task on standard instruction models (e.g. deepseek-chat): 60s bounds
-    # worst-case hangs (3 attempts x 60s = 180s) instead of the old
-    # 3 x 180s = 9min. Connect uses a short 10s window so unreachable
-    # hosts fail fast rather than blocking the pool.
-    DEFAULT_TIMEOUT: ClassVar[float] = 60.0
+    # task on standard instruction models (e.g. deepseek-chat). Sprint 5
+    # tuned this down from 60s to 40s so a stuck provider bounds worst-case
+    # hangs at 3 attempts x 40s = 120s instead of the old 3 x 60s = 180s.
+    # Connect uses a short 10s window so unreachable hosts fail fast
+    # rather than blocking the pool.
+    DEFAULT_TIMEOUT: ClassVar[float] = 40.0
     DEFAULT_CONNECT_TIMEOUT: ClassVar[float] = 10.0
     DEFAULT_TEMPERATURE: ClassVar[float] = 0.1
 

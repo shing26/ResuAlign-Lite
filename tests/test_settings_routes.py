@@ -12,6 +12,7 @@ import resualign.config as config_module
 from resualign.api import app
 from resualign.api.routers.settings import mask_api_key
 from resualign.jobs import JobRegistry
+from resualign.llm_nodes import LLMNodeStore
 from resualign.models import ResuAlignConfig
 from resualign.settings_store import SettingsStore, default_settings
 from resualign.workspace import (
@@ -46,6 +47,7 @@ def temp_settings_stores(tmp_path):
         "payloads": api_module._payloads,
         "import_batches": getattr(api_module, "_import_batches", {}),
         "settings": getattr(api_module, "_settings_store", None),
+        "llm_nodes": getattr(api_module, "_llm_nodes", None),
         "runtime_llm": dict(config_module.RUNTIME_LLM_OVERRIDE),
     }
     db_path = tmp_path / "settings.db"
@@ -55,6 +57,7 @@ def temp_settings_stores(tmp_path):
     api_module._applications = ApplicationStore(db_path=db_path)
     api_module._jobs = JobLibraryStore(db_path=db_path)
     api_module._settings_store = SettingsStore(db_path=db_path)
+    api_module._llm_nodes = LLMNodeStore(db_path=db_path)
     api_module._PERSONAL_MODE = False
     api_module._payloads = {}
     api_module._import_batches = {}
@@ -76,6 +79,7 @@ def temp_settings_stores(tmp_path):
     api_module._payloads = saved["payloads"]
     api_module._import_batches = saved["import_batches"]
     api_module._settings_store = saved["settings"]
+    api_module._llm_nodes = saved["llm_nodes"]
     config_module.RUNTIME_LLM_OVERRIDE.update(saved["runtime_llm"])
     for limiter in (
         api_module._auth_rate_limiter,

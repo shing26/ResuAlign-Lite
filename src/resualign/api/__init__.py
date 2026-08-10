@@ -477,6 +477,9 @@ from .routers import (
     kanban as _kanban_router,
 )
 from .routers import (
+    nodes as _nodes_router,
+)
+from .routers import (
     resumes as _resumes_router,
 )
 from .routers import (
@@ -543,6 +546,12 @@ list_automation_rules = _rules_router.list_automation_rules
 create_automation_rule = _rules_router.create_automation_rule
 update_automation_rule = _rules_router.update_automation_rule
 delete_automation_rule = _rules_router.delete_automation_rule
+list_llm_nodes = _nodes_router.list_llm_nodes
+create_llm_node = _nodes_router.create_llm_node
+update_llm_node = _nodes_router.update_llm_node
+delete_llm_node = _nodes_router.delete_llm_node
+activate_llm_node = _nodes_router.activate_llm_node
+test_llm_node = _nodes_router.test_llm_node
 list_blockers = _blockers_router.list_blockers
 ignore_blocker = _blockers_router.ignore_blocker
 resolve_blocker = _blockers_router.resolve_blocker

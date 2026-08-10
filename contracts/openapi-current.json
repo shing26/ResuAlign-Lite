@@ -2418,7 +2418,7 @@
     "/api/settings/test-connection": {
       "post": {
         "summary": "Test Llm Connection",
-        "description": "Probe the LLM provider with a minimal one-token chat request.\n\nResolution matches the real pipeline: submitted form values > persisted\nstore > .env / env vars. Returns ``{ok, message}`` with a readable\nfailure reason (auth, model missing, timeout, network).",
+        "description": "Probe the current effective LLM config with a minimal chat request.\n\nResolution matches the real pipeline: submitted form values > persisted\nstore > .env / env vars. Returns ``{ok, status, latency_ms, message}``\nwith a readable failure reason (auth, model missing, timeout, network).",
         "operationId": "test_llm_connection_api_settings_test_connection_post",
         "parameters": [
           {
@@ -2470,6 +2470,292 @@
         "description": "Restore the built-in weights, vocabulary, and salary reference.",
         "operationId": "reset_settings_api_settings_reset_post",
         "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/llm/nodes": {
+      "get": {
+        "summary": "List Llm Nodes",
+        "description": "List the tenant's LLM nodes (api_key masked).\n\nSeeds a default node from .env / env vars on the very first access when\nthe tenant has no nodes yet.",
+        "operationId": "list_llm_nodes_api_llm_nodes_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Llm Node",
+        "description": "Register a new LLM node. The first node becomes the active one.",
+        "operationId": "create_llm_node_api_llm_nodes_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMNodeCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/llm/nodes/{node_id}": {
+      "put": {
+        "summary": "Update Llm Node",
+        "description": "Partially update a node; any editable field may be changed.",
+        "operationId": "update_llm_node_api_llm_nodes__node_id__put",
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMNodeUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Llm Node",
+        "description": "Delete a node.\n\nDeleting the active node promotes the oldest remaining node to active\n(when any node remains).",
+        "operationId": "delete_llm_node_api_llm_nodes__node_id__delete",
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/llm/nodes/{node_id}/activate": {
+      "post": {
+        "summary": "Activate Llm Node",
+        "description": "Activate a node; all other nodes of the tenant become inactive.",
+        "operationId": "activate_llm_node_api_llm_nodes__node_id__activate_post",
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/llm/nodes/{node_id}/test": {
+      "post": {
+        "summary": "Test Llm Node",
+        "description": "Probe the node's provider with a minimal one-token chat request.\n\nReturns ``{ok, status, latency_ms, message}`` with a readable failure\nreason (auth, model missing, timeout, network).",
+        "operationId": "test_llm_node_api_llm_nodes__node_id__test_post",
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
           {
             "name": "authorization",
             "in": "header",
@@ -4123,6 +4409,143 @@
           "job_id"
         ],
         "title": "KanbanBulkStatusResultItem"
+      },
+      "LLMNodeCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Name"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "deepseek",
+              "openrouter",
+              "ollama"
+            ],
+            "title": "Provider"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "provider",
+          "model"
+        ],
+        "title": "LLMNodeCreateRequest",
+        "description": "Register a new LLM provider node for the tenant.\n\nThe first node of a tenant becomes the active node automatically; later\nnodes stay inactive until explicitly activated."
+      },
+      "LLMNodeUpdateRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "deepseek",
+                  "openrouter",
+                  "ollama"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "title": "LLMNodeUpdateRequest",
+        "description": "Partially update a node; omitted fields keep their stored value.\n\n``is_active=True`` switches the tenant's active node (all others are\ndeactivated); explicit ``null`` clears a string field."
       },
       "LLMSettingsUpdate": {
         "properties": {

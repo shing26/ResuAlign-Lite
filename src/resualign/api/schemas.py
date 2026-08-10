@@ -131,6 +131,35 @@ class SettingsTestConnectionRequest(BaseModel):
     base_url: str | None = Field(default=None, max_length=_URL_MAX)
 
 
+class LLMNodeCreateRequest(BaseModel):
+    """Register a new LLM provider node for the tenant.
+
+    The first node of a tenant becomes the active node automatically; later
+    nodes stay inactive until explicitly activated.
+    """
+
+    name: str = Field(max_length=_TITLE_MAX)
+    provider: Literal["deepseek", "openrouter", "ollama"]
+    base_url: str | None = Field(default=None, max_length=_URL_MAX)
+    api_key: str | None = Field(default=None, max_length=_LLM_KEY_MAX)
+    model: str = Field(max_length=_TITLE_MAX)
+
+
+class LLMNodeUpdateRequest(BaseModel):
+    """Partially update a node; omitted fields keep their stored value.
+
+    ``is_active=True`` switches the tenant's active node (all others are
+    deactivated); explicit ``null`` clears a string field.
+    """
+
+    name: str | None = Field(default=None, max_length=_TITLE_MAX)
+    provider: Literal["deepseek", "openrouter", "ollama"] | None = None
+    base_url: str | None = Field(default=None, max_length=_URL_MAX)
+    api_key: str | None = Field(default=None, max_length=_LLM_KEY_MAX)
+    model: str | None = Field(default=None, max_length=_TITLE_MAX)
+    is_active: bool | None = None
+
+
 class SettingsUpdateRequest(BaseModel):
     salary_reference: list[dict[str, Any]] | None = None
     appraisal_weights: dict[str, float] | None = None

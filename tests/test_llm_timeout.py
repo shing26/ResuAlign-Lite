@@ -295,12 +295,12 @@ def test_diagnosis_job_timeout_error_message_is_user_readable():
 
 def test_timeout_defaults_bound_request_hangs():
     """LLM request timeouts must be tight enough that a stuck provider
-    cannot hang the frontend for minutes: 60s read (x3 attempts = 180s
-    worst case) and a short 10s connect window."""
-    assert OpenAIClient.DEFAULT_TIMEOUT == 60.0
+    cannot hang the frontend for minutes: 40s read (x3 attempts = 120s
+    worst case, tuned down in Sprint 5) and a short 10s connect window."""
+    assert OpenAIClient.DEFAULT_TIMEOUT == 40.0
     assert OpenAIClient.DEFAULT_CONNECT_TIMEOUT == 10.0
     client = OpenAIClient(_config())
     timeout = client._client.timeout
     assert timeout.connect == 10.0
-    assert timeout.read == 60.0
+    assert timeout.read == 40.0
     client.close()
