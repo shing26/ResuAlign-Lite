@@ -28,6 +28,7 @@ import {
   diffList,
   exportDock,
   formatElapsed,
+  highlightSkillGapHtml,
   jdProfileSummary,
   jobCompletenessBadge,
   matchBadgeInfo,
@@ -58,6 +59,29 @@ let canvasRenderHooks = [];
    (terminal status, expired job, or poll terminal), late replayed SSE
    events must not flip the session back to a phantom "running" state. */
 let alignmentReconciled = false;
+
+/* Sprint 2 Live Sheet: last draft rendered into [data-live-sheet-pane].
+   Used to compute an incremental patch (liveSheetPatch) so accepting a
+   bullet updates only the changed lines instead of re-rendering the pane.
+   Contract with format.js (agent B, already landed):
+   - renderLiveSheetHtml(draft) -> full innerHTML for [data-live-sheet-pane]
+     (head + a <div class="live-sheet__paper" data-live-sheet-paper> container;
+     non-empty draft renders markdown via renderMarkdown).
+   - liveSheetPatch(prevDraft, newDraft) -> { html, rows, addedLines }:
+       * rows       —— [{ index, text, added }] non-empty lines by index;
+       * addedLines —— Set<number> line indices added vs prevDraft;
+       * html       —— full line-row rendering (live-sheet-line--added marks
+                       added lines), ready to replace [data-live-sheet-paper].
+     Applied by applyLiveSheetPatch: align existing [data-live-line] rows by
+     index (add missing / drop removed / update changed text only) when the
+     paper already uses the line-row structure, else replace with patch.html;
+     added lines get a flash highlight + scroll into view. */
+let liveSheetPrevDraft = null;
+let liveSheetApiPromise = null;
+/* Sprint 2 T3: skill deep-link (#/workspace/<id>?skill=X) pending focus.
+   Kept until the gap list actually contains a matching item (the gap may
+   arrive via SSE after the first paint). */
+let pendingSkillFocus = null;
 
 /* Render hooks let main.js attach extras (batch panel, etc.) after a
    canvas view is painted. Kept as a list so future views can register
@@ -90,6 +114,10 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
     granularity: $("[data-form='split-align'] [name='granularity']")?.value,
     focus: $("[data-form='split-align'] [name='prompt_focus']")?.value,
   };
+  const liveSheetDraft =
+    (state.wbFinalDraft && state.wbFinalDraft.draft) ||
+    (session && session.alignment && session.alignment.draft) ||
+    null;
   app.innerHTML = `
     <div class="split-canvas" data-surface-mode="optimizer">
       <div class="page-header page-header--workspace">
@@ -113,8 +141,11 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
         <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="diff" aria-selected="${state.wbMobilePane === "diff"}">结果</button>
         <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="appraisal" aria-selected="${state.wbMobilePane === "appraisal"}">评估</button>
       </div>
-      <div class="split-layout">
-        <section class="split-pane split-pane--jd ${state.wbMobilePane === "controls" ? "is-active" : ""}" data-wb-pane="controls" data-jd-canvas>
+      <!-- Sprint 2 三栏 Workbench：22% Inspector / 48% Visual Diff / 30% Live Sheet。
+           列宽由 styles.css 的 .split-layout grid-template-columns 控制（B），
+           本模板只声明 data-* 结构标记。移动端（<=900px）单列堆叠由 B 的媒体查询处理。 -->
+      <div class="split-layout" data-split-layout>
+        <section class="split-pane split-pane--jd ${state.wbMobilePane === "controls" ? "is-active" : ""}" data-wb-pane="controls" data-inspector-pane data-jd-canvas>
           <div class="split-pane__head">
             <div>
               <div class="split-section-title">JD 智能解析</div>
@@ -135,15 +166,18 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
             <div class="split-bento__cell">${renderSkills(profile)}</div>
             <div class="split-bento__cell">
               <div class="split-section-title">岗位差距</div>
-              ${renderGap(gap.gap_report || gap)}
+              ${pendingSkillFocus ? (highlightSkillGapHtml(gap.gap_report || gap, pendingSkillFocus) || "") : (renderGap(gap.gap_report || gap) || "")}
             </div>
           </div>
           <details class="raw-jd-details" data-raw-jd>
             <summary class="small">查看原始 JD</summary>
             <div class="pre raw-jd">${esc(job.jd_text || "")}</div>
           </details>
+          <div class="inspector-controls" data-inspector-controls>
+            ${alignmentControls(session, resumes, jobId)}
+          </div>
         </section>
-        <section class="split-pane split-pane--resume ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-resume-canvas>
+        <section class="split-pane split-pane--resume split-pane--diff ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>
           <div class="split-pane__head">
             <div>
               <div class="split-section-title">简历对齐画布</div>
@@ -151,11 +185,19 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
             </div>
             ${((session && session.alignment && session.alignment.diffs) || []).length ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-live-compare">并排对比</button>` : ""}
           </div>
-          ${alignmentControls(session, resumes, jobId)}
           ${exportDock(jobId, session)}
           <div class="panel panel-card panel--success final-draft-panel" data-final-draft-panel hidden></div>
           <div class="split-pane__match">${score != null ? radarHtml(score) : `<div class="small muted" style="padding:10px 0">运行预分析后生成匹配雷达。</div>`}</div>
           <div class="split-diff-area">${diffList(session, jobId)}</div>
+        </section>
+        <section class="split-pane split-pane--livesheet" data-live-sheet-pane>
+          <div class="split-pane__head">
+            <div>
+              <div class="split-section-title">实时定稿预览</div>
+              <div class="small muted">采纳建议后，此处实时增量更新</div>
+            </div>
+          </div>
+          <div class="live-sheet__paper" data-live-sheet-paper></div>
         </section>
       </div>
       <details class="panel panel-card panel--info appraisal-panel split-appraisal ${state.wbMobilePane === "appraisal" ? "is-active" : ""}" data-wb-pane="appraisal" data-appraisal-panel open>
@@ -183,6 +225,228 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
     if (previous.focus && focus) focus.value = previous.focus;
   }
   renderCanvasExtras();
+  /* Sprint 2 T2: 每次画布重绘都同步 Live Sheet（SSE job.result / poll 终态 /
+   * 采纳后整画布刷新都会走到这里）。增量 patch 只发生在已填充的 live pane
+   * 上（见 syncLiveSheetDraft）；全新画布的 body 为空，这里做整栏填充。 */
+  mountLiveSheet(app, liveSheetDraft);
+}
+
+/* ------------------------------------------------------------------ */
+/* Sprint 2 Live Sheet（实时定稿预览右栏）                              */
+/* ------------------------------------------------------------------ */
+
+/* B 契约的懒加载：format.js 由并行 agent B 提供 renderLiveSheetHtml /
+ * liveSheetPatch；未合入时用本地 fallback（纯 pre 预览），保证功能可用。
+ * 用动态 import 而非静态 import，避免在 B 合入前 imports-check 报缺失导出。 */
+function loadLiveSheetApi() {
+  if (!liveSheetApiPromise) {
+    liveSheetApiPromise = import("./format.js")
+      .then((mod) => ({
+        renderLiveSheetHtml:
+          typeof mod.renderLiveSheetHtml === "function"
+            ? mod.renderLiveSheetHtml
+            : fallbackLiveSheetHtml,
+        liveSheetPatch:
+          typeof mod.liveSheetPatch === "function" ? mod.liveSheetPatch : null,
+      }))
+      .catch(() => ({
+        renderLiveSheetHtml: fallbackLiveSheetHtml,
+        liveSheetPatch: null,
+      }));
+  }
+  return liveSheetApiPromise;
+}
+
+/* 兜底渲染（B 未提供 renderLiveSheetHtml 时）：与契约同构——pane 头部 +
+ * [data-live-sheet-paper] 容器，保证 applyLiveSheetPatch 能定位 paper。 */
+function fallbackLiveSheetHtml(draft) {
+  if (!draft) {
+    return `
+      <div class="split-pane__head">
+        <div>
+          <div class="split-section-title">实时定稿预览</div>
+          <div class="small muted">采纳建议后，此处实时增量更新</div>
+        </div>
+      </div>
+      <div class="live-sheet__paper" data-live-sheet-paper>
+        <div class="muted small">暂无定稿。运行对齐并采纳建议后，将实时预览最终简历。</div>
+      </div>`;
+  }
+  return `
+    <div class="split-pane__head">
+      <div>
+        <div class="split-section-title">实时定稿预览</div>
+        <div class="small muted">采纳建议后，此处实时增量更新</div>
+      </div>
+    </div>
+    <div class="live-sheet__paper" data-live-sheet-paper>
+      <div class="pre draft-preview">${esc(draft)}</div>
+    </div>`;
+}
+
+/* 把画布重绘后的空 live pane 填上内容。fresh paper（无行节点）→ 整栏填充；
+ * 已填充的 live pane 走 syncLiveSheetDraft 的增量路径。 */
+async function mountLiveSheet(app, nextDraft) {
+  const pane = $("[data-live-sheet-pane]", app);
+  if (!pane) return;
+  const api = await loadLiveSheetApi();
+  pane.innerHTML = api.renderLiveSheetHtml(nextDraft);
+  liveSheetPrevDraft = nextDraft;
+}
+
+/* main.js 采纳/应用采纳后调用：对已填充的 [data-live-sheet-pane] 做 DOM
+ * 增量更新（按 data-live-line 对齐行、只 patch 变化行 + 高亮新增行），
+ * 不整栏重渲染。prevDraft 为 null、draft 未变化或 patch API 缺失时回退为
+ * 整栏填充。B 的 liveSheetPatch 返回 { html, rows, addedLines }（见
+ * applyLiveSheetPatch）。 */
+export async function syncLiveSheetDraft(newDraft, prevDraft) {
+  const pane = $("[data-live-sheet-pane]");
+  if (!pane) return false;
+  /* 未变化：不动 DOM（含首次两者都为 null 的空草稿态）。 */
+  if (prevDraft === newDraft) return true;
+  const api = await loadLiveSheetApi();
+  if (prevDraft !== null && api.liveSheetPatch) {
+    const patch = api.liveSheetPatch(prevDraft, newDraft);
+    if (patch && applyLiveSheetPatch(pane, patch)) {
+      liveSheetPrevDraft = newDraft;
+      return true;
+    }
+  }
+  pane.innerHTML = api.renderLiveSheetHtml(newDraft);
+  liveSheetPrevDraft = newDraft;
+  return true;
+}
+
+/* 当前已渲染的 Live Sheet 草稿（采纳流程用它记录 prevDraft）。 */
+export function getLiveSheetDraft() {
+  return liveSheetPrevDraft;
+}
+
+/* 应用 B 的 liveSheetPatch 增量结果 { html, rows, addedLines }：
+ * - rows —— [{ index, text, added }]，非空行按 index 排序；
+ * - addedLines —— Set<number>，相对 prevDraft 新增的行序号；
+ * - html —— 完整行渲染（含 live-sheet-line--added 高亮），可直接替换
+ *   [data-live-sheet-paper] 的 innerHTML（B 契约推荐做法）。
+ * 策略：paper 已是行结构（data-live-line）时按 rows 序号对齐增量更新
+ * （缺的追加、多的移除、文本变化只改该行）；否则（renderLiveSheetHtml
+ * 输出的是 markdown 元素）用 html 替换 paper。最后对 added 行加 flash
+ * 高亮并滚动到可视区。 */
+function applyLiveSheetPatch(pane, patch) {
+  const paper = pane.querySelector("[data-live-sheet-paper]");
+  if (!paper || !patch) return false;
+  const rows = Array.isArray(patch.rows) ? patch.rows : null;
+  const html = typeof patch.html === "string" ? patch.html : "";
+  const added =
+    patch.addedLines instanceof Set ? patch.addedLines : new Set();
+  const hasLineRows = paper.querySelector("[data-live-line]") != null;
+  if (rows && hasLineRows) {
+    const byIndex = new Map(rows.map((row) => [row.index, row]));
+    const existing = new Map();
+    paper.querySelectorAll("[data-live-line]").forEach((el) => {
+      existing.set(Number(el.dataset.liveLine), el);
+    });
+    /* 移除已不存在的行 */
+    for (const [index, el] of existing) {
+      if (!byIndex.has(index)) el.remove();
+    }
+    /* 倒序 upsert：确保新行按 index 顺序插入正确位置 */
+    let anchor = null;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i];
+      let el = existing.get(row.index);
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "live-sheet-line";
+        el.setAttribute("data-live-line", String(row.index));
+        paper.insertBefore(el, anchor);
+      } else if (el.textContent !== row.text) {
+        el.textContent = row.text;
+      }
+      el.classList.toggle("live-sheet-line--added", Boolean(row.added));
+      anchor = el;
+    }
+  } else if (html) {
+    paper.innerHTML = html;
+  } else {
+    return false;
+  }
+  flashLiveSheetLines(paper);
+  if (added.size) {
+    const firstAdded = Math.min(...added);
+    const el = paper.querySelector(`[data-live-line="${firstAdded}"]`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  return true;
+}
+
+/* 新增/变化行加短暂 flash 高亮（3s 后移除；持久高亮 live-sheet-line--added
+ * 由 B 在 styles.css 提供）。 */
+function flashLiveSheetLines(paper) {
+  if (!paper) return;
+  paper.querySelectorAll(".live-sheet-line--added").forEach((el) => {
+    el.classList.add("live-sheet-line--flash");
+  });
+  window.setTimeout(() => {
+    paper.querySelectorAll(".live-sheet-line--flash").forEach((el) =>
+      el.classList.remove("live-sheet-line--flash"),
+    );
+  }, 3000);
+}
+
+/* ------------------------------------------------------------------ */
+/* Sprint 2 T3: ?skill= 深链 → Inspector 差距区高亮定位                  */
+/* ------------------------------------------------------------------ */
+
+/* 解析 #/workspace/<jobId>?skill=X 的 skill 参数（本地解析，不依赖
+ * format.js 的 parseHashValue 是否扩展——参考 state.route.resumeId 的
+ * 解析方式，但 skill 由本模块直接读取 location.hash）。 */
+function parseSkillFromHash(hash) {
+  const value = String(hash || "").replace(/^#\/?/, "");
+  const [, queryPart] = value.split("?");
+  const query = new URLSearchParams(queryPart || "");
+  return query.get("skill") || null;
+}
+
+/* 在 Inspector 的差距区定位含该技能的缺口项：模板渲染时已通过 B 的
+ * highlightSkillGapHtml 打了 data-match-skill / is-skill-match 标记（当
+ * pendingSkillFocus 存在时）；此处做 scrollIntoView + 短暂 flash，并兜底
+ * 直接扫 .gap-tag 补标记（幂等）。未命中（gap 尚未就绪）时保持 pending，
+ * 随画布重绘重试（renderCanvasExtras）。 */
+function tryFocusSkill() {
+  if (!pendingSkillFocus) return;
+  const skill = pendingSkillFocus;
+  const pane = $("[data-inspector-pane]");
+  if (!pane) return;
+  let matched = pane.querySelector("[data-match-skill]") != null;
+  if (!matched) {
+    const skillLower = skill.toLowerCase();
+    pane.querySelectorAll(".gap-tag").forEach((node) => {
+      const text = String(node.textContent || "").trim().toLowerCase();
+      if (text === skillLower || text.includes(skillLower)) {
+        node.setAttribute("data-match-skill", skill);
+        node.classList.add("is-skill-match");
+        matched = true;
+      }
+    });
+  }
+  if (!matched) return;
+  const first = pane.querySelector("[data-match-skill]");
+  if (first) {
+    first.scrollIntoView({ behavior: "smooth", block: "center" });
+    first.classList.add("is-skill-flash");
+    /* B 的 styles.css 会为 [data-match-skill] / .is-skill-match 提供持久样式；
+     * 这里再加一次短暂内联高亮，保证 B 未合入时冒烟也能肉眼可见。 */
+    const prevOutline = first.style.outline;
+    const prevBackground = first.style.backgroundColor;
+    first.style.outline = "2px solid #f59e0b";
+    first.style.backgroundColor = "rgba(245, 158, 11, 0.18)";
+    window.setTimeout(() => {
+      first.classList.remove("is-skill-flash");
+      first.style.outline = prevOutline;
+      first.style.backgroundColor = prevBackground;
+    }, 4000);
+  }
+  pendingSkillFocus = null;
 }
 
 /* Re-render the cached appraisal body and the final-draft panel after
@@ -194,6 +458,8 @@ function renderCanvasExtras() {
   renderFinalDraftPanel(app);
   const appraisalPanel = $("[data-appraisal-panel]", app);
   if (appraisalPanel && activeJobId) renderAppraisalSync(appraisalPanel, activeJobId);
+  /* T3: 每次画布重绘都尝试 ?skill= 深链定位；gap 未就绪时保持 pending。 */
+  tryFocusSkill();
 }
 
 /* 定稿面板（与遗留 renderWorkspaceView 的 renderFinalDraftPanel 同构）。
@@ -230,6 +496,9 @@ function renderFinalDraftPanel(app) {
 
 export async function renderOptimizerCanvas(app, jobId) {
   stopOptimizerStreams();
+  /* T3: 解析 #/workspace/<jobId>?skill=X 深链；renderSplitCanvas 重绘后由
+   * tryFocusSkill 在 Inspector 差距区高亮定位。 */
+  pendingSkillFocus = parseSkillFromHash(window.location.hash);
   autoAnalyzedJd = false;
   workbenchJobs = await api("/api/jobs?limit=200");
   if (!jobId) {
@@ -570,6 +839,8 @@ function stopOptimizerStreams() {
   activeSessionUrl = null;
   activeJobId = null;
   autoAnalyzedJd = false;
+  pendingSkillFocus = null;
+  liveSheetPrevDraft = null;
 }
 
 async function resumeAlignmentProgress() {

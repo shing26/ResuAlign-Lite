@@ -1131,14 +1131,16 @@ select {
 
 /* 红删绿增对比度微调：del 保持删除线，ins 加下划线强调插入；
  * 均使用现有语义 token，明暗主题自动适配。 */
+/* Sprint 2: 字符级红删绿增 —— 12% 低饱和 tint 强化
+   （保留加粗/删除线/下划线，现有 token + color-mix 明暗主题自适应） */
 .diff-char-del {
-  background: var(--error-soft);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
   color: var(--error-deep);
   text-decoration: line-through;
 }
 
 .diff-char-ins {
-  background: var(--success-soft);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
   color: var(--success-deep);
   text-decoration: underline;
   text-decoration-thickness: 1px;
@@ -4311,8 +4313,10 @@ body.command-palette-open {
 
 .split-layout {
   display: grid;
-  grid-template-columns: minmax(340px, 35%) minmax(0, 65%);
-  gap: 16px;
+  /* Sprint 2: 三栏工作台 22% / 48% / 30%，宽屏锁比例（不随内容拉伸）；
+     inspector 22% · diff 48% · live-sheet 30%，≤900px 单列堆叠见下方 media。 */
+  grid-template-columns: 22% 48% 30%;
+  gap: 12px;
   align-items: start;
   margin-top: 16px;
 }
@@ -4806,21 +4810,25 @@ body.command-palette-open {
   background: var(--surface-tint);
 }
 
+/* Sprint 2: 红绿对比框 —— 8% 低饱和度 tint
+   （color-mix(in srgb, 语义色 8%, transparent) 明暗主题均可自动取色） */
 .diff-card__col--original {
+  background: color-mix(in srgb, var(--error) 8%, transparent);
   border: 1px solid var(--border-soft);
 }
 
 .diff-card__col--proposed {
-  background: var(--surface-success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
   border: 1px solid rgba(22, 163, 74, 0.2);
 }
 
 .diff-card__text {
+  /* Sprint 2: 基准字号 13px + 行距 1.5（diff 文本区） */
   font-size: var(--text-13);
   color: var(--ink-2);
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.55;
+  line-height: 1.5;
 }
 
 .diff-card__reason {
@@ -4929,23 +4937,25 @@ body.command-palette-open {
 }
 
 @media (max-width: 1100px) {
-  .split-layout {
-    grid-template-columns: minmax(280px, 36%) minmax(0, 64%);
-  }
-
+  /* Sprint 2: 三栏 22/48/30 在 901-1100px 保持锁比例，仅压缩卡片内部列 */
   .diff-card__columns {
     grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 860px) {
+@media (max-width: 900px) {
   .split-canvas {
     padding: 12px;
     border-radius: 14px;
   }
 
+  /* Sprint 2: ≤900px 三栏单列堆叠，内边距紧凑 */
   .split-layout {
     grid-template-columns: 1fr;
+  }
+
+  .split-pane {
+    padding: 12px;
   }
 
   .split-pane--jd .split-bento {
@@ -5477,6 +5487,199 @@ label.eval-option,
   .header-job-select {
     max-width: none;
     flex-basis: 100%;
+  }
+}
+
+/* =================================================================== */
+/* Sprint 2: 三栏工作台 22/48/30 + Live Sheet（右栏定稿实时预览）          */
+/* （全部使用现有 token + 类作用域变量，不新增顶层 :root 变量）            */
+/* =================================================================== */
+
+/* --- 三栏视觉分隔：inspector 右侧、diff 两侧细边框（--line） --- */
+[data-inspector-pane] {
+  border-right: 1px solid var(--line);
+}
+
+[data-diff-pane] {
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+
+/* --- 采纳/忽略/润色按钮：阻尼触感 --- */
+.diff-card__actions .btn {
+  box-shadow: var(--shadow-sm);
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-base) var(--ease), transform 80ms var(--ease);
+}
+
+.diff-card__actions .btn:hover:not(:disabled) {
+  box-shadow: var(--card-shadow-hover);
+}
+
+.diff-card__actions .btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: var(--card-shadow-active);
+}
+
+/* --- Live Sheet：纯黑/极深灰纸张质感容器 --- */
+.live-sheet {
+  --ls-bg: #0d1420;
+  --ls-bg-2: #111b2b;
+  --ls-ink: #dbe4ef;
+  --ls-ink-strong: #f1f5f9;
+  --ls-muted: #8fa1b0;
+  --ls-line: rgba(148, 163, 184, 0.18);
+  --ls-add-bg: rgba(74, 222, 128, 0.14);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--ls-bg);
+  color: var(--ls-ink);
+  box-shadow: var(--shadow-2);
+}
+
+.live-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ls-line);
+  background: var(--ls-bg-2);
+}
+
+.live-sheet__title {
+  font-size: var(--text-12);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--ls-ink-strong);
+}
+
+.live-sheet__meta {
+  font-size: var(--text-11);
+  color: var(--ls-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-sheet__paper {
+  min-height: 180px;
+  max-height: 60vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px 20px 26px;
+  font-size: var(--text-13);
+  line-height: 1.6;
+  /* 纸张质感：极深灰底 + 顶部柔光（不依赖图片） */
+  background:
+    radial-gradient(circle at 18% 0%, rgba(148, 163, 184, 0.08), transparent 55%),
+    linear-gradient(180deg, var(--ls-bg-2), var(--ls-bg));
+}
+
+.live-sheet__paper h1,
+.live-sheet__paper h2,
+.live-sheet__paper h3,
+.live-sheet__paper h4,
+.live-sheet__paper h5,
+.live-sheet__paper h6 {
+  color: var(--ls-ink-strong);
+  line-height: 1.35;
+  margin: 1em 0 0.4em;
+}
+
+.live-sheet__paper h1 {
+  font-size: var(--text-18);
+}
+
+.live-sheet__paper h2 {
+  font-size: var(--text-16);
+  border-bottom: 1px solid var(--ls-line);
+  padding-bottom: 3px;
+}
+
+.live-sheet__paper p {
+  margin: 0.5em 0;
+}
+
+.live-sheet__paper ul {
+  margin: 0.4em 0 0.8em;
+  padding-left: 1.4em;
+}
+
+.live-sheet__paper li {
+  margin: 0.25em 0;
+}
+
+.live-sheet__paper code {
+  background: rgba(148, 163, 184, 0.16);
+  border: 1px solid var(--ls-line);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 0.88em;
+  color: var(--ls-ink-strong);
+}
+
+.live-sheet__placeholder {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--ls-muted);
+  font-size: var(--text-13);
+  line-height: 1.6;
+  border: 1px dashed var(--ls-line);
+  border-radius: var(--radius-md);
+}
+
+/* --- 行级增量视图：每条源行一个 .live-sheet-line，新增行高亮 --- */
+.live-sheet-line {
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-left: 3px solid transparent;
+}
+
+.live-sheet-line--added {
+  background: var(--ls-add-bg);
+  border-left-color: var(--success);
+  color: var(--ls-ink-strong);
+  animation: live-sheet-line-in var(--dur-enter) var(--ease-out) both;
+}
+
+@keyframes live-sheet-line-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--move-1));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- 技能命中高亮（highlightSkillGapHtml 输出的 .is-skill-match） --- */
+.gap-tag.is-skill-match {
+  background: color-mix(in srgb, var(--pending) 18%, var(--surface));
+  border-color: var(--pending);
+  color: var(--pending-deep);
+  box-shadow: 0 0 0 2px rgba(180, 83, 9, 0.18);
+}
+
+/* --- ≤900px 单列堆叠时：去掉横向分隔细边框（恢复玻璃卡片完整边框） --- */
+@media (max-width: 900px) {
+  [data-inspector-pane],
+  [data-diff-pane],
+  [data-live-sheet-pane] {
+    border-right: 1px solid var(--border-glass);
+    border-left: 1px solid var(--border-glass);
+  }
+
+  .live-sheet__paper {
+    max-height: 420px;
+    padding: 14px 16px 20px;
   }
 }
 

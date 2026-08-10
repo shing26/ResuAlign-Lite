@@ -40,10 +40,12 @@ import {
   copyAlignMarkdown,
   exportAlignJson,
   exportAlignMarkdown,
+  getLiveSheetDraft,
   renderCopilotBoard,
   renderOptimizerCanvas,
   setCanvasRenderHook,
   startAlignmentRun,
+  syncLiveSheetDraft,
 } from "./split-canvas.js";
 import {
   bindColumnScrollSync,
@@ -710,6 +712,38 @@ async function refreshWbJob(app = $("#app")) {
 async function refreshOptimizerFromJob(jobId) {
   await renderOptimizerCanvas($("#app"), jobId);
   mountWorkspaceReminder($("#app"));
+}
+
+/* T4: 岗位切换（Header select / 画布内 switcher 共用）。已在 workspace 页时
+ * 直接复用 renderOptimizerCanvas 刷新 Diff 画布：用 history.pushState 更新 URL
+ *（不触发 hashchange 整页路由，且保留 Back 后退语义），再同步 header select
+ * 回显；非 workspace（无 context）时走 navigate 路由跳转并回显。 */
+async function switchWorkspaceJob(jobId) {
+  if (!jobId) return;
+  try {
+    if (!(state.route && state.route.name === "workspace")) {
+      navigate("workspace", jobId);
+      return;
+    }
+    if (state.route.jobId === jobId) {
+      syncHeaderJobSelect();
+      return;
+    }
+    state.route = {
+      name: "workspace",
+      jobId,
+      resumeId: (state.route && state.route.resumeId) || null,
+    };
+    window.history.pushState(
+      null,
+      "",
+      `#/workspace/${encodeURIComponent(jobId)}`,
+    );
+    syncHeaderJobSelect();
+    await refreshOptimizerFromJob(jobId);
+  } catch (error) {
+    toast(error.message, "error");
+  }
 }
 
 function startWbPolling(jobId, app = $("#app")) {
@@ -1575,6 +1609,8 @@ const actions = {
   "accept-bullet": async (button) => {
     const jobId = button.dataset.id;
     const diffId = button.dataset.diffId;
+    /* T2: 采纳前记录当前 Live Sheet 草稿，便于采纳成功后做增量 patch。 */
+    const prevDraft = getLiveSheetDraft();
     const job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
     const resumeId = job.workbench_resume_id;
     if (!resumeId) {
@@ -1612,8 +1648,13 @@ const actions = {
       method: "POST",
       body: JSON.stringify({ draft }),
     });
+    /* T2: 采纳成功后先做 Live Sheet 毫秒级增量更新（liveSheetPatch 只 patch
+     * 变化行 + 高亮新增行），不等整画布刷新；整画布刷新后再同步一次，让
+     * 高亮在新 DOM 上保留（patch 幂等，纯行级 diff，成本可忽略）。 */
+    await syncLiveSheetDraft(draft, prevDraft);
     toast("已采纳该条优化", "success");
     await refreshOptimizerFromJob(jobId);
+    await syncLiveSheetDraft(draft, prevDraft);
   },
   "reject-bullet": async (button) => {
     const jobId = button.dataset.id;
@@ -1651,6 +1692,8 @@ const actions = {
   },
   "apply-accepted-bullets": async (button) => {
     const jobId = button.dataset.id;
+    /* T2: 应用采纳前记录当前 Live Sheet 草稿。 */
+    const prevDraft = getLiveSheetDraft();
     const job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
     const resumeId = job.workbench_resume_id;
     const diffs = job.diffs || [];
@@ -1678,8 +1721,12 @@ const actions = {
       method: "POST",
       body: JSON.stringify({ draft }),
     });
+    /* T2: 同 accept-bullet——先毫秒级增量 patch Live Sheet，再整画布刷新后
+     * 重放高亮。 */
+    await syncLiveSheetDraft(draft, prevDraft);
     toast("已应用已采纳建议", "success");
     await refreshOptimizerFromJob(jobId);
+    await syncLiveSheetDraft(draft, prevDraft);
   },
   "copy-align-markdown": () => copyAlignMarkdown(
     state.route.jobId,
@@ -2079,11 +2126,13 @@ document.addEventListener("change", (event) => {
       .catch((error) => toast(error.message, "error"));
   }
   if (target.matches("[data-job-switcher]") && target.value) {
-    navigate("workspace", target.value);
+    switchWorkspaceJob(target.value);
   }
-  /* T2: Header 岗位快速选择器——选择后直接跳工作台（无 Context 也显示）。 */
+  /* T2: Header 岗位快速选择器——选择后直接跳工作台（无 Context 也显示）。
+   * T4: 已在 workspace 时复用 renderOptimizerCanvas 刷新 Diff 画布，避免
+   * 整页路由重渲染；非 workspace 时 navigate 跳转。 */
   if (target.matches("[data-header-job-select]") && target.value) {
-    navigate("workspace", target.value);
+    switchWorkspaceJob(target.value);
   }
   /* U12: 权重输入变化时实时刷新合计提示。 */
   if (

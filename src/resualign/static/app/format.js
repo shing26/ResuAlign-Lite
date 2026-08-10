@@ -2079,3 +2079,122 @@ export function renderJobSuggestionsHtml(jobs, query) {
     .join("");
 }
 
+/* ------------------------------------------------------------------ */
+/* Sprint 2: 三栏工作台 Live Sheet（右栏定稿实时预览，纯函数）            */
+/* ------------------------------------------------------------------ */
+/* 供 split-canvas.js（并行 Agent A）消费的三个纯函数 + 占位文案常量：
+ *  - renderLiveSheetHtml(draft)        挂载初始渲染：纸张容器 + renderMarkdown
+ *  - liveSheetPatch(prevDraft, newDraft)  增量 patch：行级 rows + addedLines + html
+ *  - highlightSkillGapHtml(gapItems, skill)  技能命中高亮（?skill 定位用）
+ * 本模块保持 DOM-free，可在 Node 下直接单测（tests/frontend/live-sheet.test.mjs）。
+ *
+ * 契约（Agent A 消费约定）：
+ *  - renderLiveSheetHtml 返回可直接挂进 [data-live-sheet-pane] 的完整容器
+ *    `<section class="live-sheet" data-live-sheet>`，正文在
+ *    `[data-live-sheet-paper]` 内（空草稿为占位文案，非空为 renderMarkdown）。
+ *  - liveSheetPatch 返回 { html, rows, addedLines }：
+ *      * rows       —— newDraft 的非空行数组 [{ index, text, added }]，
+ *                      index 为行序号（0 起，DOM 增量按此对齐）；
+ *      * addedLines —— Set<number>，相对 prevDraft 新增的行序号；
+ *      * html       —— 完整行渲染（含 live-sheet-line--added 高亮），
+ *                      可直接替换 [data-live-sheet-paper] 的 innerHTML。
+ *    Agent A 推荐做法：按 rows 序号对齐已有 DOM 行，缺的追加、多的移除，
+ *    对 addedLines 中的行加 class「live-sheet-line--added」并滚动到可视区。
+ *  - highlightSkillGapHtml 复用 renderGap 的 gap 结构
+ *    { missing_keywords, strength_matches, misaligned_emphasis }，命中项输出
+ *    class「is-skill-match」+ 属性「data-match-skill」，未命中不输出。
+ */
+
+export const LIVE_SHEET_PLACEHOLDER = "采纳右侧提案后，此处实时预览定稿";
+
+/** 空草稿时纸张正文的占位 HTML（renderLiveSheetHtml / liveSheetPatch 共用）。 */
+function liveSheetPlaceholderHtml() {
+  return `<div class="live-sheet__placeholder">${LIVE_SHEET_PLACEHOLDER}</div>`;
+}
+
+export function renderLiveSheetHtml(draft) {
+  const hasContent = Boolean(String(draft ?? "").trim());
+  const body = hasContent
+    ? renderMarkdown(draft)
+    : liveSheetPlaceholderHtml();
+  const meta = hasContent
+    ? `${String(draft ?? "").split(/\r?\n/).filter((line) => line.trim()).length} 行`
+    : "空草稿";
+  return `
+    <section class="live-sheet" data-live-sheet>
+      <div class="live-sheet__head">
+        <span class="live-sheet__title">定稿预览</span>
+        <span class="live-sheet__meta" data-live-sheet-meta>${meta}</span>
+      </div>
+      <div class="live-sheet__paper" data-live-sheet-paper>${body}</div>
+    </section>`;
+}
+
+export function liveSheetPatch(prevDraft, newDraft) {
+  const nextLines = String(newDraft ?? "").split("\n");
+  /* 复用 lineDiff 的 add 行识别“相对 prevDraft 新增的 trim 文本”，
+   * 与现有 lineDiff 语义保持一致（忽略空行、按 trim 比较）。 */
+  const addedTrimmed = new Set(
+    lineDiff(prevDraft, newDraft)
+      .filter((row) => row.type === "add")
+      .map((row) => row.text.trim()),
+  );
+  const rows = [];
+  for (const raw of nextLines) {
+    const text = raw.trim();
+    if (!text) continue;
+    rows.push({ index: rows.length, text, added: addedTrimmed.has(text) });
+  }
+  const addedLines = new Set(rows.filter((row) => row.added).map((row) => row.index));
+  const html = rows.length
+    ? rows
+        .map(
+          (row) =>
+            `<div class="live-sheet-line${row.added ? " live-sheet-line--added" : ""}" data-live-line="${row.index}">${esc(row.text)}</div>`,
+        )
+        .join("")
+    : liveSheetPlaceholderHtml();
+  return { html, rows, addedLines };
+}
+
+export function highlightSkillGapHtml(gapItems, skill) {
+  if (!gapItems) return null;
+  const needle = String(skill ?? "").trim().toLowerCase();
+  const isHit = (item) =>
+    needle.length > 0 && String(item ?? "").toLowerCase().includes(needle);
+  const tag = (item, extraClass = "") => {
+    const hit = isHit(item);
+    const cls = `gap-tag${extraClass ? ` ${extraClass}` : ""}${hit ? " is-skill-match" : ""}`;
+    return `<span class="${cls}"${hit ? " data-match-skill" : ""}>${esc(item)}</span>`;
+  };
+  const missing = gapItems.missing_keywords || [];
+  const strengths = gapItems.strength_matches || [];
+  const misaligned = gapItems.misaligned_emphasis || [];
+  const blocks = [];
+  if (missing.length) {
+    blocks.push(`
+      <div class="gap-group gap-group--missing">
+        <div class="split-section-title">差距项</div>
+        <div class="gap-tags">${missing.map((item) => tag(item)).join("")}</div>
+      </div>`);
+  }
+  if (strengths.length) {
+    blocks.push(`
+      <div class="gap-group gap-group--strength">
+        <div class="split-section-title">已有匹配</div>
+        <div class="gap-tags">${strengths.map((item) => tag(item, "gap-tag--ok")).join("")}</div>
+      </div>`);
+  }
+  if (misaligned.length) {
+    blocks.push(`
+      <div class="gap-group gap-group--warn">
+        <div class="split-section-title">错位强调</div>
+        <div class="gap-tags">${misaligned.map((item) => tag(item, "gap-tag--warn")).join("")}</div>
+      </div>`);
+  }
+  if (!blocks.length) {
+    blocks.push(`<div class="small muted">尚未生成差距报告</div>`);
+  }
+  return blocks.join("");
+}
+
