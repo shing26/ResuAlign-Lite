@@ -423,6 +423,11 @@ from .routers import batch as _batch_router
 app.include_router(_batch_router.router)
 
 
+from .routers import dashboard as _dashboard_router
+
+app.include_router(_dashboard_router.router)
+
+
 from .routers import ops as _ops_router
 
 app.include_router(_ops_router.router)

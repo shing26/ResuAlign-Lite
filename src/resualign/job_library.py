@@ -552,6 +552,45 @@ class JobLibraryStore(_SqliteStore):
                 rows = conn.execute(sql, values).fetchall()
                 return [self._row_to_job(row) for row in rows]
 
+    def list_dashboard_jobs(
+        self, tenant_id: str
+    ) -> list[dict[str, Any]]:
+        """Return a lean per-job projection for dashboard aggregation.
+
+        The dashboard only needs status, follow-up due dates, alignment
+        state, and the JD profile's must-have skills. This avoids loading
+        ``jd_text``/drafts/diffs for every library row, which would be
+        wasteful for large libraries (100k+ entities).
+        """
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT job_id, title, company, status, jd_profile_json, "
+                    "alignment_status, next_step_due_at, updated_at "
+                    "FROM library_jobs WHERE tenant_id = ? "
+                    "ORDER BY updated_at DESC",
+                    (tenant_id,),
+                ).fetchall()
+        return [
+            {
+                "job_id": row["job_id"],
+                "title": row["title"],
+                "company": row["company"],
+                "status": row["status"],
+                "status_canonical": canonical_status(row["status"]),
+                "jd_profile": (
+                    json.loads(row["jd_profile_json"])
+                    if row["jd_profile_json"]
+                    else None
+                ),
+                "alignment_status": row["alignment_status"] or "idle",
+                "next_step_due_at": row["next_step_due_at"] or None,
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
     def update_job(
         self,
         tenant_id: str,

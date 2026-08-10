@@ -278,3 +278,40 @@ class WorkbenchRewriteResponse(BaseModel):
     reason: str = ""
     provenance_state: str = "verified"
 
+
+class DashboardKPI(BaseModel):
+    """Aggregated counters for the dashboard header."""
+
+    resumes: int = 0
+    jobs: int = 0
+    applied: int = 0
+    interview: int = 0
+    offer: int = 0
+    declined: int = 0
+    active_followups: int = 0
+
+
+class SkillGapItem(BaseModel):
+    """One must-have skill frequency across the tenant's job library."""
+
+    skill: str
+    count: int
+
+
+class DashboardQuickContinue(BaseModel):
+    """The single job suggested for continued alignment work."""
+
+    job_id: str
+    title: str
+    company: str | None = None
+    alignment_status: str = "idle"
+    updated_at: float | None = None
+
+
+class DashboardResponse(BaseModel):
+    """Aggregated data for GET /api/dashboard."""
+
+    kpi: DashboardKPI
+    skill_gaps: list[SkillGapItem] = Field(default_factory=list)
+    quick_continue: DashboardQuickContinue | None = None
+
