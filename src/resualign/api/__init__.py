@@ -69,7 +69,11 @@ from .schemas import (
     AnalyzeRequest,
     ApplicationCreateRequest,
     ApplicationUpdateRequest,
+    AutomationRuleCreateRequest,
+    AutomationRuleUpdateRequest,
+    BlockerResolveRequest,
     BulkStatusRequest,
+    FetchUrlRequest,
     FinalDraftRequest,
     JDParseRequest,
     JobCreateRequest,
@@ -92,16 +96,21 @@ __all__ = [
     "AnalyzeRequest",
     "ApplicationCreateRequest",
     "ApplicationUpdateRequest",
+    "AutomationRuleCreateRequest",
+    "AutomationRuleUpdateRequest",
     "BatchAlignStore",
+    "BlockerResolveRequest",
     "BulkStatusRequest",
     "ContentCache",
     "CrawlError",
     "CrawlTaskStore",
     "EnvSettings",
+    "FetchUrlRequest",
     "FileParseError",
     "FinalDraftRequest",
     "JDParseRequest",
     "JobCreateRequest",
+    "JobFetcherService",
     "JobImportRequest",
     "JobLibraryStore",
     "JobRegistry",
@@ -114,6 +123,8 @@ __all__ = [
     "MasterResumeUpdateRequest",
     "OpenAIClient",
     "Report",
+    "RuleFilterEngine",
+    "RuleVerdict",
     "SUPPORTED_EXTENSIONS",
     "SettingsStore",
     "SettingsUpdateRequest",
@@ -125,6 +136,7 @@ __all__ = [
     "_bearer_token",
     "_cancel_batch_align",
     "_enforce_rate_limit",
+    "_fetcher",
     "_get_batch_align",
     "_queue_batch_align",
     "build_config",
@@ -233,6 +245,7 @@ from .state import (  # noqa: F401, I001  (explicit bindings used below)
     _WORKER_SEMAPHORE,
     _cache,
     _crawl_tasks,
+    _fetcher,
     _jobs,
     _registry,
 )
@@ -242,6 +255,9 @@ from .services import batch as _batch_service
 from .services import jobs as _jobs_service
 from .services import resumes as _resumes_service
 from .services import workbench as _workbench_service
+
+from .services.fetcher import JobFetcherService  # noqa: E402
+from ..rules import RuleFilterEngine, RuleVerdict  # noqa: E402
 
 _settings_vocabulary = _jobs_service._settings_vocabulary
 _classify_job = _jobs_service._classify_job
@@ -446,6 +462,12 @@ from .routers import (
     batch as _batch_router_alias,
 )
 from .routers import (
+    blockers as _blockers_router,
+)
+from .routers import (
+    fetch as _fetch_router,
+)
+from .routers import (
     health as _health_router,
 )
 from .routers import (
@@ -456,6 +478,9 @@ from .routers import (
 )
 from .routers import (
     resumes as _resumes_router,
+)
+from .routers import (
+    rules as _rules_router,
 )
 from .routers import (
     settings as _settings_router,
@@ -513,6 +538,14 @@ get_workbench_session = _workspace_router.get_workbench_session
 get_workspace_session = _workspace_router.get_workspace_session
 stream_workbench_events = _workspace_router.stream_workbench_events
 bulk_update_kanban_status = _kanban_router.bulk_update_kanban_status
+fetch_url = _fetch_router.fetch_url
+list_automation_rules = _rules_router.list_automation_rules
+create_automation_rule = _rules_router.create_automation_rule
+update_automation_rule = _rules_router.update_automation_rule
+delete_automation_rule = _rules_router.delete_automation_rule
+list_blockers = _blockers_router.list_blockers
+ignore_blocker = _blockers_router.ignore_blocker
+resolve_blocker = _blockers_router.resolve_blocker
 
 
 # ---------------------------------------------------------------------------

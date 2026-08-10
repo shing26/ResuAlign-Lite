@@ -11,6 +11,8 @@ _TITLE_MAX = 200
 _COMPANY_MAX = 200
 _LOCATION_MAX = 100
 _URL_MAX = 2_000
+_RULE_VALUE_MAX = 2_000
+_LABEL_MAX = 200
 
 
 class AnalyzeRequest(BaseModel):
@@ -314,4 +316,33 @@ class DashboardResponse(BaseModel):
     kpi: DashboardKPI
     skill_gaps: list[SkillGapItem] = Field(default_factory=list)
     quick_continue: DashboardQuickContinue | None = None
+
+
+class AutomationRuleCreateRequest(BaseModel):
+    """Create one automation rule for the fetch pipeline."""
+
+    rule_type: Literal["blacklist", "city_whitelist", "min_salary"]
+    value: str = Field(max_length=_RULE_VALUE_MAX)
+    label: str | None = Field(default=None, max_length=_LABEL_MAX)
+    enabled: bool = True
+
+
+class AutomationRuleUpdateRequest(BaseModel):
+    """Partially update an automation rule (None leaves a field unchanged)."""
+
+    value: str | None = Field(default=None, max_length=_RULE_VALUE_MAX)
+    label: str | None = Field(default=None, max_length=_LABEL_MAX)
+    enabled: bool | None = None
+
+
+class FetchUrlRequest(BaseModel):
+    """Submit one JD URL to the fetch pipeline."""
+
+    url: str = Field(max_length=_URL_MAX)
+
+
+class BlockerResolveRequest(BaseModel):
+    """Resolve a blocker by building a library job from pasted JD text."""
+
+    manual_text: str = Field(max_length=_JD_TEXT_MAX)
 

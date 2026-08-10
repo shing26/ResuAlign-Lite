@@ -122,6 +122,13 @@ def test_job_library_migrates_legacy_db_and_keeps_data(tmp_path):
     # Data preserved.
     assert job["title"] == "Legacy Backend"
     assert job["jd_text"] == "Python backend"
+    # Sprint 3 pipeline tables are created on legacy databases too.
+    rule = store.create_rule("t1", "blacklist", "外包")
+    assert store.get_rule("t1", rule["rule_id"]) is not None
+    blocker = store.create_blocker(
+        "t1", url="https://example.com/jobs/1", category="timeout"
+    )
+    assert store.get_blocker("t1", blocker["blocker_id"]) is not None
     # Missing columns added by versioned migrations.
     assert job["alignment_status"] == "idle"
     assert job["classification_pending"] == 0
@@ -130,8 +137,9 @@ def test_job_library_migrates_legacy_db_and_keeps_data(tmp_path):
     assert job["applied_at"] is None
     assert job["next_step_due_at"] is None
     assert job["interview_stage"] is None
-    # Every historical ALTER recorded exactly once.
-    assert _migrated_versions(store) == set(range(1, 28))
+    # Every historical ALTER recorded exactly once (27 column upgrades plus
+    # the Sprint 3 automation_rules / blocker_queue table migrations).
+    assert _migrated_versions(store) == set(range(1, 30))
 
 
 def test_fresh_job_library_db_records_migrations_as_applied(tmp_path):
@@ -140,7 +148,7 @@ def test_fresh_job_library_db_records_migrations_as_applied(tmp_path):
         tenant_id="t1", title="Fresh", jd_text="Python backend."
     )
     assert job["alignment_status"] == "idle"
-    assert _migrated_versions(store) == set(range(1, 28))
+    assert _migrated_versions(store) == set(range(1, 30))
 
 
 def test_migrated_legacy_db_supports_workbench_columns(tmp_path):

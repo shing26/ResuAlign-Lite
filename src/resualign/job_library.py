@@ -90,6 +90,23 @@ def _validate_status(status: str) -> str:
     raise UserStoreError(f"Invalid status: {value}")
 
 
+RULE_TYPES = ("blacklist", "city_whitelist", "min_salary")
+
+BLOCKER_CATEGORIES = (
+    "captcha",
+    "login_required",
+    "no_content",
+    "parse_error",
+    "fetch_error",
+    "rule_rejected",
+    "timeout",
+    "network_error",
+    "site_error",
+    "invalid_url",
+)
+
+BLOCKER_STATUSES = ("pending", "resolved", "ignored")
+
 TAILOR_GRANULARITIES = ("fine", "medium", "coarse")
 TAILOR_FOCUSES = ("balanced", "quantified", "skills")
 
@@ -190,6 +207,37 @@ CREATE TABLE IF NOT EXISTS kanban_bulk_ops (
     created_at REAL NOT NULL,
     PRIMARY KEY (tenant_id, idempotency_key)
 );
+
+CREATE TABLE IF NOT EXISTS automation_rules (
+    rule_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    rule_type TEXT NOT NULL,
+    value TEXT NOT NULL,
+    label TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_automation_rules_tenant
+    ON automation_rules(tenant_id);
+
+CREATE TABLE IF NOT EXISTS blocker_queue (
+    blocker_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    job_id TEXT,
+    url TEXT,
+    title TEXT,
+    reason TEXT,
+    category TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    manual_text TEXT,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_blocker_queue_tenant
+    ON blocker_queue(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_blocker_queue_status
+    ON blocker_queue(status);
 """
 
 
@@ -268,6 +316,27 @@ class JobLibraryStore(_SqliteStore):
         (
             27,
             "ALTER TABLE library_jobs ADD COLUMN interview_stage TEXT",
+        ),
+        # Sprint 3: pipeline fetch automation rules + blocker queue. The
+        # tables also live in _JOB_LIBRARY_SCHEMA (fresh databases), so these
+        # CREATE IF NOT EXISTS migrations are no-ops there and only create the
+        # tables on databases predating Sprint 3.
+        (
+            28,
+            "CREATE TABLE IF NOT EXISTS automation_rules ("
+            "rule_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, "
+            "rule_type TEXT NOT NULL, value TEXT NOT NULL, label TEXT, "
+            "enabled INTEGER NOT NULL DEFAULT 1, "
+            "created_at REAL NOT NULL, updated_at REAL NOT NULL)",
+        ),
+        (
+            29,
+            "CREATE TABLE IF NOT EXISTS blocker_queue ("
+            "blocker_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, "
+            "job_id TEXT, url TEXT, title TEXT, reason TEXT, "
+            "category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', "
+            "manual_text TEXT, created_at REAL NOT NULL, "
+            "updated_at REAL NOT NULL)",
         ),
     )
 
@@ -1334,8 +1403,334 @@ class JobLibraryStore(_SqliteStore):
             "updated_at": row["updated_at"],
         }
 
+    # -- Automation rules (Sprint 3 pipeline) --------------------------------
+
+    def create_rule(
+        self,
+        tenant_id: str,
+        rule_type: str,
+        value: str,
+        label: str | None = None,
+        enabled: int | bool = 1,
+    ) -> dict[str, Any]:
+        """Create one enabled automation rule for a tenant."""
+        rule_type = str(rule_type or "").strip()
+        if rule_type not in RULE_TYPES:
+            raise UserStoreError(f"Invalid rule_type: {rule_type}")
+        value = (value or "").strip()
+        if not value:
+            raise UserStoreError("Rule value is required")
+        if rule_type == "min_salary":
+            _validate_min_salary_value(value)
+        rule_id = uuid.uuid4().hex
+        now = time.time()
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO automation_rules ("
+                    "rule_id, tenant_id, rule_type, value, label, enabled, "
+                    "created_at, updated_at"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        rule_id,
+                        tenant_id,
+                        rule_type,
+                        value,
+                        label,
+                        1 if enabled else 0,
+                        now,
+                        now,
+                    ),
+                )
+        rule = self.get_rule(tenant_id, rule_id)
+        assert rule is not None
+        return rule
+
+    def get_rule(
+        self, tenant_id: str, rule_id: str
+    ) -> Optional[dict[str, Any]]:
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM automation_rules "
+                    "WHERE rule_id = ? AND tenant_id = ?",
+                    (rule_id, tenant_id),
+                ).fetchone()
+                return self._row_to_rule(row) if row else None
+
+    def list_rules(
+        self,
+        tenant_id: str,
+        enabled_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return a tenant's automation rules in creation order."""
+        sql = "SELECT * FROM automation_rules WHERE tenant_id = ?"
+        values: list[Any] = [tenant_id]
+        if enabled_only:
+            sql += " AND enabled = 1"
+        sql += " ORDER BY created_at ASC, rowid ASC"
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(sql, values).fetchall()
+                return [self._row_to_rule(row) for row in rows]
+
+    def update_rule(
+        self,
+        tenant_id: str,
+        rule_id: str,
+        value: str | None = None,
+        label: str | None = None,
+        enabled: int | bool | None = None,
+    ) -> Optional[dict[str, Any]]:
+        """Partially update a rule; None-valued fields stay unchanged."""
+        sets = ["updated_at = ?"]
+        values: list[Any] = [time.time()]
+        current = self.get_rule(tenant_id, rule_id)
+        if current is None:
+            return None
+        if value is not None:
+            value = (value or "").strip()
+            if not value:
+                raise UserStoreError("Rule value cannot be empty")
+            if current["rule_type"] == "min_salary":
+                _validate_min_salary_value(value)
+            sets.append("value = ?")
+            values.append(value)
+        if label is not None:
+            sets.append("label = ?")
+            values.append(label)
+        if enabled is not None:
+            sets.append("enabled = ?")
+            values.append(1 if enabled else 0)
+        values.extend([rule_id, tenant_id])
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                conn.execute(
+                    f"UPDATE automation_rules SET {', '.join(sets)} "
+                    "WHERE rule_id = ? AND tenant_id = ?",
+                    values,
+                )
+        return self.get_rule(tenant_id, rule_id)
+
+    def delete_rule(self, tenant_id: str, rule_id: str) -> bool:
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM automation_rules "
+                    "WHERE rule_id = ? AND tenant_id = ?",
+                    (rule_id, tenant_id),
+                )
+                return cursor.rowcount > 0
+
+    @staticmethod
+    def _row_to_rule(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "rule_id": row["rule_id"],
+            "tenant_id": row["tenant_id"],
+            "rule_type": row["rule_type"],
+            "value": row["value"],
+            "label": row["label"],
+            "enabled": bool(row["enabled"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    # -- Blocker queue (Sprint 3 pipeline) -----------------------------------
+
+    def create_blocker(
+        self,
+        tenant_id: str,
+        url: str | None = None,
+        title: str | None = None,
+        reason: str | None = None,
+        category: str = "fetch_error",
+        job_id: str | None = None,
+        manual_text: str | None = None,
+    ) -> dict[str, Any]:
+        """Record one blocked fetch for a tenant's pending queue."""
+        category = str(category or "").strip() or "fetch_error"
+        if category not in BLOCKER_CATEGORIES:
+            raise UserStoreError(f"Invalid blocker category: {category}")
+        blocker_id = uuid.uuid4().hex
+        now = time.time()
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO blocker_queue ("
+                    "blocker_id, tenant_id, job_id, url, title, reason, "
+                    "category, status, manual_text, created_at, updated_at"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
+                    (
+                        blocker_id,
+                        tenant_id,
+                        job_id,
+                        url,
+                        title,
+                        reason,
+                        category,
+                        manual_text,
+                        now,
+                        now,
+                    ),
+                )
+        blocker = self.get_blocker(tenant_id, blocker_id)
+        assert blocker is not None
+        return blocker
+
+    def get_blocker(
+        self, tenant_id: str, blocker_id: str
+    ) -> Optional[dict[str, Any]]:
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM blocker_queue "
+                    "WHERE blocker_id = ? AND tenant_id = ?",
+                    (blocker_id, tenant_id),
+                ).fetchone()
+                return self._row_to_blocker(row) if row else None
+
+    def list_blockers(
+        self,
+        tenant_id: str,
+        status: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Return a tenant's blocker queue, newest first."""
+        if status is not None and status not in BLOCKER_STATUSES:
+            raise UserStoreError(f"Invalid blocker status: {status}")
+        sql = "SELECT * FROM blocker_queue WHERE tenant_id = ?"
+        values: list[Any] = [tenant_id]
+        if status is not None:
+            sql += " AND status = ?"
+            values.append(status)
+        sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+        values.append(max(1, min(int(limit), 500)))
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(sql, values).fetchall()
+                return [self._row_to_blocker(row) for row in rows]
+
+    def ignore_blocker(
+        self, tenant_id: str, blocker_id: str
+    ) -> Optional[dict[str, Any]]:
+        """Mark a pending blocker ignored; non-pending blockers are a no-op."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT status FROM blocker_queue "
+                    "WHERE blocker_id = ? AND tenant_id = ?",
+                    (blocker_id, tenant_id),
+                ).fetchone()
+                if row is None:
+                    return None
+                if row["status"] != "pending":
+                    return self.get_blocker(tenant_id, blocker_id)
+                conn.execute(
+                    "UPDATE blocker_queue SET status = 'ignored', "
+                    "updated_at = ? WHERE blocker_id = ? AND tenant_id = ?",
+                    (time.time(), blocker_id, tenant_id),
+                )
+        return self.get_blocker(tenant_id, blocker_id)
+
+    def resolve_blocker(
+        self,
+        tenant_id: str,
+        blocker_id: str,
+        job_id: str,
+        manual_text: str | None = None,
+    ) -> Optional[dict[str, Any]]:
+        """Mark a pending blocker resolved and link its created job."""
+        if not job_id:
+            raise UserStoreError("job_id is required to resolve a blocker")
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT status FROM blocker_queue "
+                    "WHERE blocker_id = ? AND tenant_id = ?",
+                    (blocker_id, tenant_id),
+                ).fetchone()
+                if row is None:
+                    return None
+                if row["status"] != "pending":
+                    raise UserStoreError(
+                        "Only pending blockers can be resolved"
+                    )
+                now = time.time()
+                sets = [
+                    "status = 'resolved'",
+                    "job_id = ?",
+                    "updated_at = ?",
+                ]
+                values: list[Any] = [job_id, now]
+                if manual_text is not None:
+                    sets.append("manual_text = ?")
+                    values.append(manual_text)
+                values.extend([blocker_id, tenant_id])
+                conn.execute(
+                    f"UPDATE blocker_queue SET {', '.join(sets)} "
+                    "WHERE blocker_id = ? AND tenant_id = ?",
+                    values,
+                )
+        return self.get_blocker(tenant_id, blocker_id)
+
+    @staticmethod
+    def _row_to_blocker(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "blocker_id": row["blocker_id"],
+            "tenant_id": row["tenant_id"],
+            "job_id": row["job_id"],
+            "url": row["url"],
+            "title": row["title"],
+            "reason": row["reason"],
+            "category": row["category"],
+            "status": row["status"],
+            "manual_text": row["manual_text"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
     def _ensure_initialized(self) -> None:
         super()._ensure_initialized(_JOB_LIBRARY_SCHEMA)
+
+
+# ---------------------------------------------------------------------------
+# Automation rules + blocker queue (Sprint 3 pipeline)
+#
+# These rows live in the same database as library_jobs, so they are exposed
+# as methods on JobLibraryStore (one store, one migration journal) rather
+# than a separate store class that would replay a second migration series.
+# ---------------------------------------------------------------------------
+
+
+def _split_rule_value(value: str) -> list[str]:
+    """Split a rule value into keyword/city tokens on ASCII/CN commas."""
+    return [
+        token.strip()
+        for token in re.split(r"[,，\s]+", (value or "").strip())
+        if token.strip()
+    ]
+
+
+def _validate_min_salary_value(value: str) -> float:
+    try:
+        threshold = float((value or "").strip())
+    except (TypeError, ValueError) as exc:
+        raise UserStoreError(
+            "min_salary rule value must be a number"
+        ) from exc
+    if threshold <= 0:
+        raise UserStoreError("min_salary rule value must be positive")
+    return threshold
 
 
 CRAWL_TASK_STATES = (

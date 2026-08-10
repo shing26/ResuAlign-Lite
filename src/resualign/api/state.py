@@ -41,6 +41,7 @@ __all__ = [
     "_cache_db",
     "_crawl_tasks",
     "_env_settings",
+    "_fetcher",
     "_import_batches",
     "_import_rate_limiter",
     "_jobs",
@@ -124,3 +125,7 @@ _payloads: dict[
 from .services import workbench as _workbench_service  # noqa: E402
 
 _session_store = _workbench_service.WorkstationSessionStore()
+
+from .services import fetcher as _fetcher_service  # noqa: E402
+
+_fetcher = _fetcher_service.JobFetcherService()
