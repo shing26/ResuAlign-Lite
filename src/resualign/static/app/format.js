@@ -203,7 +203,7 @@ export function buildDiagnosisMarkdownFrom(diagnosis, title, originalContent = "
 /* Hash routing                                                        */
 /* ------------------------------------------------------------------ */
 
-const ROUTE_NAMES = ["resume", "jobs", "workspace", "settings"];
+const ROUTE_NAMES = ["resume", "jobs", "workspace", "settings", "dashboard"];
 
 export function parseHashValue(hash) {
   const value = String(hash || "").replace(/^#\/?/, "");
@@ -1918,5 +1918,164 @@ export function diffSectionBadge(diff) {
   const section = diff && diff.section;
   if (section == null || String(section).trim() === "") return "";
   return `<span class="badge badge-gray diff-card__section">${esc(String(section).trim())}</span>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Sprint 1 Dashboard: KPI cards / skill-gap heat bars / quick continue */
+/* ------------------------------------------------------------------ */
+/* Pure HTML builders for the `#/dashboard` view. Callers in main.js own
+ * the GET /api/dashboard fetch and mount these strings into #app; every
+ * builder stays DOM-free so it can be unit-tested under Node.
+ * Contract (shared with the backend agent):
+ *   GET /api/dashboard -> {
+ *     kpi: { resumes, jobs, applied, interview, offer, declined, active_followups },
+ *     skill_gaps: [{ skill, count } ...],
+ *     quick_continue: { job_id, title, company, alignment_status, updated_at } | null
+ *   }
+ */
+
+/* 4 大 KPI 卡。applied 卡带投递转化提示（占岗位比例）。 */
+export function dashboardKpiHtml(kpi = {}) {
+  const data = kpi && typeof kpi === "object" ? kpi : {};
+  const resumes = Math.max(0, Number(data.resumes) || 0);
+  const jobs = Math.max(0, Number(data.jobs) || 0);
+  const applied = Math.max(0, Number(data.applied) || 0);
+  const followups = Math.max(0, Number(data.active_followups) || 0);
+  const applyRate = jobs > 0 ? Math.round((applied / jobs) * 100) : null;
+  const cards = [
+    { key: "resumes", label: "主简历", value: resumes, tone: "info", hint: "可用的主简历底稿" },
+    { key: "jobs", label: "岗位", value: jobs, tone: "teal", hint: "岗位库总数" },
+    { key: "applied", label: "已投递", value: applied, tone: "success", hint: applyRate != null ? `占岗位 ${applyRate}%` : "暂无岗位可计算转化" },
+    { key: "followups", label: "待跟进", value: followups, tone: "warning", hint: "需要安排下一步" },
+  ];
+  return `
+    <div class="dashboard-kpi-grid" data-dashboard-kpis>
+      ${cards
+        .map(
+          (card) => `
+        <div class="dashboard-kpi dashboard-kpi--${card.tone}" data-kpi="${card.key}">
+          <div class="dashboard-kpi__label">${esc(card.label)}</div>
+          <div class="dashboard-kpi__value">${esc(card.value)}</div>
+          <div class="dashboard-kpi__hint">${esc(card.hint)}</div>
+        </div>`,
+        )
+        .join("")}
+    </div>`;
+}
+
+/* 技能缺口热力图：横向热力条，宽度按 count / max 比例，颜色按相对强度
+ * 梯度（cool=info / warm=warning / hot=danger，全部走现有语义 token）。
+ * 每条渲染为 data-action="goto-skill" + data-skill 的可点击按钮；
+ * onSkillGapUrl(skill) 若提供则额外写入 data-skill-url 兜底深链。 */
+export function skillGapHtml(gaps, onSkillGapUrl) {
+  const list = Array.isArray(gaps)
+    ? gaps.filter((gap) => gap && String(gap.skill || "").trim())
+    : [];
+  if (!list.length) {
+    return `<div class="muted small" data-skill-gaps>暂无技能缺口数据</div>`;
+  }
+  const max = Math.max(...list.map((gap) => Number(gap.count) || 0));
+  const rows = list
+    .map((gap) => {
+      const skill = String(gap.skill);
+      const count = Math.max(0, Number(gap.count) || 0);
+      const ratio = max > 0 ? count / max : 0;
+      const width = max > 0 ? Math.max(2, Math.round(ratio * 100)) : 0;
+      const tone = ratio >= 0.66 ? "hot" : ratio >= 0.33 ? "warm" : "cool";
+      const url =
+        typeof onSkillGapUrl === "function" ? onSkillGapUrl(skill) : "";
+      const urlAttr = url ? ` data-skill-url="${esc(url)}"` : "";
+      return `
+      <button type="button" class="skill-gap-row" data-action="goto-skill" data-skill="${esc(skill)}"${urlAttr}>
+        <span class="skill-gap-row__name">${esc(skill)}</span>
+        <span class="skill-gap-row__track" aria-hidden="true">
+          <span class="skill-gap-row__fill skill-gap-row__fill--${tone}" style="width:${width}%"></span>
+        </span>
+        <span class="skill-gap-row__count">${count} 个岗位</span>
+      </button>`;
+    })
+    .join("");
+  return `<div class="skill-gap-list" data-skill-gaps>${rows}</div>`;
+}
+
+/* Quick Continue 卡：最近工作的岗位快照 + 「继续」入口。quick_continue
+ * 为 null / 缺 job_id 时返回空串（调用方直接注入，无节点则什么都不显示）。 */
+const ALIGNMENT_STATUS_LABELS = {
+  succeeded: "已对齐",
+  running: "分析中",
+  queued: "排队中",
+  failed: "分析失败",
+  idle: "待分析",
+  pending: "待分析",
+};
+
+export function quickContinueHtml(qc) {
+  if (!qc || typeof qc !== "object" || !qc.job_id) return "";
+  const status = ALIGNMENT_STATUS_LABELS[qc.alignment_status]
+    || (qc.alignment_status ? String(qc.alignment_status) : "待分析");
+  return `
+    <section class="panel panel-card quick-continue" data-quick-continue>
+      <div class="quick-continue__head">
+        <span class="badge badge-teal">继续上次</span>
+        <span class="small muted">更新于 ${formatDate(qc.updated_at)}</span>
+      </div>
+      <div class="quick-continue__title">${esc(qc.title)}</div>
+      <div class="quick-continue__meta">${esc(qc.company || "未知公司")} · <span class="quick-continue__status">${esc(status)}</span></div>
+      <div class="quick-continue__actions">
+        <a class="btn btn-primary btn-sm" href="#/workspace/${encodeURIComponent(qc.job_id)}">继续</a>
+      </div>
+    </section>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Sprint 1 Header job quick selector + ⌘K job search (pure)           */
+/* ------------------------------------------------------------------ */
+
+/* Header 岗位下拉的 option 列表。placeholder 恒为「选择岗位...」，其余每
+ * 条为 `<option value="job_id">标题 · 公司</option>`；selectedId 匹配时
+ * 标记 selected。 */
+export function jobSelectOptionsHtml(jobs, selectedId = "") {
+  const list = Array.isArray(jobs) ? jobs : [];
+  const selected = String(selectedId || "");
+  const options = list
+    .map((job) => {
+      const id = job && job.job_id;
+      if (!id) return "";
+      return `<option value="${esc(id)}" ${String(id) === selected ? "selected" : ""}>${esc(job.title || "未命名岗位")}${job.company ? ` · ${esc(job.company)}` : ""}</option>`;
+    })
+    .join("");
+  return `<option value="">选择岗位...</option>${options}`;
+}
+
+/* ⌘K「搜岗位」匹配：按标题 / 公司做不区分大小写的子串过滤，最多 limit 条。
+ * 空查询或非数组输入返回 []。 */
+export function matchJobSuggestions(jobs, query, limit = 6) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return [];
+  const list = Array.isArray(jobs) ? jobs : [];
+  const max = Math.max(1, Number(limit) || 1);
+  return list
+    .filter(
+      (job) =>
+        job &&
+        (String(job.title || "").toLowerCase().includes(q) ||
+          String(job.company || "").toLowerCase().includes(q)),
+    )
+    .slice(0, max);
+}
+
+/* ⌘K 建议下拉的按钮 HTML；无匹配返回空串。data-job-id 供点击/回车跳转。 */
+export function renderJobSuggestionsHtml(jobs, query) {
+  const matches = matchJobSuggestions(jobs, query);
+  if (!matches.length) return "";
+  return matches
+    .map(
+      (job) => `
+      <button type="button" class="command-suggestion" data-command-suggestion data-job-id="${esc(job.job_id)}">
+        <span class="command-suggestion__title">${esc(job.title || "未命名岗位")}</span>
+        ${job.company ? `<span class="command-suggestion__meta">${esc(job.company)}</span>` : ""}
+      </button>`,
+    )
+    .join("");
 }
 

@@ -58,20 +58,24 @@ import {
   batchRowsToCsv,
   buildJobsBackup,
   buildLiveCompareHtml,
+  dashboardKpiHtml,
   dueReminders,
   formatElapsed,
   jobCompletenessBadge,
   jobEditFormHtml,
+  jobSelectOptionsHtml,
   jobTimelineFormHtml,
   jobsToCsv,
   lineDiff,
   onboardingSteps,
   parseHashValue,
+  quickContinueHtml,
   renderMarkdown,
   renderOnboardingCard,
   renderReminderBanner,
   renderReminderStrip,
   runEvalFromForm,
+  skillGapHtml,
 } from "./format.js";
 import {
   apiKeyFieldHint,
@@ -93,6 +97,7 @@ const ROUTE_LABELS = {
   jobs: "岗位库",
   workspace: "工作台",
   settings: "设置",
+  dashboard: "工作台总览",
 };
 
 function parseHash() {
@@ -127,6 +132,9 @@ async function render() {
   const printNode = $("#print-root");
   if (printNode) printNode.innerHTML = "";
   app.innerHTML = `<div class="skeleton is-shimmer">加载中...</div>`;
+  /* T2: 每次路由渲染同步 Header 岗位快速选择器（异步填充 + 立即同步值）。 */
+  refreshHeaderJobSelect();
+  syncHeaderJobSelect();
   try {
     if (state.route.name === "resume" && state.route.resumeId) {
       await renderResumeDetailView(app, state.route.resumeId);
@@ -136,7 +144,8 @@ async function render() {
       await renderOptimizerCanvas(app, state.route.jobId);
       /* #11: 工作台顶部挂载当前岗位的面试/下一步到期提醒横幅 */
       mountWorkspaceReminder(app);
-    } else await renderSettingsView(app);
+    } else if (state.route.name === "dashboard") await renderDashboardView(app);
+    else await renderSettingsView(app);
   } catch (error) {
     if (isApiKeyUnconfigured(error)) {
       renderApiKeyGuide(app);
@@ -170,6 +179,79 @@ function renderApiKeyGuide(app) {
         <a href="#/settings" class="btn btn-primary">去设置页配置 LLM</a>
       </div>
     </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dashboard (Sprint 1)                                                */
+/* ------------------------------------------------------------------ */
+
+async function renderDashboardView(app) {
+  const data = await api("/api/dashboard");
+  const kpi = (data && data.kpi) || {};
+  const gaps = (data && data.skill_gaps) || [];
+  const quickContinue = (data && data.quick_continue) || null;
+  app.innerHTML = `
+    <div class="page-header page-header--dashboard">
+      <div>
+        <h2>工作台总览</h2>
+        <div class="sub">求职进度、技能缺口与最近工作</div>
+      </div>
+      <div class="row">
+        <button class="btn btn-primary btn-sm" data-action="open-command-panel">粘贴 JD / 链接</button>
+        <a href="#/jobs" class="btn btn-outline btn-sm">去岗位库</a>
+      </div>
+    </div>
+    ${dashboardKpiHtml(kpi)}
+    <section class="panel panel-card dashboard-panel" data-skill-gap-panel>
+      <div class="dashboard-panel__head">
+        <h3>技能缺口热力图</h3>
+        <span class="small muted">出现在岗位硬性要求中的高频技能，点击进入对应岗位工作台</span>
+      </div>
+      ${skillGapHtml(gaps, (skill) => `#/workspace?skill=${encodeURIComponent(skill)}`)}
+    </section>
+    ${quickContinueHtml(quickContinue)}
+  `;
+}
+
+/* T2: Header 岗位快速选择器。每次 render() 异步刷新（fetch 去重），
+ * 成功后回填 option 并保持当前工作台岗位选中；非 workspace 页也显示，
+ * change 事件直接跳 #/workspace/<job_id>。 */
+
+let headerJobsCache = null;
+let headerJobsFetch = null;
+
+function refreshHeaderJobSelect() {
+  if (headerJobsFetch) return;
+  headerJobsFetch = api("/api/jobs?limit=100")
+    .then((jobs) => {
+      headerJobsCache = Array.isArray(jobs) ? jobs : [];
+      populateHeaderJobSelect(headerJobsCache);
+      return headerJobsCache;
+    })
+    .catch(() => {
+      headerJobsCache = headerJobsCache || [];
+      return headerJobsCache;
+    })
+    .finally(() => {
+      headerJobsFetch = null;
+    });
+}
+
+function populateHeaderJobSelect(jobs) {
+  const select = $("[data-header-job-select]");
+  if (!select) return;
+  const selectedId =
+    state.route && state.route.name === "workspace" ? state.route.jobId : "";
+  select.innerHTML = jobSelectOptionsHtml(jobs, selectedId);
+}
+
+function syncHeaderJobSelect() {
+  const select = $("[data-header-job-select]");
+  if (!select) return;
+  select.value =
+    state.route && state.route.name === "workspace" && state.route.jobId
+      ? state.route.jobId
+      : "";
 }
 
 /* ------------------------------------------------------------------ */
@@ -1269,6 +1351,47 @@ const actions = {
     }
   },
   "open-workspace": (button) => navigate("workspace", button.dataset.id),
+  /* Sprint 1 T3: 技能缺口热力条点击 → 跳到最近一个含该技能的岗位工作台；
+   * 无匹配岗位时回退到岗位库并设置搜索关键词（renderCopilotBoard 读取
+   * state.filters 回填搜索框）。 */
+  "goto-skill": async (button) => {
+    const skill = String(button.dataset.skill || "").trim();
+    if (!skill) return;
+    let jobs = state.jobs;
+    if (!Array.isArray(jobs) || jobs.length === 0) {
+      try {
+        jobs = await api("/api/jobs?limit=200");
+      } catch {
+        jobs = [];
+      }
+    }
+    const skillLower = skill.toLowerCase();
+    const match = (jobs || []).find((job) => {
+      const profile = job && job.jd_profile;
+      if (
+        profile &&
+        Array.isArray(profile.must_have_skills) &&
+        profile.must_have_skills.some(
+          (item) => String(item || "").toLowerCase() === skillLower,
+        )
+      ) {
+        return true;
+      }
+      return (
+        Array.isArray(job && job.tech_tags) &&
+        job.tech_tags.some(
+          (item) => String(item || "").toLowerCase() === skillLower,
+        )
+      );
+    });
+    if (match && match.job_id) {
+      window.location.hash = `#/workspace/${encodeURIComponent(match.job_id)}?skill=${encodeURIComponent(skill)}`;
+      return;
+    }
+    state.filters = { ...state.filters, search: skill };
+    navigate("jobs");
+    toast(`未找到要求「${skill}」的岗位，已在岗位库带关键词搜索`, "info");
+  },
   "open-job-detail": (button) => {
     const job = state.jobs.find((item) => item.job_id === button.dataset.id);
     if (job) openJobDetail(job);
@@ -1956,6 +2079,10 @@ document.addEventListener("change", (event) => {
       .catch((error) => toast(error.message, "error"));
   }
   if (target.matches("[data-job-switcher]") && target.value) {
+    navigate("workspace", target.value);
+  }
+  /* T2: Header 岗位快速选择器——选择后直接跳工作台（无 Context 也显示）。 */
+  if (target.matches("[data-header-job-select]") && target.value) {
     navigate("workspace", target.value);
   }
   /* U12: 权重输入变化时实时刷新合计提示。 */

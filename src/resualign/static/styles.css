@@ -5199,3 +5199,284 @@ label.eval-option,
   margin: 0;
 }
 
+/* =================================================================== */
+/* Sprint 1: Dashboard + header job quick selector + ⌘K suggestions     */
+/* （全部使用现有 token，不新增顶层 :root 变量）                         */
+/* =================================================================== */
+
+.page-header--dashboard {
+  --header-accent: var(--success);
+}
+
+/* --- 侧边栏第 5 个 tab（工作台总览）的指示点颜色 --- */
+.tabs--rail button:nth-child(5)::before {
+  background: var(--success);
+}
+
+/* --- Header 岗位快速选择器 --- */
+.header-job-select {
+  min-width: 180px;
+  max-width: 280px;
+  min-height: 36px;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  font-size: var(--text-13);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+}
+
+.header-job-select:hover {
+  border-color: var(--border-strong);
+}
+
+.header-job-select:focus-visible {
+  box-shadow: var(--focus);
+}
+
+/* --- Dashboard KPI 卡网格 --- */
+.dashboard-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.dashboard-kpi {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--card-pad-lg);
+  background: var(--surface-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+
+.dashboard-kpi::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--info);
+}
+
+.dashboard-kpi--teal::before {
+  background: var(--teal);
+}
+
+.dashboard-kpi--success::before {
+  background: var(--success);
+}
+
+.dashboard-kpi--warning::before {
+  background: var(--warning);
+}
+
+.dashboard-kpi__label {
+  font-size: var(--text-12);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.dashboard-kpi__value {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--ink-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-kpi__hint {
+  font-size: var(--text-12);
+  color: var(--text-faint);
+}
+
+/* --- 技能缺口热力图 --- */
+.dashboard-panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.skill-gap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skill-gap-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 200px) minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.skill-gap-row:hover,
+.skill-gap-row:focus-visible {
+  background: var(--surface-tint);
+  border-color: var(--border);
+}
+
+.skill-gap-row__name {
+  font-size: var(--text-13);
+  font-weight: 700;
+  color: var(--ink-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-gap-row__track {
+  display: block;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.skill-gap-row__fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  transition: width var(--dur-base) var(--ease-standard);
+}
+
+.skill-gap-row__fill--cool {
+  background: var(--info);
+}
+
+.skill-gap-row__fill--warm {
+  background: var(--warning);
+}
+
+.skill-gap-row__fill--hot {
+  background: var(--danger);
+}
+
+.skill-gap-row__count {
+  font-size: var(--text-12);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --- Quick Continue 卡 --- */
+.quick-continue {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quick-continue__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.quick-continue__title {
+  font-size: var(--text-16);
+  font-weight: 800;
+  color: var(--ink-strong);
+}
+
+.quick-continue__meta {
+  font-size: var(--text-13);
+  color: var(--ink-2);
+}
+
+.quick-continue__status {
+  font-weight: 700;
+  color: var(--pending-deep);
+}
+
+.quick-continue__actions {
+  margin-top: 4px;
+}
+
+/* --- ⌘K 岗位搜索建议 --- */
+.command-palette__suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.command-suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--surface-tint);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-6);
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.command-suggestion:hover,
+.command-suggestion:focus-visible {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary-active);
+}
+
+.command-suggestion__title {
+  font-size: var(--text-14);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-suggestion__meta {
+  font-size: var(--text-12);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Dashboard 响应式：≤900px 单列（KPI 卡 + 热力条窄屏下仍可读） */
+@media (max-width: 900px) {
+  .dashboard-kpi-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .skill-gap-row {
+    grid-template-columns: minmax(96px, 1fr) minmax(80px, 2fr) auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .header-job-select {
+    max-width: none;
+    flex-basis: 100%;
+  }
+}
+

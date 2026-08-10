@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ResuAlign 求职工作台</title>
-  <link rel="stylesheet" href="/static/styles.css?v=22">
+  <link rel="stylesheet" href="/static/styles.css?v=23">
 </head>
 <body class="app-body">
   <div class="container app-shell">
@@ -15,6 +15,7 @@
         <button type="button" data-route="jobs" aria-selected="false">岗位库</button>
         <button type="button" data-route="workspace" aria-selected="false">工作台</button>
         <button type="button" data-route="settings" aria-selected="false">设置</button>
+        <button type="button" data-route="dashboard" aria-selected="false">工作台总览</button>
       </nav>
       <div class="rail-foot">
         <span class="rail-dot" aria-hidden="true"></span>
@@ -45,6 +46,9 @@
             <kbd class="command-bar__kbd">Ctrl K</kbd>
           </button>
         </div>
+        <select class="header-job-select" data-header-job-select aria-label="切换岗位" title="切换岗位">
+          <option value="">选择岗位...</option>
+        </select>
         <div class="topbar-actions">
           <button class="theme-toggle" type="button" data-action="toggle-theme" data-theme-toggle aria-pressed="false" aria-label="切换明暗主题" title="切换明暗主题">
             <span class="theme-toggle-icon" aria-hidden="true">◐</span>
@@ -81,6 +85,7 @@
           >
           <kbd>Esc</kbd>
         </div>
+        <div class="command-palette__suggestions" data-command-suggestions hidden></div>
         <div class="command-palette__preview" data-command-preview role="status" aria-live="polite"></div>
         <div class="command-palette__actions">
           <button type="button" class="btn btn-ghost" data-action="close-command-panel">取消</button>
@@ -89,6 +94,6 @@
       </form>
     </div>
   </div>
-  <script type="module" src="/static/app/main.js?v=22"></script>
+  <script type="module" src="/static/app/main.js?v=23"></script>
 </body>
 </html>
