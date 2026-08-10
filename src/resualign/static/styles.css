@@ -6182,4 +6182,317 @@ label.eval-option,
   margin-top: 6px;
 }
 
+/* =================================================================== */
+/* Sprint 5: 系统设置全量升级 —— Bento 概览 / LLM 节点 / 护栏 / 规则        */
+/* （全部使用现有 token + 类作用域变量，不新增顶层 :root 变量）            */
+/* =================================================================== */
+
+/* --- T1: Hero Bento 概览（4 列，复用 dashboard-kpi 视觉语言） --- */
+.settings-bento {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.settings-bento__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--card-pad-lg);
+  background: var(--surface-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+
+.settings-bento__card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--info);
+}
+
+.settings-bento__card--model::before {
+  background: var(--brand);
+}
+
+.settings-bento__label {
+  font-size: var(--text-12);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.settings-bento__value {
+  font-size: var(--text-20);
+  font-weight: 800;
+  line-height: 1.15;
+  color: var(--ink-strong);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.settings-bento__hint {
+  font-size: var(--text-12);
+  color: var(--text-faint);
+}
+
+/* --- T2: LLM 节点卡网格 --- */
+.llm-nodes-panel {
+  margin-bottom: 16px;
+}
+
+.llm-node-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.llm-node-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: var(--card-pad-lg);
+  background: var(--surface-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.llm-node-card.is-active {
+  border-color: var(--success);
+  box-shadow: 0 0 0 1px var(--success), var(--shadow-1);
+}
+
+.llm-node-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.llm-node-card__title {
+  font-size: var(--text-15);
+  font-weight: 800;
+  color: var(--ink-strong);
+  overflow-wrap: anywhere;
+}
+
+.llm-node-card__meta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin: 0;
+}
+
+.llm-node-card__meta > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.llm-node-card__meta dt {
+  flex: 0 0 auto;
+  font-size: var(--text-12);
+  color: var(--text-muted);
+}
+
+.llm-node-card__meta dd {
+  font-size: var(--text-13);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
+.llm-node-card__key {
+  font-family: var(--font-mono);
+}
+
+.llm-node-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.llm-node-card__test {
+  min-height: 0;
+}
+
+.llm-node-card__test .form-success,
+.llm-node-card__test .form-error {
+  margin-top: 2px;
+  font-size: var(--text-12);
+}
+
+.llm-eval-default {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* --- T3: 调用护栏（只读信息卡） --- */
+.guardrails-panel {
+  margin-bottom: 16px;
+}
+
+.guardrails-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.guardrail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--surface-tint);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.guardrail-item--timeout .guardrail-item__value {
+  color: var(--warning);
+}
+
+.guardrail-item--concurrency .guardrail-item__value {
+  color: var(--teal);
+}
+
+.guardrail-item__label {
+  font-size: var(--text-12);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.guardrail-item__value {
+  font-size: var(--text-20);
+  font-weight: 800;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.guardrail-item__hint {
+  font-size: var(--text-12);
+  color: var(--text-faint);
+}
+
+/* --- T4: 自动化规则列表 + 开关 --- */
+.rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.rule-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.rule-item__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rule-item__label {
+  font-size: var(--text-13);
+  font-weight: 700;
+  color: var(--ink-strong);
+  overflow-wrap: anywhere;
+}
+
+.rule-item__value {
+  font-size: var(--text-13);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.rule-item__actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* 开关：复用语义 token 的轻量 checkbox switch */
+.rule-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.rule-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.rule-toggle__track {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--neutral-soft);
+  border: 1px solid var(--border);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.rule-toggle__track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition-fast);
+}
+
+.rule-toggle input:checked + .rule-toggle__track {
+  background: var(--success);
+  border-color: var(--success);
+}
+
+.rule-toggle input:checked + .rule-toggle__track::after {
+  transform: translateX(16px);
+}
+
+.rule-toggle input:focus-visible + .rule-toggle__track {
+  box-shadow: var(--focus);
+}
+
+/* Bento / 节点卡 / 规则卡响应式：≤900px 单列（复用 Dashboard 断点习惯） */
+@media (max-width: 900px) {
+  .settings-bento {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+
 

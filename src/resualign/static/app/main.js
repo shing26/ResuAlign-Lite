@@ -73,6 +73,9 @@ import {
   jobSelectOptionsHtml,
   jobTimelineFormHtml,
   jobsToCsv,
+  llmNodeCardHtml,
+  llmNodeFormHtml,
+  nodeTestResultHtml,
   onboardingSteps,
   parseHashValue,
   quickContinueHtml,
@@ -80,13 +83,17 @@ import {
   renderOnboardingCard,
   renderReminderBanner,
   renderReminderStrip,
+  ruleFormHtml,
+  ruleListHtml,
   runEvalFromForm,
+  settingsBentoHtml,
   skillGapHtml,
   versionTimelineHtml,
 } from "./format.js";
 import {
-  apiKeyFieldHint,
   appraisalWeightsPayload,
+  buildAutomationRulePayload,
+  buildLlmNodePayload,
   buildSettingsLlmPayload,
   buildTestConnectionPayload,
   evalDefaultFromForm,
@@ -96,6 +103,8 @@ import {
   salaryReferenceRowsHtml,
   testConnectionResultHtml,
   validateAppraisalWeights,
+  validateAutomationRule,
+  validateLlmNodePayload,
   validateSalaryReference,
 } from "./settings-form.js";
 
@@ -868,28 +877,42 @@ function renderApplicationsPanel(app) {
 /* ------------------------------------------------------------------ */
 
 async function renderSettingsView(app) {
-  const [settings, status] = await Promise.all([
+  /* Sprint 5: 并行拉取设置 / 运行状态 / LLM 节点 / Dashboard KPI /
+   * 自动化规则。后端未就绪（404）时静默降级为空数组/空对象，不打断
+   * 设置页渲染（节点列表空态 + 新增按钮仍可用，后端就绪后真实走）。 */
+  const [settings, status, nodes, dashboard, rules] = await Promise.all([
     api("/api/settings"),
     api("/api/settings/status"),
+    api("/api/llm/nodes").catch(() => []),
+    api("/api/dashboard").catch(() => null),
+    api("/api/automation/rules").catch(() => []),
   ]);
   state.settings = settings;
+  state.llmNodes = Array.isArray(nodes) ? nodes : [];
+  state.automationRules = Array.isArray(rules) ? rules : [];
   const vocabulary = settings.classification_vocabulary;
   state.vocabulary = normalizeVocabulary(vocabulary);
-  const storedLlm = settings.llm || {};
-  const savedKeyMasked = storedLlm.api_key || null; // server already masks
-  const llm = {
-    provider: storedLlm.provider || status.provider,
-    model: storedLlm.model || status.model,
-    baseUrl: storedLlm.base_url || "",
-    apiKeyConfigured: Boolean(savedKeyMasked),
-    apiKeyMasked: savedKeyMasked,
+  const kpi = (dashboard && dashboard.kpi) || {};
+  const bentoCounts = {
+    resumes: Math.max(0, Number(kpi.resumes) || 0),
+    jobs: Math.max(0, Number(kpi.jobs) || 0),
   };
+  state.settingsBentoCounts = bentoCounts;
+  const activeNode = state.llmNodes.find((node) => node.is_active) || null;
+  const activeLastTest = activeNode
+    ? (state.llmNodeTests || {})[activeNode.node_id]
+    : null;
+  const latency = activeLastTest && activeLastTest.ok ? activeLastTest.latency_ms : null;
   /* U12: 薪资基准 + 投递评估权重。权重总是回填四个默认键（老库可能只有
    * 部分键），显示合计并让表单校验兜底。 */
   const weights = normalizeAppraisalWeights(settings.appraisal_weights);
   const weightsSum = Object.values(weights).reduce((acc, value) => acc + Number(value || 0), 0);
+  const nodeCards = state.llmNodes
+    .map((node) => llmNodeCardHtml(node, (state.llmNodeTests || {})[node.node_id]))
+    .join("");
   app.innerHTML = `
     <div class="page-header page-header--settings"><div><h2>设置</h2><div class="sub">内置默认配置可直接使用，按需调整后保存立即生效</div></div></div>
+    ${settingsBentoHtml(activeNode, bentoCounts, latency)}
     <section class="panel panel-card settings-status">
       <div class="settings-status__head">
         <div>
@@ -909,38 +932,54 @@ async function renderSettingsView(app) {
         <button class="btn btn-ghost btn-sm" type="button" data-action="go-jobs">去岗位库</button>
       </div>
     </section>
-    <div class="grid-2">
-      <form class="panel panel-card" data-form="settings-llm">
-        <h3>LLM 模型与 API Key</h3>
-        <div class="form-grid">
-          <div class="field"><label>服务商</label>
-            <select name="llm_provider">
-              <option value="deepseek" ${llm.provider === "deepseek" ? "selected" : ""}>DeepSeek</option>
-              <option value="openrouter" ${llm.provider === "openrouter" ? "selected" : ""}>OpenRouter</option>
-              <option value="ollama" ${llm.provider === "ollama" ? "selected" : ""}>Ollama</option>
-            </select></div>
-          <div class="field"><label>模型名称</label>
-            <input type="text" name="llm_model" value="${esc(llm.model || "")}" placeholder="例如 deepseek-chat"></div>
+    <section class="panel panel-card llm-nodes-panel" data-llm-nodes-panel>
+      <div class="settings-status__head">
+        <div>
+          <h3>LLM 模型节点</h3>
+          <div class="small muted">配置多个 API 节点，可切换当前生效节点或测试连通性</div>
         </div>
-        <div class="field"><label>API Key</label>
-          <input type="password" name="llm_api_key" value="" autocomplete="new-password" placeholder="${llm.apiKeyConfigured ? "已保存，留空保持不变" : "输入 API Key（可选，默认读取 .env）"}">
-          <div class="small muted">${apiKeyFieldHint(llm.apiKeyMasked)}</div>
-        </div>
-        <div class="field"><label>Base URL（可选）</label>
-          <input type="text" name="llm_base_url" value="${esc(llm.baseUrl || "")}" placeholder="留空使用服务商默认地址"></div>
+        <button class="btn btn-primary btn-sm" type="button" data-action="llm-node-add">新增节点</button>
+      </div>
+      <div class="llm-node-grid" data-llm-node-grid>
+        ${nodeCards || `<div class="muted small" data-llm-node-empty>还没有配置节点，点击「新增节点」创建第一个。</div>`}
+      </div>
+      <form data-form="settings-eval-default" class="llm-eval-default">
         <label class="field eval-option">
           <input type="checkbox" name="eval_default" ${settings.eval_default ? "checked" : ""}>
           <span>运行对齐时默认开启评估（幻觉检测 / JD 匹配分）</span>
         </label>
         <div class="small muted">每任务额外一次 LLM 调用；工作台可按次覆盖。</div>
-        <div class="small muted">保存后立即生效；未保存的字段继续使用 .env 或环境变量。</div>
         <div class="row" style="margin-top:10px">
-          <button class="btn btn-primary" type="submit">保存</button>
-          <button class="btn btn-outline btn-sm" type="button" data-action="test-llm-connection">测试连接</button>
-          ${llm.apiKeyConfigured ? '<button class="btn btn-ghost btn-sm" type="button" data-action="clear-llm-key">清除已保存 Key</button>' : ""}
+          <button class="btn btn-outline btn-sm" type="submit">保存评估开关</button>
         </div>
-        <div data-llm-test-result></div>
       </form>
+    </section>
+    <section class="panel panel-card guardrails-panel" data-guardrails-panel>
+      <h3>调用护栏</h3>
+      <div class="guardrails-grid">
+        <div class="guardrail-item guardrail-item--timeout">
+          <span class="guardrail-item__label">Read Timeout</span>
+          <strong class="guardrail-item__value">40s</strong>
+          <span class="guardrail-item__hint">超过 40s 自动熔断提示，不无脑死等</span>
+        </div>
+        <div class="guardrail-item guardrail-item--concurrency">
+          <span class="guardrail-item__label">并发额度</span>
+          <strong class="guardrail-item__value">1</strong>
+          <span class="guardrail-item__hint">同一时间仅一个 LLM 请求在途，其余排队执行</span>
+        </div>
+      </div>
+    </section>
+    <section class="panel panel-card" data-automation-rules-panel>
+      <div class="settings-status__head">
+        <div>
+          <h3>自动化规则</h3>
+          <div class="small muted">抓取管线粗筛：黑名单 / 城市白名单 / 最低薪资</div>
+        </div>
+        <button class="btn btn-primary btn-sm" type="button" data-action="automation-rule-add">新增规则</button>
+      </div>
+      ${ruleListHtml(state.automationRules)}
+    </section>
+    <div class="grid-2">
       <form class="panel panel-card" data-form="settings-vocabulary">
         <h3>分类词表</h3>
         <div class="field"><label>岗位职能（每行一个）</label>
@@ -950,6 +989,25 @@ async function renderSettingsView(app) {
         <div class="field"><label>状态（每行一个）</label>
           <textarea name="statuses" rows="5">${esc(vocabulary.statuses.join("\n"))}</textarea></div>
         <div class="row"><button class="btn btn-primary" type="submit">保存词表</button></div>
+      </form>
+      <form class="panel panel-card" data-form="settings-weights">
+        <h3>投递评估权重</h3>
+        <div class="small muted">投递价值评估各维度权重，合计必须为 100。</div>
+        <div class="form-grid weights-grid">
+          <label class="field"><span class="small">匹配度（match）</span>
+            <input type="number" name="weight_match" min="0" max="100" step="1" value="${esc(weights.match)}"></label>
+          <label class="field"><span class="small">薪资（salary）</span>
+            <input type="number" name="weight_salary" min="0" max="100" step="1" value="${esc(weights.salary)}"></label>
+          <label class="field"><span class="small">硬性条件（hard_conditions）</span>
+            <input type="number" name="weight_hard_conditions" min="0" max="100" step="1" value="${esc(weights.hard_conditions)}"></label>
+          <label class="field"><span class="small">岗位质量（quality）</span>
+            <input type="number" name="weight_quality" min="0" max="100" step="1" value="${esc(weights.quality)}"></label>
+        </div>
+        <div class="small muted" data-weights-sum>合计：${esc(weightsSum)}%</div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn btn-primary" type="submit">保存权重</button>
+        </div>
+        <div data-weights-save-result></div>
       </form>
     </div>
     <form class="panel panel-card" data-form="settings-salary">
@@ -981,26 +1039,58 @@ async function renderSettingsView(app) {
         <button class="btn btn-primary" type="submit">保存薪资基准</button>
       </div>
       <div data-salary-save-result></div>
-    </form>
-    <form class="panel panel-card" data-form="settings-weights">
-      <h3>投递评估权重</h3>
-      <div class="small muted">投递价值评估各维度权重，合计必须为 100。</div>
-      <div class="form-grid weights-grid">
-        <label class="field"><span class="small">匹配度（match）</span>
-          <input type="number" name="weight_match" min="0" max="100" step="1" value="${esc(weights.match)}"></label>
-        <label class="field"><span class="small">薪资（salary）</span>
-          <input type="number" name="weight_salary" min="0" max="100" step="1" value="${esc(weights.salary)}"></label>
-        <label class="field"><span class="small">硬性条件（hard_conditions）</span>
-          <input type="number" name="weight_hard_conditions" min="0" max="100" step="1" value="${esc(weights.hard_conditions)}"></label>
-        <label class="field"><span class="small">岗位质量（quality）</span>
-          <input type="number" name="weight_quality" min="0" max="100" step="1" value="${esc(weights.quality)}"></label>
-      </div>
-      <div class="small muted" data-weights-sum>合计：${esc(weightsSum)}%</div>
-      <div class="row" style="margin-top:10px">
-        <button class="btn btn-primary" type="submit">保存权重</button>
-      </div>
-      <div data-weights-save-result></div>
     </form>`;
+
+  /* Sprint 5 T1: 活跃节点无缓存测试结果时，后台测一次填充 Bento 延迟卡
+   *（不阻塞渲染；后端 test 有 40s 超时护栏，慢节点只更新卡片不卡页面）。 */
+  if (
+    activeNode &&
+    !activeLastTest &&
+    !(state.llmNodeTestInflight || {})[activeNode.node_id]
+  ) {
+    state.llmNodeTestInflight = {
+      ...(state.llmNodeTestInflight || {}),
+      [activeNode.node_id]: true,
+    };
+    api(`/api/llm/nodes/${encodeURIComponent(activeNode.node_id)}/test`, {
+      method: "POST",
+    })
+      .then((result) => {
+        state.llmNodeTests = {
+          ...(state.llmNodeTests || {}),
+          [activeNode.node_id]: result,
+        };
+        updateSettingsBento($("#app"));
+      })
+      .catch(() => {
+        /* 保持 "—" 直到用户显式测试 */
+      })
+      .finally(() => {
+        state.llmNodeTestInflight = {
+          ...(state.llmNodeTestInflight || {}),
+          [activeNode.node_id]: false,
+        };
+      });
+  }
+}
+
+/* Sprint 5 T1: 用纯函数 settingsBentoHtml 重渲染 Bento 概览（节点测试后
+ * 刷新延迟卡）。state.settingsBentoCounts / state.llmNodeTests 由
+ * renderSettingsView 与 llm-node-test action 维护。 */
+function updateSettingsBento(app = $("#app")) {
+  if (!app) return;
+  const mount = app.querySelector("[data-settings-bento]");
+  if (!mount) return;
+  const activeNode = (state.llmNodes || []).find((node) => node.is_active) || null;
+  const lastTest = activeNode
+    ? (state.llmNodeTests || {})[activeNode.node_id]
+    : null;
+  const latency = lastTest && lastTest.ok ? lastTest.latency_ms : null;
+  mount.outerHTML = settingsBentoHtml(
+    activeNode,
+    state.settingsBentoCounts || {},
+    latency,
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -1542,6 +1632,102 @@ const actions = {
   "reset-settings": async () => {
     await api("/api/settings/reset", { method: "POST" });
     toast("已恢复默认设置", "success");
+    render();
+  },
+  /* Sprint 5 T2: LLM 节点管理（新增 / 编辑 / 测试 / 激活 / 删除）。 */
+  "llm-node-add": () => {
+    showModal("新增 LLM 节点", llmNodeFormHtml(null));
+  },
+  "llm-node-edit": (button) => {
+    const node = (state.llmNodes || []).find(
+      (item) => item.node_id === button.dataset.id,
+    );
+    if (!node) {
+      toast("节点不存在或已删除", "error");
+      return;
+    }
+    showModal(`编辑节点「${node.name || "未命名"}」`, llmNodeFormHtml(node));
+  },
+  "llm-node-test": async (button) => {
+    const nodeId = button.dataset.id;
+    if (!nodeId) return;
+    const card = button.closest("[data-llm-node-card]");
+    const resultNode = card && card.querySelector("[data-llm-node-test-result]");
+    const originalText = button.textContent;
+    if (resultNode) {
+      resultNode.innerHTML =
+        '<div class="form-success" role="status">正在测试连通性…</div>';
+    }
+    button.disabled = true;
+    button.textContent = "测试中...";
+    button.classList.add("is-loading");
+    try {
+      const result = await api(
+        `/api/llm/nodes/${encodeURIComponent(nodeId)}/test`,
+        { method: "POST" },
+      );
+      state.llmNodeTests = { ...(state.llmNodeTests || {}), [nodeId]: result };
+      if (resultNode) resultNode.innerHTML = nodeTestResultHtml(result);
+      updateSettingsBento($("#app"));
+      toast(
+        result.ok ? "节点连通正常" : "节点测试失败，请检查配置",
+        result.ok ? "success" : "error",
+      );
+    } catch (error) {
+      if (resultNode) {
+        resultNode.innerHTML = `<div class="form-error" role="alert">${esc(error.message)}</div>`;
+      }
+      toast(error.message, "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+      button.classList.remove("is-loading");
+    }
+  },
+  "llm-node-activate": async (button) => {
+    const nodeId = button.dataset.id;
+    if (!nodeId) return;
+    await api(`/api/llm/nodes/${encodeURIComponent(nodeId)}/activate`, {
+      method: "POST",
+    });
+    toast("已切换为当前生效节点", "success");
+    render();
+  },
+  "llm-node-delete": (button) => {
+    const node = (state.llmNodes || []).find(
+      (item) => item.node_id === button.dataset.id,
+    );
+    const name = node && node.name ? node.name : "该节点";
+    showModal(
+      "删除 LLM 节点",
+      `<p>确定删除「${esc(name)}」？删除后该节点配置将不可恢复。</p>
+       <div class="actions">
+         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+         <button class="btn btn-danger" type="button" data-action="confirm-delete-llm-node" data-id="${esc(button.dataset.id)}">确认删除</button>
+       </div>`,
+    );
+  },
+  "confirm-delete-llm-node": async (button) => {
+    const nodeId = button.dataset.id;
+    if (!nodeId) return;
+    closeModal();
+    await api(`/api/llm/nodes/${encodeURIComponent(nodeId)}`, {
+      method: "DELETE",
+    });
+    toast("节点已删除", "success");
+    render();
+  },
+  /* Sprint 5 T4: 自动化规则（新增 Modal / 删除；开关走 change 委托）。 */
+  "automation-rule-add": () => {
+    showModal("新增自动化规则", ruleFormHtml());
+  },
+  "automation-rule-delete": async (button) => {
+    const ruleId = button.dataset.id;
+    if (!ruleId) return;
+    await api(`/api/automation/rules/${encodeURIComponent(ruleId)}`, {
+      method: "DELETE",
+    });
+    toast("规则已删除", "success");
     render();
   },
   /* U12: 薪资基准表格新增/删除行（表单提交时统一解析为 salary_reference）。 */
@@ -2301,6 +2487,24 @@ document.addEventListener("change", (event) => {
   if (target.matches("[data-header-job-select]") && target.value) {
     switchWorkspaceJob(target.value);
   }
+  /* Sprint 5 T4: 自动化规则 enabled 开关（checkbox change -> PUT）。 */
+  if (target.matches("[data-rule-toggle]")) {
+    const ruleId = target.dataset.id;
+    if (!ruleId) return;
+    const enabled = target.checked;
+    api(`/api/automation/rules/${encodeURIComponent(ruleId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    })
+      .then(() => {
+        toast(enabled ? "规则已启用" : "规则已停用", "success");
+        render();
+      })
+      .catch((error) => {
+        target.checked = !enabled;
+        toast(error.message, "error");
+      });
+  }
   /* U12: 权重输入变化时实时刷新合计提示。 */
   if (
     target.matches('[data-form="settings-weights"] input[type="number"]')
@@ -2650,6 +2854,61 @@ async function handleForm(formName, data, form) {
       });
       if (resultNode) resultNode.innerHTML = `<div class="form-success" role="status">权重已保存（合计 100）</div>`;
       toast("投递评估权重已保存", "success");
+      render();
+      break;
+    }
+    /* Sprint 5: 对齐评估默认开关（全局 eval_default，与 LLM 节点解耦）。 */
+    case "settings-eval-default": {
+      await api("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({ eval_default: evalDefaultFromForm(data) }),
+      });
+      toast("对齐评估默认开关已保存", "success");
+      render();
+      break;
+    }
+    /* Sprint 5 T2: LLM 节点新增（POST） / 编辑（PUT，隐藏 node_id 非空）。 */
+    case "llm-node-form": {
+      const payload = buildLlmNodePayload(data);
+      const nodeId = (data.node_id || "").trim();
+      const validation = validateLlmNodePayload(payload, {
+        isEdit: Boolean(nodeId),
+      });
+      if (!validation.ok) {
+        toast(validation.message, "error");
+        return;
+      }
+      if (nodeId) {
+        await api(`/api/llm/nodes/${encodeURIComponent(nodeId)}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        toast("节点已更新", "success");
+      } else {
+        await api("/api/llm/nodes", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        toast("节点已创建", "success");
+      }
+      closeModal();
+      render();
+      break;
+    }
+    /* Sprint 5 T4: 自动化规则新增（Modal 表单 -> POST）。 */
+    case "automation-rule-form": {
+      const payload = buildAutomationRulePayload(data);
+      const validation = validateAutomationRule(payload);
+      if (!validation.ok) {
+        toast(validation.message, "error");
+        return;
+      }
+      await api("/api/automation/rules", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      closeModal();
+      toast("自动化规则已添加", "success");
       render();
       break;
     }

@@ -8,6 +8,10 @@
  * suite; DOM-touching callers keep thin wrappers in their original modules.
  */
 
+/* Sprint 5: 复用 settings-form.js 的掩码纯函数（maskApiKey），该模块无
+ * DOM/fetch 依赖且不 import 本模块，不会产生循环依赖。 */
+import { maskApiKey } from "./settings-form.js";
+
 /* ------------------------------------------------------------------ */
 /* HTML escaping                                                       */
 /* ------------------------------------------------------------------ */
@@ -2423,5 +2427,244 @@ export function versionTimelineHtml(versions, currentVersion, resumeId = "") {
     })
     .join("");
   return `<div class="version-timeline" data-version-timeline>${items}</div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Sprint 5: 系统设置全量升级 —— Bento 概览 / LLM 节点 / 自动化规则（纯）   */
+/* ------------------------------------------------------------------ */
+/* 本模块保持 DOM-free，可在 Node 下单测。契约（与后端 agent 并行对齐）：
+ *   GET  /api/llm/nodes -> [{node_id, name, provider, base_url, model,
+ *                            api_key(masked), is_active, created_at}]
+ *   POST /api/llm/nodes {name, provider, base_url, api_key, model} -> 201
+ *   PUT  /api/llm/nodes/{id}（api_key 省略则保留已存 key）-> 200
+ *   DELETE /api/llm/nodes/{id} -> 204
+ *   POST /api/llm/nodes/{id}/activate -> 200
+ *   POST /api/llm/nodes/{id}/test -> {ok, status, latency_ms, message}
+ *   GET/POST/DELETE /api/automation/rules（Sprint 3 已有）
+ *     rule: {rule_id, rule_type(blacklist|city_whitelist|min_salary),
+ *            value, label, enabled}
+ * Guardrails：后端 Read Timeout 40s + 并发额度 1（只读展示）。
+ */
+
+export const LLM_NODE_PROVIDERS = ["deepseek", "openrouter", "ollama"];
+
+export const LLM_NODE_PROVIDER_LABELS = {
+  deepseek: "DeepSeek",
+  openrouter: "OpenRouter",
+  ollama: "Ollama",
+};
+
+export const AUTOMATION_RULE_TYPE_LABELS = {
+  blacklist: "黑名单",
+  city_whitelist: "城市白名单",
+  min_salary: "最低薪资",
+};
+
+/** 规则类型的展示标签；未知类型原样返回。 */
+export function automationRuleTypeLabel(ruleType) {
+  return AUTOMATION_RULE_TYPE_LABELS[ruleType] || String(ruleType || "");
+}
+
+export const GUARDRAIL_READ_TIMEOUT_S = 40;
+export const GUARDRAIL_CONCURRENCY = 1;
+
+/* --- T1: Hero Bento 概览 --- */
+/* 4 列 Bento 卡：活跃模型 ID / 架构模式 / 本地数据索引数 / API 链路延迟。
+ * activeNode 为 GET /api/llm/nodes 中 is_active 的节点（可为 null）；
+ * counts 为 {resumes, jobs}（索引数 = resumes + jobs）；
+ * latency 为最近一次节点 test 的 latency_ms（null 表示尚未测试）。 */
+export function settingsBentoHtml(activeNode, counts, latency) {
+  const node = activeNode && typeof activeNode === "object" ? activeNode : null;
+  const model = node && String(node.model || "").trim() ? String(node.model) : "—";
+  const provider = node && String(node.provider || "").trim() ? String(node.provider) : "";
+  const activeLabel = provider ? `${provider} · ${model}` : model;
+  const data = counts && typeof counts === "object" ? counts : {};
+  const resumes = Math.max(0, Number(data.resumes) || 0);
+  const jobs = Math.max(0, Number(data.jobs) || 0);
+  const dataCount = resumes + jobs;
+  const latencyNum =
+    latency == null || latency === "" ? NaN : Number(latency);
+  const hasLatency = Number.isFinite(latencyNum) && latencyNum >= 0;
+  const latencyText = hasLatency ? `${Math.round(latencyNum)} ms` : "—";
+  return `
+    <section class="settings-bento" data-settings-bento aria-label="系统概览">
+      <div class="settings-bento__card settings-bento__card--model" data-bento-model>
+        <span class="settings-bento__label">活跃模型 ID</span>
+        <strong class="settings-bento__value">${esc(activeLabel)}</strong>
+        <span class="settings-bento__hint">${node ? "当前生效的 LLM 节点" : "未配置生效节点"}</span>
+      </div>
+      <div class="settings-bento__card" data-bento-arch>
+        <span class="settings-bento__label">架构模式</span>
+        <strong class="settings-bento__value">本地 SQLite</strong>
+        <span class="settings-bento__hint">单机部署，数据全部落本地</span>
+      </div>
+      <div class="settings-bento__card" data-bento-counts>
+        <span class="settings-bento__label">本地数据索引数</span>
+        <strong class="settings-bento__value">${esc(dataCount)}</strong>
+        <span class="settings-bento__hint">简历 ${esc(resumes)} · 岗位 ${esc(jobs)}</span>
+      </div>
+      <div class="settings-bento__card" data-bento-latency>
+        <span class="settings-bento__label">API 链路延迟</span>
+        <strong class="settings-bento__value">${esc(latencyText)}</strong>
+        <span class="settings-bento__hint">${hasLatency ? "最近一次节点连通测试" : "尚未测试，可点节点卡「测试连通性」"}</span>
+      </div>
+    </section>`;
+}
+
+/* --- T2: LLM 节点卡 + 表单 + 测试结果 --- */
+
+/** 节点测试结果块。result 为 {ok, status, latency_ms, message}；
+ *  无结果（null/undefined/缺 ok 布尔）返回空串，调用方不挂载任何节点。
+ *  HTTP status + latency 优先展示，message 兜底说明。 */
+export function nodeTestResultHtml(result) {
+  if (!result || typeof result !== "object" || typeof result.ok !== "boolean") {
+    return "";
+  }
+  const ok = Boolean(result.ok);
+  const statusRaw = String(result.status ?? "").trim();
+  const latencyNum =
+    result.latency_ms == null || result.latency_ms === ""
+      ? NaN
+      : Number(result.latency_ms);
+  const hasLatency = Number.isFinite(latencyNum) && latencyNum >= 0;
+  const message = String(result.message || "").trim();
+  const parts = [];
+  if (statusRaw) parts.push(`HTTP ${statusRaw}`);
+  if (hasLatency) parts.push(`${Math.round(latencyNum)} ms`);
+  const meta = parts.length ? `<strong>${parts.join(" · ")}</strong>` : "";
+  const cls = ok ? "form-success" : "form-error";
+  const role = ok ? "status" : "alert";
+  return `<div class="${cls}" role="${role}" data-llm-node-test>${meta}${meta && message ? " " : ""}${message ? esc(message) : ""}</div>`;
+}
+
+/** 单张 LLM 节点卡。node.api_key 来自后端（已掩码），此处仍经 maskApiKey
+ *  防御一次，保证明文 key 也不会泄漏。lastTest 为该节点的最近测试结果。 */
+export function llmNodeCardHtml(node, lastTest) {
+  const n = node && typeof node === "object" ? node : {};
+  const nodeId = String(n.node_id || "");
+  const active = Boolean(n.is_active);
+  const name = String(n.name || "").trim() || "未命名节点";
+  const provider = String(n.provider || "").trim() || "—";
+  const model = String(n.model || "").trim() || "—";
+  const baseUrl = String(n.base_url || "").trim();
+  const maskedKey = maskApiKey(n.api_key);
+  const testResult = lastTest ? nodeTestResultHtml(lastTest) : "";
+  return `
+    <article class="llm-node-card${active ? " is-active" : ""}" data-llm-node-card data-node-id="${esc(nodeId)}">
+      <div class="llm-node-card__head">
+        <div class="llm-node-card__title">${esc(name)}</div>
+        ${active ? '<span class="badge badge-green" data-node-active-badge>当前生效</span>' : ""}
+      </div>
+      <dl class="llm-node-card__meta">
+        <div><dt>服务商</dt><dd>${esc(provider)}</dd></div>
+        <div><dt>模型</dt><dd>${esc(model)}</dd></div>
+        ${baseUrl ? `<div><dt>Base URL</dt><dd>${esc(baseUrl)}</dd></div>` : ""}
+        <div><dt>API Key</dt><dd class="llm-node-card__key">${maskedKey ? esc(maskedKey) : '<span class="muted">未配置</span>'}</dd></div>
+      </dl>
+      <div class="llm-node-card__actions">
+        <button type="button" class="btn btn-outline btn-sm" data-action="llm-node-test" data-id="${esc(nodeId)}">测试连通性</button>
+        ${active ? "" : `<button type="button" class="btn btn-outline btn-sm" data-action="llm-node-activate" data-id="${esc(nodeId)}">设为当前生效</button>`}
+        <button type="button" class="btn btn-ghost btn-sm" data-action="llm-node-edit" data-id="${esc(nodeId)}">编辑</button>
+        <button type="button" class="btn btn-danger btn-sm" data-action="llm-node-delete" data-id="${esc(nodeId)}">删除</button>
+      </div>
+      <div class="llm-node-card__test" data-llm-node-test-result>${testResult}</div>
+    </article>`;
+}
+
+/** LLM 节点新增/编辑 Modal 表单。node 为 null 表示新增；编辑时预填字段，
+ *  API Key 输入框留空表示保持不变（占位文案提示已保存掩码）。 */
+export function llmNodeFormHtml(node) {
+  const n = node && typeof node === "object" ? node : {};
+  const nodeId = String(n.node_id || "");
+  const name = String(n.name || "");
+  const provider = String(n.provider || "deepseek");
+  const model = String(n.model || "");
+  const baseUrl = String(n.base_url || "");
+  const hasKey = Boolean(n.api_key);
+  const providerOptions = LLM_NODE_PROVIDERS.map(
+    (value) =>
+      `<option value="${esc(value)}" ${provider === value ? "selected" : ""}>${esc(LLM_NODE_PROVIDER_LABELS[value] || value)}</option>`,
+  ).join("");
+  return `<form data-form="llm-node-form">
+      <input type="hidden" name="node_id" value="${esc(nodeId)}">
+      <div class="form-grid">
+        <div class="field"><label>节点名称</label>
+          <input type="text" name="node_name" required maxlength="80" value="${esc(name)}" placeholder="例如：主 DeepSeek 节点"></div>
+        <div class="field"><label>服务商</label>
+          <select name="node_provider">${providerOptions}</select></div>
+        <div class="field"><label>模型名称</label>
+          <input type="text" name="node_model" required value="${esc(model)}" placeholder="例如 deepseek-chat"></div>
+        <div class="field"><label>Base URL（可选）</label>
+          <input type="text" name="node_base_url" value="${esc(baseUrl)}" placeholder="留空使用服务商默认地址"></div>
+        <div class="field wide"><label>API Key${nodeId ? "（编辑留空保持不变）" : ""}</label>
+          <input type="password" name="node_api_key" autocomplete="new-password" value="" placeholder="${hasKey ? "已保存，留空保持不变" : "输入 API Key（Ollama 可留空）"}">
+          ${hasKey ? `<div class="small muted">已保存 Key：${esc(maskApiKey(n.api_key))}</div>` : ""}</div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+        <button class="btn btn-primary" type="submit">${nodeId ? "保存修改" : "创建节点"}</button>
+      </div>
+    </form>`;
+}
+
+/* --- T4: 自动化规则列表 + 新增表单 --- */
+
+/** 规则列表。每条渲染类型中文标签 + value + label + enabled 开关 + 删除。
+ *  开关为 checkbox（data-rule-toggle），change 事件由 main.js 委托 PUT。 */
+export function ruleListHtml(rules) {
+  const list = Array.isArray(rules) ? rules : [];
+  if (!list.length) {
+    return `<div class="rule-list" data-rule-list><div class="muted small" data-rule-empty>还没有自动化规则，点击「新增规则」添加。</div></div>`;
+  }
+  const items = list
+    .map((rule) => {
+      const id = esc(rule && rule.rule_id);
+      const ruleType = String((rule && rule.rule_type) || "").trim();
+      const typeLabel = esc(automationRuleTypeLabel(ruleType));
+      const value = esc((rule && rule.value) || "");
+      const label = rule && rule.label ? esc(String(rule.label)) : "";
+      const enabled = Boolean(rule && rule.enabled);
+      const tone = ruleType === "blacklist" ? "badge-red" : ruleType === "city_whitelist" ? "badge-blue" : "badge-amber";
+      return `
+    <article class="rule-item" data-rule-item data-rule-id="${id}">
+      <div class="rule-item__head">
+        <span class="badge ${tone}">${typeLabel}</span>
+        <label class="rule-toggle">
+          <input type="checkbox" data-rule-toggle data-id="${id}" ${enabled ? "checked" : ""} aria-label="${enabled ? "停用规则" : "启用规则"}">
+          <span class="rule-toggle__track" aria-hidden="true"></span>
+          <span class="small muted">${enabled ? "启用" : "停用"}</span>
+        </label>
+      </div>
+      ${label ? `<div class="rule-item__label">${label}</div>` : ""}
+      <div class="rule-item__value">${value}</div>
+      <div class="rule-item__actions">
+        <button type="button" class="btn btn-danger btn-sm" data-action="automation-rule-delete" data-id="${id}">删除</button>
+      </div>
+    </article>`;
+    })
+    .join("");
+  return `<div class="rule-list" data-rule-list>${items}</div>`;
+}
+
+/** 自动化规则新增 Modal 表单（type 下拉 + value 输入 + label）。 */
+export function ruleFormHtml() {
+  return `<form data-form="automation-rule-form">
+      <div class="form-grid">
+        <div class="field"><label>规则类型</label>
+          <select name="rule_type">
+            <option value="blacklist">黑名单（拦截公司名/关键词）</option>
+            <option value="city_whitelist">城市白名单（仅抓取这些城市）</option>
+            <option value="min_salary">最低薪资（低于则拦截，单位：千元/月）</option>
+          </select></div>
+        <div class="field"><label>规则值</label>
+          <input type="text" name="rule_value" required maxlength="2000" placeholder="例如：Acme 科技 / 上海,杭州 / 20"></div>
+        <div class="field wide"><label>备注标签（可选）</label>
+          <input type="text" name="rule_label" maxlength="200" placeholder="例如：排除外包公司"></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+        <button class="btn btn-primary" type="submit">新增规则</button>
+      </div>
+    </form>`;
 }
 
