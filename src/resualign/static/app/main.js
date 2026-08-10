@@ -58,11 +58,15 @@ import {
   backupRestoreGuide,
   batchPanelHtml,
   batchRowsToCsv,
+  blockerCountBadge,
+  blockerListHtml,
   buildJobsBackup,
   buildLiveCompareHtml,
   dashboardKpiHtml,
   dueReminders,
+  fetchUrlResultMessage,
   formatElapsed,
+  isJdUrl,
   jobCompletenessBadge,
   jobEditFormHtml,
   jobSelectOptionsHtml,
@@ -2000,6 +2004,98 @@ const actions = {
     toast(`已取消 ${result.canceled} 个排队任务`, "success");
   },
   "close-modal": closeModal,
+  /* Sprint 3: Pipeline + Blocker（抓取 Bar + 阻断队列）。所有新按钮走
+   * document 级 data-action 委托；Modal 开关复用 events.js 的
+   * showModal / closeModal（close-modal action 已在此注册）。 */
+  "fetch-job-url": async (button) => {
+    const input = $("[data-fetch-url]");
+    const url = input ? (input.value || "").trim() : "";
+    if (!url) {
+      toast("请先粘贴岗位链接", "error");
+      return;
+    }
+    if (!isJdUrl(url)) {
+      toast("请输入以 http(s):// 开头的有效链接", "error");
+      return;
+    }
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = "抓取中...";
+    button.classList.add("is-loading");
+    try {
+      const result = await api("/api/jobs/fetch-url", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      });
+      const status = result && result.status;
+      const reason = result && result.reason;
+      toast(
+        fetchUrlResultMessage(status, reason),
+        status === "created"
+          ? "success"
+          : status === "rule_rejected"
+            ? "warning"
+            : "info",
+      );
+      if (status === "created") {
+        if (input) input.value = "";
+        await render();
+      } else if (status === "blocked") {
+        /* 新阻断进入队列：立即刷新微标计数。 */
+        refreshBlockerBadge();
+      }
+    } catch (error) {
+      toast(error.message || "抓取失败", "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+      button.classList.remove("is-loading");
+    }
+  },
+  "open-blockers": () => openBlockersModal(),
+  "ignore-blocker": async (button) => {
+    const blockerId = button.dataset.id;
+    if (!blockerId) return;
+    try {
+      await api(`/api/blockers/${encodeURIComponent(blockerId)}/ignore`, {
+        method: "POST",
+      });
+      blockerState.list = blockerState.list.filter(
+        (item) => item.blocker_id !== blockerId,
+      );
+      blockerState.count = blockerState.list.length;
+      renderBlockerBadge();
+      const item = button.closest("[data-blocker-item]");
+      if (item) item.remove();
+      const container = $("[data-blocker-list]");
+      if (container && blockerState.count === 0) {
+        container.innerHTML =
+          '<div class="muted small" data-blocker-empty>暂无待处理的阻断</div>';
+      }
+      toast("已忽略该阻断", "success");
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  },
+  "toggle-blocker-resolve": (button) => {
+    const item = button.closest("[data-blocker-item]");
+    if (!item) return;
+    const form = item.querySelector("[data-form='blocker-resolve']");
+    if (!form) return;
+    const willOpen = form.hidden;
+    $$("[data-form='blocker-resolve']:not([hidden])").forEach((other) => {
+      if (other !== form) other.hidden = true;
+    });
+    form.hidden = !willOpen;
+    if (willOpen) {
+      const textarea = form.querySelector("textarea[name='manual_text']");
+      if (textarea) textarea.focus();
+    }
+  },
+  "cancel-blocker-resolve": (button) => {
+    const form = button.closest("[data-form='blocker-resolve']");
+    if (form) form.hidden = true;
+  },
   "skip-onboarding-step": (button) => {
     const step = button.dataset.step;
     if (!step) return;
@@ -2486,6 +2582,27 @@ async function handleForm(formName, data, form) {
       render();
       break;
     }
+    /* Sprint 3: 阻断「手动补全」——粘贴 JD 文本后调 resolve 入库存档。 */
+    case "blocker-resolve": {
+      const blockerId = data.blocker_id;
+      const manualText = (data.manual_text || "").trim();
+      if (!blockerId) {
+        toast("缺少阻断信息", "error");
+        return;
+      }
+      if (!manualText) {
+        toast("请先粘贴 JD 文本", "error");
+        return;
+      }
+      await api(`/api/blockers/${encodeURIComponent(blockerId)}/resolve`, {
+        method: "POST",
+        body: JSON.stringify({ manual_text: manualText }),
+      });
+      closeModal();
+      toast("已手动补全并入库存档", "success");
+      await render();
+      break;
+    }
     default:
       break;
   }
@@ -2710,6 +2827,89 @@ setCanvasRenderHook(async (app) => {
     app.insertBefore(createForm.firstChild, app.querySelector("#job-board"));
     app.insertBefore(importForm.firstChild, app.querySelector("#job-board"));
   }
+});
+
+/* ------------------------------------------------------------------ */
+/* Sprint 3: Pipeline + Blocker（抓取 Bar + 阻断微标/Modal）             */
+/* ------------------------------------------------------------------ */
+/* 页面结构在 split-canvas.js 的 renderCopilotBoard（禁改），因此通过
+ * 第三个 canvas render hook 挂载到岗位库 Top Bar（page-header .row）：
+ *  - 抓取 Bar：<input data-fetch-url> + 「自动抓取」（data-action=fetch-job-url）
+ *  - 阻断微标：blockerCountBadge 输出 <button class="blocker-badge"
+ *    data-action="open-blockers">，有 pending 时显示并带闪烁动画（CSS）。
+ * 契约（后端并行实现）：
+ *   POST /api/jobs/fetch-url {url} -> {status, job_id?, blocker_id?, reason?}
+ *   GET  /api/blockers?status=pending -> [Blockers]
+ *   POST /api/blockers/{id}/ignore -> 204
+ *   POST /api/blockers/{id}/resolve {manual_text} -> {status:'resolved', job_id?}
+ * 后端未就绪（404）时静默降级：抓取 Bar 仍在但提交报 toast，微标保持隐藏，
+ * 不打断岗位库渲染。 */
+
+let blockerState = { count: 0, list: [], loaded: false };
+
+function renderBlockerBadge() {
+  const mount = $("[data-blocker-badge]");
+  if (!mount) return;
+  mount.innerHTML = blockerCountBadge(blockerState.count);
+}
+
+async function refreshBlockerBadge() {
+  try {
+    const list = await api("/api/blockers?status=pending");
+    const blockers = Array.isArray(list) ? list : [];
+    blockerState = { count: blockers.length, list: blockers, loaded: true };
+  } catch {
+    blockerState = { count: 0, list: [], loaded: true };
+  }
+  renderBlockerBadge();
+}
+
+async function openBlockersModal() {
+  try {
+    const list = await api("/api/blockers?status=pending");
+    const blockers = Array.isArray(list) ? list : [];
+    blockerState = { count: blockers.length, list: blockers, loaded: true };
+    renderBlockerBadge();
+    showModal(
+      "抓取阻断队列",
+      `${blockerListHtml(blockers)}
+      <div class="actions">
+        <button class="btn btn-ghost" type="button" data-action="close-modal">关闭</button>
+      </div>`,
+    );
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+setCanvasRenderHook(async (app) => {
+  const headerRow = app.querySelector(".page-header--jobs .row");
+  if (!headerRow || app.querySelector("[data-fetch-url-bar]")) return;
+
+  const fetchBar = document.createElement("div");
+  fetchBar.className = "fetch-url-bar";
+  fetchBar.setAttribute("data-fetch-url-bar", "");
+  fetchBar.innerHTML = `
+    <input type="url" data-fetch-url placeholder="https://… 粘贴岗位链接，自动抓取入库" aria-label="岗位链接" autocomplete="off">
+    <button type="button" class="btn btn-primary btn-sm" data-action="fetch-job-url">自动抓取</button>`;
+  fetchBar
+    .querySelector("[data-fetch-url]")
+    .addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const button = fetchBar.querySelector('[data-action="fetch-job-url"]');
+        if (button) button.click();
+      }
+    });
+
+  const badgeMount = document.createElement("span");
+  badgeMount.className = "blocker-badge-mount";
+  badgeMount.setAttribute("data-blocker-badge", "");
+
+  headerRow.append(fetchBar, badgeMount);
+  /* 先渲染缓存计数（若有），再异步拉最新计数，避免每次进岗位库闪一下。 */
+  renderBlockerBadge();
+  refreshBlockerBadge();
 });
 
 async function boot() {

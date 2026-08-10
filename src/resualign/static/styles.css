@@ -5683,3 +5683,154 @@ label.eval-option,
   }
 }
 
+/* =================================================================== */
+/* Sprint 3: Pipeline + Blocker（抓取 Bar + 阻断微标/列表）               */
+/* =================================================================== */
+/* 全部复用现有设计 token（不新增顶层 :root 变量）。闪烁动画由
+ * prefers-reduced-motion 全局规则自动降级为单次。 */
+
+/* 岗位库 Top Bar 内的 URL 抓取输入区（注入到 .page-header .row）。 */
+.fetch-url-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: min(340px, 100%);
+}
+
+.fetch-url-bar input[data-fetch-url] {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  height: 36px;
+  font-size: var(--text-13);
+}
+
+/* 阻断微标：数字 badge + 呼吸闪烁。pending > 0 时由 blockerCountBadge
+ * 生成该按钮；hidden 状态由调用方直接不挂载节点表达（0 时空串）。 */
+.blocker-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--pending);
+  border-radius: var(--radius-pill);
+  padding: 5px 10px;
+  font-size: var(--text-13);
+  font-weight: 800;
+  line-height: 1;
+  color: var(--pending-deep);
+  background: var(--pending-soft);
+  cursor: pointer;
+  white-space: nowrap;
+  animation: blocker-badge-pulse 1.6s var(--ease-in-out) infinite;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+
+.blocker-badge:hover {
+  background: color-mix(in srgb, var(--pending) 16%, var(--pending-soft));
+  border-color: var(--pending-deep);
+  transform: translateY(-1px);
+}
+
+.blocker-badge__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--pending);
+  color: #fff;
+  font-size: var(--text-12);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes blocker-badge-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--pending) 42%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--pending) 0%, transparent);
+  }
+}
+
+/* 阻断队列列表（showModal 内容）。 */
+.blocker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: min(52vh, 480px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.blocker-item {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--pending);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  background: var(--surface);
+}
+
+.blocker-item__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.blocker-item__title {
+  font-weight: 800;
+  font-size: var(--text-15);
+  overflow-wrap: anywhere;
+}
+
+.blocker-item__meta {
+  color: var(--text-muted);
+  font-size: var(--text-12);
+  overflow-wrap: anywhere;
+  margin-top: 2px;
+}
+
+.blocker-item__reason {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--pending-soft);
+  color: var(--pending-deep);
+  font-size: var(--text-13);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.blocker-item__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.blocker-resolve {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.blocker-resolve textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+}
+
+/* fetch-url 被规则拦截 / 加入阻断时的 toast 语义色（复用 pending token）。 */
+.toast.warning {
+  background: var(--surface-pending);
+  color: var(--pending-deep);
+  border-left-color: var(--pending);
+}
+

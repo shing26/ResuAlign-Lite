@@ -2198,3 +2198,85 @@ export function highlightSkillGapHtml(gapItems, skill) {
   return blocks.join("");
 }
 
+/* ------------------------------------------------------------------ */
+/* Sprint 3: Pipeline + Blocker（抓取结果文案 / 阻断列表 / 微标）          */
+/* ------------------------------------------------------------------ */
+/* 与后端并行实现的契约（本模块保持 DOM-free，可在 Node 下单测）：
+ *   POST /api/jobs/fetch-url {url}
+ *     -> { status:'created'|'duplicate'|'blocked'|'rule_rejected',
+ *          job_id?, blocker_id?, reason? }
+ *   GET  /api/blockers?status=pending
+ *     -> [{ blocker_id, job_id, url, title, reason, category, status, created_at }]
+ */
+
+export const FETCH_URL_STATUS_MESSAGES = {
+  created: "岗位已抓取",
+  duplicate: "已存在相同岗位",
+  blocked: "已加入阻断队列",
+  rule_rejected: "规则拦截",
+};
+
+/** fetch-url 提交结果的 toast 文案。blocked / rule_rejected 会带上后端
+ *  reason（若提供）；未知状态回退为「抓取结果：<status>」。 */
+export function fetchUrlResultMessage(status, reason) {
+  const key = String(status || "");
+  const reasonText = String(reason || "").trim();
+  if (key === "blocked" || key === "rule_rejected") {
+    return reasonText
+      ? `${FETCH_URL_STATUS_MESSAGES[key] || key}：${reasonText}`
+      : FETCH_URL_STATUS_MESSAGES[key] || key;
+  }
+  return FETCH_URL_STATUS_MESSAGES[key] || `抓取结果：${key || "未知"}`;
+}
+
+/** 阻断队列列表 HTML（showModal 内容）。每条含 URL / title / category /
+ *  reason / created_at，以及「忽略」「手动补全」两个操作与补全表单；
+ *  URL / title / reason / category / blocker_id 全部经 esc 转义。 */
+export function blockerListHtml(blockers) {
+  const list = Array.isArray(blockers) ? blockers : [];
+  if (!list.length) {
+    return `<div class="blocker-list" data-blocker-list><div class="muted small" data-blocker-empty>暂无待处理的阻断</div></div>`;
+  }
+  const items = list
+    .map((blocker) => {
+      const id = esc(blocker && blocker.blocker_id);
+      const url = esc(blocker && blocker.url);
+      const title = esc((blocker && blocker.title) || "未命名岗位");
+      const reason = esc(blocker && blocker.reason);
+      const category = esc(blocker && blocker.category);
+      const time = formatDate(blocker && blocker.created_at);
+      return `
+      <article class="blocker-item" data-blocker-item data-blocker-id="${id}">
+        <div class="blocker-item__head">
+          <span class="badge badge-amber">待处理</span>
+          <span class="small muted">${time}</span>
+        </div>
+        <div class="blocker-item__title">${title}</div>
+        <div class="blocker-item__meta">${url}${category ? ` · ${category}` : ""}</div>
+        ${reason ? `<div class="blocker-item__reason">${reason}</div>` : ""}
+        <div class="blocker-item__actions">
+          <button type="button" class="btn btn-outline btn-sm" data-action="ignore-blocker" data-id="${id}">忽略</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-action="toggle-blocker-resolve" data-id="${id}">手动补全</button>
+        </div>
+        <form class="blocker-resolve" data-form="blocker-resolve" data-id="${id}" hidden>
+          <input type="hidden" name="blocker_id" value="${id}">
+          <textarea name="manual_text" rows="5" placeholder="粘贴该岗位 JD 文本，手动补全后入库存档"></textarea>
+          <div class="row" style="margin-top:8px">
+            <button class="btn btn-primary btn-sm" type="submit">提交补全</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-action="cancel-blocker-resolve" data-id="${id}">取消</button>
+          </div>
+        </form>
+      </article>`;
+    })
+    .join("");
+  return `<div class="blocker-list" data-blocker-list>${items}</div>`;
+}
+
+/** 阻断微标 HTML（数字 badge + 闪烁动画由 CSS 提供）。pending 为 0 / 负数 /
+ *  缺失时返回空串，调用方不挂载任何节点。 */
+export function blockerCountBadge(count) {
+  const n = Math.max(0, Number(count) || 0);
+  if (n <= 0) return "";
+  return `<button type="button" class="blocker-badge" data-action="open-blockers" title="有 ${n} 条抓取阻断待处理" aria-label="打开抓取阻断队列：${n} 条待处理">阻断 <span class="blocker-badge__count">${n}</span></button>`;
+}
+
