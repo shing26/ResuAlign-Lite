@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 
 import resualign.api as api_module
 
+from ...agent.hitl import emit_hitl_event
 from ...job_library import _normalize_source_url
 from ...rules import RuleFilterEngine
 
@@ -105,6 +106,23 @@ class JobFetcherService:
         # The engine is stateless; build one per call so a swapped store is
         # always honored.
         return RuleFilterEngine(self.store)
+
+    @staticmethod
+    def _emit_blocker_created(blocker: dict[str, Any]) -> None:
+        """Fan out the HITL ``blocker.created`` event (webhook or app log).
+
+        Added in Sprint 6 so humans/agents watching ``RESUALIGN_WEBHOOK_URL``
+        learn about pipeline blockers without polling. Never raises.
+        """
+        emit_hitl_event(
+            "blocker.created",
+            {
+                "blocker_id": blocker["blocker_id"],
+                "url": blocker.get("url"),
+                "reason": blocker.get("reason"),
+                "category": blocker.get("category"),
+            },
+        )
 
     # -- Automation rules ----------------------------------------------------
 
@@ -218,6 +236,7 @@ class JobFetcherService:
                 reason=error,
                 category="invalid_url",
             )
+            self._emit_blocker_created(blocker)
             return self._blocked_payload(blocker)
 
         # Hash dedupe before spending a crawl on a known URL.
@@ -243,6 +262,7 @@ class JobFetcherService:
                 reason=pre_verdict.reason or "被自动化规则拦截",
                 category="rule_rejected",
             )
+            self._emit_blocker_created(blocker)
             return self._rule_rejected_payload(blocker, pre_verdict)
 
         meta: dict[str, Any] = {}
@@ -259,6 +279,7 @@ class JobFetcherService:
                 reason=(detail or {}).get("reason") or str(exc),
                 category=_blocker_category_from_error(exc),
             )
+            self._emit_blocker_created(blocker)
             return self._blocked_payload(blocker)
         except Exception as exc:
             logger.exception(
@@ -270,6 +291,7 @@ class JobFetcherService:
                 reason=str(exc)[:300],
                 category="fetch_error",
             )
+            self._emit_blocker_created(blocker)
             return self._blocked_payload(blocker)
 
         title = self._derive_or_fallback_title(jd_text, meta)
@@ -297,6 +319,7 @@ class JobFetcherService:
                 reason=verdict.reason or "被自动化规则拦截",
                 category="rule_rejected",
             )
+            self._emit_blocker_created(blocker)
             return self._rule_rejected_payload(blocker, verdict)
 
         user = {"user_id": tenant_id}

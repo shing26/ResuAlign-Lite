@@ -18,11 +18,28 @@ def _parse_args(argv=None):
     p = argparse.ArgumentParser(
         description="ResuAlign - Resume alignment and diagnosis tool"
     )
-    p.add_argument("resume", type=Path, help="Path to resume file (PDF/DOCX/txt)")
+    p.add_argument("resume", type=Path, nargs="?", help="Path to resume file (PDF/DOCX/txt)")
     jd_group = p.add_mutually_exclusive_group()
     jd_group.add_argument("--jd", "-j", help="Job description text (inline)")
     jd_group.add_argument("--jd-file", type=Path, help="Path to job description file")
     jd_group.add_argument("--jd-url", help="URL of a job description page to crawl")
+    agent_group = p.add_mutually_exclusive_group()
+    agent_group.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run the agent-native headless daemon (no web frontend)",
+    )
+    agent_group.add_argument(
+        "--agent-mode",
+        action="store_true",
+        help="Alias for --headless: run the agent-native daemon",
+    )
+    p.add_argument(
+        "--interval",
+        type=float,
+        default=30.0,
+        help="Headless/agent-mode poll interval in seconds (default: 30)",
+    )
     p.add_argument("--provider", help="LLM provider (deepseek/openrouter/ollama)")
     p.add_argument("--api-key", help="API key (overrides .env/env)")
     p.add_argument("--model", "-m", help="Model name")
@@ -49,6 +66,23 @@ def _colorize_score(score: int) -> str:
 
 def main(argv=None):
     args = _parse_args(argv)
+
+    # Agent-native mode: run the headless daemon instead of the interactive
+    # resume-vs-JD report. No resume file, no web frontend.
+    if args.headless or args.agent_mode:
+        from .agent.headless import run_headless
+
+        run_headless(interval=args.interval)
+        return
+
+    if args.resume is None:
+        print(
+            "Error: resume file is required "
+            "(or use --headless/--agent-mode for the agent daemon).",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     config = build_config(
         provider=args.provider,
         api_key=args.api_key,

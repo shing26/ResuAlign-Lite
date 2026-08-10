@@ -48,9 +48,27 @@ def _apply_sqlite_pragmas(
     connection.execute("PRAGMA foreign_keys=ON")
     if in_memory:
         return
-    connection.execute("PRAGMA journal_mode=WAL")
+    _set_wal_with_retry(connection)
     connection.execute("PRAGMA busy_timeout=5000")
     connection.execute("PRAGMA synchronous=NORMAL")
+
+
+def _set_wal_with_retry(connection) -> None:
+    """Switch to WAL journal mode, tolerating first-open contention.
+
+    ``PRAGMA journal_mode=WAL`` requires an exclusive lock and does NOT
+    honor ``busy_timeout``, so when two stores first initialize the same
+    fresh database concurrently one of them can hit ``database is locked``.
+    WAL mode persists in the db header, so retrying briefly is safe.
+    """
+    for attempt in range(3):
+        try:
+            connection.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt == 2:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 class _SqliteStore:

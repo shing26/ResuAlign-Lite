@@ -24,7 +24,7 @@ NODE_FORM = '[data-form="llm-node-form"]'
 
 
 def test_node_survives_reload(page, base_url, api_call):
-    errors = capture_errors(page)
+    capture_errors(page)
 
     page.goto(f"{base_url}/#/settings", wait_until="domcontentloaded")
     page.wait_for_selector(NODE_GRID, timeout=15000)
