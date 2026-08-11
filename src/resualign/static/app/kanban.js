@@ -1,9 +1,10 @@
 /* ResuAlign v2.0 — Job Kanban (蓝图文件 5)
  * 岗位库重构：URL 自动抓取 Bar + Funnel Metrics + 5 列 surface3 沉降式
  * Kanban（未投递 ➔ 已投递 ➔ 面试中 ➔ 已拿 Offer ➔ 放弃），卡片悬浮带
- * Apple 微动效。旧的「关键词/职能/级别/状态」4 大筛选框已彻底切除。
- * 原实现位于 split-canvas.js（renderCopilotBoard），v2.0 拆分为独立模块，
- * 路由收口处改调 renderKanban。
+ * Apple 微动效。搜索/职能/级别/状态筛选以苹果风折叠 Toolbar 呈现
+ * （收合式，展开不挤占看板空间）；事件绑定复用 main.js 的
+ * data-form="job-filter" → handleForm → state.filters 委托，保持架构。
+ * 原实现位于 split-canvas.js（renderCopilotBoard），v2.0 拆分为独立模块。
  */
 import {
   $,
@@ -16,10 +17,12 @@ import {
   esc,
   state,
   toast,
+  vocabularyList,
 } from "./events.js";
 import {
   boardCard,
   computeJobStats,
+  options,
   renderJobStatsHtml,
 } from "./format.js";
 
@@ -80,6 +83,27 @@ export async function renderKanban(app) {
       </div>
     </div>
     ${renderJobStatsHtml(computeJobStats(state.jobs))}
+    <details class="board-filter panel panel-card" data-board-filter>
+      <summary class="board-filter__summary" data-filter-summary>
+        <span class="board-filter__label">🔍 筛选岗位</span>
+        <span class="board-filter__hint small muted">关键词 / 职能 / 级别 / 状态</span>
+        <span class="board-filter__toggle" aria-hidden="true">展开</span>
+      </summary>
+      <form class="board-filter__form" data-form="job-filter">
+        <label class="field"><span class="small">关键词</span>
+          <input type="text" name="search" value="${esc(state.filters.search || "")}" placeholder="搜索标题 / 公司 / 技能..."></label>
+        <label class="field"><span class="small">职能</span>
+          <select name="job_function">${options(vocabulary.job_functions || [], state.filters.job_function || "")}</select></label>
+        <label class="field"><span class="small">级别</span>
+          <select name="seniority">${options(vocabulary.seniorities || [], state.filters.seniority || "")}</select></label>
+        <label class="field"><span class="small">状态</span>
+          <select name="status">${options(statuses, state.filters.status || "")}</select></label>
+        <div class="board-filter__actions">
+          <button class="btn btn-primary btn-sm" type="submit">应用筛选</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-action="clear-filters">清除</button>
+        </div>
+      </form>
+    </details>
     <div class="board-toolbar panel panel-card">
       <span class="small muted">拖拽卡片到目标列；触屏 / 键盘：使用卡片内下拉菜单移动状态。</span>
     </div>

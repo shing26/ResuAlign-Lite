@@ -3742,6 +3742,70 @@ select {
   max-width: 220px;
 }
 
+/* 苹果风折叠筛选 Toolbar：收合只占一行，展开显示四维筛选表单 */
+.board-filter {
+  margin: 10px 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.board-filter__summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.board-filter__summary::-webkit-details-marker {
+  display: none;
+}
+
+.board-filter__label {
+  font-weight: 700;
+  font-size: var(--text-14);
+  color: var(--ink);
+}
+
+.board-filter__hint {
+  flex: 1;
+}
+
+.board-filter__toggle {
+  font-size: var(--text-12);
+  color: var(--text-muted);
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.board-filter[open] .board-filter__toggle {
+  transform: rotate(180deg);
+}
+
+.board-filter__form {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) 1fr 1fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+  padding: 4px 14px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.board-filter__actions {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .board-filter__form {
+    grid-template-columns: 1fr 1fr;
+  }
+  .board-filter__actions {
+    grid-column: 1 / -1;
+  }
+}
+
 /* T4 three-level workbench result */
 .wb-level {
   margin-top: 14px;
@@ -6096,6 +6160,37 @@ label.eval-option,
 
 .resume-sheet__doc {
   min-height: 200px;
+}
+
+/* v2.0 双态编辑：Sheet 内嵌源码 Textarea（默认隐藏，点「编辑源码」切换） */
+.resume-inline-edit {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.resume-inline-edit textarea {
+  width: 100%;
+  min-height: 420px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-13);
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.resume-inline-edit textarea:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+body.resume-inline-editing .resume-sheet__doc {
+  display: none;
 }
 
 /* --- T3 右 35% 侧栏 --------------------------------------------------- */

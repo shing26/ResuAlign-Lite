@@ -137,6 +137,7 @@ async function renderResumeDetailView(app, resumeId) {
         <div class="resume-sheet__bar">
           <span class="resume-sheet__title">完整简历</span>
           <div class="row">
+            <button class="btn btn-primary btn-sm" data-action="toggle-resume-inline-edit" data-id="${resume.resume_id}">编辑源码</button>
             <button class="btn btn-outline btn-sm" data-action="edit-resume" data-id="${resume.resume_id}">编辑</button>
             <button class="btn btn-outline btn-sm" data-action="copy-resume-md" data-id="${resume.resume_id}">复制 MD</button>
             <button class="btn btn-secondary btn-sm" data-action="print-resume">导出 PDF</button>
@@ -147,6 +148,13 @@ async function renderResumeDetailView(app, resumeId) {
           <button class="btn btn-ghost btn-sm" data-action="restore-current-preview">返回当前版本</button>
         </div>
         <div class="resume-doc resume-sheet__doc" data-resume-sheet-doc>${renderMarkdown(resume.content)}</div>
+        <form class="resume-inline-edit" data-resume-inline-edit data-form="resume-edit" hidden>
+          <input type="hidden" name="resume_id" value="${resume.resume_id}">
+          <div class="field"><label>简历内容（Markdown）</label>
+            <textarea name="content" rows="16" required>${esc(resume.content)}</textarea></div>
+          <div class="actions"><button class="btn btn-ghost btn-sm" type="button" data-action="cancel-resume-inline-edit">取消</button>
+            <button class="btn btn-primary btn-sm" type="submit">保存修改</button></div>
+        </form>
       </section>
       <aside class="resume-detail-side">
         <section class="panel panel-card ats-health-card" data-ats-health-card>

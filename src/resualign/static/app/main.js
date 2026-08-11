@@ -1144,6 +1144,35 @@ const actions = {
     $$("[data-version-item]").forEach((item) => item.classList.remove("is-active"));
     toast("已返回当前版本", "info");
   },
+  /* v2.0 双态编辑：全景渲染 View ↔ 隐藏 Textarea 零缝切换（保留模态框编辑）。
+   * 保存走 data-form="resume-edit" 的既有 handleForm 提交，本 action 只负责
+   * 切换两个面板的可见性。 */
+  "toggle-resume-inline-edit": (button) => {
+    const sheet = button && button.closest("[data-resume-sheet]");
+    const doc = $("[data-resume-sheet-doc]", sheet);
+    const form = $("[data-resume-inline-edit]", sheet);
+    if (!doc || !form) return;
+    const entering = form.hidden;
+    form.hidden = !entering;
+    doc.hidden = entering;
+    if (entering) {
+      const textarea = form.querySelector("textarea[name='content']");
+      if (textarea) textarea.focus();
+    }
+    document.body.classList.toggle("resume-inline-editing", entering);
+  },
+  "cancel-resume-inline-edit": (button) => {
+    const sheet = button && button.closest("[data-resume-sheet]");
+    const doc = $("[data-resume-sheet-doc]", sheet);
+    const form = $("[data-resume-inline-edit]", sheet);
+    if (!doc || !form) return;
+    /* 放弃未保存改动：重置 textarea 为当前已渲染内容 */
+    const textarea = form.querySelector("textarea[name='content']");
+    if (textarea) textarea.value = state.resumeCurrentContent || "";
+    form.hidden = true;
+    doc.hidden = false;
+    document.body.classList.remove("resume-inline-editing");
+  },
   "export-diagnosis": () => printTarget("diagnosis"),
   "export-diagnosis-md": async () => {
     const resumeId =
