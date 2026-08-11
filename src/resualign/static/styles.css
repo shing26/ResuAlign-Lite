@@ -6494,5 +6494,196 @@ label.eval-option,
   }
 }
 
+/* ==========================================================================
+   ResuAlign v2.0 - Apple Native Visual Patch (追加到文件最底部)
+   ========================================================================== */
+
+/* 1. 全局阶梯暗黑背景与字阶 */
+:root {
+  --app-bg: #121214;
+  --surface-primary: #1a1a1e;
+  --surface-panel: #232328;
+  --surface-subtle: #161619;
+  
+  --apple-blue: #007aff;
+  --apple-green: #32d74b;
+  --apple-red: #ff453a;
+  --apple-amber: #ff9f0a;
+}
+
+body, html {
+  background-color: var(--app-bg) !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", sans-serif !important;
+}
+
+/* 2. 64px 顶栏与侧边栏苹果暗色 */
+.topbar, header {
+  background-color: #1a1a1e !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.app-rail, .sidebar {
+  background-color: #1a1a1e !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+/* 3. 卡片与 5 列看板沉降底色 */
+.app-card, .apple-card, .card {
+  background-color: #232328 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 12px !important;
+}
+
+.kanban-column, .kanban-col {
+  background-color: #161619 !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-radius: 16px !important;
+}
+
+/* 4. 低饱和度 Diff 对比框 */
+.diff-ins, ins {
+  background-color: rgba(50, 215, 75, 0.08) !important;
+  border: 1px solid rgba(50, 215, 75, 0.22) !important;
+  color: #93ecaa !important;
+  text-decoration: none !important;
+}
+
+.diff-del, del {
+  background-color: rgba(255, 69, 58, 0.08) !important;
+  border: 1px solid rgba(255, 69, 58, 0.2) !important;
+  color: #ffb0ab !important;
+}
+
+/* 5. 原生下拉菜单暗色修复 */
+select option {
+  background-color: #232328 !important;
+  color: #ffffff !important;
+}
 
 
+/* ==========================================================================
+   Apple Native Aesthetic (v2.0 shell) - override layer
+   Keeps every component class used by the JS renderers intact; this layer
+   re-maps the design tokens to the Apple palette and adds the unified
+   app-shell look (rail / topbar / nav / scrollbar / select).
+   ========================================================================== */
+:root {
+  --apple-bg: #121214;
+  --apple-surface-1: #1a1a1e;
+  --apple-surface-2: #232328;
+  --apple-surface-3: #161619;
+  --apple-blue: #007aff;
+  --apple-green: #32d74b;
+  --apple-red: #ff453a;
+  --apple-amber: #ff9f0a;
+  --apple-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", sans-serif;
+  --apple-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Dark shell is the single delivered aesthetic (index.html carries class=dark). */
+html.dark, :root[data-theme="dark"], html.dark :root {
+  --bg-canvas: var(--apple-bg);
+  --bg: var(--apple-bg);
+  --surface: var(--apple-surface-1);
+  --surface-2: var(--apple-surface-2);
+  --surface-panel: var(--apple-surface-1);
+  --surface-raised: var(--apple-surface-2);
+  --surface-tint: var(--apple-surface-3);
+  --bg-rail: #101012;
+  --bg-rail-soft: #17171b;
+  --bg-header: #101012;
+  --border: rgba(255,255,255,0.1);
+  --border-soft: rgba(255,255,255,0.06);
+  --border-strong: rgba(255,255,255,0.16);
+  --ink: #f2f2f7;
+  --ink-strong: #ffffff;
+  --ink-2: #d0d0d8;
+  --text-muted: rgba(255,255,255,0.55);
+  --brand: var(--apple-blue);
+  --primary: var(--apple-blue);
+  --primary-hover: #3395ff;
+  --primary-active: #0071e3;
+  --success: var(--apple-green);
+  --success-soft: rgba(50,215,75,0.12);
+  --warning: var(--apple-amber);
+  --warning-soft: rgba(255,159,10,0.12);
+  --error: var(--apple-red);
+  --error-soft: rgba(255,69,58,0.12);
+  --info: #64d2ff;
+  --info-soft: rgba(100,210,255,0.12);
+  --teal: #30d0c0;
+  --teal-soft: rgba(48,208,192,0.12);
+  --shadow-1: 0 2px 8px rgba(0,0,0,0.25);
+  --shadow-2: 0 4px 16px rgba(0,0,0,0.35);
+  --shadow-3: 0 8px 28px rgba(0,0,0,0.45);
+  --radius-lg: 12px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
+}
+
+body {
+  font-family: var(--apple-font);
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* macOS minimal scrollbars */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.28); }
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
+
+/* Unified app shell: rail + topbar */
+.app-rail {
+  border-right: 1px solid var(--border);
+  background: var(--bg-rail);
+}
+.tabs--rail button {
+  border-radius: 10px;
+  transition: background 0.16s cubic-bezier(0.16,1,0.3,1), color 0.16s;
+  color: var(--text-muted);
+  padding: 9px 12px;
+  margin: 1px 0;
+}
+.tabs--rail button:hover { background: rgba(255,255,255,0.06); color: var(--ink); }
+.tabs--rail button[aria-selected="true"] {
+  background: var(--surface-2);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+}
+.topbar {
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+.header-job-select,
+select, .board-status-select {
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+}
+select option {
+  background-color: var(--surface-2);
+  color: #fff;
+}
+.command-bar__trigger {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(0,0,0,0.3);
+  transition: background 0.16s, border-color 0.16s;
+}
+.command-bar__trigger:hover { background: rgba(0,0,0,0.5); border-color: var(--border-strong); }
+
+/* Card & button radius pass for the Apple feel */
+.card, .panel, .panel-card, .apple-card, .board-card, .diff-card,
+.dashboard-kpi, .llm-node-card, .rule-item, .batch-panel {
+  border-radius: 12px;
+}
+
+/* Low-saturation inline diff already tokenised; keep char marks crisp */
+.diff-char-ins { background: rgba(50,215,75,0.1); border: 1px solid rgba(50,215,75,0.25); color: #93ecaa; border-radius: 4px; }
+.diff-char-del { background: rgba(255,69,58,0.1); border: 1px solid rgba(255,69,58,0.25); color: #ffb0ab; border-radius: 4px; text-decoration: line-through; }
