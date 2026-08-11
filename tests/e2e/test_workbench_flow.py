@@ -125,7 +125,16 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
         job_id = _wait_for_classified_job(api_call)
 
         # Back to the library: the card is classified (no pending badge).
-        page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")
+        # Navigate defensively: a stale S2 pushState or a slow board render
+        # can leave the workspace view visible; re-goto if the board route
+        # does not settle.
+        for _ in range(2):
+            page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")
+            try:
+                page.wait_for_selector("#job-board", timeout=12000)
+                break
+            except Exception:
+                continue
         card = page.locator(f'.board-card[data-job-id="{job_id}"]')
         card.wait_for(timeout=15000)
         expect(
