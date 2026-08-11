@@ -1,9 +1,8 @@
-"""E2E: workbench key path — paste JD → classify → workbench → granularity →
-async tailor → diff cards with provenance → accept bullet → markdown export.
+"""E2E: workbench key path ??paste JD ??classify ??workbench ??granularity ??async tailor ??diff cards with provenance ??accept bullet ??markdown export.
 
 The journey under test is the workstation money path:
 
-1. 岗位库 command palette pastes a JD; the fake LLM classifies the job.
+1. ?????command palette pastes a JD; the fake LLM classifies the job.
 2. The workbench opens the job, pins a master resume, selects the fine
    granularity, and runs the async alignment (wb-run).
 3. The split canvas polls to succeeded and renders diff cards with
@@ -12,15 +11,15 @@ The journey under test is the workstation money path:
    panel (the front-end accepted-state change).
 5. Downloading Markdown carries the accepted text.
 
-Setup through the API (the master resume — not the journey under test),
+Setup through the API (the master resume ??not the journey under test),
 assertions through the rendered UI. The test owns its data and deletes the
 job + resume in a finally block.
 
 fake_llm coverage: the workbench run exercises ``resume auditor`` (diagnose),
 ``job description analyst + gap analyst`` (jd_analysis), and ``precise resume
-editor`` (tailor) — all already routed by .scratch/phase-20/fake_llm.py, so
+editor`` (tailor) ??all already routed by .scratch/phase-20/fake_llm.py, so
 no fake-LLM change is required. evaluate is optional and stays off (the
-settings default), matching the task's "(可选)" stage.
+settings default), matching the task's "(????" stage.
 """
 
 from __future__ import annotations
@@ -41,17 +40,17 @@ pytestmark = pytest.mark.e2e
 
 UNIQUE_TAG = "e2e-wb-flow"
 JD_TEXT = (
-    "招聘 Python 后端工程师（{tag}），负责高并发服务端开发，"
-    "要求熟悉 FastAPI 异步接口与 Redis 缓存。"
-    "岗位要求：5 年以上后端经验；能支撑 millions of requests per day。"
+    "??? Python ?????????{tag}????????????????????"
+    "?????? FastAPI ????????Redis ?????
+    "???????? ?????????????????millions of requests per day??
 ).format(tag=UNIQUE_TAG)
 
 # fake_llm.py's tailor branch rewrites the first resume line to
 # "<line> (high concurrency)"; every assertion below keys on that line.
-RESUME_TITLE_LINE = "E2E 工作台主简历"
+RESUME_TITLE_LINE = "E2E ??????????
 RESUME_CONTENT = (
     RESUME_TITLE_LINE
-    + "\n\n工作经历\n- 使用 Python 开发后端服务\n- 使用 Redis 做缓存与会话管理\n"
+    + "\n\n??????\n- ??? Python ??????????n- ??? Redis ????????????\n"
 )
 ACCEPTED_TEXT = f"{RESUME_TITLE_LINE} (high concurrency)"
 
@@ -96,13 +95,13 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
 
     # Setup through the API: one master resume the workbench can pin.
     resume = api_call("POST", "/api/master-resumes", {
-        "title": "E2E 工作台主简历",
+        "title": "E2E ??????????,
         "content": RESUME_CONTENT,
     })
     resume_id = resume["resume_id"]
 
     try:
-        # --- 1. 岗位库 → 添加岗位（粘贴 JD，fake LLM 分类成功）------------
+        # --- 1. ??????????????????JD??ake LLM ????????-----------
         page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")
         page.wait_for_selector("[data-action='open-command-panel']", timeout=15000)
         page.click("[data-action='open-command-panel']")
@@ -125,16 +124,10 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
         job_id = _wait_for_classified_job(api_call)
 
         # Back to the library: the card is classified (no pending badge).
-        # Navigate defensively: a stale S2 pushState or a slow board render
-        # can leave the workspace view visible; re-goto if the board route
-        # does not settle.
-        for _ in range(2):
-            page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")
-            try:
-                page.wait_for_selector("#job-board", timeout=12000)
-                break
-            except Exception:
-                continue
+        # Wait for the board container so a slow first render fails fast
+        # instead of timing out late on CI.
+        page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")
+        page.wait_for_selector("#job-board", timeout=20000)
         card = page.locator(f'.board-card[data-job-id="{job_id}"]')
         card.wait_for(timeout=15000)
         expect(
@@ -142,18 +135,18 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
             "job card should not show the pending badge after classification",
         )
         expect(
-            card.locator(".badge-blue:has-text('后端')").count() >= 1,
+            card.locator(".badge-blue:has-text('???')").count() >= 1,
             "job card should show the classified function badge",
         )
 
-        # --- 2. 工作台打开该岗位 -------------------------------------------
+        # --- 2. ?????????????-------------------------------------------
         # Navigate by hash instead of clicking the card button: the board
         # re-renders on background polling (SSE/classification refresh), so
         # the button can detach mid-click on slower CI runners.
         page.evaluate("location.hash = '#/workspace/%s'" % job_id)
         page.wait_for_selector(WORKSPACE_SELECTOR, timeout=15000)
 
-        # --- 3. 选主简历 + granularity（fine）→ 生成（wb-run）→ 轮询 succeeded
+        # --- 3. ???????+ granularity??ine??? ?????b-run??? ??? succeeded
         wait_for_function(
             page,
             """({ resumeId }) => {
@@ -175,7 +168,7 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
         first_card = page.locator("[data-diff-list] .diff-card").first
         first_card.wait_for(timeout=15000)
 
-        # --- 4. Provenance 校验 --------------------------------------------
+        # --- 4. Provenance ??? --------------------------------------------
         provenance_badge = first_card.locator("[data-provenance]")
         expect(
             provenance_badge.count() == 1,
@@ -209,7 +202,7 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
             f"got {proposed.inner_text()!r}",
         )
 
-        # --- 5. 采纳（accept-bullet）→ 采纳态变化 --------------------------
+        # --- 5. ?????ccept-bullet??? ????????--------------------------
         before = api_call("GET", f"/api/jobs/{job_id}")
         expect(
             not (before.get("final_draft") or "").strip(),
@@ -231,12 +224,12 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
             "final_draft should persist the accepted text",
         )
 
-        # --- 6. 下载 Markdown → 导出内容含采纳后的文本 ---------------------
-        # The workbench dock's "下载 Markdown" (export-align-markdown) carries
-        # the accepted suggestion and its provenance in 修改建议. (Its 对齐内容
+        # --- 6. ??? Markdown ???????????????????---------------------
+        # The workbench dock's "??? Markdown" (export-align-markdown) carries
+        # the accepted suggestion and its provenance in ??????. (Its ??????
         # section reads session.alignment.draft, which the split-canvas SSE
-        # job.result replay sets from result.draft — the analysis result has
-        # no draft field, so the section renders the "尚未生成定稿" placeholder
+        # job.result replay sets from result.draft ??the analysis result has
+        # no draft field, so the section renders the "?????????" placeholder
         # in the current product. The accepted draft itself is exported from
         # the final-draft panel below.)
         with page.expect_download(timeout=15000) as download_info:
@@ -247,20 +240,20 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
             "workbench markdown export should start with a title heading",
         )
         expect(
-            "## 修改建议" in dock_content,
-            "workbench markdown export should carry a 修改建议 section",
+            "## ??????" in dock_content,
+            "workbench markdown export should carry a ?????? section",
         )
         expect(
             "Matches JD high-concurrency scenario" in dock_content,
             "markdown should list the accepted diff's reason",
         )
         expect(
-            "来源已验证" in dock_content,
+            "???????? in dock_content,
             "markdown should carry the verified provenance label",
         )
 
-        # The final-draft panel's "导出 Markdown" (export-final-draft-md)
-        # exports state.wbFinalDraft.draft — the accepted text, via a real
+        # The final-draft panel's "??? Markdown" (export-final-draft-md)
+        # exports state.wbFinalDraft.draft ??the accepted text, via a real
         # Playwright download event.
         with page.expect_download(timeout=15000) as download_info:
             page.click("[data-action='export-final-draft-md']")
