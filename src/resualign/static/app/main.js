@@ -167,6 +167,15 @@ async function render() {
       renderApiKeyGuide(app);
       return;
     }
+    /* S6-fix: a stale/removed workspace job id should fall back to the
+       Dashboard instead of a dead-end error panel. */
+    if (
+      state.route.name === "workspace" &&
+      /not found|404|已过期|不存在/i.test(String(error.message))
+    ) {
+      navigate("dashboard");
+      return;
+    }
     app.innerHTML = `<div class="panel"><h3>出错了</h3><p class="muted">${esc(error.message)}</p>
       <div class="row" style="margin-top:12px"><button class="btn btn-primary" data-action="reload">重试</button></div></div>`;
   }
