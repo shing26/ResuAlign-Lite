@@ -26,6 +26,7 @@ import {
   vocabularyList,
 } from "./events.js";
 import { initTheme, toggleTheme } from "./theme.js";
+import { renderDashboard } from "./dashboard-view.js";
 import {
   closeCommandPanel,
   confirmCommandPanel,
@@ -160,7 +161,7 @@ async function render() {
       await renderOptimizerCanvas(app, state.route.jobId);
       /* #11: 工作台顶部挂载当前岗位的面试/下一步到期提醒横幅 */
       mountWorkspaceReminder(app);
-    } else if (state.route.name === "dashboard") await renderDashboardView(app);
+    } else if (state.route.name === "dashboard") await renderDashboard(app);
     else await renderSettingsView(app);
   } catch (error) {
     if (isApiKeyUnconfigured(error)) {
