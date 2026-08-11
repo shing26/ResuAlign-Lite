@@ -125,20 +125,12 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
         job_id = _wait_for_classified_job(api_call)
 
         # Back to the library: the card is classified (no pending badge).
-        # Navigate by hash like the workspace hop below; a stale workspace
-        # poller can pushState the hash back, so confirm it settled on the
-        # jobs route and retry once before asserting on the board.
-        for _ in range(2):
-            page.evaluate("location.hash = '#/jobs'")
-            try:
-                page.wait_for_function(
-                    "() => location.hash.startsWith('#/jobs')",
-                    timeout=10.0,
-                )
-                page.wait_for_selector("#job-board", timeout=12000)
-                break
-            except Exception:
-                continue
+        # Do a full reload so any in-flight workspace poller/SSE callbacks
+        # from the previous view are gone; hash-only navigation could let a
+        # stale callback pushState back to the workspace route on CI.
+        page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector("#job-board", timeout=20000)
         card = page.locator(f'.board-card[data-job-id="{job_id}"]')
         card.wait_for(timeout=15000)
         expect(
