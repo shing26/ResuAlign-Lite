@@ -26,7 +26,7 @@ globalThis.HTMLFormElement = window.HTMLFormElement;
 
 document.body.innerHTML = `
   <div class="app-main">
-    <main id="app"></main>
+    <main id="app-router-view"></main>
   </div>
   <div id="print-root"></div>
   <div id="toast-region"></div>

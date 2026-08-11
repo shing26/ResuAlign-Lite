@@ -2,14 +2,9 @@
 
 import {
   $,
-  $$,
-  JOB_STATUS_CANONICAL,
-  JOB_STATUS_LABELS,
   STAGE_LABELS,
   api,
-  canonicalJobStatus,
   download,
-  ensureVocabulary,
   esc,
   formatDate,
   formatSalary,
@@ -21,8 +16,6 @@ import {
   PROVENANCE_LABELS,
   alignProgressPercent,
   alignmentControls,
-  boardCard,
-  computeJobStats,
   crawlStatusLine,
   diffCard,
   diffList,
@@ -31,10 +24,7 @@ import {
   highlightSkillGapHtml,
   jdProfileSummary,
   jobCompletenessBadge,
-  matchBadgeInfo,
-  radarHtml,
   renderGap,
-  renderJobStatsHtml,
   renderMatchBadge,
   renderSkills,
   stageStepper,
@@ -50,11 +40,9 @@ let activePollTimer = 0;
 let activePollJobId = null;
 let fallbackPollTimer = 0;
 let fallbackEtag = "";
-let draggingJobId = null;
 let alignmentStartedAt = 0;
 let workbenchJobs = [];
 let autoAnalyzedJd = false;
-let canvasRenderHooks = [];
 /* #B4: once the alignment state has been reconciled against the real job
    (terminal status, expired job, or poll terminal), late replayed SSE
    events must not flip the session back to a phantom "running" state. */
@@ -83,12 +71,6 @@ let liveSheetApiPromise = null;
    arrive via SSE after the first paint). */
 let pendingSkillFocus = null;
 
-/* Render hooks let main.js attach extras (batch panel, etc.) after a
-   canvas view is painted. Kept as a list so future views can register
-   their own post-render work without touching this module. */
-export function setCanvasRenderHook(fn) {
-  if (typeof fn === "function") canvasRenderHooks.push(fn);
-}
 
 function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const job = (session && session.job) || {};
@@ -96,9 +78,6 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const gap = (session && session.gap) || {};
   const profile = jd.profile || {};
   const summary = jdProfileSummary(profile);
-  /* F10/U11: 匹配分取 eval_score.jd_match_score → gap.score → job.match_score，
-   * 徽章旁标注来源（renderMatchBadge 渲染徽章 + 来源旁注）。 */
-  const score = matchBadgeInfo(session, job).score ?? (gap.score != null ? gap.score : job.match_score);
   const jobId = job.job_id || "";
   /* Mirror the legacy workbench contract so renderFinalDraftPanel /
      record-application work identically on the live canvas. */
@@ -176,7 +155,6 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <div class="inspector-controls" data-inspector-controls>
             ${alignmentControls(session, resumes, jobId)}
           </div>
-          <div class="split-pane__match">${score != null ? radarHtml(score) : `<div class="small muted" style="padding:10px 0">运行预分析后生成匹配雷达。</div>`}</div>
         </section>
         <section class="split-pane split-pane--resume split-pane--diff ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>
           <div class="split-pane__head">
@@ -453,7 +431,7 @@ function tryFocusSkill() {
  * every canvas repaint (SSE events replace #app.innerHTML wholesale, so
  * the panels would otherwise fall back to their placeholder states). */
 function renderCanvasExtras() {
-  const app = $("#app");
+  const app = $("#app-router-view");
   if (!app) return;
   renderFinalDraftPanel(app);
   const appraisalPanel = $("[data-appraisal-panel]", app);
@@ -629,7 +607,7 @@ async function autoAnalyzeJd(session) {
         status: "queued",
         error: null,
       };
-      const app = $("#app");
+      const app = $("#app-router-view");
       if (app) {
         const resumes = await api("/api/master-resumes");
         renderSplitCanvas(app, activeSession, resumes, workbenchJobs);
@@ -750,7 +728,7 @@ async function pollSessionFallback(sessionId) {
       updated.alignment = { ...updated.alignment, ...activeSession.alignment };
     }
     activeSession = updated;
-    const app = $("#app");
+    const app = $("#app-router-view");
     if (app) {
       const resumes = await api("/api/master-resumes");
       renderSplitCanvas(app, activeSession, resumes, workbenchJobs);
@@ -849,7 +827,7 @@ function handleEvent(eventName, data) {
       };
     }
   }
-  const app = $("#app");
+  const app = $("#app-router-view");
   if (app) {
     api("/api/master-resumes")
       .then((resumes) =>
@@ -943,7 +921,7 @@ function setAlignmentTerminal(snapshot) {
 
 async function rerenderActiveCanvas() {
   if (!activeSession) return;
-  const app = $("#app");
+  const app = $("#app-router-view");
   if (!app) return;
   let resumes = [];
   try {
@@ -1023,7 +1001,7 @@ export async function startAlignmentRun(jobId, resumeId, granularity, focus, run
       stage: "queued",
       error: null,
     };
-    const app = $("#app");
+    const app = $("#app-router-view");
     if (app) {
       const resumes = await api("/api/master-resumes");
       renderSplitCanvas(app, activeSession, resumes, workbenchJobs);
@@ -1052,7 +1030,7 @@ export async function analyzeActiveJd() {
     status: "queued",
     error: null,
   };
-  const app = $("#app");
+  const app = $("#app-router-view");
   if (app) {
     renderSplitCanvas(
       app,
@@ -1068,7 +1046,7 @@ async function pollAlignmentJob() {
   if (!jobId) return;
   try {
     const snapshot = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
-    const app = $("#app");
+    const app = $("#app-router-view");
     if (activeSession && app) {
       activeSession.alignment = {
         status: snapshot.status === "succeeded" ? "succeeded" : snapshot.status === "failed" ? "failed" : "running",
@@ -1164,128 +1142,6 @@ export function activeSessionForExport() {
   return activeSession;
 }
 
-function moveBoardJob(jobId, status) {
-  return api("/api/kanban/bulk-status", {
-    method: "POST",
-    body: JSON.stringify({
-      job_ids: [jobId],
-      status,
-      idempotency_key: `fe-${jobId}-${status}`,
-    }),
-  });
-}
-
-export async function renderCopilotBoard(app) {
-  stopOptimizerStreams();
-  const query = new URLSearchParams({
-    ...state.filters,
-    limit: "500",
-    offset: "0",
-  });
-  for (const key of ["job_function", "seniority", "status", "search"]) {
-    if (!state.filters[key]) query.delete(key);
-  }
-  state.jobs = await api(`/api/jobs?${query}`);
-  const vocabulary = await ensureVocabulary();
-  const columns = JOB_STATUS_CANONICAL.map((canonical) => {
-    const items = state.jobs.filter(
-      (job) => canonicalJobStatus(job.status) === canonical,
-    );
-    return `
-      <section class="board-column" data-status="${canonical}" data-board-drop aria-label="${esc(JOB_STATUS_LABELS[canonical])}">
-        <div class="board-column__head">
-          <span class="board-column__dot board-dot--${canonical}" aria-hidden="true"></span>
-          <h3>${esc(JOB_STATUS_LABELS[canonical])}</h3>
-          <span class="board-column__count">${items.length}</span>
-        </div>
-        <div class="board-column__body">
-          ${items.map(boardCard).join("") || '<div class="board-column__empty">暂无岗位</div>'}
-        </div>
-      </section>`;
-  }).join("");
-  const statuses = vocabulary.statuses || [];
-  app.innerHTML = `
-    <div class="page-header page-header--jobs">
-      <div>
-        <h2>岗位库</h2>
-        <div class="sub">共 ${state.jobs.length} 条 · 拖拽或选择状态推进投递进度</div>
-      </div>
-      <div class="row">
-        <button class="btn btn-primary" data-action="open-command-panel">粘贴 JD / 链接</button>
-      </div>
-    </div>
-    ${renderJobStatsHtml(computeJobStats(state.jobs))}
-    <div class="board-toolbar panel panel-card">
-      <span class="small muted">拖拽卡片到目标列；触屏 / 键盘：使用卡片内下拉菜单移动状态。</span>
-    </div>
-    <div id="job-board" class="pipeline-board" data-pipeline-board>${columns}</div>`;
-  bindBoardDrag(app);
-  canvasRenderHooks.forEach((hook) => {
-    try {
-      hook(app);
-    } catch {
-      /* a failing hook must not break the board render */
-    }
-  });
-}
-
-function prefersCoarsePointer() {
-  return (
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(pointer: coarse)").matches
-  );
-}
-
-function bindBoardDrag(root) {
-  const touchOnly = prefersCoarsePointer();
-  $$("[data-board-drag]", root).forEach((card) => {
-    if (touchOnly) {
-      /* HTML5 drag & drop is mouse-only; on touch devices the card's
-         status <select> is the supported interaction (#5). Disabling
-         draggable also stops long-press drag ghosts on mobile Safari. */
-      card.draggable = false;
-      return;
-    }
-    card.addEventListener("dragstart", (event) => {
-      draggingJobId = card.dataset.jobId;
-      card.classList.add("is-dragging");
-      if (event.dataTransfer) {
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", card.dataset.jobId);
-      }
-    });
-    card.addEventListener("dragend", () => {
-      draggingJobId = null;
-      card.classList.remove("is-dragging");
-      $$(".board-column.is-drag-over", root).forEach((column) =>
-        column.classList.remove("is-drag-over"),
-      );
-    });
-  });
-  if (touchOnly) return;
-  $$("[data-board-drop]", root).forEach((column) => {
-    column.addEventListener("dragover", (event) => {
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-      column.classList.add("is-drag-over");
-    });
-    column.addEventListener("dragleave", () => column.classList.remove("is-drag-over"));
-    column.addEventListener("drop", async (event) => {
-      event.preventDefault();
-      column.classList.remove("is-drag-over");
-      const jobId = draggingJobId || (event.dataTransfer && event.dataTransfer.getData("text/plain"));
-      if (!jobId) return;
-      const status = column.dataset.status;
-      try {
-        const result = await moveBoardJob(jobId, status);
-        if (result.updated) toast("岗位状态已更新", "success");
-        renderCopilotBoard($("#app"));
-      } catch (error) {
-        toast(error.message, "error");
-      }
-    });
-  });
-}
 
 export function copyAlignMarkdown(jobId, session) {
   const alignment = (session && session.alignment) || {};

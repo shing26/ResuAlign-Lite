@@ -194,7 +194,7 @@ export async function acceptSelectedDiffs() {
   }
   state.wbWorkingDraft = { jobId, draft };
   state.wbAcceptedIndices = accepted;
-  await renderWbResult($("#app"));
+  await renderWbResult($("#app-router-view"));
   const target = $("[data-accept-result]");
   target.innerHTML = `
     <div class="drawer">
@@ -214,5 +214,5 @@ export function regenerateDiff() {
 
 export function toggleWbView(button) {
   state.wbCompareView = button.dataset.wbView;
-  renderWbResult($("#app"));
+  renderWbResult($("#app-router-view"));
 }

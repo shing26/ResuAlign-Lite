@@ -1352,7 +1352,7 @@ table.data th {
 /* Scroll lock while a modal is open (#6): desktop scrolls inside #app,
    mobile (≤900px) scrolls the body. Mirrors command-palette-open. */
 body.modal-open,
-body.modal-open #app {
+body.modal-open #app-router-view {
   overflow: hidden;
 }
 
@@ -1576,7 +1576,7 @@ h6 {
   height: 100vh;
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 216px minmax(0, 1fr);
+  grid-template-columns: 60px minmax(0, 1fr);
   background: var(--bg-canvas);
   padding: 0;
   overflow: hidden;
@@ -1588,8 +1588,9 @@ h6 {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 18px 12px 16px;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 0 14px;
   background: var(--bg-rail);
   color: #d7e0e8;
 }
@@ -1597,12 +1598,12 @@ h6 {
 .rail-mark {
   display: grid;
   place-items: center;
-  width: 42px;
-  height: 42px;
-  border-radius: var(--radius-md);
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
   background: var(--brand);
   color: #fff;
-  font-size: 0.95rem;
+  font-size: 0.8rem;
   font-weight: 800;
   box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.14), 0 6px 18px rgba(0, 0, 0, 0.18);
 }
@@ -1611,8 +1612,9 @@ h6 {
   margin-top: auto;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 12px 8px 2px;
+  padding: 12px 0 2px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   color: #8fa1b0;
   font-size: var(--text-12);
@@ -1629,6 +1631,7 @@ h6 {
 .tabs--rail {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 6px;
   background: transparent;
   border-radius: 0;
@@ -1637,16 +1640,76 @@ h6 {
 }
 
 .tabs--rail button {
-  width: 100%;
-  min-height: 42px;
-  text-align: left;
-  padding: 11px 12px;
-  border-radius: var(--radius-md);
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 12px;
   color: #b7c3cf;
   font-weight: 600;
   font-size: var(--text-14);
   line-height: 1.2;
   white-space: nowrap;
+  position: relative;
+}
+
+.tabs--rail button svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+/* 桌面端图标栏隐藏文字，hover/active 用原生 tooltip（title）提示；
+   移动端（≤900px）横向展示时恢复文字。 */
+.rail-label {
+  display: none;
+}
+
+/* Apple 悬浮 tooltip：hover 时在右侧弹出导航名 */
+.tabs--rail button:hover::after {
+  content: attr(title);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 90;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.82);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.tabs--rail button:hover::before {
+  content: "";
+  position: absolute;
+  left: calc(100% + 4px);
+  top: 50%;
+  transform: translateY(-50%);
+  border: 5px solid transparent;
+  border-right-color: rgba(0, 0, 0, 0.82);
+  z-index: 90;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.tabs--rail button:hover::after,
+.tabs--rail button:hover::before {
+  opacity: 1;
+}
+
+.tabs--rail button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .tabs--rail button::before {
@@ -1704,7 +1767,7 @@ h6 {
   overflow: hidden;
 }
 
-#app {
+#app-router-view {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -1717,7 +1780,7 @@ h6 {
   align-items: center;
   gap: 18px;
   flex-wrap: wrap;
-  min-height: 56px;
+  min-height: 64px;
   margin: 0 0 16px;
   padding: 12px 18px;
   background: var(--surface-panel);
@@ -2565,13 +2628,37 @@ table.data th {
 
   .tabs--rail {
     flex-direction: row;
+    align-items: center;
     overflow-x: auto;
     gap: 4px;
   }
 
   .tabs--rail button {
     flex: 0 0 auto;
+    width: auto;
+    height: auto;
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
     text-align: center;
+    border-radius: 10px;
+  }
+
+  .tabs--rail button svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* 移动端横向导航恢复文字标签 */
+  .tabs--rail button .rail-label {
+    display: inline;
+  }
+
+  .tabs--rail button:hover::after,
+  .tabs--rail button:hover::before {
+    display: none;
   }
 
   .rail-foot {
@@ -2593,7 +2680,7 @@ table.data th {
     overflow: visible;
   }
 
-  #app {
+  #app-router-view {
     overflow-y: visible;
     padding-right: 0;
   }
@@ -4128,7 +4215,7 @@ select,
   display: none;
 }
 
-body.is-printing #app,
+body.is-printing #app-router-view,
 body.is-printing .app-rail,
 body.is-printing .topbar,
 body.is-printing .toast-region {
@@ -4140,7 +4227,7 @@ body.is-printing #print-root {
 }
 
 @media print {
-  body.is-printing #app,
+  body.is-printing #app-router-view,
   body.is-printing .app-rail,
   body.is-printing .topbar,
   body.is-printing .toast-region {
@@ -6643,10 +6730,10 @@ body {
   background: var(--bg-rail);
 }
 .tabs--rail button {
-  border-radius: 10px;
+  border-radius: 12px;
   transition: background 0.16s cubic-bezier(0.16,1,0.3,1), color 0.16s;
   color: var(--text-muted);
-  padding: 9px 12px;
+  padding: 0;
   margin: 1px 0;
 }
 .tabs--rail button:hover { background: rgba(255,255,255,0.06); color: var(--ink); }
@@ -6656,7 +6743,7 @@ body {
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
 }
 .topbar {
-  background: var(--surface-1);
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 .header-job-select,

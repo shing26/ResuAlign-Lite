@@ -28,6 +28,11 @@ import {
 import { initTheme, toggleTheme } from "./theme.js";
 import { renderDashboard } from "./dashboard-view.js";
 import {
+  openResumeCreator,
+  openResumeEditor,
+  renderResumeCenter,
+} from "./resume-center.js";
+import {
   closeCommandPanel,
   confirmCommandPanel,
   initializeCommandPanel,
@@ -42,12 +47,14 @@ import {
   exportAlignJson,
   exportAlignMarkdown,
   getLiveSheetDraft,
-  renderCopilotBoard,
   renderOptimizerCanvas,
-  setCanvasRenderHook,
   startAlignmentRun,
   syncLiveSheetDraft,
 } from "./split-canvas.js";
+import {
+  renderKanban,
+  setCanvasRenderHook,
+} from "./kanban.js";
 import {
   bindColumnScrollSync,
 } from "./diff-editor.js";
@@ -95,14 +102,11 @@ import {
   appraisalWeightsPayload,
   buildAutomationRulePayload,
   buildLlmNodePayload,
-  buildSettingsLlmPayload,
-  buildTestConnectionPayload,
   evalDefaultFromForm,
   normalizeAppraisalWeights,
   salaryCityOptions,
   salaryReferenceFromForm,
   salaryReferenceRowsHtml,
-  testConnectionResultHtml,
   validateAppraisalWeights,
   validateAutomationRule,
   validateLlmNodePayload,
@@ -139,13 +143,56 @@ function setActiveTab() {
   });
 }
 
+/* 蓝图路由收口：hash → 视图分发的唯一入口。route 名直接来自 hash
+ *（resumes 复数、workspace 带 job_id/id/skill query），视图实现由
+ * 各子模块负责。workbench 是 workspace 的旧别名，一并归一。 */
+async function handleRoute(app) {
+  const hash = window.location.hash || "#/dashboard";
+  const [rawRoute, queryString] = hash.replace("#/", "").split("?");
+  /* route 取第一段：#/workspace/<jobId> → "workspace"，
+   * #/workspace?job_id=X → "workspace"，#/resumes → "resumes" */
+  const route = (rawRoute || "dashboard").split("/")[0] || "dashboard";
+  const params = new URLSearchParams(queryString || "");
+
+  switch (route) {
+    case "dashboard":
+      await renderDashboard(app);
+      break;
+    case "workspace":
+    case "workbench": {
+      /* 兼容两种 deep-link：#/workspace/<jobId>（path 段，已由
+       * parseHashValue 解析）与 #/workspace?job_id=X&skill=Y（蓝图
+       * 显式契约）。?skill= 深链由 split-canvas 内部自解析。 */
+      const jobId =
+        state.route.jobId || params.get("job_id") || params.get("id") || null;
+      await renderOptimizerCanvas(app, jobId);
+      /* #11: 工作台顶部挂载当前岗位的面试/下一步到期提醒横幅 */
+      mountWorkspaceReminder(app);
+      break;
+    }
+    case "jobs":
+      await renderKanban(app);
+      break;
+    case "resumes":
+    case "resume":
+      await renderResumeCenter(app, { resumeId: state.route.resumeId });
+      break;
+    case "settings":
+      await renderSettingsView(app);
+      break;
+    default:
+      await renderDashboard(app);
+      break;
+  }
+}
+
 async function render() {
   state.route = parseHash();
   document.body.classList.remove("wb-appraisal-drawer-open");
   closeSplitCanvas();
   setActiveTab();
   stopAllPolling();
-  const app = $("#app");
+  const app = $("#app-router-view");
   const printNode = $("#print-root");
   if (printNode) printNode.innerHTML = "";
   app.innerHTML = `<div class="skeleton is-shimmer">加载中...</div>`;
@@ -153,16 +200,7 @@ async function render() {
   refreshHeaderJobSelect();
   syncHeaderJobSelect();
   try {
-    if (state.route.name === "resume" && state.route.resumeId) {
-      await renderResumeDetailView(app, state.route.resumeId);
-    } else if (state.route.name === "resume") await renderResumeView(app);
-    else if (state.route.name === "jobs") await renderCopilotBoard(app);
-    else if (state.route.name === "workspace") {
-      await renderOptimizerCanvas(app, state.route.jobId);
-      /* #11: 工作台顶部挂载当前岗位的面试/下一步到期提醒横幅 */
-      mountWorkspaceReminder(app);
-    } else if (state.route.name === "dashboard") await renderDashboard(app);
-    else await renderSettingsView(app);
+    await handleRoute(app);
   } catch (error) {
     console.error("render error:", error && error.message, "route:", state.route && state.route.name);
     if (isApiKeyUnconfigured(error)) {
@@ -281,175 +319,6 @@ function syncHeaderJobSelect() {
       : "";
 }
 
-/* ------------------------------------------------------------------ */
-/* Resume Center                                                       */
-/* ------------------------------------------------------------------ */
-
-async function renderResumeView(app) {
-  state.resumes = await api("/api/master-resumes");
-  const hasResumes = state.resumes.length > 0;
-  const cards = state.resumes
-    .map(
-      (resume) => `
-      <div class="card resume-card card-base card-hover-soft">
-        <div class="card-head">
-          <div>
-            <div class="card-title">${esc(resume.title)}</div>
-            <div class="card-meta">更新于 ${formatDate(resume.updated_at)} · v${resume.current_version}</div>
-          </div>
-          <span class="badge badge-teal">当前版本 v${resume.current_version}</span>
-        </div>
-        <div class="pre" style="max-height:160px">${esc(resume.content)}</div>
-        <div class="row" style="margin-top:10px">
-          <button class="btn btn-primary btn-sm" data-action="open-resume-archive" data-id="${resume.resume_id}">查看档案</button>
-          <button class="btn btn-outline btn-sm" data-action="edit-resume" data-id="${resume.resume_id}">编辑</button>
-          <button class="btn btn-danger btn-sm" data-action="delete-resume" data-id="${resume.resume_id}">删除</button>
-        </div>
-      </div>`,
-    )
-    .join("");
-
-  app.innerHTML = `
-    <div class="page-header page-header--resume">
-      <div>
-        <h2>简历中心</h2>
-        <div class="sub">维护主简历与版本历史，工作台始终基于当前版本生成对齐稿</div>
-      </div>
-      <div class="row">
-        <button class="btn btn-primary" data-action="new-resume">新建主简历</button>
-        <button class="btn btn-outline" data-action="upload-resume">上传简历文件</button>
-        <input type="file" id="resume-upload-input" accept=".pdf,.docx,.txt" hidden>
-      </div>
-    </div>
-    <form class="panel panel-card" data-form="resume-create" hidden>
-      <h3>新建主简历</h3>
-      <div class="form-grid">
-        <div class="field"><label>标题</label><input type="text" name="title" required placeholder="例如：2026 后端大厂版"></div>
-        <div class="field"></div>
-        <div class="field wide"><label>简历内容（Markdown）</label>
-          <textarea name="content" rows="10" required placeholder="个人信息、工作经历、项目经历..."></textarea></div>
-      </div>
-      <div class="row"><button class="btn btn-primary" type="submit">保存</button>
-        <button class="btn btn-ghost" type="button" data-action="cancel-new-resume">取消</button></div>
-    </form>
-    <div id="resume-list" class="card-list motion-stagger">${hasResumes ? cards : `
-      <div class="panel panel-card empty-state">
-        <div class="big">还没有主简历</div>
-        <div>先创建一份主简历，工作台才能生成对齐版本。</div>
-        <div class="actions"><button class="btn btn-primary" data-action="new-resume">新建主简历</button></div>
-      </div>`}
-    </div>`;
-}
-
-async function renderResumeDetailView(app, resumeId) {
-  const resume = await api(`/api/master-resumes/${encodeURIComponent(resumeId)}`);
-  const versions = resume.versions || [];
-  /* Sprint 4 T3: ATS 卡数据源 —— state.diagnosis 只在 job_id 与本简历最新诊断
-   * 任务一致时才可信（防止跨简历串数据）。renderDiagnosisResult 完成后还会
-   * 通过 [data-ats-health-mount] 实时刷新（见 events.js）。 */
-  const diagnosis =
-    state.diagnosis &&
-    resume.latest_diagnosis_job_id &&
-    state.diagnosis.job_id === resume.latest_diagnosis_job_id
-      ? diagnosisFromSnapshot(state.diagnosis)
-      : null;
-  state.resumeVersions = versions;
-  state.resumeCurrentContent = resume.content || "";
-
-  app.innerHTML = `
-    <div class="page-header page-header--resume">
-      <div>
-        <button class="btn btn-ghost btn-sm" data-action="back-resume-center">← 返回简历中心</button>
-        <h2 style="margin-top:6px">${esc(resume.title)}</h2>
-        <div class="sub">更新于 ${formatDate(resume.updated_at)} · 当前版本 v${resume.current_version} · 共 ${versions.length} 个版本</div>
-      </div>
-      <div class="row">
-        <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">诊断简历</button>
-        <button class="btn btn-secondary btn-sm" data-action="export-resume-md" data-id="${resume.resume_id}">导出 Markdown</button>
-        <button class="btn btn-danger btn-sm" data-action="delete-resume" data-id="${resume.resume_id}">删除</button>
-      </div>
-    </div>
-    <section class="panel panel-card panel--teal diagnosis-panel" data-diagnosis-panel>
-      <div class="diagnosis-head">
-        <div>
-          <h3>简历诊断</h3>
-          <div class="small muted" data-diagnosis-meta>尚未诊断</div>
-        </div>
-        <div class="row">
-          <button class="btn btn-outline btn-sm" data-action="export-diagnosis" hidden>导出 PDF</button>
-          <button class="btn btn-secondary btn-sm" data-action="export-diagnosis-md" hidden>导出 Markdown</button>
-        </div>
-      </div>
-      <div class="progress-wrap" data-diagnosis-progress hidden>
-        <div class="progress-track"><div class="progress-fill" data-diagnosis-fill style="width:5%"></div></div>
-        <span class="small" data-diagnosis-stage>排队中</span>
-        <span class="small muted" data-diagnosis-elapsed>0s</span>
-        <button class="btn btn-ghost btn-sm" type="button" data-action="cancel-diagnosis" hidden>取消任务</button>
-      </div>
-      <div data-diagnosis-result hidden></div>
-      <div class="form-error" data-diagnosis-error hidden></div>
-    </section>
-    <div class="resume-archive-grid">
-      <section class="panel panel-card resume-sheet" data-resume-sheet>
-        <div class="resume-sheet__bar">
-          <span class="resume-sheet__title">完整简历</span>
-          <div class="row">
-            <button class="btn btn-outline btn-sm" data-action="edit-resume" data-id="${resume.resume_id}">编辑</button>
-            <button class="btn btn-outline btn-sm" data-action="copy-resume-md" data-id="${resume.resume_id}">复制 MD</button>
-            <button class="btn btn-secondary btn-sm" data-action="print-resume">导出 PDF</button>
-          </div>
-        </div>
-        <div class="resume-preview-bar" data-resume-preview-bar hidden>
-          <span>正在预览 <strong data-preview-version></strong>，改动不会保存</span>
-          <button class="btn btn-ghost btn-sm" data-action="restore-current-preview">返回当前版本</button>
-        </div>
-        <div class="resume-doc resume-sheet__doc" data-resume-sheet-doc>${renderMarkdown(resume.content)}</div>
-      </section>
-      <aside class="resume-detail-side">
-        <section class="panel panel-card ats-health-card" data-ats-health-card>
-          <h3>ATS 健康度</h3>
-          <div data-ats-health-mount>${atsHealthCardHtml(diagnosis)}</div>
-        </section>
-        <section class="panel panel-card version-timeline-card" data-version-timeline-card>
-          <h3>版本历史</h3>
-          ${versionTimelineHtml(versions, resume.current_version, resume.resume_id)}
-        </section>
-      </aside>
-    </div>`;
-  state.diagnosisResumeId = resumeId;
-  await recoverDiagnosis(resume);
-}
-
-/* Sprint 4 T3: 从 state.diagnosis 快照提取 diagnosis 对象，与 events.js
- * renderDiagnosisResult 的 result.diagnosis || result 语义保持一致。 */
-function diagnosisFromSnapshot(snapshot) {
-  if (!snapshot || typeof snapshot !== "object") return null;
-  const result = snapshot.result || {};
-  return result.diagnosis || result || null;
-}
-
-async function openResumeEditor(resumeId) {
-  let resume = state.resumes.find((item) => item.resume_id === resumeId);
-  if (!resume) {
-    try {
-      resume = await api(`/api/master-resumes/${encodeURIComponent(resumeId)}`);
-    } catch {
-      toast("简历不存在或已删除", "error");
-      return;
-    }
-  }
-  if (!resume) return;
-  showModal(
-    `编辑「${resume.title}」`,
-    `<form data-form="resume-edit">
-      <input type="hidden" name="resume_id" value="${resume.resume_id}">
-      <div class="field"><label>简历内容（Markdown）</label>
-        <textarea name="content" rows="16" required>${esc(resume.content)}</textarea></div>
-      <div class="actions"><button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
-        <button class="btn btn-primary" type="submit">保存新版本</button></div>
-    </form>`,
-  );
-}
 
 /* ------------------------------------------------------------------ */
 /* Job Library                                                         */
@@ -729,7 +598,7 @@ async function renderWorkspaceView(app) {
   renderFinalDraftPanel(app);
 }
 
-async function refreshWbJob(app = $("#app")) {
+async function refreshWbJob(app = $("#app-router-view")) {
   if (!state.wbJob) return;
   state.wbJob = await api(`/api/jobs/${encodeURIComponent(state.wbJob.job_id)}`);
   state.wbResult = null;
@@ -738,8 +607,8 @@ async function refreshWbJob(app = $("#app")) {
 }
 
 async function refreshOptimizerFromJob(jobId) {
-  await renderOptimizerCanvas($("#app"), jobId);
-  mountWorkspaceReminder($("#app"));
+  await renderOptimizerCanvas($("#app-router-view"), jobId);
+  mountWorkspaceReminder($("#app-router-view"));
 }
 
 /* T4: 岗位切换（Header select / 画布内 switcher 共用）。已在 workspace 页时
@@ -774,7 +643,7 @@ async function switchWorkspaceJob(jobId) {
   }
 }
 
-function startWbPolling(jobId, app = $("#app")) {
+function startWbPolling(jobId, app = $("#app-router-view")) {
   stopWbPolling();
   /* U5: 前端计时起点，后端 elapsed_seconds 缺失时兜底显示运行时长。 */
   state.wbElapsedStart = Date.now();
@@ -789,7 +658,7 @@ async function pollWbJob(jobId) {
     if (!state.wbPolling || state.wbPolling.jobId !== jobId) return;
     renderWbProgress(snapshot);
     if (["succeeded", "failed", "canceled"].includes(snapshot.status)) {
-      const app = state.wbPolling ? state.wbPolling.app : $("#app");
+      const app = state.wbPolling ? state.wbPolling.app : $("#app-router-view");
       stopWbPolling();
       /* F5: 任务结束自动切到「结果」tab，让移动端用户直接看到 diff 面板。 */
       setWbMobilePane("diff");
@@ -1071,7 +940,7 @@ async function renderSettingsView(app) {
           ...(state.llmNodeTests || {}),
           [activeNode.node_id]: result,
         };
-        updateSettingsBento($("#app"));
+        updateSettingsBento($("#app-router-view"));
       })
       .catch(() => {
         /* 保持 "—" 直到用户显式测试 */
@@ -1088,7 +957,7 @@ async function renderSettingsView(app) {
 /* Sprint 5 T1: 用纯函数 settingsBentoHtml 重渲染 Bento 概览（节点测试后
  * 刷新延迟卡）。state.settingsBentoCounts / state.llmNodeTests 由
  * renderSettingsView 与 llm-node-test action 维护。 */
-function updateSettingsBento(app = $("#app")) {
+function updateSettingsBento(app = $("#app-router-view")) {
   if (!app) return;
   const mount = app.querySelector("[data-settings-bento]");
   if (!mount) return;
@@ -1224,12 +1093,9 @@ function fallbackCopyMarkdown(text) {
 
 const actions = {
   reload: () => render(),
-  "new-resume": async () => {
-    $('[data-form="resume-create"]').hidden = false;
-  },
-  "cancel-new-resume": () => {
-    $('[data-form="resume-create"]').hidden = true;
-  },
+  /* v2.0: 新建主简历走模态框（主视图无内联 textarea）。 */
+  "new-resume": () => openResumeCreator(),
+  "cancel-new-resume": () => closeModal(),
   "upload-resume": () => {
     const input = $("#resume-upload-input");
     if (input) input.click();
@@ -1562,7 +1428,7 @@ const actions = {
   },
   "open-workspace": (button) => navigate("workspace", button.dataset.id),
   /* Sprint 1 T3: 技能缺口热力条点击 → 跳到最近一个含该技能的岗位工作台；
-   * 无匹配岗位时回退到岗位库并设置搜索关键词（renderCopilotBoard 读取
+   * 无匹配岗位时回退到岗位库并设置搜索关键词（renderKanban 读取
    * state.filters 回填搜索框）。 */
   "goto-skill": async (button) => {
     const skill = String(button.dataset.skill || "").trim();
@@ -1676,7 +1542,7 @@ const actions = {
       );
       state.llmNodeTests = { ...(state.llmNodeTests || {}), [nodeId]: result };
       if (resultNode) resultNode.innerHTML = nodeTestResultHtml(result);
-      updateSettingsBento($("#app"));
+      updateSettingsBento($("#app-router-view"));
       toast(
         result.ok ? "节点连通正常" : "节点测试失败，请检查配置",
         result.ok ? "success" : "error",
@@ -1778,41 +1644,13 @@ const actions = {
     const row = button.closest("[data-salary-row]");
     if (row) row.remove();
   },
-  "test-llm-connection": async () => {
-    const form = $("[data-form='settings-llm']");
-    const resultNode = form && form.querySelector("[data-llm-test-result]");
-    if (!form || !resultNode) return;
-    const button = form.querySelector('[data-action="test-llm-connection"]');
-    resultNode.innerHTML = '<div class="form-success" role="status">正在测试连接…</div>';
-    if (button) button.disabled = true;
-    try {
-      const data = Object.fromEntries(new FormData(form).entries());
-      const body = await api("/api/settings/test-connection", {
-        method: "POST",
-        body: JSON.stringify(buildTestConnectionPayload(data)),
-      });
-      resultNode.innerHTML = testConnectionResultHtml(body);
-    } catch (error) {
-      resultNode.innerHTML = `<div class="form-error" role="alert">${esc(error.message)}</div>`;
-    } finally {
-      if (button) button.disabled = false;
-    }
-  },
-  "clear-llm-key": async () => {
-    await api("/api/settings", {
-      method: "PUT",
-      body: JSON.stringify({ llm: { api_key: null } }),
-    });
-    toast("已清除保存的 API Key，后续将读取 .env 或环境变量", "success");
-    render();
-  },
   "analyze-jd": async () => {
     try {
       await analyzeActiveJd();
       toast("已开始解析 JD", "success");
   } catch (error) {
     if (isApiKeyUnconfigured(error)) {
-        renderApiKeyGuide($("#app"));
+        renderApiKeyGuide($("#app-router-view"));
       } else {
         toast(error.message || "JD 解析失败", "error");
       }
@@ -1928,7 +1766,7 @@ const actions = {
   "reject-bullet": async (button) => {
     const jobId = button.dataset.id;
     const diffId = button.dataset.diffId;
-    const app = $("#app");
+    const app = $("#app-router-view");
     const card = $(`[data-diff-id="${CSS.escape(diffId)}"]`, app);
     if (card) {
       card.classList.add("is-rejected");
@@ -2115,7 +1953,7 @@ const actions = {
       version: saved.version,
       updated_at: saved.updated_at,
     };
-    renderFinalDraftPanel($("#app"));
+    renderFinalDraftPanel($("#app-router-view"));
     const finalPanel = $("[data-final-draft-panel]");
     if (finalPanel) finalPanel.classList.add("is-saved");
     try {
@@ -2440,7 +2278,7 @@ document.addEventListener("click", async (event) => {
     await action(button, event);
   } catch (error) {
     if (isApiKeyUnconfigured(error)) {
-      renderApiKeyGuide($("#app"));
+      renderApiKeyGuide($("#app-router-view"));
     } else {
       toast(error.message, "error");
     }
@@ -2546,7 +2384,7 @@ document.addEventListener("submit", async (event) => {
     await handleForm(formName, data, form);
   } catch (error) {
     if (isApiKeyUnconfigured(error)) {
-      renderApiKeyGuide($("#app"));
+      renderApiKeyGuide($("#app-router-view"));
     } else {
       toast(error.message, "error");
     }
@@ -2596,6 +2434,7 @@ async function handleForm(formName, data, form) {
         body: JSON.stringify({ title: data.title, content: data.content }),
       });
       toast("主简历已创建", "success");
+      closeModal();
       render();
       break;
     case "resume-edit":
@@ -2793,18 +2632,6 @@ async function handleForm(formName, data, form) {
       state.personal = false;
       closeModal();
       toast("登录成功", "success");
-      render();
-      break;
-    }
-    case "settings-llm": {
-      await api("/api/settings", {
-        method: "PUT",
-        body: JSON.stringify({
-          llm: buildSettingsLlmPayload(data),
-          eval_default: evalDefaultFromForm(data),
-        }),
-      });
-      toast("LLM 配置已保存，后续任务立即生效", "success");
       render();
       break;
     }
@@ -3035,7 +2862,7 @@ async function loadResumesForOnboarding() {
 
 /* 岗位库顶部：提醒条（任何岗位数下，有到期岗位即显示）+ 三步引导卡
    （仅当存在未完成且未跳过的步骤）。通过第二个 canvas hook 挂载，
-   不动 split-canvas.js 的 renderCopilotBoard。 */
+   不动 kanban.js 的 renderKanban。 */
 setCanvasRenderHook(async (app) => {
   if (
     !app.querySelector(".page-header") ||
@@ -3170,7 +2997,7 @@ setCanvasRenderHook(async (app) => {
 /* ------------------------------------------------------------------ */
 /* Sprint 3: Pipeline + Blocker（抓取 Bar + 阻断微标/Modal）             */
 /* ------------------------------------------------------------------ */
-/* 页面结构在 split-canvas.js 的 renderCopilotBoard（禁改），因此通过
+/* 页面结构在 kanban.js 的 renderKanban，因此通过
  * 第三个 canvas render hook 挂载到岗位库 Top Bar（page-header .row）：
  *  - 抓取 Bar：<input data-fetch-url> + 「自动抓取」（data-action=fetch-job-url）
  *  - 阻断微标：blockerCountBadge 输出 <button class="blocker-badge"
@@ -3274,14 +3101,12 @@ async function boot() {
         method: "POST",
         body: formData,
       });
-      const form = $('[data-form="resume-create"]');
-      if (!form) return;
-      form.hidden = false;
-      form.querySelector('input[name="title"]').value =
-        parsed.title || file.name;
-      form.querySelector('textarea[name="content"]').value = parsed.content;
+      /* v2.0: 上传解析成功后打开新建模态框并预填标题/内容。 */
+      openResumeCreator({
+        title: parsed.title || file.name,
+        content: parsed.content || "",
+      });
       toast(`已解析 ${file.name}，请确认后保存`, "success");
-      form.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (error) {
       toast(error.message, "error");
     }

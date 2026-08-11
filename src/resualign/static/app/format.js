@@ -207,7 +207,7 @@ export function buildDiagnosisMarkdownFrom(diagnosis, title, originalContent = "
 /* Hash routing                                                        */
 /* ------------------------------------------------------------------ */
 
-const ROUTE_NAMES = ["resume", "jobs", "workspace", "settings", "dashboard"];
+const ROUTE_NAMES = ["resume", "resumes", "jobs", "workspace", "settings", "dashboard"];
 
 export function parseHashValue(hash) {
   const value = String(hash || "").replace(/^#\/?/, "");
@@ -227,7 +227,12 @@ export function parseHashValue(hash) {
     }
     return { name: "workspace", jobId, resumeId: resumeFromQuery };
   }
-  if (parts[0] === "resume" && parts[1]) {
+  /* #/workspace?job_id=X（或 ?id=X）也进入工作台：蓝图的显式路由契约 */
+  if (parts[0] === "workspace") {
+    const jobFromQuery = query.get("job_id") || query.get("id") || null;
+    return { name: "workspace", jobId: jobFromQuery, resumeId: resumeFromQuery };
+  }
+  if ((parts[0] === "resume" || parts[0] === "resumes") && parts[1]) {
     let resumeId = parts[1];
     try {
       resumeId = decodeURIComponent(resumeId);
@@ -236,8 +241,9 @@ export function parseHashValue(hash) {
     }
     return { name: "resume", jobId: null, resumeId };
   }
+  /* "resumes" 是 "resume" 的复数路由别名（蓝图契约 #/resumes） */
   const name = ROUTE_NAMES.includes(parts[0]) ? parts[0] : "resume";
-  return { name, jobId: null, resumeId: resumeFromQuery };
+  return { name: name === "resumes" ? "resume" : name, jobId: null, resumeId: resumeFromQuery };
 }
 
 /* ------------------------------------------------------------------ */

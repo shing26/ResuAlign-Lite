@@ -250,6 +250,32 @@ test("parseHashValue falls back to resume for unknown or empty routes", () => {
   assert.deepEqual(parseHashValue("#/workspace"), { name: "workspace", jobId: null, resumeId: null });
 });
 
+test("parseHashValue maps the #/resumes plural route to the resume view", () => {
+  assert.deepEqual(parseHashValue("#/resumes"), {
+    name: "resume",
+    jobId: null,
+    resumeId: null,
+  });
+  assert.deepEqual(parseHashValue("#/resumes/r-9"), {
+    name: "resume",
+    jobId: null,
+    resumeId: "r-9",
+  });
+});
+
+test("parseHashValue reads job_id/id query params on the workspace route", () => {
+  assert.deepEqual(parseHashValue("#/workspace?job_id=j1"), {
+    name: "workspace",
+    jobId: "j1",
+    resumeId: null,
+  });
+  assert.deepEqual(parseHashValue("#/workspace?id=j2&resume=r-1"), {
+    name: "workspace",
+    jobId: "j2",
+    resumeId: "r-1",
+  });
+});
+
 test("parseHashValue keeps raw value when decodeURIComponent throws", () => {
   const result = parseHashValue("#/workspace/%E0%A4%A");
   assert.equal(result.name, "workspace");
