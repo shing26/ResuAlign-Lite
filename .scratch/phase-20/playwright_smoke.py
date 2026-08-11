@@ -324,21 +324,21 @@ def run_key_path(
     # Tailor in the Optimizer split canvas.
     page = new_page(context, errors)
     page.goto(f"{base}/#/workspace/{job_id}", wait_until="domcontentloaded")
-    # On narrow screens the split-canvas panes are tab-gated: the align
-    # form lives in the "结果" pane which starts hidden. Switch to it so
-    # the form is visible on mobile. The tab bar is display:none on
-    # desktop, so only click it when actually visible.
+    page.wait_for_selector("[data-form='split-align']")
+    page.select_option(
+        '[data-form="split-align"] select[name="master_resume_id"]', resume_id
+    )
+    page.click('[data-form="split-align"] button[type="submit"]')
+    # On narrow screens the split-canvas panes are tab-gated and the diff
+    # pane (with the result cards) starts hidden; switch to it so the cards
+    # are visible on mobile. Desktop tab bar is display:none, so only click
+    # when actually visible.
     try:
         page.wait_for_selector("[data-wb-tab='diff']", timeout=15000)
         if page.locator("[data-wb-tab='diff']").first.is_visible():
             page.click("[data-wb-tab='diff']")
     except Exception:
         pass
-    page.wait_for_selector("[data-form='split-align']")
-    page.select_option(
-        '[data-form="split-align"] select[name="master_resume_id"]', resume_id
-    )
-    page.click('[data-form="split-align"] button[type="submit"]')
     page.wait_for_selector(".diff-card", timeout=30000)
     expect(
         page.locator(".diff-card").count() >= 1,
