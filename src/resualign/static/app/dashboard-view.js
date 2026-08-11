@@ -93,8 +93,9 @@ export async function renderDashboard(container) {
             const pct = Math.round((count / maxCount) * 100);
             const open = count > 0;
             return `
-            <a href="#/workspace?skill=${encodeURIComponent(gap.skill || "")}"
-               class="gap-action-card border ${open ? "border-applered/20 bg-applered/[0.04]" : "border-white/[0.04] bg-black/10"} p-2.5 rounded-lg cursor-pointer space-y-1.5 block group">
+            <button type="button"
+               data-action="goto-skill" data-skill="${esc_attr(gap.skill || "")}"
+               class="gap-action-card w-full text-left border ${open ? "border-applered/20 bg-applered/[0.04]" : "border-white/[0.04] bg-black/10"} p-2.5 rounded-lg cursor-pointer space-y-1.5 group">
               <div class="flex justify-between text-[11.5px]">
                 <span class="text-white font-medium ${open ? "group-hover:text-applered" : ""} transition flex items-center gap-1">
                   ${esc_attr(gap.skill)}
@@ -107,7 +108,7 @@ export async function renderDashboard(container) {
               <div class="w-full h-1.5 bg-black/40 rounded-full overflow-hidden">
                 <div class="h-full ${open ? "bg-applered" : "bg-applegreen"} rounded-full" style="width: ${open ? pct : 100}%"></div>
               </div>
-            </a>`;
+            </button>`;
           })
           .join("")
       : `<div class="text-[12px] text-white/40">暂无岗位缺口数据，导入 JD 后自动汇总。</div>`;

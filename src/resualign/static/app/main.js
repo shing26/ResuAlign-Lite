@@ -164,6 +164,7 @@ async function render() {
     } else if (state.route.name === "dashboard") await renderDashboard(app);
     else await renderSettingsView(app);
   } catch (error) {
+    console.error("render error:", error && error.message, "route:", state.route && state.route.name);
     if (isApiKeyUnconfigured(error)) {
       renderApiKeyGuide(app);
       return;
@@ -1577,21 +1578,18 @@ const actions = {
     const skillLower = skill.toLowerCase();
     const match = (jobs || []).find((job) => {
       const profile = job && job.jd_profile;
-      if (
-        profile &&
-        Array.isArray(profile.must_have_skills) &&
-        profile.must_have_skills.some(
-          (item) => String(item || "").toLowerCase() === skillLower,
-        )
-      ) {
-        return true;
-      }
-      return (
-        Array.isArray(job && job.tech_tags) &&
-        job.tech_tags.some(
-          (item) => String(item || "").toLowerCase() === skillLower,
-        )
-      );
+      const skills = [
+        ...(profile && Array.isArray(profile.must_have_skills)
+          ? profile.must_have_skills
+          : []),
+        ...(Array.isArray(job && job.tech_tags) ? job.tech_tags : []),
+      ];
+      return skills.some((item) => {
+        const s = String(item || "").toLowerCase();
+        /* Dashboard gap labels can be longer than a bare skill keyword;
+           accept substring matches either way (mirrors highlightSkillGap). */
+        return s === skillLower || s.includes(skillLower) || skillLower.includes(s);
+      });
     });
     if (match && match.job_id) {
       window.location.hash = `#/workspace/${encodeURIComponent(match.job_id)}?skill=${encodeURIComponent(skill)}`;
@@ -1812,8 +1810,8 @@ const actions = {
     try {
       await analyzeActiveJd();
       toast("已开始解析 JD", "success");
-    } catch (error) {
-      if (isApiKeyUnconfigured(error)) {
+  } catch (error) {
+    if (isApiKeyUnconfigured(error)) {
         renderApiKeyGuide($("#app"));
       } else {
         toast(error.message || "JD 解析失败", "error");

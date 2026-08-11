@@ -494,6 +494,33 @@ function renderFinalDraftPanel(app) {
     </div>`;
 }
 
+/* Rehydrate a minimal three-pane session from a persisted library job
+   (no live workbench session exists for API/import-created jobs). */
+function buildSessionFromJob(job) {
+  const profile = job.jd_profile || null;
+  return {
+    job,
+    jd: {
+      status: profile ? "ready" : "idle",
+      profile,
+      summary: job.jd_summary || null,
+      error: null,
+    },
+    gap: job.gap_report || {},
+    alignment: {
+      status:
+        job.alignment_status === "succeeded" ? "succeeded" : "idle",
+      stage: job.alignment_status === "succeeded" ? "done" : "",
+      error: null,
+      diffs: job.diffs || [],
+      invalid_diffs: job.invalid_diffs || [],
+      draft: job.final_draft || null,
+      eval_score: job.eval_score || null,
+    },
+    meta: {},
+  };
+}
+
 export async function renderOptimizerCanvas(app, jobId) {
   stopOptimizerStreams();
   /* T3: 解析 #/workspace/<jobId>?skill=X 深链；renderSplitCanvas 重绘后由
@@ -501,8 +528,7 @@ export async function renderOptimizerCanvas(app, jobId) {
   pendingSkillFocus = parseSkillFromHash(window.location.hash);
   autoAnalyzedJd = false;
   workbenchJobs = await api("/api/jobs?limit=200");
-  if (!jobId) {
-    if (workbenchJobs.length) {
+  if (!jobId) {    if (workbenchJobs.length) {
       const targetId = workbenchJobs[0].job_id;
       const resumeId = state.route && state.route.resumeId;
       state.route = { name: "workspace", jobId: targetId, resumeId };
@@ -531,12 +557,20 @@ export async function renderOptimizerCanvas(app, jobId) {
       </div>`;
     return;
   }
-  const session = await loadSession(jobId);
+  let session = await loadSession(jobId);
   if (!session) {
-    /* Silent fallback: a stale/removed session id should quietly return
-     * to the Dashboard instead of showing a dead-end error panel. */
-    window.location.hash = "#/dashboard";
-    return;
+    const existing = workbenchJobs.find((item) => item.job_id === jobId);
+    if (existing) {
+      /* The job exists but has no workbench session (e.g. created via the
+       * API / import). Rehydrate the three-pane canvas from the persisted
+       * analysis product (jd_profile / gap_report / diffs) instead of
+       * bouncing the user back to the Dashboard. */
+      session = buildSessionFromJob(existing);
+    } else {
+      /* A genuinely stale/removed job id: quietly return to Dashboard. */
+      window.location.hash = "#/dashboard";
+      return;
+    }
   }
   /* #B5: the session job snapshot can be stale (created before the last
      final-draft save); refresh the draft fields from the fresh job list
@@ -859,11 +893,10 @@ async function resumeAlignmentProgress() {
   try {
     snapshot = await api(`/api/jobs/${encodeURIComponent(analysisId)}`);
   } catch {
-    /* #B4 + silent-fallback: the referenced analysis job is gone (cleaned
-     * up after TTL). Drop the invalid id and quietly return to the
-     * Dashboard instead of surfacing a red toast. */
+    /* The pinned analysis job was cleaned up (TTL). Keep the canvas open
+     * with the persisted data and let the user rerun alignment; never
+     * bounce a valid job's workspace back to the Dashboard. */
     stopAlignmentPoll();
-    window.location.hash = "#/dashboard";
     return;
   }
   if (snapshot.status === "failed" || snapshot.status === "canceled") {
