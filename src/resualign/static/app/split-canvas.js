@@ -176,6 +176,7 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <div class="inspector-controls" data-inspector-controls>
             ${alignmentControls(session, resumes, jobId)}
           </div>
+          <div class="split-pane__match">${score != null ? radarHtml(score) : `<div class="small muted" style="padding:10px 0">运行预分析后生成匹配雷达。</div>`}</div>
         </section>
         <section class="split-pane split-pane--resume split-pane--diff ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>
           <div class="split-pane__head">
@@ -187,7 +188,6 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           </div>
           ${exportDock(jobId, session)}
           <div class="panel panel-card panel--success final-draft-panel" data-final-draft-panel hidden></div>
-          <div class="split-pane__match">${score != null ? radarHtml(score) : `<div class="small muted" style="padding:10px 0">运行预分析后生成匹配雷达。</div>`}</div>
           <div class="split-diff-area">${diffList(session, jobId)}</div>
         </section>
         <section class="split-pane split-pane--livesheet" data-live-sheet-pane>
@@ -533,7 +533,9 @@ export async function renderOptimizerCanvas(app, jobId) {
   }
   const session = await loadSession(jobId);
   if (!session) {
-    app.innerHTML = `<div class="panel panel-card"><h3>工作台会话不存在</h3><p class="muted">岗位可能已删除或会话已过期。</p><div class="row"><button class="btn btn-primary" data-action="back-to-jobs">返回岗位库</button></div></div>`;
+    /* Silent fallback: a stale/removed session id should quietly return
+     * to the Dashboard instead of showing a dead-end error panel. */
+    window.location.hash = "#/dashboard";
     return;
   }
   /* #B5: the session job snapshot can be stale (created before the last
@@ -857,13 +859,11 @@ async function resumeAlignmentProgress() {
   try {
     snapshot = await api(`/api/jobs/${encodeURIComponent(analysisId)}`);
   } catch {
-    /* #B4: the referenced analysis job is gone (cleaned up after TTL).
-     * Session event replay may have set alignment to "running"; without
-     * this fallback the workspace would stay stuck on a phantom task. */
-    setAlignmentTerminal({
-      status: "failed",
-      error: "对齐任务已过期或已被清理，请重新运行",
-    });
+    /* #B4 + silent-fallback: the referenced analysis job is gone (cleaned
+     * up after TTL). Drop the invalid id and quietly return to the
+     * Dashboard instead of surfacing a red toast. */
+    stopAlignmentPoll();
+    window.location.hash = "#/dashboard";
     return;
   }
   if (snapshot.status === "failed" || snapshot.status === "canceled") {
@@ -934,10 +934,8 @@ export async function cancelActiveAlignment() {
   try {
     snapshot = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
   } catch {
-    setAlignmentTerminal({
-      status: "failed",
-      error: "对齐任务已过期或已被清理，请重新运行",
-    });
+    stopAlignmentPoll();
+    window.location.hash = "#/dashboard";
     return;
   }
   if (!["queued", "running"].includes(snapshot.status)) {
@@ -1181,20 +1179,9 @@ export async function renderCopilotBoard(app) {
       </div>
       <div class="row">
         <button class="btn btn-primary" data-action="open-command-panel">粘贴 JD / 链接</button>
-        <button class="btn btn-ghost btn-sm" data-action="export-jobs-csv">导出 CSV</button>
-        <button class="btn btn-ghost btn-sm" data-action="export-jobs-backup">整库备份</button>
-        <button class="btn btn-ghost btn-sm" data-action="show-backup-guide">备份说明</button>
       </div>
     </div>
     ${renderJobStatsHtml(computeJobStats(state.jobs))}
-    <form class="panel panel-card filter-bar" data-form="copilot-filter">
-      <div class="field"><label>关键词</label><input type="search" name="search" value="${esc(state.filters.search)}" placeholder="标题 / 公司 / JD"></div>
-      <div class="field"><label>职能</label><select name="job_function"><option value="">全部</option>${vocabulary.job_functions.map((value) => `<option value="${esc(value)}" ${value === state.filters.job_function ? "selected" : ""}>${esc(value)}</option>`).join("")}</select></div>
-      <div class="field"><label>级别</label><select name="seniority"><option value="">全部</option>${vocabulary.seniorities.map((value) => `<option value="${esc(value)}" ${value === state.filters.seniority ? "selected" : ""}>${esc(value)}</option>`).join("")}</select></div>
-      <div class="field"><label>状态</label><select name="status"><option value="">全部</option>${statuses.map((value) => `<option value="${esc(value)}" ${value === state.filters.status ? "selected" : ""}>${esc(value)}</option>`).join("")}</select></div>
-      <button class="btn btn-secondary" type="submit">筛选</button>
-      <button class="btn btn-ghost" type="button" data-action="clear-filters">清空</button>
-    </form>
     <div class="board-toolbar panel panel-card">
       <span class="small muted">拖拽卡片到目标列；触屏 / 键盘：使用卡片内下拉菜单移动状态。</span>
     </div>
