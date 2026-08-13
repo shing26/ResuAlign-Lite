@@ -10394,3 +10394,59 @@ details > summary::-webkit-details-marker,
   flex-wrap: wrap;
   gap: 6px;
 }
+
+/* #26: 工作台定稿后的投递闭环引导条。 */
+.workbench-guide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: -4px 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--ra-border, rgba(255, 255, 255, 0.1));
+  border-radius: 8px;
+  background: var(--surface-tint, #243248);
+}
+
+.workbench-guide__steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--text-13, 0.8125rem);
+}
+
+.workbench-guide__step {
+  color: var(--ra-text-secondary, rgba(255, 255, 255, 0.64));
+  white-space: nowrap;
+}
+
+.workbench-guide__step.is-done {
+  color: var(--ra-success, #30d158);
+}
+
+.workbench-guide__step.is-current {
+  color: var(--ra-action, #007aff);
+  font-weight: 700;
+}
+
+.workbench-guide__arrow {
+  color: var(--ra-text-tertiary, rgba(255, 255, 255, 0.4));
+}
+
+.workbench-guide__actions {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .workbench-guide {
+    align-items: flex-start;
+  }
+
+  .workbench-guide__actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

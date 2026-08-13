@@ -37,6 +37,9 @@ import {
   renderMatchBadge,
   runEvalFromForm,
   tokenizeInline,
+  workbenchGuideHtml,
+  workbenchGuideSteps,
+  workbenchPrimaryButtonHtml,
 } from "../../src/resualign/static/app/format.js";
 
 /* ------------------------------------------------------------------ */
@@ -841,4 +844,85 @@ test("runEvalFromForm maps checked to true, unchecked to undefined", () => {
   assert.equal(runEvalFromForm({}), undefined);
   assert.equal(runEvalFromForm({ run_eval: "off" }), undefined);
   assert.equal(runEvalFromForm(null), undefined);
+});
+
+/* ------------------------------------------------------------------ */
+/* #26 工作台引导条 + 首次主简历主按钮                                  */
+/* ------------------------------------------------------------------ */
+
+test("workbenchGuideHtml hides without a final draft", () => {
+  assert.equal(workbenchGuideHtml({ job_id: "j1", status: "draft" }), "");
+  assert.equal(workbenchGuideHtml(null), "");
+  const steps = workbenchGuideSteps({
+    job_id: "j1",
+    status: "draft",
+  });
+  assert.equal(steps[0].done, false);
+});
+
+test("workbenchGuideHtml advances from record to follow-up", () => {
+  const draftOnly = workbenchGuideHtml({
+    job_id: "j1",
+    title: "后端工程师",
+    status: "draft",
+    final_draft: "# 定稿",
+  });
+  assert.match(draftOnly, /data-workbench-guide/);
+  assert.match(draftOnly, /data-guide-current="record"/);
+  assert.match(draftOnly, /class="[^"]*is-done[^"]*" data-guide-step="draft"/);
+  assert.match(
+    draftOnly,
+    /class="[^"]*is-current[^"]*" data-guide-step="record"/,
+  );
+  assert.match(
+    draftOnly,
+    /data-action="record-application" data-id="j1">记录投递<\/button>/,
+  );
+  assert.doesNotMatch(draftOnly, /data-action="open-job-followup"/);
+
+  const applied = workbenchGuideHtml({
+    job_id: "j1",
+    title: "后端工程师",
+    status: "applied",
+    applied_at: "2026-08-14",
+    final_draft: "# 定稿",
+  });
+  assert.match(applied, /data-guide-current="followup"/);
+  assert.match(applied, /class="[^"]*is-done[^"]*" data-guide-step="record"/);
+  assert.match(
+    applied,
+    /data-action="open-job-followup" data-id="j1">安排跟进<\/button>/,
+  );
+  assert.doesNotMatch(applied, /data-action="record-application"/);
+});
+
+test("workbenchGuideHtml marks follow-up done and removes actions", () => {
+  const html = workbenchGuideHtml({
+    job_id: "j1",
+    title: "后端工程师",
+    status: "interview",
+    applied_at: "2026-08-14",
+    final_draft: "# 定稿",
+    next_step_due_at: "2026-08-20T10:00",
+    interview_stage: "二面",
+  });
+  assert.match(html, /data-guide-current=""/);
+  assert.match(html, /class="[^"]*is-done[^"]*" data-guide-step="followup"/);
+  assert.doesNotMatch(html, /data-action="record-application"/);
+  assert.doesNotMatch(html, /data-action="open-job-followup"/);
+});
+
+test("workbenchPrimaryButtonHtml swaps to create resume without resumes", () => {
+  const empty = workbenchPrimaryButtonHtml([]);
+  assert.match(empty, /data-action="go-resumes"/);
+  assert.match(empty, />先创建主简历<\/button>/);
+  assert.doesNotMatch(empty, /disabled/);
+
+  const ready = workbenchPrimaryButtonHtml([{ resume_id: "r1" }]);
+  assert.match(ready, /data-action="run-alignment"/);
+  assert.match(ready, />重新生成对齐<\/button>/);
+
+  const running = workbenchPrimaryButtonHtml([{ resume_id: "r1" }], true);
+  assert.match(running, /disabled/);
+  assert.match(running, />对齐生成中...<\/button>/);
 });

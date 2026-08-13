@@ -1564,6 +1564,65 @@ export function renderReminderBanner(reminder) {
     </div>`;
 }
 
+/* #26: 工作台定稿后的投递闭环引导。final_draft 生成后显示三步，
+ * 记录投递完成前进到安排跟进；终态或已安排跟进视为全部完成。 */
+export function workbenchGuideSteps(job) {
+  const status = canonicalJobStatus(job && job.status);
+  const applied = ["applied", "interview", "offer", "withdrawn"].includes(
+    status,
+  );
+  const followedUp = Boolean(
+    job &&
+      (job.next_step_due_at || job.next_step || job.interview_stage),
+  );
+  const terminal = status === "offer" || status === "withdrawn";
+  return [
+    {
+      key: "draft",
+      label: "已生成定稿",
+      done: Boolean(job && job.final_draft),
+    },
+    { key: "record", label: "记录投递", done: applied },
+    { key: "followup", label: "安排跟进", done: followedUp || terminal },
+  ];
+}
+
+export function workbenchGuideHtml(job) {
+  if (!job || !job.final_draft) return "";
+  const steps = workbenchGuideSteps(job);
+  const current = steps.find((step) => !step.done);
+  const currentKey = current ? current.key : "";
+  const action =
+    currentKey === "record"
+      ? `<button class="btn btn-primary btn-sm" type="button" data-action="record-application" data-id="${esc(job.job_id || "")}">记录投递</button>`
+      : currentKey === "followup"
+        ? `<button class="btn btn-primary btn-sm" type="button" data-action="open-job-followup" data-id="${esc(job.job_id || "")}">安排跟进</button>`
+        : "";
+  return `
+    <div class="workbench-guide" data-workbench-guide data-guide-current="${esc(currentKey)}" role="region" aria-label="投递闭环引导">
+      <div class="workbench-guide__steps">
+        ${steps
+          .map(
+            (step, index) => `
+          <span class="workbench-guide__step ${step.done ? "is-done" : ""} ${step.key === currentKey ? "is-current" : ""}" data-guide-step="${esc(step.key)}">${esc(step.label)}</span>
+          ${index < steps.length - 1 ? '<span class="workbench-guide__arrow" aria-hidden="true">→</span>' : ""}`,
+          )
+          .join("")}
+      </div>
+      ${action ? `<div class="workbench-guide__actions">${action}</div>` : ""}
+    </div>`;
+}
+
+export function workbenchPrimaryButtonHtml(resumes, alignmentRunning = false) {
+  const hasResumes = Array.isArray(resumes) && resumes.length > 0;
+  const label = hasResumes
+    ? alignmentRunning
+      ? "对齐生成中..."
+      : "重新生成对齐"
+    : "先创建主简历";
+  return `<button class="btn btn-primary" type="button" data-action="${hasResumes ? "run-alignment" : "go-resumes"}" ${hasResumes && alignmentRunning ? "disabled" : ""}>${esc(label)}</button>`;
+}
+
 /* ------------------------------------------------------------------ */
 /* U7 采纳语义：diff 应用纯函数（split-canvas 单条采纳 / 应用已采纳）    */
 /* ------------------------------------------------------------------ */
