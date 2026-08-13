@@ -136,10 +136,10 @@ An immutable snapshot of a Master Resume. Updating the resume appends a new
 version; rollback points the current version back without rewriting history.
 _Avoid_: resume edit, history entry
 
-**Application**
-A per-tenant record that pins a Master Resume version, stores JD text/url and
-status, and points at the latest analysis job. Re-running an application
-updates the latest job without deleting prior history.
+**Application** *(legacy)*
+A dormant per-tenant record that previously pinned a Master Resume version
+and analysis job. The delivery loop no longer tracks applications through
+this entity; Job is the single source of truth (ADR-0027).
 _Avoid_: job application, submission
 
 **Stage Progress**
@@ -147,6 +147,45 @@ A notification emitted before each pipeline stage, carrying the stage name and
 a human-readable message. The engine stays I/O-free by handing progress to a
 callback instead of printing.
 _Avoid_: status text, log line
+
+### Delivery Loop (投递闭环)
+
+**投递闭环 (Delivery Loop)**
+The canonical job-hunting journey: 岗位库 → 工作台对齐 → 记录投递 → 安排跟进 →
+终态收口. Job is the single source of truth for the whole loop.
+_Avoid_: Application 双轨记录, 投递记录面板
+
+**状态生命周期 (Status Lifecycle)**
+A half-constrained transition policy: forward moves auto-fill timestamps and
+clear later-stage fields; backward corrections require explicit confirmation
+and clean stale fields; terminal states keep historical timestamps.
+_Avoid_: 自由改状态, 无约束状态
+
+**记录投递 (Record Application)**
+A one-click action that stamps today's applied_at and moves the Job to 已投递;
+it is idempotent and never downgrades a later stage.
+_Avoid_: 重复记录, 倒回状态
+
+**安排跟进 (Schedule Follow-up)**
+A quick capture of interview stage, next step, and due time that updates the
+Job and its active reminder in one step.
+_Avoid_: 详情弹窗手工多步
+
+**历史峰值漏斗 (Historical Peak Funnel)**
+Funnel metrics derived from the strongest historical evidence
+(offer_at > applied_at > status), so withdrawn jobs keep their past-stage
+credit.
+_Avoid_: 只看当前状态
+
+**待跟进提醒 (Follow-up Reminder)**
+A due-based reminder shown only for active stages (已投递/面试中); terminal
+states automatically stop reminders.
+_Avoid_: 终态仍提醒
+
+**直达投递 (Direct Application)**
+A 去投递 action that opens the Job's source_url so the user can submit the
+tailored resume; missing links route to a 补链接 flow.
+_Avoid_: 详情里找不到 JD 原文
 
 **JD Source**
 Anything that turns a job posting reference into JD text: an inline paste, a
