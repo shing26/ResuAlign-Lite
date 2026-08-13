@@ -64,6 +64,28 @@ const MOCK_JOBS = [
     salary_min: 20000,
     salary_max: 35000,
   },
+  {
+    job_id: "j4",
+    title: "产品经理",
+    company: "Delta",
+    location: "广州",
+    status: "draft",
+    jd_text: "产品规划",
+    source_url: "",
+    salary_min: 15000,
+    salary_max: 25000,
+  },
+  {
+    job_id: "j5",
+    title: "设计工程师",
+    company: "Epsilon",
+    location: "杭州",
+    status: "interview",
+    jd_text: "交互设计",
+    source_url: "",
+    salary_min: 20000,
+    salary_max: 30000,
+  },
 ];
 
 const calls = { patches: [], opens: [] };
@@ -243,5 +265,165 @@ test("followup modal: schedule next step through lifecycle PATCH", async () => {
   await waitFor(
     () => document.body.textContent.includes("准备二面"),
     "board card shows the saved next step",
+  );
+});
+
+test("terminal confirm: offer select confirms before PATCH", async () => {
+  const select = document.querySelector(
+    '.board-card[data-job-id="j4"] [data-board-status]',
+  );
+  assert.ok(select, "j4 status select exists");
+  select.value = "offer";
+  select.dispatchEvent(new window.Event("change", { bubbles: true }));
+
+  const form = await waitFor(
+    () => document.querySelector("[data-form='job-terminal-confirm']"),
+    "terminal confirm modal opened",
+  );
+  assert.equal(form.querySelector('[name="status"]').value, "offer");
+  const before = calls.patches.filter(
+    (call) => call.url === "/api/jobs/j4" && call.body.status === "offer",
+  ).length;
+  form.querySelector('[name="offer_at"]').value = "2026-08-22";
+  form.querySelector('[name="notes"]').value = "已收 offer";
+  form.dispatchEvent(
+    new window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+
+  await waitFor(
+    () =>
+      calls.patches.some(
+        (call) =>
+          call.url === "/api/jobs/j4" &&
+          call.body.status === "offer" &&
+          call.body.offer_at === "2026-08-22" &&
+          call.body.notes === "已收 offer",
+      ),
+    "terminal PATCH carries offer date and notes",
+  );
+  assert.equal(
+    calls.patches.filter(
+      (call) => call.url === "/api/jobs/j4" && call.body.status === "offer",
+    ).length,
+    before + 1,
+  );
+  await waitFor(
+    () => !document.querySelector(".modal-backdrop"),
+    "confirm modal closes after save",
+  );
+  await waitFor(
+    () => {
+      const current = document.querySelector(
+        '.board-card[data-job-id="j4"] [data-board-status]',
+      );
+      return current && current.value === "offer";
+    },
+    "board card reflects offer after rerender",
+  );
+});
+
+test("terminal confirm: cancel keeps the previous status", async () => {
+  const select = document.querySelector(
+    '.board-card[data-job-id="j5"] [data-board-status]',
+  );
+  assert.ok(select, "j5 status select exists");
+  select.value = "interview";
+  assert.equal(select.value, "interview");
+  select.value = "withdrawn";
+  select.dispatchEvent(new window.Event("change", { bubbles: true }));
+
+  const modal = await waitFor(
+    () => document.querySelector(".modal-backdrop"),
+    "withdrawn confirm modal opened",
+  );
+  const before = calls.patches.filter(
+    (call) => call.url === "/api/jobs/j5" && call.body.status === "withdrawn",
+  ).length;
+  modal.querySelector('[data-action="cancel-status-back"]').click();
+  await waitFor(
+    () => !document.querySelector(".modal-backdrop"),
+    "cancel closes the confirm modal",
+  );
+  assert.equal(
+    calls.patches.filter(
+      (call) => call.url === "/api/jobs/j5" && call.body.status === "withdrawn",
+    ).length,
+    before,
+  );
+  assert.equal(select.value, "interview");
+});
+
+test("terminal confirm: drag to withdrawn opens the confirm modal", async () => {
+  const card = document.querySelector('.board-card[data-job-id="j5"]');
+  assert.ok(card, "j5 card exists");
+  const select = card.querySelector("[data-board-status]");
+  select.value = "interview";
+  const dragStart = new window.Event("dragstart", { bubbles: true });
+  dragStart.dataTransfer = {
+    setData() {},
+    effectAllowed: "",
+  };
+  card.dispatchEvent(dragStart);
+
+  const drop = new window.Event("drop", { bubbles: true, cancelable: true });
+  drop.dataTransfer = { getData: () => "j5" };
+  const column = document.querySelector(
+    '.board-column[data-status="withdrawn"]',
+  );
+  assert.ok(column, "withdrawn column exists");
+  column.dispatchEvent(drop);
+
+  const form = await waitFor(
+    () => document.querySelector("[data-form='job-terminal-confirm']"),
+    "drag terminal confirm modal opened",
+  );
+  assert.equal(form.querySelector('[name="status"]').value, "withdrawn");
+  form.querySelector('[data-action="cancel-status-back"]').click();
+  await waitFor(
+    () => !document.querySelector(".modal-backdrop"),
+    "drag confirm cancel closes the modal",
+  );
+  assert.equal(select.value, "interview");
+});
+
+test("terminal confirm: job detail modal routes through confirm", async () => {
+  clickButton('[data-action="open-job-timeline"][data-id="j5"]');
+  const detail = await waitFor(
+    () => document.querySelector(".modal-backdrop"),
+    "job detail modal opened",
+  );
+  const form = detail.querySelector("[data-form='job-detail-edit']");
+  assert.ok(form, "job detail form exists");
+  form.querySelector('[name="status"]').value = "offer";
+  form.querySelector('[name="offer_at"]').value = "2026-08-23T09:00";
+  form.querySelector('[name="notes"]').value = "最终 offer";
+  form.dispatchEvent(
+    new window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+
+  const confirmForm = await waitFor(
+    () => document.querySelector("[data-form='job-terminal-confirm']"),
+    "terminal confirm modal opened from detail form",
+  );
+  assert.equal(confirmForm.querySelector('[name="offer_at"]').value, "2026-08-23");
+  assert.equal(confirmForm.querySelector('[name="notes"]').value, "最终 offer");
+  confirmForm.dispatchEvent(
+    new window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+
+  await waitFor(
+    () =>
+      calls.patches.some(
+        (call) =>
+          call.url === "/api/jobs/j5" &&
+          call.body.status === "offer" &&
+          call.body.offer_at === "2026-08-23" &&
+          call.body.notes === "最终 offer",
+      ),
+    "detail terminal PATCH carries date and notes",
+  );
+  await waitFor(
+    () => !document.querySelector(".modal-backdrop"),
+    "detail terminal flow closes all modals",
   );
 });

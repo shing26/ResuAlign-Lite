@@ -15,6 +15,7 @@ import {
   esc,
   formatElapsed,
   isBackwardJobStatus,
+  jobTerminalConfirmFormHtml,
   jobStatusLabel,
   jobStatusRank,
   normalizeVocabulary,
@@ -280,12 +281,28 @@ export function confirmBackwardStatus(job, targetStatus, onConfirm, onCancel) {
   );
 }
 
-export function applyPendingStatusTransition() {
+export function confirmTerminalStatus(
+  job,
+  targetStatus,
+  onConfirm,
+  onCancel,
+  options = {},
+) {
+  pendingStatusTransition = { onConfirm, onCancel };
+  showModal(
+    `收口确认 · ${jobStatusLabel(targetStatus)}`,
+    jobTerminalConfirmFormHtml(job, targetStatus, options),
+  );
+}
+
+export async function applyPendingStatusTransition(payload) {
   const pending = pendingStatusTransition;
   if (!pending) return;
   pendingStatusTransition = null;
   closeModal();
-  if (typeof pending.onConfirm === "function") pending.onConfirm();
+  if (typeof pending.onConfirm === "function") {
+    await pending.onConfirm(payload || {});
+  }
 }
 
 export function cancelPendingStatusTransition() {

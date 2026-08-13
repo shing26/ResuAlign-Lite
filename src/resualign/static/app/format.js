@@ -1717,6 +1717,36 @@ export function jobFollowupFormHtml(job) {
     </form>`;
 }
 
+function localDateInputValue(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/* #25: 终态收口确认表单。确认后由 main.js 的 job-terminal-confirm
+ * 分支把日期/备注交给挂起的 onConfirm，走 PATCH 生命周期。 */
+export function jobTerminalConfirmFormHtml(job, targetStatus, options = {}) {
+  const canonical = canonicalJobStatus(targetStatus);
+  if (canonical !== "offer" && canonical !== "withdrawn") return "";
+  const dateName = canonical === "offer" ? "offer_at" : "rejected_at";
+  const dateLabel = canonical === "offer" ? "Offer 日期" : "放弃/拒绝日期";
+  const dateValue = String(
+    options.date || options.today || localDateInputValue(),
+  ).slice(0, 10);
+  return `<form data-form="job-terminal-confirm">
+      <input type="hidden" name="job_id" value="${esc(job && job.job_id || "")}">
+      <input type="hidden" name="status" value="${esc(canonical)}">
+      <p class="small muted">将「${esc(job && job.title || "该岗位")}」收口为「${esc(JOB_STATUS_LABELS[canonical])}」，写入时间戳并清理跟进字段。</p>
+      <div class="form-grid">
+        <div class="field"><label>${esc(dateLabel)}</label><input type="date" name="${dateName}" value="${esc(dateValue)}" required></div>
+        <div class="field wide"><label>备注（可选）</label><textarea name="notes" rows="3">${esc(options.notes || "")}</textarea></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-ghost" type="button" data-action="cancel-status-back">取消</button>
+        <button class="btn btn-primary" type="submit">确认收口</button>
+      </div>
+    </form>`;
+}
+
 /* 编辑岗位弹窗表单。vocabulary 需含 statuses / job_functions / seniorities
  * 列表（由调用方从 events.js vocabularyList 传入，保持本模块无 DOM 依赖）。 */
 export function jobEditFormHtml(job, vocabulary = {}) {
