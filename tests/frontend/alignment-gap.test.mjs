@@ -157,8 +157,10 @@ test("split-canvas.js renders the template workbench three-pane structure", () =
   assert.match(src, /岗位职责萃取/, "duty extraction block");
   assert.match(src, /技能缺口/, "gap block");
   assert.match(src, /简历对齐画布/, "alignment canvas title");
-  assert.match(src, /重新生成对齐/, "rerun alignment button");
-  assert.match(src, /data-action="run-alignment"/, "rerun alignment action");
+  assert.match(src, /workbenchPrimaryButtonHtml/, "primary button helper mounted");
+  const formatSrc = read("format.js");
+  assert.match(formatSrc, /重新生成对齐/, "rerun alignment button");
+  assert.match(formatSrc, /data-action="run-alignment"/, "rerun alignment action");
   assert.match(src, /data-inspector-pane/, "inspector pane contract");
   assert.match(src, /data-diff-pane/, "diff pane contract");
   assert.match(src, /data-live-sheet-pane/, "live sheet pane contract");

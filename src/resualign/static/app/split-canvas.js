@@ -30,6 +30,8 @@ import {
   renderMatchBadge,
   renderSkills,
   stageStepper,
+  workbenchGuideHtml,
+  workbenchPrimaryButtonHtml,
 } from "./format.js";
 let activeSession = null;
 let activeSessionUrl = null;
@@ -73,7 +75,7 @@ let pendingSkillFocus = null;
 let activeAuxPane = "inspector";
 
 
-function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
+export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const job = (session && session.job) || {};
   const jd = (session && session.jd) || {};
   const gap = (session && session.gap) || {};
@@ -150,10 +152,11 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <div class="row">
             ${jobApplyLinkHtml(job)}
             <button class="btn btn-primary" type="button" data-action="record-application" data-id="${esc(jobId)}">记录投递</button>
-            <button class="btn btn-primary" type="button" data-action="run-alignment" ${alignmentRunning ? "disabled" : ""}>${alignmentRunning ? "对齐生成中..." : "重新生成对齐"}</button>
+            ${workbenchPrimaryButtonHtml(resumes, alignmentRunning)}
           </div>
         </div>
       </div>
+      ${workbenchGuideHtml(job)}
       <div class="wb-grid" data-split-layout>
         <section class="wb-main ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>
           <div class="wb-main-head">
