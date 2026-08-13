@@ -32,6 +32,8 @@ def test_batch_import_five_jobs(page, base_url, api_call, artifacts_dir):
 
     # Board starts empty on a fresh temp DB.
     page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")
+    page.wait_for_selector("[data-jobs-data-menu] summary", timeout=15000)
+    page.click("[data-jobs-data-menu] summary")
     page.wait_for_selector("[data-action='show-import']", timeout=15000)
     expect(
         page.locator("#job-board .board-card").count() == 0,
@@ -51,8 +53,8 @@ def test_batch_import_five_jobs(page, base_url, api_call, artifacts_dir):
     page.wait_for_selector("text=完成：新建 5", timeout=90000)
     wait_for_count(page, "#job-board .board-card", 5, timeout=30000)
     expect(
-        page.locator(".page-header--jobs .sub").inner_text().find("共 5 条") >= 0,
-        "jobs header should show a total of 5",
+        page.locator("[data-jobs-rail-count]").inner_text().strip() == "5",
+        "jobs rail should show a total of 5",
     )
 
     # API agrees: exactly 5 jobs are stored.
@@ -66,6 +68,10 @@ def test_batch_import_five_jobs(page, base_url, api_call, artifacts_dir):
         card.wait_for()
         title = next(
             job["title"] for job in jobs if job["job_id"] == job_ids[0]
+        )
+        card.locator(".board-more summary").click()
+        card.locator("[data-action='open-job-timeline']").wait_for(
+            state="visible", timeout=5000
         )
         card.locator('[data-action="open-job-timeline"]').click()
         modal = page.locator(".modal-backdrop[role='dialog']")
