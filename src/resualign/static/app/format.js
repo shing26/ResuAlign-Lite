@@ -695,6 +695,7 @@ function boardMoreMenu(job) {
     <details class="board-more" aria-label="更多操作">
       <summary class="board-more__trigger" aria-label="更多操作" title="更多操作">···</summary>
       <div class="board-more__menu">
+        <button class="btn btn-ghost btn-sm" type="button" data-action="open-job-followup" data-id="${id}">安排跟进</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="open-job-timeline" data-id="${id}">详情</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="edit-job" data-id="${id}">编辑</button>
         <button class="btn btn-danger btn-sm" type="button" data-action="delete-job" data-id="${id}">删除</button>
@@ -1537,7 +1538,10 @@ export function renderReminderStrip(reminders) {
     .map((reminder) => {
       const job = reminder.job || {};
       const when = reminderWhen(reminder);
-      return `<a class="badge badge-amber" href="#/workspace/${encodeURIComponent(job.job_id || "")}" title="${esc(job.next_step || "")}">${esc(job.title || job.job_id || "未命名岗位")} · ${esc(when || job.next_step || "")} · ${esc(reminderDueLabel(reminder))}</a>`;
+      return `<div class="reminder-strip__item">
+        <a class="badge badge-amber" href="#/workspace/${encodeURIComponent(job.job_id || "")}" title="${esc(job.next_step || "")}">${esc(job.title || job.job_id || "未命名岗位")} · ${esc(when || job.next_step || "")} · ${esc(reminderDueLabel(reminder))}</a>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="open-job-followup" data-id="${esc(job.job_id || "")}">安排跟进</button>
+      </div>`;
     })
     .join("");
   return `
@@ -1556,6 +1560,7 @@ export function renderReminderBanner(reminder) {
     <div class="reminder-banner" data-reminder-banner role="status" aria-label="面试跟进提醒">
       <span class="reminder-strip__label">面试跟进</span>
       <span>「${esc(job.title || job.job_id || "该岗位")}」${esc(reminderDueLabel(reminder))}：${esc(when || job.next_step || "")}</span>
+      <button class="btn btn-ghost btn-sm" type="button" data-action="open-job-followup" data-id="${esc(job.job_id || "")}">安排跟进</button>
     </div>`;
 }
 
@@ -1679,6 +1684,35 @@ export function jobTimelineFormHtml(job) {
         <button class="btn btn-primary btn-sm" type="button" data-action="record-application" data-id="${esc(job.job_id)}">记录投递</button>
         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
         <button class="btn btn-primary" type="submit">保存</button>
+      </div>
+    </form>`;
+}
+
+/* 安排跟进快捷弹窗。状态默认保持已投递/面试中，其余状态默认面试中；
+ * 无到期时间允许保存，提醒仅在有可解析时间时生成。 */
+export function jobFollowupFormHtml(job) {
+  const canonical = canonicalJobStatus(job.status);
+  const defaultStatus =
+    canonical === "applied" || canonical === "interview" ? canonical : "interview";
+  const statusOptions = JOB_STATUS_CANONICAL.map(
+    (value) =>
+      `<option value="${value}" ${defaultStatus === value ? "selected" : ""}>${esc(JOB_STATUS_LABELS[value])}</option>`,
+  ).join("");
+  const stageOptions = `<option value="" ${job.interview_stage ? "" : "selected"}>无</option>${INTERVIEW_STAGES.map(
+    (stage) =>
+      `<option value="${esc(stage)}" ${job.interview_stage === stage ? "selected" : ""}>${esc(stage)}</option>`,
+  ).join("")}`;
+  return `<form data-form="job-followup">
+      <input type="hidden" name="job_id" value="${esc(job.job_id)}">
+      <div class="form-grid">
+        <div class="field"><label>状态</label><select name="status">${statusOptions}</select></div>
+        <div class="field"><label>面试阶段</label><select name="interview_stage">${stageOptions}</select></div>
+        <div class="field wide"><label>下一步</label><input type="text" name="next_step" value="${esc(job.next_step || "")}"></div>
+        <div class="field wide"><label>到期时间</label><input type="datetime-local" name="next_step_due_at" value="${esc(job.next_step_due_at || "")}"></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+        <button class="btn btn-primary" type="submit">保存跟进</button>
       </div>
     </form>`;
 }

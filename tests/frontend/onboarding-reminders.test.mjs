@@ -445,6 +445,8 @@ test("renderReminderStrip renders amber badges linking to the workspace", () => 
   assert.match(html, /class="badge badge-amber"/);
   assert.match(html, /href="#\/workspace\/j1"/);
   assert.match(html, /href="#\/workspace\/j2"/);
+  assert.match(html, /data-action="open-job-followup" data-id="j1"/);
+  assert.match(html, /data-action="open-job-followup" data-id="j2"/);
   assert.match(html, /岗位 j1 · 8\/9 10:00 · 已过期 26h/);
   assert.match(html, /岗位 j2 · 8\/11 09:00 · 21h 内到期/);
   assert.match(html, /title="2026-08-09 10:00"/); /* raw next_step as tooltip */
@@ -479,6 +481,7 @@ test("renderReminderBanner renders the active job follow-up line", () => {
   assert.match(html, /data-reminder-banner/);
   assert.match(html, /面试跟进/);
   assert.match(html, /「岗位 j9」已过期 21h：8\/9 15:00/);
+  assert.match(html, /data-action="open-job-followup" data-id="j9"/);
 });
 
 test("renderReminderBanner shows structured stage + due time", () => {

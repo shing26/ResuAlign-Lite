@@ -26,6 +26,7 @@ settings default), matching the task's "(可选)" stage.
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -91,7 +92,7 @@ def _read_download(download) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
-def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
+def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
     errors = capture_errors(page)
     job_id = None
     resume_id = None
@@ -367,6 +368,11 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
         context_actions.locator(
             f'[data-action="record-application"][data-id="{job_id}"]'
         ).click()
+        page.wait_for_function(
+            "() => (document.querySelector('.wb-context-meta') || {}).textContent"
+            "?.includes('已投递')",
+            timeout=10000,
+        )
         poll_until(
             lambda: (api_call("GET", f"/api/jobs/{job_id}") or {}).get("status")
             in ("applied", "已投递"),
@@ -378,6 +384,63 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
             bool(recorded.get("applied_at")),
             "record-application should stamp applied_at",
         )
+
+        # --- 6.9 #24: 安排跟进 → 生命周期写字段 → 提醒条立即更新 ----
+        fresh_context = browser.new_context(
+            viewport={"width": 1440, "height": 900},
+            accept_downloads=True,
+        )
+        followup_page = fresh_context.new_page()
+        followup_errors = capture_errors(followup_page)
+        try:
+            followup_page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")
+            followup_page.wait_for_selector("#job-board", timeout=20000)
+            card = followup_page.locator(f'.board-card[data-job-id="{job_id}"]')
+            card.wait_for(timeout=15000)
+            card.locator(".board-more summary").click()
+            card.locator('[data-action="open-job-followup"]').click()
+            followup_modal = followup_page.locator(".modal-backdrop")
+            followup_modal.wait_for(timeout=10000)
+            followup_form = followup_modal.locator("[data-form='job-followup']")
+            followup_form.locator('[name="status"]').select_option("interview")
+            followup_form.locator('[name="interview_stage"]').select_option("二面")
+            followup_form.locator('[name="next_step"]').fill("准备二面")
+            due_at = (datetime.now() + timedelta(hours=24)).strftime(
+                "%Y-%m-%dT%H:%M"
+            )
+            followup_form.locator('[name="next_step_due_at"]').fill(due_at)
+            followup_form.locator("button[type='submit']").click()
+            followup_modal.wait_for(state="detached", timeout=10000)
+
+            strip = followup_page.locator("[data-reminder-strip]")
+            strip.wait_for(timeout=10000)
+            expect(
+                strip.locator(
+                    f'[data-action="open-job-followup"][data-id="{job_id}"]'
+                ).count()
+                >= 1,
+                "reminder strip should offer follow-up scheduling",
+            )
+            followed = api_call("GET", f"/api/jobs/{job_id}")
+            expect(
+                followed.get("status") in ("interview", "面试中"),
+                "follow-up save should move the job to interview",
+            )
+            expect(
+                followed.get("next_step") == "准备二面",
+                "follow-up save should persist next_step",
+            )
+            expect(
+                followed.get("next_step_due_at") == due_at,
+                "follow-up save should persist due time",
+            )
+            expect(
+                bool(followed.get("applied_at")),
+                "lifecycle should keep applied_at while entering interview",
+            )
+            assert_clean_page(followup_errors, "workbench followup")
+        finally:
+            fresh_context.close()
 
         # Passing-run artifact for the report.
         shots = artifacts_dir / "passing"

@@ -524,6 +524,7 @@ test("boardCard renders copilot card with drag handle and match badge", () => {
   assert.match(html, /copilot-card/);
   assert.match(html, /data-board-drag/);
   assert.match(html, /data-action="open-optimizer"/);
+  assert.match(html, /data-action="open-job-followup" data-id="j1"/);
   assert.match(html, /data-action="delete-job"/);
   assert.match(html, /match--high/);
   assert.match(html, />82<\/span>/);
@@ -556,6 +557,7 @@ test("renderBoardCard renders job-board card with check and edit actions", () =>
   });
   assert.match(html, /data-board-check/);
   assert.match(html, /data-action="open-job-timeline"/);
+  assert.match(html, /data-action="open-job-followup" data-id="j1"/);
   assert.match(html, /data-action="edit-job"/);
   assert.match(html, /data-action="delete-job"/);
   assert.match(html, /aria-label="选择 前端"/);

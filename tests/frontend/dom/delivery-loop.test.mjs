@@ -53,6 +53,17 @@ const MOCK_JOBS = [
     salary_min: 18000,
     salary_max: 28000,
   },
+  {
+    job_id: "j3",
+    title: "数据工程师",
+    company: "Gamma",
+    location: "深圳",
+    status: "draft",
+    jd_text: "SQL / Python",
+    source_url: "",
+    salary_min: 20000,
+    salary_max: 35000,
+  },
 ];
 
 const calls = { patches: [], opens: [] };
@@ -191,5 +202,46 @@ test("delivery loop: save source_url, open original JD, record application", asy
   await waitFor(
     () => !document.querySelector(".modal-backdrop"),
     "record-application closes the detail modal",
+  );
+});
+
+test("followup modal: schedule next step through lifecycle PATCH", async () => {
+  const card = document.querySelector('.board-card[data-job-id="j3"]');
+  assert.ok(card, "j3 card exists");
+  card.querySelector(".board-more summary").click();
+  clickButton('[data-action="open-job-followup"][data-id="j3"]');
+
+  const modal = await waitFor(
+    () => document.querySelector(".modal-backdrop"),
+    "followup modal opened",
+  );
+  const form = modal.querySelector("[data-form='job-followup']");
+  assert.ok(form, "followup form exists");
+  assert.match(form.outerHTML, /<option value="interview" selected/);
+  form.querySelector('[name="status"]').value = "interview";
+  form.querySelector('[name="interview_stage"]').value = "二面";
+  form.querySelector('[name="next_step"]').value = "准备二面";
+  form.querySelector('[name="next_step_due_at"]').value = "2026-08-15T10:00";
+  form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+
+  await waitFor(
+    () =>
+      calls.patches.some(
+        (call) =>
+          call.url === "/api/jobs/j3" &&
+          call.body.status === "interview" &&
+          call.body.next_step === "准备二面" &&
+          call.body.next_step_due_at === "2026-08-15T10:00" &&
+          call.body.interview_stage === "二面",
+      ),
+    "followup PATCH carries status and follow-up fields",
+  );
+  await waitFor(
+    () => !document.querySelector(".modal-backdrop"),
+    "followup modal closes after save",
+  );
+  await waitFor(
+    () => document.body.textContent.includes("准备二面"),
+    "board card shows the saved next step",
   );
 });
