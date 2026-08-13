@@ -733,6 +733,7 @@ export function boardCard(job) {
         ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
         ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
       </div>
+      ${jobSourceUrl(job) ? `<div class="board-card__links">${jobApplyLinkHtml(job)}</div>` : ""}
       <div class="row" style="margin-top:8px">
         <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
         <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-optimizer" data-id="${job.job_id}">工作台</button>
@@ -772,6 +773,7 @@ export function renderBoardCard(job) {
         ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
         ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
       </div>
+      ${jobSourceUrl(job) ? `<div class="board-card__links">${jobApplyLinkHtml(job)}</div>` : ""}
       <div class="row" style="margin-top:8px">
         <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${statusOptions}</select>
         <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-workspace" data-id="${job.job_id}">工作台</button>
@@ -1631,6 +1633,19 @@ export function renderMatchBadge(session, job) {
 
 export const INTERVIEW_STAGES = ["一面", "二面", "HR面", "谈薪", "笔试", "其他"];
 
+export function jobSourceUrl(job) {
+  if (!job || typeof job !== "object") return "";
+  return String(job.source_url || job.jd_url || "").trim();
+}
+
+export function jobApplyLinkHtml(job) {
+  const url = jobSourceUrl(job);
+  if (url) {
+    return `<button type="button" class="btn btn-secondary btn-sm" data-action="open-source-url" data-url="${esc(url)}">去投递 ↗</button>`;
+  }
+  return `<button type="button" class="btn btn-ghost btn-sm" data-action="open-job-detail" data-id="${esc(job && job.job_id ? job.job_id : "")}">补链接</button>`;
+}
+
 /* 岗位详情/时间线弹窗表单。next_step_due_at 为 datetime-local（本地时间，
  * 无时区，与 parseNextStepDate 语义一致）；interview_stage 值域含“无”。 */
 export function jobTimelineFormHtml(job) {
@@ -1645,6 +1660,12 @@ export function jobTimelineFormHtml(job) {
   return `<form data-form="job-detail-edit">
       <input type="hidden" name="job_id" value="${esc(job.job_id)}">
       <div class="form-grid">
+        <div class="field wide"><label>JD 原文链接</label>
+          <div class="row">
+            <input type="url" name="source_url" value="${esc(jobSourceUrl(job))}" placeholder="https://...">
+            ${jobSourceUrl(job) ? `<button type="button" class="btn btn-secondary btn-sm" data-action="open-source-url" data-url="${esc(jobSourceUrl(job))}">去投递 ↗</button>` : ""}
+          </div>
+        </div>
         <div class="field"><label>状态</label><select name="status">${statusOptions}</select></div>
         <div class="field"><label>投递时间</label><input type="datetime-local" name="applied_at" value="${esc(job.applied_at || "")}"></div>
         <div class="field"><label>下一步</label><input type="text" name="next_step" value="${esc(job.next_step || "")}"></div>
@@ -1655,6 +1676,7 @@ export function jobTimelineFormHtml(job) {
         <div class="field wide"><label>备注</label><textarea name="notes" rows="3">${esc(job.notes || "")}</textarea></div>
       </div>
       <div class="actions">
+        <button class="btn btn-primary btn-sm" type="button" data-action="record-application" data-id="${esc(job.job_id)}">记录投递</button>
         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
         <button class="btn btn-primary" type="submit">保存</button>
       </div>

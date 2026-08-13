@@ -33,6 +33,7 @@ from helpers import (
     assert_clean_page,
     capture_errors,
     expect,
+    poll_until,
     wait_for_count,
     wait_for_function,
 )
@@ -40,6 +41,7 @@ from helpers import (
 pytestmark = pytest.mark.e2e
 
 UNIQUE_TAG = "e2e-wb-flow"
+SOURCE_URL = f"https://example.com/jobs/{UNIQUE_TAG}"
 JD_TEXT = (
     "招聘 Python 后端工程师（{tag}），负责高并发服务端开发，"
     "要求熟悉 FastAPI 异步接口与 Redis 缓存。"
@@ -228,6 +230,38 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
             "final_draft should persist the accepted text",
         )
 
+        # #23: 补链接与记录投递入口必须同时出现在上下文条和定稿面板。
+        context_actions = page.locator(".wb-context-actions")
+        expect(
+            context_actions.locator(
+                f'[data-action="open-job-detail"][data-id="{job_id}"]'
+            ).count()
+            >= 1,
+            "workbench context should guide the missing source link",
+        )
+        expect(
+            context_actions.locator(
+                f'[data-action="record-application"][data-id="{job_id}"]'
+            ).count()
+            >= 1,
+            "workbench context should expose record-application",
+        )
+        final_panel = page.locator("[data-final-draft-panel]:not([hidden])")
+        expect(
+            final_panel.locator(
+                f'[data-action="open-job-detail"][data-id="{job_id}"]'
+            ).count()
+            >= 1,
+            "final-draft panel should guide the missing source link",
+        )
+        expect(
+            final_panel.locator(
+                f'[data-action="record-application"][data-id="{job_id}"]'
+            ).count()
+            >= 1,
+            "final-draft panel should expose record-application",
+        )
+
         # --- 6. 下载 Markdown → 导出内容含采纳后的文本 ---------------------
         # The workbench dock's "下载 Markdown" (export-align-markdown) carries
         # the accepted suggestion and its provenance in 修改建议. (Its 对齐内容
@@ -270,6 +304,79 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
             ACCEPTED_TEXT in content,
             f"accepted-draft markdown should contain the accepted text, "
             f"got:\n{content[:400]}",
+        )
+
+        # #23: 详情补填 source_url → 卡片/工作台显示去投递 → 记录投递。
+        page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")
+        page.wait_for_selector("#job-board", timeout=20000)
+        card = page.locator(f'.board-card[data-job-id="{job_id}"]')
+        card.wait_for(timeout=15000)
+        card.locator(".board-more summary").click()
+        card.locator('[data-action="open-job-timeline"]').click()
+        modal = page.locator(".modal-backdrop")
+        modal.wait_for(timeout=10000)
+        link_input = modal.locator('input[name="source_url"]')
+        link_input.wait_for(timeout=10000)
+        link_input.fill(SOURCE_URL)
+        modal.locator("[data-form='job-detail-edit'] button[type='submit']").click()
+        modal.wait_for(state="detached", timeout=10000)
+
+        go_apply = card.locator(
+            f'[data-action="open-source-url"][data-url="{SOURCE_URL}"]'
+        )
+        go_apply.wait_for(timeout=10000)
+        page.evaluate(
+            """() => {
+                window.__openedUrls = [];
+                window.open = (url, name, features) => {
+                    window.__openedUrls.push({ url, name, features });
+                    return null;
+                };
+            }"""
+        )
+        go_apply.click()
+        opened = page.evaluate("() => window.__openedUrls")
+        expect(
+            opened
+            == [
+                {
+                    "url": SOURCE_URL,
+                    "name": "_blank",
+                    "features": "noopener,noreferrer",
+                }
+            ],
+            "go-to-apply should open the original JD URL in a new tab",
+        )
+
+        page.evaluate("location.hash = '#/workspace/%s'" % job_id)
+        page.wait_for_selector(WORKSPACE_SELECTOR, timeout=15000)
+        context_actions = page.locator(".wb-context-actions")
+        go_apply = context_actions.locator(
+            f'[data-action="open-source-url"][data-url="{SOURCE_URL}"]'
+        )
+        go_apply.wait_for(timeout=10000)
+        final_panel = page.locator("[data-final-draft-panel]:not([hidden])")
+        final_panel.wait_for(timeout=10000)
+        expect(
+            final_panel.locator(
+                f'[data-action="open-source-url"][data-url="{SOURCE_URL}"]'
+            ).count()
+            >= 1,
+            "final-draft panel should show go-to-apply after source_url save",
+        )
+        context_actions.locator(
+            f'[data-action="record-application"][data-id="{job_id}"]'
+        ).click()
+        poll_until(
+            lambda: (api_call("GET", f"/api/jobs/{job_id}") or {}).get("status")
+            in ("applied", "已投递"),
+            "record-application should move the job to applied",
+            timeout=15,
+        )
+        recorded = api_call("GET", f"/api/jobs/{job_id}")
+        expect(
+            bool(recorded.get("applied_at")),
+            "record-application should stamp applied_at",
         )
 
         # Passing-run artifact for the report.
