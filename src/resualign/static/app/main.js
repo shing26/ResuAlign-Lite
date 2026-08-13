@@ -5,8 +5,10 @@ import {
   applyPendingStatusTransition,
   buildDiagnosisMarkdown,
   cancelPendingStatusTransition,
+  canonicalJobStatus,
   closeModal,
   confirmBackwardStatus,
+  confirmTerminalStatus,
   download,
   esc,
   formatDate,
@@ -104,6 +106,11 @@ import {
   validateAutomationRule,
   validateLlmNodePayload,
 } from "./settings-form.js";
+
+function isTerminalJobStatus(status) {
+  const canonical = canonicalJobStatus(status);
+  return canonical === "offer" || canonical === "withdrawn";
+}
 
 const ROUTE_LABELS = {
   resume: "简历中心",
@@ -1926,13 +1933,17 @@ document.addEventListener("change", (event) => {
     const job = (state.jobs || []).find(
       (item) => item.job_id === target.dataset.id,
     );
+    const targetStatus = canonicalJobStatus(target.value);
+    const resetStatus = () => {
+      target.value = job ? canonicalJobStatus(job.status) : "";
+    };
     const applyStatus = () => {
       api("/api/kanban/bulk-status", {
         method: "POST",
         body: JSON.stringify({
           job_ids: [target.dataset.id],
-          status: target.value,
-          idempotency_key: `fe-select-${target.dataset.id}-${target.value}`,
+          status: targetStatus,
+          idempotency_key: `fe-select-${target.dataset.id}-${targetStatus}`,
         }),
       })
         .then(() => {
@@ -1941,10 +1952,24 @@ document.addEventListener("change", (event) => {
         })
         .catch((error) => toast(error.message, "error"));
     };
-    if (job && isBackwardJobStatus(job.status, target.value)) {
-      confirmBackwardStatus(job, target.value, applyStatus, () => {
-        target.value = job.status;
-      });
+    if (job && isBackwardJobStatus(job.status, targetStatus)) {
+      confirmBackwardStatus(job, targetStatus, applyStatus, resetStatus);
+    } else if (job && isTerminalJobStatus(targetStatus)) {
+      confirmTerminalStatus(job, targetStatus, async (payload) => {
+        await api(`/api/jobs/${encodeURIComponent(job.job_id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: targetStatus,
+            ...(payload.offer_at ? { offer_at: payload.offer_at } : {}),
+            ...(payload.rejected_at
+              ? { rejected_at: payload.rejected_at }
+              : {}),
+            ...(payload.notes ? { notes: payload.notes } : {}),
+          }),
+        });
+        toast("岗位状态已更新", "success");
+        render();
+      }, resetStatus);
     } else {
       applyStatus();
     }
@@ -2107,13 +2132,76 @@ async function handleForm(formName, data, form) {
         seniority: data.seniority || null,
         tech_tags: (data.tech_tags || "").split(",").map((tag) => tag.trim()).filter(Boolean),
       };
-      await api(`/api/jobs/${encodeURIComponent(data.job_id)}`, {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-      });
-      toast("岗位已更新", "success");
-      closeModal();
-      render();
+      const job = (state.jobs || []).find(
+        (item) => item.job_id === data.job_id,
+      );
+      const targetStatus = canonicalJobStatus(data.status);
+      const saveJob = async (extra = {}) => {
+        const body = {
+          ...payload,
+          ...(extra.status
+            ? { status: canonicalJobStatus(extra.status) }
+            : {}),
+          ...(extra.offer_at !== undefined
+            ? { offer_at: extra.offer_at || null }
+            : {}),
+          ...(extra.rejected_at !== undefined
+            ? { rejected_at: extra.rejected_at || null }
+            : {}),
+          ...(extra.notes !== undefined
+            ? { notes: extra.notes || null }
+            : {}),
+        };
+        await api(`/api/jobs/${encodeURIComponent(data.job_id)}`, {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        });
+        toast("岗位已更新", "success");
+        closeModal();
+        render();
+      };
+      const reopenJobEditor = () => {
+        showModal(
+          `编辑「${job.title}」`,
+          jobEditFormHtml(
+            {
+              ...job,
+              title: data.title,
+              jd_text: data.jd_text,
+              company: data.company || job.company || "",
+              location: data.location || job.location || "",
+              status: data.status,
+              job_function: data.job_function || job.job_function || "",
+              seniority: data.seniority || job.seniority || "",
+              salary_min: data.salary_min
+                ? Number(data.salary_min)
+                : job.salary_min,
+              salary_max: data.salary_max
+                ? Number(data.salary_max)
+                : job.salary_max,
+              tech_tags: (data.tech_tags || "")
+                .split(",")
+                .map((tag) => tag.trim())
+                .filter(Boolean),
+            },
+            {
+              statuses: vocabularyList("statuses"),
+              job_functions: vocabularyList("job_functions"),
+              seniorities: vocabularyList("seniorities"),
+            },
+          ),
+        );
+      };
+      if (job && isTerminalJobStatus(targetStatus)) {
+        confirmTerminalStatus(
+          job,
+          targetStatus,
+          saveJob,
+          reopenJobEditor,
+        );
+        return;
+      }
+      await saveJob();
       break;
     }
     case "job-detail-edit": {
@@ -2133,33 +2221,63 @@ async function handleForm(formName, data, form) {
       const job = (state.jobs || []).find(
         (item) => item.job_id === data.job_id,
       );
-      const saveDetail = async () => {
+      const targetStatus = canonicalJobStatus(data.status);
+      const reopenDetail = () => {
+        showModal(
+          `岗位详情 · ${job.title}`,
+          jobTimelineFormHtml({
+            ...job,
+            status: data.status,
+            source_url: data.source_url || "",
+            applied_at: data.applied_at || "",
+            next_step: data.next_step || "",
+            notes: data.notes || "",
+            offer_at: data.offer_at || "",
+            rejected_at: data.rejected_at || "",
+            next_step_due_at: data.next_step_due_at || "",
+            interview_stage: data.interview_stage || "",
+          }),
+        );
+      };
+      const saveDetail = async (extra = {}) => {
+        const body = {
+          ...payload,
+          ...(extra.status
+            ? { status: canonicalJobStatus(extra.status) }
+            : {}),
+          ...(extra.offer_at !== undefined
+            ? { offer_at: extra.offer_at || null }
+            : {}),
+          ...(extra.rejected_at !== undefined
+            ? { rejected_at: extra.rejected_at || null }
+            : {}),
+          ...(extra.notes !== undefined
+            ? { notes: extra.notes || null }
+            : {}),
+        };
         await api(`/api/jobs/${encodeURIComponent(data.job_id)}`, {
           method: "PATCH",
-          body: JSON.stringify(payload),
+          body: JSON.stringify(body),
         });
         toast("岗位时间线已保存", "success");
         closeModal();
         render();
       };
-      if (job && isBackwardJobStatus(job.status, data.status)) {
-        confirmBackwardStatus(job, data.status, saveDetail, () => {
-          showModal(
-            `岗位详情 · ${job.title}`,
-            jobTimelineFormHtml({
-              ...job,
-              status: data.status,
-              source_url: data.source_url || "",
-              applied_at: data.applied_at || "",
-              next_step: data.next_step || "",
-              notes: data.notes || "",
-              offer_at: data.offer_at || "",
-              rejected_at: data.rejected_at || "",
-              next_step_due_at: data.next_step_due_at || "",
-              interview_stage: data.interview_stage || "",
-            }),
-          );
-        });
+      if (job && isTerminalJobStatus(targetStatus)) {
+        confirmTerminalStatus(
+          job,
+          targetStatus,
+          saveDetail,
+          reopenDetail,
+          {
+            date: targetStatus === "offer" ? data.offer_at : data.rejected_at,
+            notes: data.notes || "",
+          },
+        );
+        return;
+      }
+      if (job && isBackwardJobStatus(job.status, targetStatus)) {
+        confirmBackwardStatus(job, targetStatus, saveDetail, reopenDetail);
         return;
       }
       await saveDetail();
@@ -2183,32 +2301,79 @@ async function handleForm(formName, data, form) {
           return;
         }
       }
-      const saveFollowup = async () => {
+      const targetStatus = canonicalJobStatus(data.status);
+      const reopenFollowup = () => {
+        showModal(
+          `安排跟进 · ${job.title || "该岗位"}`,
+          jobFollowupFormHtml({
+            ...job,
+            status: data.status,
+            next_step: data.next_step || "",
+            next_step_due_at: data.next_step_due_at || "",
+            interview_stage: data.interview_stage || "",
+          }),
+        );
+      };
+      const saveFollowup = async (extra = {}) => {
+        const body = {
+          ...payload,
+          ...(extra.status
+            ? { status: canonicalJobStatus(extra.status) }
+            : {}),
+          ...(extra.offer_at !== undefined
+            ? { offer_at: extra.offer_at || null }
+            : {}),
+          ...(extra.rejected_at !== undefined
+            ? { rejected_at: extra.rejected_at || null }
+            : {}),
+          ...(extra.notes !== undefined
+            ? { notes: extra.notes || null }
+            : {}),
+        };
         await api(`/api/jobs/${encodeURIComponent(data.job_id)}`, {
           method: "PATCH",
-          body: JSON.stringify(payload),
+          body: JSON.stringify(body),
         });
         toast("跟进已安排", "success");
         closeModal();
         render();
       };
-      if (job && isBackwardJobStatus(job.status, data.status)) {
-        confirmBackwardStatus(job, data.status, saveFollowup, () => {
-          showModal(
-            `安排跟进 · ${job.title || "该岗位"}`,
-            jobFollowupFormHtml({
-              ...job,
-              status: data.status,
-              next_step: data.next_step || "",
-              next_step_due_at: data.next_step_due_at || "",
-              interview_stage: data.interview_stage || "",
-            }),
-          );
-        });
+      if (job && isTerminalJobStatus(targetStatus)) {
+        confirmTerminalStatus(
+          job,
+          targetStatus,
+          saveFollowup,
+          reopenFollowup,
+          {
+            date: targetStatus === "offer" ? data.offer_at : data.rejected_at,
+            notes: data.notes || "",
+          },
+        );
+        return;
+      }
+      if (job && isBackwardJobStatus(job.status, targetStatus)) {
+        confirmBackwardStatus(
+          job,
+          targetStatus,
+          saveFollowup,
+          reopenFollowup,
+        );
         return;
       }
       await saveFollowup();
       break;
+    }
+    case "job-terminal-confirm": {
+      const targetStatus = canonicalJobStatus(data.status);
+      const payload = {
+        status: targetStatus,
+        ...(data.offer_at ? { offer_at: data.offer_at } : {}),
+        ...(data.rejected_at ? { rejected_at: data.rejected_at } : {}),
+        ...((data.notes || "").trim()
+          ? { notes: (data.notes || "").trim() }
+          : {}),
+      };
+      return applyPendingStatusTransition(payload);
     }
     case "job-filter":
       state.filters = {

@@ -23,6 +23,7 @@ import {
   jobSourceUrl,
   jobStatusRank,
   jobStatusLabel,
+  jobTerminalConfirmFormHtml,
   jobTimelineFormHtml,
   lineDiff,
   matchBadgeInfo,
@@ -646,6 +647,35 @@ test("jobFollowupFormHtml keeps applied/interview as the default status", () => 
   assert.match(interview, /<option value="interview" selected>面试中<\/option>/);
   const terminal = jobFollowupFormHtml({ job_id: "j4", status: "offer" });
   assert.match(terminal, /<option value="interview" selected>面试中<\/option>/);
+});
+
+test("jobTerminalConfirmFormHtml renders offer date and notes fields", () => {
+  const html = jobTerminalConfirmFormHtml(
+    { job_id: "j1", title: "后端工程师" },
+    "offer",
+    { today: "2026-08-20", notes: "口头 offer" },
+  );
+  assert.match(html, /data-form="job-terminal-confirm"/);
+  assert.match(html, /name="job_id" value="j1"/);
+  assert.match(html, /name="status" value="offer"/);
+  assert.match(html, /type="date" name="offer_at" value="2026-08-20"/);
+  assert.match(html, /name="notes" rows="3">口头 offer<\/textarea>/);
+  assert.match(html, /data-action="cancel-status-back"/);
+  assert.match(html, /type="submit">确认收口<\/button>/);
+});
+
+test("jobTerminalConfirmFormHtml renders withdrawn date and clears non-terminal", () => {
+  const html = jobTerminalConfirmFormHtml(
+    { job_id: "j2", title: "前端工程师" },
+    "withdrawn",
+    { today: "2026-08-21" },
+  );
+  assert.match(html, /name="status" value="withdrawn"/);
+  assert.match(html, /type="date" name="rejected_at" value="2026-08-21"/);
+  assert.equal(
+    jobTerminalConfirmFormHtml({ job_id: "j3" }, "applied"),
+    "",
+  );
 });
 
 test("jobEditFormHtml adds the reclassify secondary action", () => {

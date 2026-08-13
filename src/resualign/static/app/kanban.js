@@ -14,6 +14,7 @@ import {
   api,
   canonicalJobStatus,
   confirmBackwardStatus,
+  confirmTerminalStatus,
   ensureVocabulary,
   esc,
   isBackwardJobStatus,
@@ -34,7 +35,23 @@ export function setCanvasRenderHook(fn) {
   if (typeof fn === "function") canvasRenderHooks.push(fn);
 }
 
-function moveBoardJob(jobId, status) {
+function isTerminalJobStatus(status) {
+  const canonical = canonicalJobStatus(status);
+  return canonical === "offer" || canonical === "withdrawn";
+}
+
+function moveBoardJob(jobId, status, extra = {}) {
+  const dateField = extra.offer_at ? "offer_at" : extra.rejected_at ? "rejected_at" : null;
+  if (dateField) {
+    return api(`/api/jobs/${encodeURIComponent(jobId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status,
+        [dateField]: extra[dateField],
+        ...(extra.notes ? { notes: extra.notes } : {}),
+      }),
+    }).then((job) => ({ updated: 1, results: [{ updated: true, job }] }));
+  }
   return api("/api/kanban/bulk-status", {
     method: "POST",
     body: JSON.stringify({
@@ -190,9 +207,9 @@ function bindBoardDrag(root) {
       const jobId = draggingJobId || (event.dataTransfer && event.dataTransfer.getData("text/plain"));
       if (!jobId) return;
       const status = column.dataset.status;
-      const applyMove = async () => {
+      const applyMove = async (extra = {}) => {
         try {
-          const result = await moveBoardJob(jobId, status);
+          const result = await moveBoardJob(jobId, status, extra);
           if (result.updated) toast("岗位状态已更新", "success");
           renderKanban($("#app-router-view"));
         } catch (error) {
@@ -204,6 +221,8 @@ function bindBoardDrag(root) {
       );
       if (job && isBackwardJobStatus(job.status, status)) {
         confirmBackwardStatus(job, status, applyMove);
+      } else if (job && isTerminalJobStatus(status)) {
+        confirmTerminalStatus(job, status, applyMove);
       } else {
         applyMove();
       }
