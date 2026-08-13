@@ -19,6 +19,7 @@ import {
   jobCompleteness,
   jobCompletenessBadge,
   jobEditFormHtml,
+  jobFollowupFormHtml,
   jobSourceUrl,
   jobStatusRank,
   jobStatusLabel,
@@ -617,6 +618,34 @@ test("jobTimelineFormHtml renders source link field and record button", () => {
   assert.match(html, /name="source_url" value="https:\/\/example.com\/jobs\/1"/);
   assert.match(html, /data-action="open-source-url"/);
   assert.match(html, /data-action="record-application" data-id="j1"/);
+});
+
+test("jobFollowupFormHtml renders status, stage, next step and due fields", () => {
+  const html = jobFollowupFormHtml({
+    job_id: "j1",
+    status: "draft",
+    next_step: "等 HR 通知",
+    next_step_due_at: "2026-08-10T14:30",
+    interview_stage: "二面",
+  });
+  assert.match(html, /data-form="job-followup"/);
+  assert.match(html, /name="job_id" value="j1"/);
+  assert.match(html, /<option value="interview" selected>面试中<\/option>/);
+  assert.match(html, /name="next_step" value="等 HR 通知"/);
+  assert.match(html, /type="datetime-local" name="next_step_due_at" value="2026-08-10T14:30"/);
+  assert.match(html, /name="interview_stage"/);
+  assert.match(html, /<option value="二面" selected>二面<\/option>/);
+  assert.match(html, /data-action="close-modal"/);
+  assert.match(html, /type="submit">保存跟进<\/button>/);
+});
+
+test("jobFollowupFormHtml keeps applied/interview as the default status", () => {
+  const applied = jobFollowupFormHtml({ job_id: "j2", status: "applied" });
+  assert.match(applied, /<option value="applied" selected>已投递<\/option>/);
+  const interview = jobFollowupFormHtml({ job_id: "j3", status: "interview" });
+  assert.match(interview, /<option value="interview" selected>面试中<\/option>/);
+  const terminal = jobFollowupFormHtml({ job_id: "j4", status: "offer" });
+  assert.match(terminal, /<option value="interview" selected>面试中<\/option>/);
 });
 
 test("jobEditFormHtml adds the reclassify secondary action", () => {

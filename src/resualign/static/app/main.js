@@ -79,6 +79,7 @@ import {
   isJdUrl,
   jobApplyLinkHtml,
   jobEditFormHtml,
+  jobFollowupFormHtml,
   jobSelectOptionsHtml,
   jobTimelineFormHtml,
   jobsToCsv,
@@ -979,6 +980,25 @@ const actions = {
     }
     if (job) openJobDetail(job);
   },
+  "open-job-followup": async (button) => {
+    let job = (state.jobs || []).find(
+      (item) => item.job_id === button.dataset.id,
+    );
+    if (!job) {
+      try {
+        job = await api(`/api/jobs/${encodeURIComponent(button.dataset.id)}`);
+      } catch (error) {
+        toast(error.message || "岗位不存在", "error");
+        return;
+      }
+    }
+    if (job) {
+      showModal(
+        `安排跟进 · ${job.title || "该岗位"}`,
+        jobFollowupFormHtml(job),
+      );
+    }
+  },
   "record-application": async (button) => {
     const jobId = button.dataset.id || (state.wbJob && state.wbJob.job_id);
     if (!jobId) return;
@@ -1007,7 +1027,7 @@ const actions = {
     });
     toast("已记录投递", "success");
     if (button.closest(".modal-backdrop")) closeModal();
-    render();
+    await render();
   },
   "toggle-batch-panel": (button) => {
     const wrap = button.parentElement && button.parentElement.querySelector("[data-batch-wrap]");
@@ -2143,6 +2163,51 @@ async function handleForm(formName, data, form) {
         return;
       }
       await saveDetail();
+      break;
+    }
+    case "job-followup": {
+      const payload = {
+        status: data.status,
+        next_step: data.next_step || null,
+        next_step_due_at: data.next_step_due_at || null,
+        interview_stage: data.interview_stage || null,
+      };
+      let job = (state.jobs || []).find(
+        (item) => item.job_id === data.job_id,
+      );
+      if (!job) {
+        try {
+          job = await api(`/api/jobs/${encodeURIComponent(data.job_id)}`);
+        } catch (error) {
+          toast(error.message || "岗位不存在", "error");
+          return;
+        }
+      }
+      const saveFollowup = async () => {
+        await api(`/api/jobs/${encodeURIComponent(data.job_id)}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+        toast("跟进已安排", "success");
+        closeModal();
+        render();
+      };
+      if (job && isBackwardJobStatus(job.status, data.status)) {
+        confirmBackwardStatus(job, data.status, saveFollowup, () => {
+          showModal(
+            `安排跟进 · ${job.title || "该岗位"}`,
+            jobFollowupFormHtml({
+              ...job,
+              status: data.status,
+              next_step: data.next_step || "",
+              next_step_due_at: data.next_step_due_at || "",
+              interview_stage: data.interview_stage || "",
+            }),
+          );
+        });
+        return;
+      }
+      await saveFollowup();
       break;
     }
     case "job-filter":

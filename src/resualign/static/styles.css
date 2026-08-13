@@ -5186,6 +5186,13 @@ body.command-palette-open {
   font-variant-numeric: tabular-nums;
 }
 
+.reminder-strip__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .reminder-strip a.badge {
   text-decoration: none;
 }

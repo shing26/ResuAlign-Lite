@@ -80,6 +80,12 @@ test("reminder strip DOM: badges link to workspace and carry due labels", () => 
   assert.equal(links[0].textContent, "后端开发 · 8/9 10:00 · 已过期 26h");
   assert.equal(links[0].getAttribute("title"), "2026-08-09 10:00 二面");
   assert.equal(links[1].textContent, "前端开发 · 8/11 09:00 · 21h 内到期");
+  const followups = [...strip.querySelectorAll('[data-action="open-job-followup"]')];
+  assert.equal(followups.length, 2);
+  assert.deepEqual(
+    followups.map((node) => node.dataset.id),
+    ["j1", "j2"],
+  );
 });
 
 test("reminder strip DOM: structured fields render stage badge with due time", () => {
@@ -121,6 +127,10 @@ test("reminder banner DOM: shows active job follow-up", () => {
   assert.ok(banner.textContent.includes("算法工程师"));
   assert.ok(banner.textContent.includes("已过期 21h"));
   assert.ok(banner.textContent.includes("8/9 15:00"));
+  assert.equal(
+    banner.querySelector('[data-action="open-job-followup"]').dataset.id,
+    "j9",
+  );
 });
 
 test("reminder banner DOM: structured stage shows as 阶段 · 到期时间", () => {
