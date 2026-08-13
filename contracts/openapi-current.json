@@ -3100,7 +3100,7 @@
     "/api/dashboard": {
       "get": {
         "summary": "Get Dashboard",
-        "description": "Return aggregated KPI, skill-gap, and quick-continue data.\n\n- ``kpi.resumes`` counts the tenant's master resumes.\n- ``kpi.jobs`` counts the tenant's library jobs; the applied/interview/\n  offer/declined counters derive from the canonical five-state status.\n- ``kpi.active_followups`` counts jobs whose ``next_step_due_at`` is\n  non-empty and not in the past.\n- ``skill_gaps`` ranks the frequencies of ``must_have_skills`` across\n  all job JD profiles, descending (top 8).\n- ``quick_continue`` is the most recently updated job whose\n  ``alignment_status`` is not ``succeeded``; when every job is\n  finished, it falls back to the most recently updated job.",
+        "description": "Return aggregated KPI, skill-gap, and quick-continue data.\n\n- ``kpi.resumes`` counts the tenant's master resumes.\n- ``kpi.jobs`` counts the tenant's library jobs; applied/interview/offer\n  use the historical peak stage (offer_at > applied_at > current status),\n  while declined stays the current withdrawn count.\n- ``kpi.active_followups`` counts jobs whose ``next_step_due_at`` is\n  non-empty and not in the past, restricted to applied/interview jobs.\n- ``skill_gaps`` ranks the frequencies of ``must_have_skills`` across\n  all job JD profiles, descending (top 8).\n- ``quick_continue`` is the most recently updated job whose\n  ``alignment_status`` is not ``succeeded``; when every job is\n  finished, it falls back to the most recently updated job.",
         "operationId": "get_dashboard_api_dashboard_get",
         "parameters": [
           {

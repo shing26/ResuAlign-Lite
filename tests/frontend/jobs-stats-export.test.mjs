@@ -47,6 +47,25 @@ test("computeJobStats counts five canonical states and funnel stages", () => {
   });
 });
 
+test("computeJobStats uses historical peak for withdrawn jobs", () => {
+  const stats = computeJobStats([
+    { status: "withdrawn", applied_at: "2026-08-01" },
+    { status: "withdrawn", applied_at: "2026-08-02", offer_at: "2026-08-10" },
+    { status: "offer", applied_at: "2026-08-03" },
+    { status: "interview" },
+  ]);
+  assert.deepEqual(stats.counts, {
+    draft: 0,
+    applied: 0,
+    interview: 1,
+    offer: 1,
+    withdrawn: 2,
+  });
+  assert.equal(stats.funnel.applied, 4);
+  assert.equal(stats.funnel.interview, 3);
+  assert.equal(stats.funnel.offer, 2);
+});
+
 test("computeJobStats accepts Chinese status labels via aliases", () => {
   const stats = computeJobStats([{ status: "已投递" }, { status: "面试中" }]);
   assert.equal(stats.counts.applied, 1);
