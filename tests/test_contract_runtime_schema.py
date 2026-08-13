@@ -54,7 +54,6 @@ CRITICAL_ROUTES = {
     "/api/jobs/import",
     "/api/jobs/{job_id}",
     "/api/jobs/{job_id}/workbench",
-    "/api/jobs/{job_id}/appraisal",
     "/api/jobs/{job_id}/workbench/accept",
     "/api/master-resumes",
     "/api/master-resumes/{resume_id}",
@@ -235,17 +234,6 @@ IMPORT_RESPONSE_SCHEMA = {
         "created": {"type": "integer"},
         "skipped": {"type": "integer"},
         "errors": {"type": "array", "items": {"type": "string"}},
-    },
-}
-
-APPRAISAL_SCHEMA = {
-    "type": "object",
-    "required": ["score", "verdict", "components", "reasons"],
-    "properties": {
-        "score": {"type": ["integer", "number"]},
-        "verdict": {"type": "string"},
-        "components": {"type": "object"},
-        "reasons": {"type": "array", "items": {"type": "string"}},
     },
 }
 
@@ -440,7 +428,7 @@ def test_critical_route_success_bodies_validate():
         "GET /api/applications",
     )
 
-    # Workbench queue -> run with a patched engine -> appraisal + accept.
+    # Workbench queue -> run with a patched engine -> accept.
     report = Report(
         score=80,
         skills=["Python"],
@@ -487,12 +475,6 @@ def test_critical_route_success_bodies_validate():
     analysis_job_id = r.json()["job_id"]
     with patch("resualign.api.run", return_value=report):
         api_module._run_job(analysis_job_id)
-
-    r = client.get(f"/api/jobs/{job_id}/appraisal", headers=headers)
-    assert r.status_code == 200
-    _validate(
-        r.json(), APPRAISAL_SCHEMA, "GET /api/jobs/{job_id}/appraisal"
-    )
 
     r = client.post(
         f"/api/jobs/{job_id}/workbench/accept",

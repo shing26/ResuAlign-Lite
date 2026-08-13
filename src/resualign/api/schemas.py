@@ -161,8 +161,6 @@ class LLMNodeUpdateRequest(BaseModel):
 
 
 class SettingsUpdateRequest(BaseModel):
-    salary_reference: list[dict[str, Any]] | None = None
-    appraisal_weights: dict[str, float] | None = None
     classification_vocabulary: dict[str, list[str]] | None = None
     llm_provider: str | None = None
     llm_model: str | None = None
@@ -257,7 +255,6 @@ class WorkstationState(BaseModel):
     alignment: WorkstationAlignmentSection = Field(
         default_factory=WorkstationAlignmentSection
     )
-    appraisal: dict[str, Any] = Field(default_factory=dict)
     crawl: WorkstationCrawlSection = Field(default_factory=WorkstationCrawlSection)
     meta: WorkstationMeta = Field(default_factory=WorkstationMeta)
 

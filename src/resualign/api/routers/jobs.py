@@ -237,50 +237,6 @@ def run_workbench(job_id: str, req: WorkbenchRunRequest, request: Request, user:
     api_module._jobs.update_job(user['user_id'], job_id, workbench_job_id=analysis_job_id, workbench_resume_id=req.master_resume_id, tailor_granularity=req.granularity, tailor_focus=req.prompt_focus, custom_prompt=req.custom_prompt)
     return {'job_id': analysis_job_id, 'status': 'queued', 'workbench': True}
 
-@router.get('/api/jobs/{job_id}/appraisal')
-def get_workbench_appraisal(
-    job_id: str,
-    commute_minutes: int | None = None,
-    commute_cost_per_minute: float | None = None,
-    living_cost_adjustment: float | None = None,
-    user: dict[str, Any] = Depends(get_current_user),
-):
-    """Return the worth appraisal for one library job."""
-    job = api_module._jobs.get_job(user['user_id'], job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail='Job not found')
-    library_median = api_module._jobs.salary_median(user['user_id'], job_function=job.get('job_function'))
-    latest = api_module._registry.snapshot(job.get('workbench_job_id'), tenant_id=user['user_id']) if job.get('workbench_job_id') else None
-    match_score = None
-    if latest and latest.get('status') == 'succeeded' and latest.get('result'):
-        result = latest['result']
-        eval_score = result.get('eval_score') or {}
-        match_score = eval_score.get('jd_match_score')
-        if match_score is None:
-            match_score = api_module._gap_match_score(result)
-        if match_score is None:
-            match_score = result.get('score')
-    pinned = None
-    if job.get('workbench_resume_id'):
-        pinned = api_module._resumes.get_master_resume(user['user_id'], job['workbench_resume_id'])
-    profile = api_module.resume_profile(pinned['content']) if pinned else {'years': None, 'education': None}
-    settings = api_module._settings_store.get_settings(user['user_id'])
-    try:
-        return api_module.compute_appraisal(
-            job,
-            resume_match_score=match_score,
-            resume_years=profile['years'],
-            resume_education=profile['education'],
-            weights=settings['appraisal_weights'],
-            settings=settings,
-            library_median=library_median,
-            commute_minutes=commute_minutes,
-            commute_cost_per_minute=commute_cost_per_minute,
-            living_cost_adjustment=living_cost_adjustment,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
 @router.post('/api/jobs/{job_id}/workbench/accept')
 def accept_workbench_diffs(job_id: str, req: WorkbenchAcceptRequest, user: dict[str, Any]=Depends(get_current_user)):
     """Apply accepted diff indices to the pinned resume and return a draft."""

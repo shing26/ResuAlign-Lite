@@ -72,9 +72,8 @@ def _corrupt_statuses(store, tenant_id, statuses):
         with store._connect() as conn:
             conn.execute(
                 "INSERT INTO user_settings ("
-                "tenant_id, salary_reference_json, appraisal_weights_json, "
-                "classification_vocabulary_json, updated_at"
-                ") VALUES (?, '[]', '{}', ?, ?) "
+                "tenant_id, classification_vocabulary_json, updated_at"
+                ") VALUES (?, ?, ?) "
                 "ON CONFLICT(tenant_id) DO UPDATE SET "
                 "classification_vocabulary_json = excluded."
                 "classification_vocabulary_json, "

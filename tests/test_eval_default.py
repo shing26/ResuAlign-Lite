@@ -195,8 +195,9 @@ def test_put_settings_partial_update_keeps_eval_default():
     client.put("/api/settings", json={"eval_default": True}, headers=headers)
     r = client.put(
         "/api/settings",
-        json={"appraisal_weights": {"match": 40, "salary": 20,
-                                    "hard_conditions": 30, "quality": 10}},
+        json={"classification_vocabulary": {"job_functions": ["后端"],
+                                            "seniorities": ["高级"],
+                                            "statuses": ["未投递"]}},
         headers=headers,
     )
     assert r.status_code == 200

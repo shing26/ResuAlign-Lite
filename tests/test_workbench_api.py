@@ -11,7 +11,6 @@ from resualign.api import app
 from resualign.jobs import JobRegistry
 from resualign.models import (
     DiffItem,
-    EvalScore,
     GapReport,
     JDProfile,
     Report,
@@ -653,35 +652,6 @@ def test_job_update_persists_tailor_prefs():
     assert body["custom_prompt"] == "突出部署经验"
 
 
-def test_workbench_appraisal_returns_score_and_verdict():
-    job = _create_library_job()
-    resume = _create_resume()
-    with patch("resualign.api._run_job"), patch(
-        "resualign.api.build_config", return_value=_config()
-    ):
-        client.post(
-            f"/api/jobs/{job['job_id']}/workbench",
-            json={"master_resume_id": resume["resume_id"]},
-            headers=_auth_headers(),
-        )
-
-    report = _finished_report()
-    with patch("resualign.api.build_config", return_value=_config()), patch(
-        "resualign.api.run", return_value=report
-    ):
-        api_module._run_job(job["workbench_job_id"])
-
-    r = client.get(
-        f"/api/jobs/{job['job_id']}/appraisal", headers=_auth_headers()
-    )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["verdict"] in {"投递", "考虑", "放弃"}
-    assert body["score"] > 0
-    assert "match" in body["components"]
-    assert body["reasons"]
-
-
 def test_workbench_accept_diffs_returns_draft():
     job = _create_library_job()
     resume = _create_resume(content="Python developer. Redis.")
@@ -783,40 +753,6 @@ def test_workbench_requires_existing_resume_and_tenant_isolation():
         )
     assert r.status_code == 404
 
-    assert (
-        client.get(
-            f"/api/jobs/{job['job_id']}/appraisal", headers=_other_headers()
-        ).status_code
-        == 404
-    )
-
-
-def test_workbench_appraisal_uses_pinned_resume_profile_for_hard_conditions():
-    job = _create_library_job(seniority="高级")
-    resume = _create_resume(
-        content="Python developer with 2 years experience."
-    )
-    with patch("resualign.api._run_job"), patch(
-        "resualign.api.build_config", return_value=_config()
-    ):
-        client.post(
-            f"/api/jobs/{job['job_id']}/workbench",
-            json={"master_resume_id": resume["resume_id"]},
-            headers=_auth_headers(),
-        )
-
-    with patch("resualign.api.build_config", return_value=_config()), patch(
-        "resualign.api.run", return_value=_finished_report()
-    ):
-        api_module._run_job(job["workbench_job_id"])
-
-    r = client.get(
-        f"/api/jobs/{job['job_id']}/appraisal", headers=_auth_headers()
-    )
-    assert r.status_code == 200
-    assert r.json()["components"]["hard_conditions"] == 80
-
-
 def test_workbench_accept_missing_pinned_resume_returns_404():
     job = _create_library_job()
     resume = _create_resume(content="Python developer. Redis.")
@@ -909,29 +845,26 @@ def test_settings_get_update_and_validation():
     r = client.get("/api/settings", headers=_auth_headers())
     assert r.status_code == 200
     body = r.json()
-    assert body["appraisal_weights"]["match"] == 40
     assert "job_functions" in body["classification_vocabulary"]
-    assert body["salary_reference"]
+    assert "appraisal_weights" not in body
+    assert "salary_reference" not in body
 
-    weights = dict(body["appraisal_weights"])
-    weights["match"] = 35
-    weights["salary"] = 35
     r = client.put(
         "/api/settings",
-        json={"appraisal_weights": weights},
+        json={
+            "classification_vocabulary": {
+                "job_functions": ["后端", "前端"],
+                "seniorities": ["高级"],
+                "statuses": ["未投递"],
+            }
+        },
         headers=_auth_headers(),
     )
     assert r.status_code == 200
-    assert r.json()["appraisal_weights"]["salary"] == 35
-
-    bad = dict(body["appraisal_weights"])
-    bad["match"] = 99
-    r = client.put(
-        "/api/settings",
-        json={"appraisal_weights": bad},
-        headers=_auth_headers(),
-    )
-    assert r.status_code == 422
+    assert r.json()["classification_vocabulary"]["job_functions"] == [
+        "后端",
+        "前端",
+    ]
 
 
 def test_application_status_update_preserves_workbench_result():
@@ -973,66 +906,6 @@ def test_application_status_update_preserves_workbench_result():
     assert r.json()["latest_job_id"] == job_id
     job = client.get(f"/api/jobs/{job_id}", headers=_auth_headers()).json()
     assert job["status"] == "succeeded"
-
-
-def test_workbench_appraisal_uses_eval_match_score_when_available():
-    job = _create_library_job()
-    resume = _create_resume()
-    with patch("resualign.api._run_job"), patch(
-        "resualign.api.build_config", return_value=_config()
-    ):
-        client.post(
-            f"/api/jobs/{job['job_id']}/workbench",
-            json={"master_resume_id": resume["resume_id"]},
-            headers=_auth_headers(),
-        )
-    job = client.get(
-        f"/api/jobs/{job['job_id']}", headers=_auth_headers()
-    ).json()
-
-    report = _finished_report()
-    report.eval_score = EvalScore(
-        jd_match_score=95,
-        improvement=10,
-        hallucination_detected=False,
-        hallucination_details=[],
-        gap_coverage=0.9,
-    )
-    with patch("resualign.api.build_config", return_value=_config()), patch(
-        "resualign.api.run", return_value=report
-    ):
-        api_module._run_job(job["workbench_job_id"])
-
-    body = client.get(
-        f"/api/jobs/{job['job_id']}/appraisal", headers=_auth_headers()
-    ).json()
-    assert body["components"]["match"] == 95
-
-
-def test_workbench_appraisal_uses_gap_derived_match_when_no_eval():
-    job = _create_library_job()
-    resume = _create_resume()
-    with patch("resualign.api._run_job"), patch(
-        "resualign.api.build_config", return_value=_config()
-    ):
-        client.post(
-            f"/api/jobs/{job['job_id']}/workbench",
-            json={"master_resume_id": resume["resume_id"]},
-            headers=_auth_headers(),
-        )
-    job = client.get(
-        f"/api/jobs/{job['job_id']}", headers=_auth_headers()
-    ).json()
-
-    with patch("resualign.api.build_config", return_value=_config()), patch(
-        "resualign.api.run", return_value=_finished_report()
-    ):
-        api_module._run_job(job["workbench_job_id"])
-
-    body = client.get(
-        f"/api/jobs/{job['job_id']}/appraisal", headers=_auth_headers()
-    ).json()
-    assert body["components"]["match"] == 85
 
 
 def test_cached_diagnosis_reuses_matching_hash():

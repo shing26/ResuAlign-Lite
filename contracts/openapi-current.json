@@ -763,102 +763,6 @@
         }
       }
     },
-    "/api/jobs/{job_id}/appraisal": {
-      "get": {
-        "summary": "Get Workbench Appraisal",
-        "description": "Return the worth appraisal for one library job.",
-        "operationId": "get_workbench_appraisal_api_jobs__job_id__appraisal_get",
-        "parameters": [
-          {
-            "name": "job_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Job Id"
-            }
-          },
-          {
-            "name": "commute_minutes",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Commute Minutes"
-            }
-          },
-          {
-            "name": "commute_cost_per_minute",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Commute Cost Per Minute"
-            }
-          },
-          {
-            "name": "living_cost_adjustment",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Living Cost Adjustment"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/jobs/{job_id}/workbench/accept": {
       "post": {
         "summary": "Accept Workbench Diffs",
@@ -1763,7 +1667,7 @@
     "/api/master-resumes/{resume_id}": {
       "get": {
         "summary": "Get Master Resume",
-        "description": "Return one master resume with its full version history.",
+        "description": "Return one master resume, dropping dangling diagnosis job references.",
         "operationId": "get_master_resume_api_master_resumes__resume_id__get",
         "parameters": [
           {
@@ -2467,7 +2371,7 @@
     "/api/settings/reset": {
       "post": {
         "summary": "Reset Settings",
-        "description": "Restore the built-in weights, vocabulary, and salary reference.",
+        "description": "Restore the built-in vocabulary and default settings.",
         "operationId": "reset_settings_api_settings_reset_post",
         "parameters": [
           {
@@ -4732,35 +4636,6 @@
       },
       "SettingsUpdateRequest": {
         "properties": {
-          "salary_reference": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Salary Reference"
-          },
-          "appraisal_weights": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "number"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Appraisal Weights"
-          },
           "classification_vocabulary": {
             "anyOf": [
               {
@@ -5433,11 +5308,6 @@
           },
           "alignment": {
             "$ref": "#/components/schemas/WorkstationAlignmentSection"
-          },
-          "appraisal": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Appraisal"
           },
           "crawl": {
             "$ref": "#/components/schemas/WorkstationCrawlSection"

@@ -3,7 +3,7 @@
  * This module MUST stay free of DOM/window/document/localStorage/fetch access
  * so it can be imported and unit-tested directly under Node
  * (see tests/frontend/*.test.mjs). Function bodies were moved from main.js /
- * events.js / split-canvas.js / diff-editor.js / appraisal-panel.js /
+ * events.js / split-canvas.js / diff-editor.js /
  * command-panel.js. Signatures and HTML output are covered by the node:test
  * suite; DOM-touching callers keep thin wrappers in their original modules.
  */
@@ -591,8 +591,13 @@ export function diffList(session, jobId) {
   if (!cards) {
     return `
       <div class="resume-empty" data-resume-canvas-empty>
-        <div class="big">还没有对齐结果</div>
-        <div class="small muted">选择一份主简历并运行对齐，AI 会逐条给出改写建议。</div>
+        <div class="resume-empty__title">还没有对齐结果</div>
+        <ol class="resume-empty__steps">
+          <li>在左侧「对齐调优」选择主简历</li>
+          <li>点击右侧顶部「重新生成对齐」</li>
+          <li>逐条采纳建议并保存定稿</li>
+        </ol>
+        <button class="btn btn-primary btn-sm" type="button" data-action="run-alignment">开始对齐</button>
       </div>`;
   }
   return `<div class="diff-card-list" data-diff-list>${cards}</div>`;
@@ -662,14 +667,29 @@ export function alignmentControls(session, resumes, jobId) {
 export function exportDock(jobId, session) {
   const alignment = (session && session.alignment) || {};
   return `
-    <div class="export-dock" data-export-dock>
-      <span class="small muted">导出</span>
-      <button class="btn btn-secondary btn-sm" type="button" data-action="copy-align-markdown" data-id="${esc(jobId)}">复制 Markdown</button>
-      <button class="btn btn-secondary btn-sm" type="button" data-action="export-align-markdown" data-id="${esc(jobId)}">下载 Markdown</button>
-      <button class="btn btn-secondary btn-sm" type="button" data-action="export-align-pdf" data-id="${esc(jobId)}">导出 PDF</button>
-      <button class="btn btn-outline btn-sm" type="button" data-action="export-align-json" data-id="${esc(jobId)}">导出 JSON</button>
-      ${alignment.draft ? `<span class="badge badge-green">已生成</span>` : ""}
-    </div>`;
+    <details class="export-dock" data-export-dock>
+      <summary class="btn btn-secondary btn-sm export-dock__trigger">导出 ▾</summary>
+      <div class="export-dock__menu">
+        <button class="btn btn-secondary btn-sm" type="button" data-action="copy-align-markdown" data-id="${esc(jobId)}">复制 Markdown</button>
+        <button class="btn btn-secondary btn-sm" type="button" data-action="export-align-markdown" data-id="${esc(jobId)}">下载 Markdown</button>
+        <button class="btn btn-secondary btn-sm" type="button" data-action="export-align-pdf" data-id="${esc(jobId)}">导出 PDF</button>
+        <button class="btn btn-outline btn-sm" type="button" data-action="export-align-json" data-id="${esc(jobId)}">导出 JSON</button>
+        ${alignment.draft ? `<span class="badge badge-green">已生成</span>` : ""}
+      </div>
+    </details>`;
+}
+
+function boardMoreMenu(job) {
+  const id = esc(job.job_id);
+  return `
+    <details class="board-more" aria-label="更多操作">
+      <summary class="board-more__trigger" aria-label="更多操作" title="更多操作">···</summary>
+      <div class="board-more__menu">
+        <button class="btn btn-ghost btn-sm" type="button" data-action="open-job-timeline" data-id="${id}">详情</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="edit-job" data-id="${id}">编辑</button>
+        <button class="btn btn-danger btn-sm" type="button" data-action="delete-job" data-id="${id}">删除</button>
+      </div>
+    </details>`;
 }
 
 export function boardCard(job) {
@@ -685,8 +705,10 @@ export function boardCard(job) {
   return `
     <article class="board-card copilot-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}" draggable="true" data-board-drag>
       <div class="board-card__top">
+        <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
         ${match != null ? `<span class="match-badge ${matchTone(match)}" title="${matchTitle}">${match}</span>` : `<span class="match-badge match-badge--empty" title="${matchTitle}">待分析</span>`}
         <button type="button" class="board-card__title" data-action="open-optimizer" data-id="${job.job_id}">${esc(job.title)}</button>
+        ${boardMoreMenu(job)}
       </div>
       <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
       <div class="board-card__tags">
@@ -703,10 +725,7 @@ export function boardCard(job) {
       </div>
       <div class="row" style="margin-top:8px">
         <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
-        <button class="btn btn-ghost btn-sm" data-action="open-optimizer" data-id="${job.job_id}">工作台</button>
-        <button class="btn btn-ghost btn-sm" data-action="open-job-timeline" data-id="${job.job_id}">详情</button>
-        <button class="btn btn-ghost btn-sm" data-action="edit-job" data-id="${job.job_id}">编辑</button>
-        <button class="btn btn-danger btn-sm" data-action="delete-job" data-id="${job.job_id}">删除</button>
+        <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-optimizer" data-id="${job.job_id}">工作台</button>
       </div>
     </article>`;
 }
@@ -729,6 +748,7 @@ export function renderBoardCard(job) {
         <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
         ${match != null ? `<span class="match-badge ${matchTone(match)}" title="${matchTitle}">${match}</span>` : `<span class="match-badge match-badge--empty" title="${matchTitle}">待分析</span>`}
         <button type="button" class="board-card__title" data-action="open-job-timeline" data-id="${job.job_id}">${esc(job.title)}</button>
+        ${boardMoreMenu(job)}
       </div>
       <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
       <div class="board-card__tags">
@@ -744,9 +764,7 @@ export function renderBoardCard(job) {
       </div>
       <div class="row" style="margin-top:8px">
         <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${statusOptions}</select>
-        <button class="btn btn-ghost btn-sm" data-action="open-workspace" data-id="${job.job_id}">工作台</button>
-        <button class="btn btn-ghost btn-sm" data-action="edit-job" data-id="${job.job_id}">编辑</button>
-        <button class="btn btn-danger btn-sm" data-action="delete-job" data-id="${job.job_id}">删除</button>
+        <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-workspace" data-id="${job.job_id}">工作台</button>
       </div>
     </article>`;
 }
@@ -866,153 +884,13 @@ export function renderBatchMatrixHtml(batch) {
       <tbody>${tableRows}</tbody></table></div>`;
 }
 
-/* ------------------------------------------------------------------ */
-/* Appraisal panel: provenance / detail HTML, benchmark badge, radar   */
-/* ------------------------------------------------------------------ */
-
-export function renderWbProvenance(diff) {
-  const quote = diff.provenance_quote || diff.provenance || "";
-  const span = diff.source_span ? ` <span class="muted">${esc(diff.source_span)}</span>` : "";
-  return quote
-    ? `<blockquote class="provenance-quote">${esc(quote)}${span}</blockquote>`
-    : "";
-}
-
-export function buildWbDetailHtml(result, diffs) {
-  const jdProfile = result.jd_profile || {};
-  const gapReport = result.gap_report || {};
-  const evalScore = result.eval_score || {};
-  const chipList = (items) =>
-    (items || []).map((item) => `<span class="chip">${esc(item)}</span>`).join("");
-  const listItems = (items) =>
-    (items || []).map((item) => `<li class="small">${esc(item)}</li>`).join("");
-  const evalDetails = hasEvalResult(evalScore)
-    ? `<div class="wb-detail__body">
-        <div class="row">
-          <span class="badge badge-blue">JD 匹配 ${evalScore.jd_match_score ?? "—"}</span>
-          <span class="badge badge-teal">提升 ${evalScore.improvement ?? "—"}</span>
-          <span class="badge ${evalScore.hallucination_detected ? "badge-red" : "badge-green"}">幻觉 ${evalScore.hallucination_detected ? "检出" : "未检出"}</span>
-          <span class="badge badge-gray">覆盖率 ${evalScore.gap_coverage ?? "—"}</span>
-        </div>
-        <ul style="margin:8px 0 0 18px">${listItems(evalScore.hallucination_details)}</ul>
-      </div>`
-    : `<div class="wb-detail__body">
-        <div class="muted small">本次未运行对齐评估（幻觉检测 / JD 匹配分）</div>
-        <button class="btn btn-secondary btn-sm" type="button" data-action="retry-workbench-eval">重新运行（开启评估）</button>
-      </div>`;
-  const provenanceRows = diffs
-    .map((diff, index) => {
-      const quote = diff.provenance_quote || diff.provenance || "";
-      const span = diff.source_span ? ` <span class="muted">${esc(diff.source_span)}</span>` : "";
-      return `<li class="small"><strong>${index + 1}. ${esc(diff.type)}</strong> ${esc(quote || "无来源引用")}${span}</li>`;
-    })
-    .join("");
-  return `
-    <details class="wb-detail" open>
-      <summary>JD 画像</summary>
-      <div class="wb-detail__body">
-        <div class="small muted">必备技能</div><div class="chips">${chipList(jdProfile.must_have_skills) || '<span class="muted small">—</span>'}</div>
-        <div class="small muted">加分技能</div><div class="chips">${chipList(jdProfile.nice_to_have_skills) || '<span class="muted small">—</span>'}</div>
-        <div class="small muted">软技能</div><div class="chips">${chipList(jdProfile.soft_skills) || '<span class="muted small">—</span>'}</div>
-        <div class="small muted">业务场景</div><div class="chips">${chipList(jdProfile.business_scenarios) || '<span class="muted small">—</span>'}</div>
-        <div class="small muted">年限 ${jdProfile.min_years_experience ?? "—"} · 学历 ${chipList(jdProfile.education_requirements) || "—"}</div>
-      </div>
-    </details>
-    <details class="wb-detail">
-      <summary>差距报告</summary>
-      <div class="wb-detail__body">
-        <div class="small muted">缺失关键词</div><ul style="margin:4px 0 0 18px">${listItems(gapReport.missing_keywords) || '<span class="muted small">—</span>'}</ul>
-        <div class="small muted">错位强调</div><ul style="margin:4px 0 0 18px">${listItems(gapReport.misaligned_emphasis) || '<span class="muted small">—</span>'}</ul>
-        <div class="small muted">优势匹配</div><ul style="margin:4px 0 0 18px">${listItems(gapReport.strength_matches) || '<span class="muted small">—</span>'}</ul>
-      </div>
-    </details>
-    <details class="wb-detail">
-      <summary>Eval 评分</summary>
-      ${evalDetails}
-    </details>
-    <details class="wb-detail">
-      <summary>Provenance 来源</summary>
-      <ul style="margin:4px 0 0 18px">${provenanceRows || '<li class="small muted">暂无来源引用</li>'}</ul>
-    </details>`;
-}
-
-export function benchmarkSourceBadge(appraisal) {
-  const source = appraisal.benchmark_source || "暂无基准";
-  const city = appraisal.city_normalized;
-  if (source === "设置表（城市）") {
-    return {
-      className: "badge-teal",
-      label: city ? `设置表（${city}）` : "设置表（城市）",
-      detail: city
-        ? `基准来源：设置表（城市） · 城市归一化：${city}`
-        : "基准来源：设置表（城市）",
-    };
-  }
-  if (source === "库内同类中位") {
-    return {
-      className: "badge-gray",
-      label: "库内同类中位",
-      detail: "基准来源：库内同类中位",
-    };
-  }
-  return {
-    className: "badge-amber",
-    label: "暂无基准，中性处理",
-    detail: "基准来源：暂无基准",
-  };
-}
-
-export function renderAppraisalRadar(components) {
-  const keys = ["match", "salary", "hard_conditions", "quality", "commute"].filter(
-    (key) => components[key] != null,
-  );
-  if (!keys.length) return "";
-  const size = 180;
-  const center = size / 2;
-  const radius = 68;
-  const angle = (index) => -Math.PI / 2 + (index * 2 * Math.PI) / keys.length;
-  const point = (value, index) => {
-    const ratio = Math.max(0, Math.min(100, Number(value) || 0)) / 100;
-    const x = center + radius * ratio * Math.cos(angle(index));
-    const y = center + radius * ratio * Math.sin(angle(index));
-    return `${x.toFixed(2)},${y.toFixed(2)}`;
-  };
-  const labels = {
-    match: "匹配",
-    salary: "薪资",
-    hard_conditions: "条件",
-    quality: "质量",
-    commute: "通勤",
-  };
-  const axes = keys
-    .map((key, index) => {
-      const [x, y] = point(100, index).split(",");
-      return `<line x1="${center}" y1="${center}" x2="${x}" y2="${y}" class="radar-axis"></line>`;
-    })
-    .join("");
-  const polygon = keys.map((key, index) => point(components[key], index)).join(" ");
-  const dots = keys
-    .map((key, index) => {
-      const [x, y] = point(components[key], index).split(",");
-      return `<circle cx="${x}" cy="${y}" r="3" class="radar-dot"></circle>`;
-    })
-    .join("");
-  const text = keys
-    .map((key, index) => {
-      const [x, y] = point(112, index).split(",");
-      return `<text x="${x}" y="${y}" class="radar-label">${esc(labels[key] || key)}</text>`;
-    })
-    .join("");
-  return `<svg class="radar-svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="Appraisal radar">${axes}${polygon ? `<polygon points="${polygon}" class="radar-polygon"></polygon>` : ""}${dots}${text}</svg>`;
-}
-
 /* Line-level + character-level side-by-side compare grid (原版 | 优化版).
  *
- * Shared by the legacy workbench result view and the live canvas 并排对比
- * modal (#17): line-level semantics are kept (diff-remove / diff-add for
- * whole-line changes); modified lines use diff-modify and additionally mark
- * the changed characters inline (diff-char-del / diff-char-ins). Every line
- * is addressable via data-line (0-based) + a visible 1-based .cmp-line-num. */
+ * Shared by the live canvas 并排对比 modal (#17): line-level semantics are
+ * kept (diff-remove / diff-add for whole-line changes); modified lines use
+ * diff-modify and additionally mark the changed characters inline
+ * (diff-char-del / diff-char-ins). Every line is addressable via data-line
+ * (0-based) + a visible 1-based .cmp-line-num. */
 export function buildCmpSideHtml(originalText, optimizedText, diffs) {
   const diffRows = lineDiff(originalText, optimizedText);
   const removedLines = new Set(
@@ -1085,71 +963,6 @@ export function buildCmpSideHtml(originalText, optimizedText, diffs) {
       <section class="cmp-column-wrap"><h4>原版</h4><div class="cmp-column motion-stagger">${originalHtml}</div></section>
       <section class="cmp-column-wrap"><h4>优化版</h4><div class="cmp-column motion-stagger">${optimizedHtml}</div></section>
     </div>`;
-}
-
-/* Pure core of buildWbResultHtml: same HTML output, but the workbench
- * state (original content + compare view) is passed in explicitly. */
-export function buildWbResultHtmlFrom(result, diffs, accepted, originalContent, compareView) {
-  const sections = (result.tailored_resume || {}).sections || {};
-  const optimizedText =
-    Object.values(sections).join("\n\n") || result.tailored_resume || "";
-  const originalText = originalContent || "";
-  const sideView = buildCmpSideHtml(originalText, optimizedText, diffs);
-  const diffCards = diffs
-    .map(
-      (diff, index) => `
-      <div class="card diff-card card-base card-hover-soft">
-        <div class="row" style="align-items:flex-start">
-          <label class="cmp-check"><input type="checkbox" data-accept-diff="${index}" ${accepted.has(index) ? "" : "checked"} aria-label="采纳此条"><span class="small">采纳</span></label>
-          <span class="badge badge-${diff.type === "add" ? "green" : diff.type === "remove" ? "red" : "blue"}">${esc(diff.type)}</span>
-          <span class="small muted">${esc(diff.reason || "")} · ${esc(diff.confidence || "")}</span>
-        </div>
-        ${diff.type !== "add" ? `<div class="diff-line diff-remove">- ${esc(diff.original)}</div>` : ""}
-        ${diff.type !== "remove" ? `<div class="diff-line diff-add">+ ${esc(diff.proposed)}</div>` : ""}
-        ${renderWbProvenance(diff)}
-        <div class="row" style="margin-top:8px">
-          <button class="btn btn-secondary btn-sm" data-action="regenerate-diff" data-index="${index}">重新生成</button>
-        </div>
-      </div>`,
-    )
-    .join("");
-  const score = result.score ?? "—";
-  const ringClass =
-    score >= 80
-      ? "score-ring--high"
-      : score >= 60
-        ? "score-ring--mid"
-        : "score-ring--low";
-  return `
-    <div class="wb-level">
-      <div class="wb-score-row">
-        <div class="score-ring ${ringClass}" style="--score:${esc(score)}"><span>${esc(score)}</span></div>
-        <div>
-          <span class="badge badge-green">已完成</span>
-          <div class="small muted" style="margin-top:4px">总分 ${esc(score)} / 100 · ${esc(result.model || "—")} · ${esc(result.elapsed_seconds ?? 0)}s</div>
-        </div>
-      </div>
-      <div class="row">
-        <button class="btn btn-primary btn-sm" data-action="print-workbench">导出 PDF</button>
-        <button class="btn btn-secondary btn-sm" data-action="export-markdown">导出 Markdown</button>
-        <button class="btn btn-outline btn-sm" data-action="export-json">导出 JSON</button>
-      </div>
-    </div>
-    <div class="segmented segmented-card" role="group" aria-label="结果视图">
-      <button type="button" class="segmented-button" data-action="toggle-wb-view" data-wb-view="side" aria-pressed="${compareView === "side"}">并排对比</button>
-      <button type="button" class="segmented-button" data-action="toggle-wb-view" data-wb-view="list" aria-pressed="${compareView === "list"}">修改列表</button>
-    </div>
-    ${compareView === "side" ? sideView : ""}
-    <div class="wb-level">
-      <h4>逐条修改（${diffs.length}）</h4>
-      <div class="card-list motion-stagger">${diffCards || '<div class="muted small">无修改项</div>'}</div>
-      <div class="row" style="margin-top:10px"><button class="btn btn-primary" data-action="accept-diffs">采纳选中修改</button></div>
-    </div>
-    <div class="wb-level">
-      <h4>分析详情</h4>
-      ${buildWbDetailHtml(result, diffs)}
-    </div>
-    <div data-accept-result></div>`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1920,9 +1733,8 @@ export function runEvalFromForm(data) {
 /* #17 Live workbench: side-by-side compare from a live session        */
 /* ------------------------------------------------------------------ */
 /* The live canvas keeps the per-card 采纳/忽略/润色 interactions in
- * diffList(); this builds the read-only 并排对比 view (the same
- * buildCmpSideHtml used by the legacy result view) from the session's
- * alignment draft + diffs, so the two workbenches share one rendering. */
+ * diffList(); this builds the read-only 并排对比 view with buildCmpSideHtml
+ * from the session's alignment draft + diffs. */
 
 export function buildLiveCompareHtml(session, originalContent) {
   const alignment = (session && session.alignment) || {};
@@ -2147,8 +1959,8 @@ export function renderLiveSheetHtml(draft) {
   return `
     <section class="live-sheet" data-live-sheet>
       <div class="live-sheet__head">
-        <span class="live-sheet__title">定稿预览</span>
-        <span class="live-sheet__meta" data-live-sheet-meta>${meta}</span>
+        <span class="live-sheet__title">定稿 Live Sheet</span>
+        <span class="live-sheet__meta" data-live-sheet-meta title="${esc(meta)}">实时同步</span>
       </div>
       <div class="live-sheet__paper" data-live-sheet-paper>${body}</div>
     </section>`;
@@ -2475,42 +2287,38 @@ export const GUARDRAIL_READ_TIMEOUT_S = 40;
 export const GUARDRAIL_CONCURRENCY = 1;
 
 /* --- T1: Hero Bento 概览 --- */
-/* 4 列 Bento 卡：活跃模型 ID / 架构模式 / 本地数据索引数 / API 链路延迟。
+/* 4 列 Bento 卡：活跃模型 ID / 架构模式 / Timeout 护栏 / API 延迟。
  * activeNode 为 GET /api/llm/nodes 中 is_active 的节点（可为 null）；
- * counts 为 {resumes, jobs}（索引数 = resumes + jobs）；
- * latency 为最近一次节点 test 的 latency_ms（null 表示尚未测试）。 */
-export function settingsBentoHtml(activeNode, counts, latency) {
+ * latency 为最近一次节点 test 的 latency_ms（null 表示尚未测试）；
+ * Timeout 护栏沿用后端 Read Timeout 40s + 并发额度 1 契约。 */
+export function settingsBentoHtml(activeNode, latency) {
   const node = activeNode && typeof activeNode === "object" ? activeNode : null;
   const model = node && String(node.model || "").trim() ? String(node.model) : "—";
   const provider = node && String(node.provider || "").trim() ? String(node.provider) : "";
   const activeLabel = provider ? `${provider} · ${model}` : model;
-  const data = counts && typeof counts === "object" ? counts : {};
-  const resumes = Math.max(0, Number(data.resumes) || 0);
-  const jobs = Math.max(0, Number(data.jobs) || 0);
-  const dataCount = resumes + jobs;
   const latencyNum =
     latency == null || latency === "" ? NaN : Number(latency);
   const hasLatency = Number.isFinite(latencyNum) && latencyNum >= 0;
   const latencyText = hasLatency ? `${Math.round(latencyNum)} ms` : "—";
   return `
-    <section class="settings-bento" data-settings-bento aria-label="系统概览">
-      <div class="settings-bento__card settings-bento__card--model" data-bento-model>
+    <section class="settings-bento metric-strip settings-status" data-settings-bento aria-label="系统概览">
+      <div class="settings-bento__card metric-cell settings-bento__card--model" data-bento-model>
         <span class="settings-bento__label">活跃模型 ID</span>
         <strong class="settings-bento__value">${esc(activeLabel)}</strong>
         <span class="settings-bento__hint">${node ? "当前生效的 LLM 节点" : "未配置生效节点"}</span>
       </div>
-      <div class="settings-bento__card" data-bento-arch>
+      <div class="settings-bento__card metric-cell" data-bento-arch>
         <span class="settings-bento__label">架构模式</span>
         <strong class="settings-bento__value">本地 SQLite</strong>
         <span class="settings-bento__hint">单机部署，数据全部落本地</span>
       </div>
-      <div class="settings-bento__card" data-bento-counts>
-        <span class="settings-bento__label">本地数据索引数</span>
-        <strong class="settings-bento__value">${esc(dataCount)}</strong>
-        <span class="settings-bento__hint">简历 ${esc(resumes)} · 岗位 ${esc(jobs)}</span>
+      <div class="settings-bento__card metric-cell settings-bento__card--timeout" data-bento-timeout>
+        <span class="settings-bento__label">Timeout 护栏</span>
+        <strong class="settings-bento__value">${GUARDRAIL_READ_TIMEOUT_S} 秒</strong>
+        <span class="settings-bento__hint">并发: ${GUARDRAIL_CONCURRENCY}</span>
       </div>
-      <div class="settings-bento__card" data-bento-latency>
-        <span class="settings-bento__label">API 链路延迟</span>
+      <div class="settings-bento__card metric-cell" data-bento-latency>
+        <span class="settings-bento__label">API 延迟</span>
         <strong class="settings-bento__value">${esc(latencyText)}</strong>
         <span class="settings-bento__hint">${hasLatency ? "最近一次节点连通测试" : "尚未测试，可点节点卡「测试连通性」"}</span>
       </div>
@@ -2620,7 +2428,14 @@ export function llmNodeFormHtml(node) {
 export function ruleListHtml(rules) {
   const list = Array.isArray(rules) ? rules : [];
   if (!list.length) {
-    return `<div class="rule-list" data-rule-list><div class="muted small" data-rule-empty>还没有自动化规则，点击「新增规则」添加。</div></div>`;
+    return `
+      <div class="rule-list" data-rule-list>
+        <div class="rule-empty" data-rule-empty>
+          <span class="rule-empty__plus" aria-hidden="true">＋</span>
+          <span class="rule-empty__copy">新增规则 · 拦截外包/单休岗位</span>
+          <button class="btn btn-outline btn-sm" type="button" data-action="automation-rule-add">新增规则</button>
+        </div>
+      </div>`;
   }
   const items = list
     .map((rule) => {

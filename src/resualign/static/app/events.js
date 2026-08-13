@@ -76,15 +76,12 @@ export const state = {
   wbJob: null,
   wbResumes: [],
   wbApplications: [],
-  wbPolling: null,
   applicationPoll: null,
   wbResult: null,
   wbRun: null,
   wbOriginalContent: null,
   wbAcceptedIndices: null,
   wbCompareView: "list",
-  wbAppraisal: null,
-  wbAppraisalOpen: false,
   wbMobilePane: "controls",
   batchAlign: null,
   batchPolling: null,
@@ -439,31 +436,16 @@ export function renderDiagnosisResult(snapshot) {
   target.hidden = false;
   const verdictClass =
     score >= 80 ? "badge-green" : score >= 60 ? "badge-amber" : "badge-red";
-  const ringClass =
-    score >= 80 ? "score-ring--high" : score >= 60 ? "score-ring--mid" : "score-ring--low";
   const verdict = score >= 80 ? "优秀" : score >= 60 ? "建议优化" : "需重点优化";
   target.innerHTML = `
-    <div class="appraisal-score diagnosis-score">
-      <div class="score-ring ${ringClass}" style="--score:${score}"><span>${score}</span></div>
-      <div>
-        <span class="badge ${verdictClass}">${verdict}</span>
-        <div class="small muted" style="margin-top:4px">诊断分 ${score} / 100</div>
-      </div>
-    </div>
-    ${skills.length ? `<div class="chips">${skills.map((skill) => `<span class="chip">${esc(skill)}</span>`).join("")}</div>` : ""}
-    <div class="diagnosis-columns">
-      <div>
-        <h4>问题</h4>
-        ${issues.length ? `<ul class="diagnosis-list motion-stagger">${issues.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>` : `<div class="muted small">未发现明显问题</div>`}
-      </div>
-      <div>
-        <h4>优化建议</h4>
-        ${suggestions.length ? `<ul class="diagnosis-list motion-stagger">${suggestions.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>` : `<div class="muted small">暂无建议</div>`}
-      </div>
-    </div>
-    <div class="row" style="margin-top:12px">
-      <button class="btn btn-primary btn-sm" data-action="diagnosis-to-align" data-id="${state.diagnosisResumeId || ""}">用这份简历去对齐</button>
-      <button class="btn btn-outline btn-sm" data-action="rerun-diagnosis" data-id="${state.diagnosisResumeId || ""}">重新诊断</button>
+    <div class="diagnosis-banner__result">
+      <span class="diagnosis-banner__score">${score}</span>
+      <span class="badge ${verdictClass}">${verdict}</span>
+      <span class="small muted">诊断分 ${score} / 100 · 详情见右侧 ATS 健康度</span>
+      <span class="diagnosis-banner__actions">
+        <button class="btn btn-outline btn-sm" data-action="diagnosis-to-align" data-id="${state.diagnosisResumeId || ""}">去对齐</button>
+        <button class="btn btn-ghost btn-sm" data-action="rerun-diagnosis" data-id="${state.diagnosisResumeId || ""}">重新诊断</button>
+      </span>
     </div>`;
   const diagnoseBtn = $("[data-action='diagnose-resume']", panel);
   if (diagnoseBtn) {
@@ -559,33 +541,10 @@ export function renderBatchResults(batch) {
   results.innerHTML = renderBatchMatrixHtml(batch);
 }
 
-export function renderWbProgress(snapshot) {
-  const panel = $("[data-wb-progress-panel]");
-  if (!panel) return;
-  panel.hidden = false;
-  const fill = $("[data-wb-progress-fill]", panel);
-  const stage = $("[data-wb-stage]", panel);
-  const message = $("[data-wb-message]", panel);
-  const elapsed = $("[data-wb-elapsed]", panel);
-  const weight = STAGE_WEIGHTS[snapshot.stage || snapshot.status] ?? STAGE_WEIGHTS.running;
-  fill.style.width = `${Math.round(weight * 100)}%`;
-  stage.textContent = STAGE_LABELS[snapshot.stage || snapshot.status] || snapshot.stage || snapshot.status;
-  message.textContent = snapshot.message || "";
-  /* U5: 后端 elapsed_seconds 缺失/为 0 时用前端计时起点兜底，保证每秒刷新。 */
-  const backendMs = Number(snapshot.elapsed_seconds) > 0 ? Number(snapshot.elapsed_seconds) * 1000 : 0;
-  const elapsedMs =
-    backendMs > 0
-      ? backendMs
-      : Math.max(0, Date.now() - (state.wbElapsedStart || Date.now()));
-  elapsed.textContent = formatElapsed(elapsedMs);
-  const cancel = $("[data-wb-cancel]");
-  if (cancel) cancel.hidden = snapshot.status !== "queued" && snapshot.status !== "running";
-}
-
-/* F5: 移动端工作台 tab 切换（controls / diff / appraisal）。激活指定 pane：
+/* F5: 移动端工作台 tab 切换（controls / diff）。激活指定 pane：
  * 更新 [data-wb-tab] 的 aria-selected 与 [data-wb-pane] 的 is-active。 */
 export function setWbMobilePane(pane) {
-  const target = ["controls", "diff", "appraisal"].includes(pane) ? pane : "controls";
+  const target = ["controls", "diff"].includes(pane) ? pane : "controls";
   state.wbMobilePane = target;
   $$("[data-wb-tab]").forEach((tab) =>
     tab.setAttribute("aria-selected", String(tab.dataset.wbTab === target)),
@@ -595,12 +554,9 @@ export function setWbMobilePane(pane) {
   });
 }
 
-export function stopWbPolling() {
-  stopPolling("wb");
-  state.wbPolling = null;
-}
-
 export function stopApplicationPolling() {
+  const poll = state.applicationPoll;
+  if (poll && poll.timer) window.clearInterval(poll.timer);
   stopPolling("application");
   state.applicationPoll = null;
 }

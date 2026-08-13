@@ -18,15 +18,15 @@
 - Phase 16 closes the personal workbench loop: independent resume diagnosis,
   job-specific final drafts with refresh recovery and save-as-new-resume,
   JD parse failure fallback with salary prefill, classification degradation
-  and reclassification, city-aware salary benchmark sources, and frontend
-  vocabulary sync. A unified desktop/mobile Playwright gate covers the new
-  and old flows in CI.
+  and reclassification, and frontend vocabulary sync. A unified
+  desktop/mobile Playwright gate covers the new and old flows in CI.
 - Phase 18 redesigns the frontend as a card-based local workbench with
   CSS-only component motion: list stagger, nav/segmented indicators, progress
   pulse, diff reveal, toast and skeleton feedback, all gated by
-  `prefers-reduced-motion`. The existing rail/canvas skeleton, module color
-  bands, protected selectors, and all `data-*` / `aria-*` contracts remain
-  unchanged (ADR-0017).
+  `prefers-reduced-motion`. ADR-0026 supersedes the ADR-0017 old-class
+  clause for the v3 shell; `data-*` / `aria-*` and route contracts remain
+  unchanged. ADR-0025 removes the delivery appraisal, delivery-weight
+  evaluation, and salary-benchmark surfaces.
 - Workbench latency optimization (ADR-0018): JD profile + gap analysis are one
   LLM call, a diagnosis cache is reused when the same resume reruns, and long
   JD contexts are capped. Cold workbench runs drop from 4 to 3 LLM calls;
@@ -251,13 +251,6 @@ seniority (intern, campus, junior, mid, senior, expert), and free-form
 technology/domain tags. Produced by the LLM and editable by the user.
 _Avoid_: job category, job type
 
-**Salary Benchmark**
-A reference for judging a job's salary competitiveness: an editable table keyed
-by city x function x seniority, supplemented by the median of same-function
-jobs already in the library, with per-job manual override. The appraisal card
-labels the source: settings table (normalized city), library median, or neutral.
-_Avoid_: salary database, pay grade
-
 **Master Resume Diagnosis**
 An async no-JD pipeline run against one Master Resume, producing a 0-100
 score, skills, issues, and suggestions. The resume record keeps the latest
@@ -284,16 +277,10 @@ and edit modal come from `/api/settings`; the frontend caches the list per
 page load and falls back to built-ins when the settings API is unavailable.
 _Avoid_: duplicated hard-coded dropdowns, per-filter settings requests
 
-**Worth Appraisal**
-A transparent 0-100 score for whether to apply to a job, composed of resume
-match (40%), salary competitiveness (30%), hard conditions (20%), and job
-quality signals (10%), ending in apply / consider / skip. Weights are editable.
-_Avoid_: suitability score, job match rate
-
 **Application Status**
 A lightweight per-job lifecycle marker: not applied, applied, interviewing,
 offered, or declined. The Single-Job Workspace is the one-stop entry for
-appraisal and status updates.
+status updates and the tailored draft.
 _Avoid_: pipeline stage, funnel state
 
 **Interview Stage**
@@ -313,8 +300,8 @@ skip). Distinct from Follow-up despite sharing the label "下一步" in the UI.
 _Avoid_: next step (ambiguous with Follow-up)
 
 **Single-Job Workspace**
-The per-job working page combining JD analysis, worth appraisal, status, and
-generation of a tailored resume draft from the Master Resume version.
+The per-job working page combining JD analysis, status, and generation of a
+tailored resume draft from the Master Resume version.
 _Avoid_: job detail page, application form
 
 **Rewrite Granularity**

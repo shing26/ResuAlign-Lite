@@ -137,8 +137,8 @@ Remove-Item data\jobs.db
 - `POST /api/jobs/{job_id}/final-draft`：保存岗位定稿。
 - `POST /api/jobs/{job_id}/reclassify`：重新分类待定岗位。
 - `/api/master-resumes`、`/api/jobs`、`/api/applications`：三大数据域 CRUD。
-- `POST /api/jobs/{id}/workbench`、`GET /api/jobs/{id}/appraisal`：
-  单岗位工作台与评估（含薪资基准来源与城市归一化）。
+- `POST /api/jobs/{id}/workbench`：
+  单岗位工作台对齐与定稿。
 - `GET/PUT /api/settings`：用户设置。
 
 详细使用说明见 [docs/user-guide.md](docs/user-guide.md)。

@@ -310,7 +310,7 @@ def test_llm_connection(
 
 @router.post('/api/settings/reset')
 def reset_settings(user: dict[str, Any] = Depends(get_current_user)):
-    """Restore the built-in weights, vocabulary, and salary reference."""
+    """Restore the built-in vocabulary and default settings."""
     api_module._settings_store.update_settings(user["user_id"], default_settings())
     clear_runtime_llm()
     return _public_settings(api_module._settings_store.get_settings(user["user_id"]))

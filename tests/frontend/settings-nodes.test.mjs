@@ -32,39 +32,37 @@ function bodyFrom(html) {
 /* ------------------------------------------------------------------ */
 
 test("settingsBentoHtml renders four bento cards with defaults when empty", () => {
-  const body = bodyFrom(settingsBentoHtml(null, {}, null));
+  const body = bodyFrom(settingsBentoHtml(null, null));
   const cards = [...body.querySelectorAll(".settings-bento__card")];
   assert.equal(cards.length, 4);
 
   const labels = cards.map((card) => card.querySelector(".settings-bento__label").textContent);
-  assert.deepEqual(labels, ["活跃模型 ID", "架构模式", "本地数据索引数", "API 链路延迟"]);
+  assert.deepEqual(labels, ["活跃模型 ID", "架构模式", "Timeout 护栏", "API 延迟"]);
 
   assert.equal(body.querySelector("[data-bento-model] .settings-bento__value").textContent, "—");
   assert.equal(body.querySelector("[data-bento-arch] .settings-bento__value").textContent, "本地 SQLite");
-  assert.equal(body.querySelector("[data-bento-counts] .settings-bento__value").textContent, "0");
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "40 秒");
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__hint").textContent, "并发: 1");
   assert.equal(body.querySelector("[data-bento-latency] .settings-bento__value").textContent, "—");
 });
 
-test("settingsBentoHtml shows active node and data counts with latency", () => {
+test("settingsBentoHtml shows active node, timeout guardrails and latency", () => {
   const node = { node_id: "n1", name: "主节点", provider: "deepseek", model: "deepseek-chat", is_active: true };
-  const body = bodyFrom(settingsBentoHtml(node, { resumes: 3, jobs: 5 }, 123));
+  const body = bodyFrom(settingsBentoHtml(node, 123));
   assert.equal(
     body.querySelector("[data-bento-model] .settings-bento__value").textContent,
     "deepseek · deepseek-chat",
   );
-  assert.equal(body.querySelector("[data-bento-counts] .settings-bento__value").textContent, "8");
-  assert.match(
-    body.querySelector("[data-bento-counts] .settings-bento__hint").textContent,
-    /简历 3 · 岗位 5/,
-  );
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "40 秒");
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__hint").textContent, "并发: 1");
   assert.equal(body.querySelector("[data-bento-latency] .settings-bento__value").textContent, "123 ms");
 });
 
 test("settingsBentoHtml tolerates missing / non-array-ish counts", () => {
-  const body = bodyFrom(settingsBentoHtml(null, null, null));
-  assert.equal(body.querySelector("[data-bento-counts] .settings-bento__value").textContent, "0");
-  const body2 = bodyFrom(settingsBentoHtml(null, { resumes: "x", jobs: -2 }, "abc"));
-  assert.equal(body2.querySelector("[data-bento-counts] .settings-bento__value").textContent, "0");
+  const body = bodyFrom(settingsBentoHtml(null, null));
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "40 秒");
+  const body2 = bodyFrom(settingsBentoHtml(null, "abc"));
+  assert.equal(body2.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "40 秒");
   assert.equal(body2.querySelector("[data-bento-latency] .settings-bento__value").textContent, "—");
 });
 

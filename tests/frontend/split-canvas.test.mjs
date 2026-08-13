@@ -6,7 +6,6 @@ import {
   boardCard,
   buildCmpSideHtml,
   buildLiveCompareHtml,
-  buildWbResultHtmlFrom,
   crawlStatusLine,
   diffCard,
   diffList,
@@ -624,75 +623,6 @@ test("boardCard timeline action label is unified as 详情", () => {
   const html = boardCard({ job_id: "j1", title: "后端", status: "applied" });
   assert.match(html, /data-action="open-job-timeline" data-id="j1">详情<\/button>/);
   assert.doesNotMatch(html, />时间线<\/button>/);
-});
-
-/* ------------------------------------------------------------------ */
-/* buildWbResultHtmlFrom                                               */
-/* ------------------------------------------------------------------ */
-
-const WB_RESULT = {
-  score: 88,
-  model: "deepseek-chat",
-  elapsed_seconds: 12,
-  tailored_resume: { sections: { exp: "新经验" } },
-  diffs: [
-    {
-      type: "modify",
-      original: "旧经验",
-      proposed: "新经验",
-      reason: "对齐 JD",
-      confidence: "中",
-      provenance_quote: "来源句",
-    },
-  ],
-};
-
-test("buildWbResultHtmlFrom renders side-by-side view when compareView is side", () => {
-  const html = buildWbResultHtmlFrom(
-    WB_RESULT,
-    WB_RESULT.diffs,
-    new Set(),
-    "旧经验",
-    "side",
-  );
-  assert.match(html, /cmp-grid cmp-grid--workbench/);
-  assert.match(html, /data-accept-diff="0"/);
-  assert.match(html, /aria-pressed="true">并排对比/);
-  assert.match(html, /score-ring--high/);
-  assert.match(html, /diff-line diff-remove">- 旧经验/);
-  assert.match(html, /diff-line diff-add">\+ 新经验/);
-  assert.match(html, /Provenance 来源/);
-});
-
-test("buildWbResultHtmlFrom hides side view and respects accepted set", () => {
-  const html = buildWbResultHtmlFrom(
-    WB_RESULT,
-    WB_RESULT.diffs,
-    new Set([0]),
-    "旧经验",
-    "list",
-  );
-  assert.doesNotMatch(html, /cmp-grid/);
-  assert.doesNotMatch(html, /data-accept-diff="0" checked/);
-  assert.match(html, /aria-pressed="true">修改列表/);
-});
-
-test("buildWbResultHtmlFrom checks unaccepted diffs by default", () => {
-  const html = buildWbResultHtmlFrom(
-    WB_RESULT,
-    WB_RESULT.diffs,
-    new Set(),
-    "旧经验",
-    "list",
-  );
-  assert.match(html, /data-accept-diff="0" checked/);
-});
-
-test("buildWbResultHtmlFrom renders placeholder lines when content is empty", () => {
-  const html = buildWbResultHtmlFrom({}, [], new Set(), "", "side");
-  assert.match(html, /cmp-line/);
-  assert.match(html, /无修改项/);
-  assert.match(html, /暂无来源引用/);
 });
 
 /* ------------------------------------------------------------------ */

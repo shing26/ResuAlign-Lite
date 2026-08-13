@@ -23,7 +23,6 @@ import {
   boardCard,
   computeJobStats,
   options,
-  renderJobStatsHtml,
 } from "./format.js";
 
 let canvasRenderHooks = [];
@@ -61,53 +60,77 @@ export async function renderKanban(app) {
     );
     return `
       <section class="board-column" data-status="${canonical}" data-board-drop aria-label="${esc(JOB_STATUS_LABELS[canonical])}">
-        <div class="board-column__head">
-          <span class="board-column__dot board-dot--${canonical}" aria-hidden="true"></span>
-          <h3>${esc(JOB_STATUS_LABELS[canonical])}</h3>
-          <span class="board-column__count">${items.length}</span>
+        <div class="board-col-head">
+          <h3>
+            <span class="dot dot-${canonical === "offer" ? "success" : "neutral"}" aria-hidden="true"></span>
+            ${esc(JOB_STATUS_LABELS[canonical])}
+          </h3>
+          <span class="board-col-count">${items.length}</span>
         </div>
-        <div class="board-column__body">
+        <div class="board-col-body">
           ${items.map(boardCard).join("") || '<div class="board-column__empty">暂无岗位</div>'}
         </div>
       </section>`;
   }).join("");
   const statuses = vocabulary.statuses || [];
+  const stats = computeJobStats(state.jobs);
+  const funnel = stats.funnel || {};
+  const percent = (value) => (value == null ? "—" : `${value}%`);
   app.innerHTML = `
-    <div class="page-header page-header--jobs">
-      <div>
-        <h2>岗位库</h2>
-        <div class="sub">共 ${state.jobs.length} 条 · 拖拽或选择状态推进投递进度</div>
-      </div>
-      <div class="row">
-        <button class="btn btn-primary" data-action="open-command-panel">粘贴 JD / 链接</button>
-      </div>
-    </div>
-    ${renderJobStatsHtml(computeJobStats(state.jobs))}
-    <details class="board-filter panel panel-card" data-board-filter>
-      <summary class="board-filter__summary" data-filter-summary>
-        <span class="board-filter__label">🔍 筛选岗位</span>
-        <span class="board-filter__hint small muted">关键词 / 职能 / 级别 / 状态</span>
-        <span class="board-filter__toggle" aria-hidden="true">展开</span>
-      </summary>
-      <form class="board-filter__form" data-form="job-filter">
-        <label class="field"><span class="small">关键词</span>
-          <input type="text" name="search" value="${esc(state.filters.search || "")}" placeholder="搜索标题 / 公司 / 技能..."></label>
-        <label class="field"><span class="small">职能</span>
-          <select name="job_function">${options(vocabulary.job_functions || [], state.filters.job_function || "")}</select></label>
-        <label class="field"><span class="small">级别</span>
-          <select name="seniority">${options(vocabulary.seniorities || [], state.filters.seniority || "")}</select></label>
-        <label class="field"><span class="small">状态</span>
-          <select name="status">${options(statuses, state.filters.status || "")}</select></label>
-        <div class="board-filter__actions">
-          <button class="btn btn-primary btn-sm" type="submit">应用筛选</button>
-          <button class="btn btn-ghost btn-sm" type="button" data-action="clear-filters">清除</button>
+    <div class="view view-fit jobs-view">
+      <div class="jobs-command jobs-topbar" data-jobs-topbar>
+        <div class="fetch-url" data-fetch-url-bar>
+          <input type="url" data-fetch-url placeholder="粘贴岗位 JD 链接自动抓取..." aria-label="岗位链接" autocomplete="off">
+          <button type="button" class="btn btn-light" data-action="fetch-job-url">自动抓取</button>
         </div>
-      </form>
-    </details>
-    <div class="board-toolbar panel panel-card">
-      <span class="small muted">拖拽卡片到目标列；触屏 / 键盘：使用卡片内下拉菜单移动状态。</span>
-    </div>
-    <div id="job-board" class="pipeline-board" data-pipeline-board>${columns}</div>`;
+        <span class="blocker-btn" data-blocker-badge></span>
+        <div class="conversion" data-jobs-conversion aria-label="投递面试转化统计">
+          <span>投递转化 <b data-jobs-apply-rate>${esc(percent(funnel.applyRate))}</b>（${esc(funnel.applied || 0)}/${esc(funnel.total || 0)}）</span>
+          <span>面试转化 <b data-jobs-interview-rate>${esc(percent(funnel.interviewRate))}</b>（${esc(funnel.interview || 0)}/${esc(funnel.applied || 0)}）</span>
+        </div>
+      </div>
+      <div class="jobs-toolbar">
+        <div class="toolbar-left">
+          <details class="filter-details board-filter" data-board-filter>
+            <summary class="btn btn-secondary btn-sm board-filter__summary">筛选</summary>
+            <form class="filter-pop board-filter__form" data-form="job-filter">
+              <label><span>关键词 / 公司</span><input class="field-input" type="text" name="search" value="${esc(state.filters.search || "")}" placeholder="Java / 公司名"></label>
+              <label><span>职能</span><select class="field-input" name="job_function">${options(vocabulary.job_functions || [], state.filters.job_function || "")}</select></label>
+              <label><span>职级</span><select class="field-input" name="seniority">${options(vocabulary.seniorities || [], state.filters.seniority || "")}</select></label>
+              <label><span>状态</span><select class="field-input" name="status">${options(statuses, state.filters.status || "")}</select></label>
+              <div class="board-filter__actions">
+                <button type="button" class="btn btn-ghost btn-sm" data-action="clear-filters">清除</button>
+                <button class="btn btn-primary btn-sm" type="submit">应用</button>
+              </div>
+            </form>
+          </details>
+          <div class="jobs-tools" data-jobs-tools>
+            <button type="button" class="btn btn-primary btn-sm" data-action="show-add-job">添加岗位</button>
+            <details class="toolbar-more" data-jobs-data-menu>
+              <summary class="btn btn-secondary btn-sm toolbar-more__trigger">数据 ▾</summary>
+              <div class="toolbar-more__menu">
+                <button type="button" class="btn btn-secondary btn-sm" data-action="show-import">批量导入</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-action="export-jobs-csv">导出 CSV</button>
+                <button type="button" class="btn btn-outline btn-sm" data-action="export-jobs-backup">整库备份</button>
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+    <div class="jobs-forms-mount" data-jobs-forms-mount></div>
+    <div class="board-toolbar" data-jobs-batch-mount></div>
+    <div id="job-board" class="board pipeline-board" data-pipeline-board>${columns}</div>
+    </div>`;
+  const fetchInput = app.querySelector("[data-fetch-url]");
+  if (fetchInput) {
+    fetchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const button = app.querySelector('[data-action="fetch-job-url"]');
+        if (button) button.click();
+      }
+    });
+  }
   bindBoardDrag(app);
   canvasRenderHooks.forEach((hook) => {
     try {

@@ -6,15 +6,12 @@ import json
 import time
 from typing import Any
 
-from .appraisal import DEFAULT_WEIGHTS
 from .job_library import JOB_FUNCTIONS, JOB_STATUSES, SENIORITIES
 from .store_base import UserStoreError, _SqliteStore
 
 _SETTINGS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS user_settings (
     tenant_id TEXT PRIMARY KEY,
-    salary_reference_json TEXT NOT NULL DEFAULT '[]',
-    appraisal_weights_json TEXT NOT NULL DEFAULT '{}',
     classification_vocabulary_json TEXT NOT NULL DEFAULT '{}',
     llm_provider TEXT,
     llm_model TEXT,
@@ -25,40 +22,8 @@ CREATE TABLE IF NOT EXISTS user_settings (
 """
 
 
-def default_salary_reference() -> list[dict[str, Any]]:
-    """Return the built-in salary reference table (monthly CNY, p50/p75)."""
-    table = [
-        ("后端", "北京", 32000, 48000),
-        ("后端", "上海", 30000, 45000),
-        ("后端", "深圳", 30000, 46000),
-        ("前端", "北京", 28000, 42000),
-        ("前端", "上海", 27000, 40000),
-        ("前端", "深圳", 27000, 41000),
-        ("算法", "北京", 38000, 60000),
-        ("算法", "上海", 36000, 55000),
-        ("数据", "上海", 28000, 42000),
-        ("测试", "上海", 22000, 32000),
-        ("运维", "上海", 24000, 36000),
-        ("产品", "上海", 26000, 38000),
-        ("设计", "上海", 24000, 36000),
-        ("运营", "上海", 18000, 28000),
-        ("销售", "上海", 16000, 30000),
-    ]
-    return [
-        {
-            "job_function": function,
-            "city": city,
-            "p50": p50,
-            "p75": p75,
-        }
-        for function, city, p50, p75 in table
-    ]
-
-
 def default_settings() -> dict[str, Any]:
     return {
-        "salary_reference": default_salary_reference(),
-        "appraisal_weights": dict(DEFAULT_WEIGHTS),
         "classification_vocabulary": {
             "job_functions": list(JOB_FUNCTIONS),
             "seniorities": list(SENIORITIES),
@@ -156,9 +121,8 @@ class SettingsStore(_SqliteStore):
             self._ensure_initialized()
             with self._connect() as conn:
                 row = conn.execute(
-                    "SELECT salary_reference_json, appraisal_weights_json, "
-                    "classification_vocabulary_json, llm_provider, llm_model, "
-                    "llm_json, eval_default "
+                    "SELECT classification_vocabulary_json, llm_provider, "
+                    "llm_model, llm_json, eval_default "
                     "FROM user_settings "
                     "WHERE tenant_id = ?",
                     (tenant_id,),
@@ -173,12 +137,6 @@ class SettingsStore(_SqliteStore):
         if not llm.get("model") and row["llm_model"]:
             llm["model"] = row["llm_model"]
         settings = {
-            "salary_reference": json.loads(
-                row["salary_reference_json"] or "[]"
-            ),
-            "appraisal_weights": json.loads(
-                row["appraisal_weights_json"] or "{}"
-            ),
             "classification_vocabulary": json.loads(
                 row["classification_vocabulary_json"] or "{}"
             ),
@@ -223,14 +181,10 @@ class SettingsStore(_SqliteStore):
             with self._connect() as conn:
                 conn.execute(
                     "INSERT INTO user_settings ("
-                    "tenant_id, salary_reference_json, "
-                    "appraisal_weights_json, classification_vocabulary_json, "
+                    "tenant_id, classification_vocabulary_json, "
                     "llm_provider, llm_model, llm_json, eval_default, updated_at"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(tenant_id) DO UPDATE SET "
-                    "salary_reference_json = excluded.salary_reference_json, "
-                    "appraisal_weights_json = "
-                    "excluded.appraisal_weights_json, "
                     "classification_vocabulary_json = "
                     "excluded.classification_vocabulary_json, "
                     "llm_provider = excluded.llm_provider, "
@@ -240,12 +194,6 @@ class SettingsStore(_SqliteStore):
                     "updated_at = excluded.updated_at",
                     (
                         tenant_id,
-                        json.dumps(
-                            merged["salary_reference"], ensure_ascii=False
-                        ),
-                        json.dumps(
-                            merged["appraisal_weights"], ensure_ascii=False
-                        ),
                         json.dumps(
                             merged["classification_vocabulary"],
                             ensure_ascii=False,
@@ -314,13 +262,6 @@ def _merge_defaults(
     )
     eval_default = updates.get("eval_default")
     merged = {
-        "salary_reference": list(
-            updates.get("salary_reference", defaults["salary_reference"])
-        ),
-        "appraisal_weights": dict(
-            defaults["appraisal_weights"],
-            **updates.get("appraisal_weights", {}),
-        ),
         "classification_vocabulary": {
             key: list(
                 (updates.get("classification_vocabulary") or {}).get(
@@ -379,33 +320,6 @@ def _validate_settings(settings: dict[str, Any]) -> None:
         value = llm.get(key)
         if value is not None and not isinstance(value, str):
             raise UserStoreError(f"llm.{key} must be a string or null")
-
-    weights = settings.get("appraisal_weights") or {}
-    missing = set(DEFAULT_WEIGHTS) - set(weights)
-    if missing:
-        raise UserStoreError(f"Missing weights: {sorted(missing)}")
-    if not all(isinstance(v, (int, float)) for v in weights.values()):
-        raise UserStoreError("Appraisal weights must be numbers")
-    if abs(sum(weights.values()) - 100) > 1e-6:
-        raise UserStoreError("Appraisal weights must sum to 100")
-
-    reference = settings.get("salary_reference") or []
-    if not isinstance(reference, list):
-        raise UserStoreError("Salary reference must be a list")
-    for entry in reference:
-        if not isinstance(entry, dict):
-            raise UserStoreError("Each salary reference row must be an object")
-        if not str(entry.get("job_function") or "").strip():
-            raise UserStoreError(
-                "Each salary reference row needs a job_function"
-            )
-        if not str(entry.get("city") or "").strip():
-            raise UserStoreError("Each salary reference row needs a city")
-        for key in ("p50", "p75"):
-            if not isinstance(entry.get(key), (int, float)):
-                raise UserStoreError(
-                    f"Salary reference {key} must be a number"
-                )
 
     vocabulary = settings.get("classification_vocabulary") or {}
     for key in ("job_functions", "seniorities", "statuses"):

@@ -7,7 +7,7 @@ import "./happy-setup.mjs";
 
 import { setWbMobilePane, state } from "../../../src/resualign/static/app/events.js";
 
-/* F5: 移动端工作台三面板（调优 / 结果 / 评估）切换。 */
+/* F5: 移动端工作台双面板（调优 / 结果）切换。 */
 
 function mountWorkbench() {
   document.body.innerHTML = `
@@ -15,11 +15,12 @@ function mountWorkbench() {
       <div class="wb-mobile-tabs">
         <button type="button" data-action="set-wb-tab" data-wb-tab="controls" aria-selected="true">调优</button>
         <button type="button" data-action="set-wb-tab" data-wb-tab="diff" aria-selected="false">结果</button>
-        <button type="button" data-action="set-wb-tab" data-wb-tab="appraisal" aria-selected="false">评估</button>
       </div>
-      <div class="workbench-column workbench-controls is-active" data-wb-pane="controls"></div>
-      <div class="workbench-column workbench-diff" data-wb-pane="diff"></div>
-      <div class="workbench-column workbench-appraisal" data-wb-pane="appraisal"></div>
+      <div class="wb-main is-active" data-wb-pane="diff"></div>
+      <div class="wb-aux">
+        <div class="wb-pane active" data-wb-pane="controls"></div>
+        <div class="wb-pane" data-wb-pane="livesheet"></div>
+      </div>
     </div>`;
 }
 
@@ -38,17 +39,16 @@ test("setWbMobilePane activates the diff pane and updates tab aria-selected", ()
   );
   assert.ok(document.querySelector('[data-wb-pane="diff"]').classList.contains("is-active"));
   assert.ok(!document.querySelector('[data-wb-pane="controls"]').classList.contains("is-active"));
-  assert.ok(!document.querySelector('[data-wb-pane="appraisal"]').classList.contains("is-active"));
 });
 
-test("setWbMobilePane switches back to controls and to appraisal", () => {
+test("setWbMobilePane switches back to controls from diff", () => {
   mountWorkbench();
-  setWbMobilePane("appraisal");
-  assert.ok(document.querySelector('[data-wb-pane="appraisal"]').classList.contains("is-active"));
-  assert.ok(!document.querySelector('[data-wb-pane="diff"]').classList.contains("is-active"));
+  setWbMobilePane("diff");
+  assert.ok(document.querySelector('[data-wb-pane="diff"]').classList.contains("is-active"));
+  assert.ok(!document.querySelector('[data-wb-pane="controls"]').classList.contains("is-active"));
   setWbMobilePane("controls");
   assert.ok(document.querySelector('[data-wb-pane="controls"]').classList.contains("is-active"));
-  assert.ok(!document.querySelector('[data-wb-pane="appraisal"]').classList.contains("is-active"));
+  assert.ok(!document.querySelector('[data-wb-pane="diff"]').classList.contains("is-active"));
 });
 
 test("setWbMobilePane clamps unknown panes to controls", () => {

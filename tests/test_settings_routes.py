@@ -166,7 +166,6 @@ def test_settings_reset_restores_builtin_defaults():
     headers = _auth_headers()
     defaults = default_settings()
     changed = {
-        "appraisal_weights": {"match": 50, "salary": 20, "hard_conditions": 20, "quality": 10},
         "classification_vocabulary": {
             "job_functions": ["后端"],
             "seniorities": ["高级"],
@@ -175,15 +174,12 @@ def test_settings_reset_restores_builtin_defaults():
     }
     r = client.put("/api/settings", json=changed, headers=headers)
     assert r.status_code == 200
-    assert r.json()["appraisal_weights"]["match"] == 50
     assert r.json()["classification_vocabulary"]["job_functions"] == ["后端"]
 
     r = client.post("/api/settings/reset", headers=headers)
     assert r.status_code == 200
     restored = r.json()
-    assert restored["appraisal_weights"] == defaults["appraisal_weights"]
     assert restored["classification_vocabulary"] == defaults["classification_vocabulary"]
-    assert restored["salary_reference"] == defaults["salary_reference"]
     assert restored["llm_provider"] is None
     assert restored["llm_model"] is None
 

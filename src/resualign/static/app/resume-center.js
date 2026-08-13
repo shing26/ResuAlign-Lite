@@ -60,7 +60,7 @@ async function renderResumeListView(app) {
     .join("");
 
   app.innerHTML = `
-    <div class="page-header page-header--resume">
+    <div class="page-header page-header--resume flex items-center justify-between">
       <div>
         <h2>简历中心</h2>
         <div class="sub">维护主简历与版本历史，工作台始终基于当前版本生成对齐稿</div>
@@ -100,72 +100,85 @@ async function renderResumeDetailView(app, resumeId) {
   state.resumeCurrentContent = resume.content || "";
 
   app.innerHTML = `
-    <div class="page-header page-header--resume">
-      <div>
-        <button class="btn btn-ghost btn-sm" data-action="back-resume-center">← 返回简历中心</button>
-        <h2 style="margin-top:6px">${esc(resume.title)}</h2>
-        <div class="sub">更新于 ${formatDate(resume.updated_at)} · 当前版本 v${resume.current_version} · 共 ${versions.length} 个版本</div>
-      </div>
-      <div class="row">
-        <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">诊断简历</button>
-        <button class="btn btn-secondary btn-sm" data-action="export-resume-md" data-id="${resume.resume_id}">导出 Markdown</button>
-        <button class="btn btn-danger btn-sm" data-action="delete-resume" data-id="${resume.resume_id}">删除</button>
-      </div>
-    </div>
-    <section class="panel panel-card panel--teal diagnosis-panel" data-diagnosis-panel>
-      <div class="diagnosis-head">
-        <div>
-          <h3>简历诊断</h3>
-          <div class="small muted" data-diagnosis-meta>尚未诊断</div>
+    <div class="view view-fit resume-view">
+      <div class="resume-band">
+        <div class="resume-band-main">
+          <button class="btn btn-ghost btn-sm" data-action="back-resume-center">← 返回列表</button>
+          <h2>${esc(resume.title)}</h2>
+          <p>更新于 ${formatDate(resume.updated_at)} · 当前版本 v${resume.current_version} · 共 ${versions.length} 个版本</p>
         </div>
-        <div class="row">
-          <button class="btn btn-outline btn-sm" data-action="export-diagnosis" hidden>导出 PDF</button>
-          <button class="btn btn-secondary btn-sm" data-action="export-diagnosis-md" hidden>导出 Markdown</button>
+        <div class="resume-band-actions">
+          <span class="status-line"><span class="dot dot-success" aria-hidden="true"></span>最近诊断：${diagnosis && Number.isFinite(Number(diagnosis.score)) ? `${esc(diagnosis.score)} 分` : "尚未诊断"}</span>
+          <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">诊断简历</button>
+          <button class="btn btn-secondary btn-sm" data-action="export-resume-md" data-id="${resume.resume_id}">导出 Markdown</button>
+          <button class="btn btn-danger btn-sm" data-action="delete-resume" data-id="${resume.resume_id}">删除</button>
         </div>
       </div>
-      <div class="progress-wrap" data-diagnosis-progress hidden>
-        <div class="progress-track"><div class="progress-fill" data-diagnosis-fill style="width:5%"></div></div>
-        <span class="small" data-diagnosis-stage>排队中</span>
-        <span class="small muted" data-diagnosis-elapsed>0s</span>
-        <button class="btn btn-ghost btn-sm" type="button" data-action="cancel-diagnosis" hidden>取消任务</button>
-      </div>
-      <div data-diagnosis-result hidden></div>
-      <div class="form-error" data-diagnosis-error hidden></div>
-    </section>
-    <div class="resume-archive-grid">
-      <section class="panel panel-card resume-sheet" data-resume-sheet>
-        <div class="resume-sheet__bar">
-          <span class="resume-sheet__title">完整简历</span>
-          <div class="row">
-            <button class="btn btn-primary btn-sm" data-action="toggle-resume-inline-edit" data-id="${resume.resume_id}">编辑源码</button>
-            <button class="btn btn-outline btn-sm" data-action="edit-resume" data-id="${resume.resume_id}">编辑</button>
-            <button class="btn btn-outline btn-sm" data-action="copy-resume-md" data-id="${resume.resume_id}">复制 MD</button>
-            <button class="btn btn-secondary btn-sm" data-action="print-resume">导出 PDF</button>
+      <section class="panel diagnosis-panel diagnosis-banner" data-diagnosis-panel>
+        <div class="diagnosis-banner__row">
+          <div class="diagnosis-banner__copy">
+            <span class="diagnosis-banner__label">简历诊断</span>
+            <span class="small muted" data-diagnosis-meta>尚未诊断</span>
+          </div>
+          <div class="diagnosis-banner__actions">
+            <button class="btn btn-outline btn-sm" data-action="export-diagnosis" hidden>导出 PDF</button>
+            <button class="btn btn-secondary btn-sm" data-action="export-diagnosis-md" hidden>导出 Markdown</button>
+            <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">诊断简历</button>
           </div>
         </div>
-        <div class="resume-preview-bar" data-resume-preview-bar hidden>
-          <span>正在预览 <strong data-preview-version></strong>，改动不会保存</span>
-          <button class="btn btn-ghost btn-sm" data-action="restore-current-preview">返回当前版本</button>
+        <div class="progress-wrap" data-diagnosis-progress hidden>
+          <div class="progress-track"><div class="progress-fill" data-diagnosis-fill style="width:5%"></div></div>
+          <span class="small" data-diagnosis-stage>排队中</span>
+          <span class="small muted" data-diagnosis-elapsed>0s</span>
+          <button class="btn btn-ghost btn-sm" type="button" data-action="cancel-diagnosis" hidden>取消任务</button>
         </div>
-        <div class="resume-doc resume-sheet__doc" data-resume-sheet-doc>${renderMarkdown(resume.content)}</div>
-        <form class="resume-inline-edit" data-resume-inline-edit data-form="resume-edit" hidden>
-          <input type="hidden" name="resume_id" value="${resume.resume_id}">
-          <div class="field"><label>简历内容（Markdown）</label>
-            <textarea name="content" rows="16" required>${esc(resume.content)}</textarea></div>
-          <div class="actions"><button class="btn btn-ghost btn-sm" type="button" data-action="cancel-resume-inline-edit">取消</button>
-            <button class="btn btn-primary btn-sm" type="submit">保存修改</button></div>
-        </form>
+        <div data-diagnosis-result hidden></div>
+        <div class="form-error" data-diagnosis-error hidden></div>
       </section>
-      <aside class="resume-detail-side">
-        <section class="panel panel-card ats-health-card" data-ats-health-card>
-          <h3>ATS 健康度</h3>
-          <div data-ats-health-mount>${atsHealthCardHtml(diagnosis)}</div>
+      <div class="resume-archive-grid resume-grid">
+        <section class="panel resume-sheet" data-resume-sheet>
+          <div class="resume-sheet-head">
+            <div>
+              <h2>完整简历</h2>
+              <p>Markdown 文档 · 预览与源码双态</p>
+            </div>
+            <div class="resume-sheet-actions">
+              <button class="btn btn-primary btn-sm" data-action="toggle-resume-inline-edit" data-id="${resume.resume_id}">编辑源码</button>
+              <button class="btn btn-outline btn-sm" data-action="edit-resume" data-id="${resume.resume_id}">编辑</button>
+              <button class="btn btn-outline btn-sm" data-action="copy-resume-md" data-id="${resume.resume_id}">复制 MD</button>
+              <button class="btn btn-secondary btn-sm" data-action="print-resume">导出 PDF</button>
+            </div>
+          </div>
+          <div class="resume-preview-bar" data-resume-preview-bar hidden>
+            <span>正在预览 <strong data-preview-version></strong>，改动不会保存</span>
+            <button class="btn btn-ghost btn-sm" data-action="restore-current-preview">返回当前版本</button>
+          </div>
+          <div class="resume-doc" data-resume-sheet-doc>${renderMarkdown(resume.content)}</div>
+          <form class="resume-editor resume-inline-edit hidden" data-resume-inline-edit data-form="resume-edit">
+            <input type="hidden" name="resume_id" value="${resume.resume_id}">
+            <textarea name="content" rows="16" required aria-label="简历 Markdown 源码">${esc(resume.content)}</textarea>
+            <div class="editor-actions">
+              <button class="btn btn-ghost" type="button" data-action="cancel-resume-inline-edit">取消</button>
+              <button class="btn btn-primary" type="submit">保存新版本</button>
+            </div>
+          </form>
         </section>
-        <section class="panel panel-card version-timeline-card" data-version-timeline-card>
-          <h3>版本历史</h3>
-          ${versionTimelineHtml(versions, resume.current_version, resume.resume_id)}
-        </section>
-      </aside>
+        <aside class="resume-rail">
+          <section class="rail-section" data-ats-health-card>
+            <div class="rail-section-head">
+              <h3>ATS 健康度</h3>
+              <span class="pill ${diagnosis && Number.isFinite(Number(diagnosis.score)) ? "pill-success" : "pill-neutral"}">${diagnosis && Number.isFinite(Number(diagnosis.score)) ? `${esc(diagnosis.score)} / 100` : "未诊断"}</span>
+            </div>
+            <div data-ats-health-mount>${atsHealthCardHtml(diagnosis)}</div>
+          </section>
+          <section class="rail-section" data-version-timeline-card>
+            <div class="rail-section-head">
+              <h3>版本时间线</h3>
+            </div>
+            ${versionTimelineHtml(versions, resume.current_version, resume.resume_id)}
+          </section>
+        </aside>
+      </div>
     </div>`;
   state.diagnosisResumeId = resumeId;
   await recoverDiagnosis(resume);
@@ -224,11 +237,21 @@ export function openResumeCreator(prefill = {}) {
 /* 路由入口                                                             */
 /* ------------------------------------------------------------------ */
 
-export async function renderResumeCenter(app, { resumeId = null } = {}) {
-  if (resumeId) {
+export async function renderResumeCenter(app, { resumeId = null, showList = false } = {}) {
+  if (resumeId && resumeId !== "list") {
     await renderResumeDetailView(app, resumeId);
-  } else {
+  } else if (showList) {
     await renderResumeListView(app);
+  } else {
+    /* v2.0 shell：默认直达最新主简历的 65/35 详情视图（preview.html 契约）；
+     * 显式 #/resume/list 或无简历时才渲染列表/空态。 */
+    state.resumes = await api("/api/master-resumes");
+    const first = Array.isArray(state.resumes) ? state.resumes[0] : null;
+    if (first) {
+      await renderResumeDetailView(app, first.resume_id);
+    } else {
+      await renderResumeListView(app);
+    }
   }
 }
 

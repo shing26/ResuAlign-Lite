@@ -3,9 +3,7 @@ import assert from "node:assert/strict";
 import {
   applyAcceptedDiffsToDraft,
   applyDiffToDraft,
-  benchmarkSourceBadge,
   buildDiagnosisMarkdownFrom,
-  buildWbResultHtmlFrom,
   canonicalJobStatus,
   cmpLineHtml,
   esc,
@@ -383,71 +381,6 @@ test("cmpLineHtml emits addressable rows with 1-based visible numbers", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* buildWbResultHtmlFrom side view (line-level + char-level marks)     */
-/* ------------------------------------------------------------------ */
-
-const WB_RESULT = {
-  tailored_resume: { sections: { a: "负责高并发系统开发" } },
-  score: 70,
-  model: "deepseek-chat",
-  elapsed_seconds: 3,
-};
-
-test("buildWbResultHtmlFrom marks modify rows with char-level spans and line numbers", () => {
-  const html = buildWbResultHtmlFrom(
-    WB_RESULT,
-    [{ type: "modify", original: "负责系统开发", proposed: "负责高并发系统开发" }],
-    new Set(),
-    "负责系统开发",
-    "side",
-  );
-  assert.ok(html.includes('class="cmp-line diff-modify" data-line="0"'));
-  assert.ok(html.includes('<span class="cmp-line-num">1</span>'));
-  assert.ok(html.includes('<span class="diff-char-ins">高并发</span>'));
-});
-
-test("buildWbResultHtmlFrom keeps diff-remove/diff-add line semantics", () => {
-  const html = buildWbResultHtmlFrom(
-    WB_RESULT,
-    [{ type: "add", original: "", proposed: "负责高并发系统开发" }],
-    new Set(),
-    "旧行",
-    "side",
-  );
-  assert.ok(html.includes('class="cmp-line diff-remove" data-line="0"'));
-  assert.ok(html.includes("−"));
-  assert.ok(html.includes('class="cmp-line diff-add" data-line="0"'));
-  assert.ok(html.includes("＋"));
-});
-
-test("buildWbResultHtmlFrom leaves unchanged lines plain", () => {
-  const html = buildWbResultHtmlFrom(
-    WB_RESULT,
-    [],
-    new Set(),
-    "负责高并发系统开发",
-    "side",
-  );
-  assert.ok(html.includes('class="cmp-line" data-line="0"'));
-  assert.ok(!html.includes("diff-remove"));
-  assert.ok(!html.includes("diff-add"));
-  assert.ok(!html.includes("diff-char"));
-});
-
-test("buildWbResultHtmlFrom list view omits compare columns", () => {
-  const html = buildWbResultHtmlFrom(
-    WB_RESULT,
-    [{ type: "modify", original: "负责系统开发", proposed: "负责高并发系统开发" }],
-    new Set(),
-    "负责系统开发",
-    "list",
-  );
-  assert.ok(!html.includes("cmp-column"));
-  assert.ok(html.includes("diff-line diff-remove"));
-  assert.ok(html.includes("diff-line diff-add"));
-});
-
-/* ------------------------------------------------------------------ */
 /* matchTone                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -458,29 +391,6 @@ test("matchTone buckets scores at 80/60 boundaries", () => {
   assert.equal(matchTone(70), "match--mid");
   assert.equal(matchTone(60), "match--mid");
   assert.equal(matchTone(30), "match--low");
-});
-
-/* ------------------------------------------------------------------ */
-/* benchmarkSourceBadge                                                */
-/* ------------------------------------------------------------------ */
-
-test("benchmarkSourceBadge labels the settings-table source with city", () => {
-  const badge = benchmarkSourceBadge({
-    benchmark_source: "设置表（城市）",
-    city_normalized: "上海",
-  });
-  assert.equal(badge.className, "badge-teal");
-  assert.equal(badge.label, "设置表（上海）");
-  assert.match(badge.detail, /城市归一化：上海/);
-});
-
-test("benchmarkSourceBadge labels library-median and neutral sources", () => {
-  const median = benchmarkSourceBadge({ benchmark_source: "库内同类中位" });
-  assert.equal(median.className, "badge-gray");
-  assert.equal(median.label, "库内同类中位");
-  const neutral = benchmarkSourceBadge({});
-  assert.equal(neutral.className, "badge-amber");
-  assert.equal(neutral.label, "暂无基准，中性处理");
 });
 
 /* ------------------------------------------------------------------ */

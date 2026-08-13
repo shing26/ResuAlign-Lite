@@ -78,3 +78,133 @@ test("styles.css styles the inline source editor", () => {
   assert.match(css, /\.resume-inline-edit\s*\{/);
   assert.match(css, /body\.resume-inline-editing/, "view hidden while editing");
 });
+
+/* ------------------------------------------------------------------ */
+/* v2.1 对齐：240px 侧栏 + 64px 顶栏 + 岗位库单一 Top Bar + 简历默认详情 */
+/* ------------------------------------------------------------------ */
+
+test("index.html: rail brand, jobs count badge and topbar title slots", () => {
+  const html = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src/resualign/static/index.html"),
+    "utf8",
+  );
+  assert.match(html, /class="rail-brand\b/, "rail brand block");
+  assert.match(html, /Career Studio v3/, "rail brand tagline");
+  assert.match(html, /data-jobs-rail-count/, "jobs nav count badge");
+  assert.match(html, /id="page-title"/, "dynamic topbar title");
+  assert.match(html, /id="page-title"[^>]*>驾驶舱</, "dashboard title matches template");
+  assert.match(html, /id="page-subtitle"/, "dynamic topbar subtitle");
+  assert.match(html, /quick-jd-btn/, "quick import JD button");
+  assert.match(html, /快速导入 JD/, "quick import JD label matches template");
+  assert.match(html, /class="nav-index\b/, "numbered rail indicators");
+  assert.match(html, />驾驶舱</, "dashboard rail label");
+  assert.match(html, />工作台</, "workspace rail label");
+  assert.match(html, />岗位库</, "jobs rail label");
+  assert.match(html, />简历中心</, "resume rail label");
+  assert.match(html, />系统设置</, "settings rail label");
+});
+
+test("styles.css: 240px rail + 64px topbar override layer", () => {
+  const css = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src/resualign/static/styles.css"),
+    "utf8",
+  );
+  assert.match(css, /\.app-rail\s*\{[^}]*240px/, "240px rail column");
+  assert.match(css, /\.rail-brand\s*\{/, "rail brand styles");
+  assert.match(css, /\.rail-count\s*\{/, "rail count badge styles");
+  assert.match(css, /\.topbar\s*\{[^}]*height:\s*64px/, "64px topbar");
+  assert.match(css, /\.header-title\s*\{/, "topbar title styles");
+  assert.match(css, /\.quick-jd-btn\s*\{/, "quick JD button styles");
+  assert.match(css, /\.rail-icon\s*\{/, "rail emoji icon styles");
+  assert.match(css, /\.jobs-topbar__conversion\s*\{/, "conversion pill row styles");
+  assert.match(css, /\.jobs-tools\s*\{/, "secondary jobs tools row styles");
+});
+
+test("kanban.js: single jobs top bar keeps fetch, blocker and export contracts", () => {
+  const src = read("kanban.js");
+  assert.match(src, /data-jobs-topbar/, "unified jobs top bar");
+  assert.match(src, /data-fetch-url-bar/, "fetch bar inside the top bar");
+  assert.match(src, /data-blocker-badge/, "blocker badge mount inside the top bar");
+  assert.match(src, /data-jobs-conversion/, "template conversion row");
+  assert.match(src, /data-jobs-apply-rate/, "apply conversion pill");
+  assert.match(src, /data-jobs-interview-rate/, "interview conversion pill");
+  assert.match(src, /data-action="show-add-job"/, "add job action");
+  assert.match(src, /data-action="show-import"/, "batch import action");
+  assert.match(src, /data-action="export-jobs-csv"/, "CSV export action");
+  assert.match(src, /data-action="export-jobs-backup"/, "library backup action");
+  assert.match(src, /data-jobs-tools/, "tools row inside collapsible toolbar");
+  assert.match(src, /data-jobs-forms-mount/, "job forms mount");
+  assert.match(src, /data-jobs-batch-mount/, "batch panel mount");
+  assert.doesNotMatch(src, /page-header--jobs/, "template top bar replaces jobs page header");
+});
+
+test("main.js: route meta, rail count and resume list route", () => {
+  const src = read("main.js");
+  assert.match(src, /PAGE_META\s*=\s*\{/, "page meta map");
+  assert.match(src, /dashboard: \["驾驶舱"/, "dashboard route meta matches template");
+  assert.match(src, /refreshHeaderMeta\(\)/, "header meta refreshed per route");
+  assert.match(src, /refreshJobsRailCount\(/, "jobs rail count refresh");
+  assert.match(src, /#\/resume\/list/, "explicit resume list route");
+  assert.match(src, /settingsBentoHtml\(activeNode, latency\)/, "settings runtime status bento");
+  assert.match(src, /data-llm-nodes-panel/, "settings LLM node panel");
+  assert.match(src, /\.jobs-topbar"\) \|\| app\.querySelector\("\.page-header"\)/, "jobs strip hooks target the top bar");
+  assert.doesNotMatch(src, /page-header--jobs \.row/, "old fetch-bar hook removed");
+});
+
+test("split-canvas.js renders the template workbench three-pane structure", () => {
+  const src = read("split-canvas.js");
+  assert.match(src, /目标岗位/, "target job header");
+  assert.match(src, /岗位职责萃取/, "duty extraction block");
+  assert.match(src, /技能缺口/, "gap block");
+  assert.match(src, /简历对齐画布/, "alignment canvas title");
+  assert.match(src, /重新生成对齐/, "rerun alignment button");
+  assert.match(src, /data-action="run-alignment"/, "rerun alignment action");
+  assert.match(src, /data-inspector-pane/, "inspector pane contract");
+  assert.match(src, /data-diff-pane/, "diff pane contract");
+  assert.match(src, /data-live-sheet-pane/, "live sheet pane contract");
+  assert.match(src, /data-job-switcher/, "job switcher contract");
+});
+
+test("split-canvas.js keeps application-record and legacy wb-run contracts", () => {
+  const src = read("split-canvas.js");
+  assert.match(src, /data-applications-panel/, "applications panel mount");
+  assert.match(src, /data-form="application-create"/, "application create form");
+  assert.match(src, /data-form="wb-run"/, "legacy wb-run form contract");
+  assert.match(src, /data-action="update-application-status"/, "application status action");
+  assert.match(src, /data-action="run-application"/, "application run action");
+  assert.match(src, /data-action="delete-application"/, "application delete action");
+  assert.match(src, /data-action="set-wb-tab-v3"/, "aux pane tabs use delegated actions");
+  assert.match(src, /state\.wbOriginalContent = null/, "new run clears stale diff original");
+  assert.match(src, /state\.wbAcceptedIndices = null/, "new run clears stale accepted indices");
+});
+
+test("dashboard-view.js labels skill-gap frequency honestly", () => {
+  const src = read("dashboard-view.js");
+  assert.match(src, /需求最多/, "peak-frequency skill label");
+  assert.doesNotMatch(src, /已覆盖/, "no misleading covered label");
+});
+
+test("main.js wires the rerun alignment action", () => {
+  const src = read("main.js");
+  assert.match(src, /"run-alignment":/, "run-alignment action registered");
+  assert.match(src, /data-form='split-align'/, "submits the split align form");
+});
+
+test("styles.css styles the template workbench blocks", () => {
+  const css = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src/resualign/static/styles.css"),
+    "utf8",
+  );
+  assert.match(css, /\.workbench-job-head\s*\{/, "workbench job head styles");
+  assert.match(css, /\.workbench-job-title\s*\{/, "workbench job title styles");
+  assert.match(css, /\.workbench-duty-text\s*\{/, "duty extraction styles");
+  assert.match(css, /\.workbench-gap\s*\{/, "gap block styles");
+  assert.match(css, /\.workbench-tune\s*\{/, "alignment tune collapsible styles");
+});
+
+test("resume-center.js: default route opens the latest resume detail", () => {
+  const src = read("resume-center.js");
+  assert.match(src, /showList/, "list route flag accepted");
+  assert.match(src, /renderResumeDetailView\(app, first\.resume_id\)/, "defaults to latest resume detail");
+  assert.match(src, /renderResumeListView/, "list view still available");
+});
