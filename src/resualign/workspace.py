@@ -527,7 +527,12 @@ class MasterResumeStore(_SqliteStore):
 
 
 class ApplicationStore(_SqliteStore):
-    """Per-tenant application records with pinned resume snapshots."""
+    """Dormant per-tenant application records with pinned resume snapshots.
+
+    ADR-0027: the job library is the single source for delivery-loop state.
+    This store and its routes are retained only for legacy data compatibility
+    until a dedicated cleanup ticket removes them.
+    """
 
     def __init__(
         self,

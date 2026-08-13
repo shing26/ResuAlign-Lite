@@ -214,8 +214,20 @@ export async function api(path, options = {}) {
 let modalReturnFocus = null;
 let modalKeydownHandler = null;
 
+function dismissModal() {
+  const backdrop = $(".modal-backdrop");
+  if (backdrop) backdrop.remove();
+  if (modalKeydownHandler) {
+    document.removeEventListener("keydown", modalKeydownHandler);
+    modalKeydownHandler = null;
+  }
+  unlockBodyScroll(document.body);
+  restoreFocus(modalReturnFocus);
+  modalReturnFocus = null;
+}
+
 export function showModal(title, bodyHtml) {
-  closeModal();
+  dismissModal();
   modalReturnFocus =
     document.activeElement instanceof HTMLElement
       ? document.activeElement
@@ -244,15 +256,12 @@ export function showModal(title, bodyHtml) {
 }
 
 export function closeModal() {
-  const backdrop = $(".modal-backdrop");
-  if (backdrop) backdrop.remove();
-  if (modalKeydownHandler) {
-    document.removeEventListener("keydown", modalKeydownHandler);
-    modalKeydownHandler = null;
+  const pending = pendingStatusTransition;
+  pendingStatusTransition = null;
+  dismissModal();
+  if (pending && typeof pending.onCancel === "function") {
+    pending.onCancel();
   }
-  unlockBodyScroll(document.body);
-  restoreFocus(modalReturnFocus);
-  modalReturnFocus = null;
 }
 
 let pendingStatusTransition = null;
@@ -295,10 +304,7 @@ export async function applyPendingStatusTransition(payload) {
 }
 
 export function cancelPendingStatusTransition() {
-  const pending = pendingStatusTransition;
-  pendingStatusTransition = null;
   closeModal();
-  if (pending && typeof pending.onCancel === "function") pending.onCancel();
 }
 
 export function openLoginModal() {

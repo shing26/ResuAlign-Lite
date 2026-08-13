@@ -88,7 +88,19 @@ const MOCK_JOBS = [
   },
 ];
 
-const calls = { patches: [], opens: [] };
+const DEEP_JOB = {
+  job_id: "deep",
+  title: "Deep 岗位",
+  company: "Zeta",
+  location: "成都",
+  status: "offer",
+  jd_text: "Deep learning",
+  source_url: "",
+  salary_min: 25000,
+  salary_max: 40000,
+};
+
+const calls = { patches: [], opens: [], gets: [] };
 
 function jsonBody(body, status = 200) {
   return {
@@ -123,13 +135,20 @@ async function mockFetch(path, options = {}) {
   }
   if (method === "GET" && url.startsWith("/api/jobs/")) {
     const jobId = url.split("/").pop();
+    calls.gets.push({ url });
+    if (jobId === DEEP_JOB.job_id) return jsonBody(DEEP_JOB);
     const job = MOCK_JOBS.find((item) => item.job_id === jobId);
     return jsonBody(job || null);
   }
-  if (method === "GET" && url.startsWith("/api/jobs")) return jsonBody(MOCK_JOBS);
+  if (method === "GET" && url.startsWith("/api/jobs")) {
+    calls.gets.push({ url });
+    return jsonBody(MOCK_JOBS);
+  }
   return jsonBody({ detail: `no mock for ${method} ${url}` }, 404);
 }
 globalThis.fetch = mockFetch;
+
+const { state } = await import("../../../src/resualign/static/app/events.js");
 
 /* Boot main.js after globals + shell are in place. */
 await import("../../../src/resualign/static/app/main.js");
@@ -426,4 +445,147 @@ test("terminal confirm: job detail modal routes through confirm", async () => {
     () => !document.querySelector(".modal-backdrop"),
     "detail terminal flow closes all modals",
   );
+});
+
+test("review fix: job-edit fetches a deep-linked job before backward confirm", async () => {
+  const form = document.createElement("form");
+  form.dataset.form = "job-edit";
+  form.innerHTML = `
+    <input type="hidden" name="job_id" value="${DEEP_JOB.job_id}">
+    <input type="hidden" name="title" value="${DEEP_JOB.title}">
+    <input type="hidden" name="jd_text" value="${DEEP_JOB.jd_text}">
+    <select name="status"><option value="interview" selected>面试中</option></select>
+  `;
+  document.body.append(form);
+
+  const before = calls.gets.filter(
+    (call) => call.url === `/api/jobs/${DEEP_JOB.job_id}`,
+  ).length;
+  form.dispatchEvent(
+    new window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+
+  await waitFor(
+    () => document.querySelector('[data-action="confirm-status-back"]'),
+    "backward confirm opened for deep-linked job",
+  );
+  assert.equal(
+    calls.gets.filter(
+      (call) => call.url === `/api/jobs/${DEEP_JOB.job_id}`,
+    ).length,
+    before + 1,
+  );
+
+  document.querySelector('[data-action="cancel-status-back"]').click();
+  await waitFor(
+    () => document.querySelector("[data-form='job-edit']"),
+    "cancel reopens the job editor",
+  );
+  assert.match(
+    document.querySelector("[data-form='job-edit']").outerHTML,
+    /Deep 岗位/,
+  );
+  document.querySelector("[data-form='job-edit'] [data-action='close-modal']").click();
+  await waitFor(
+    () => !document.querySelector(".modal-backdrop"),
+    "job editor closes after review test",
+  );
+});
+
+test("review fix: open-job-detail fetches a deep-linked job", async () => {
+  const button = document.createElement("button");
+  button.dataset.action = "open-job-detail";
+  button.dataset.id = DEEP_JOB.job_id;
+  document.body.append(button);
+
+  const before = calls.gets.filter(
+    (call) => call.url === `/api/jobs/${DEEP_JOB.job_id}`,
+  ).length;
+  button.click();
+
+  await waitFor(
+    () => document.querySelector("[data-form='job-detail-edit']"),
+    "job detail modal opened via fetch fallback",
+  );
+  assert.equal(
+    calls.gets.filter(
+      (call) => call.url === `/api/jobs/${DEEP_JOB.job_id}`,
+    ).length,
+    before + 1,
+  );
+  document.querySelector("[data-form='job-detail-edit'] [data-action='close-modal']").click();
+  await waitFor(
+    () => !document.querySelector(".modal-backdrop"),
+    "detail modal closes after review test",
+  );
+});
+
+test("review fix: job-detail-edit fetches a deep-linked job before backward confirm", async () => {
+  const form = document.createElement("form");
+  form.dataset.form = "job-detail-edit";
+  form.innerHTML = `
+    <input type="hidden" name="job_id" value="${DEEP_JOB.job_id}">
+    <select name="status"><option value="interview" selected>面试中</option></select>
+  `;
+  document.body.append(form);
+
+  const before = calls.gets.filter(
+    (call) => call.url === `/api/jobs/${DEEP_JOB.job_id}`,
+  ).length;
+  form.dispatchEvent(
+    new window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+
+  await waitFor(
+    () => document.querySelector('[data-action="confirm-status-back"]'),
+    "backward confirm opened from deep-linked detail form",
+  );
+  assert.equal(
+    calls.gets.filter(
+      (call) => call.url === `/api/jobs/${DEEP_JOB.job_id}`,
+    ).length,
+    before + 1,
+  );
+
+  document.querySelector('[data-action="cancel-status-back"]').click();
+  await waitFor(
+    () => document.querySelector("[data-form='job-detail-edit']"),
+    "cancel reopens the job detail form",
+  );
+  document.querySelector("[data-form='job-detail-edit'] [data-action='close-modal']").click();
+  await waitFor(
+    () => !document.querySelector(".modal-backdrop"),
+    "detail form closes after review test",
+  );
+});
+
+test("review fix: Escape and backdrop close cancel a pending terminal transition", async () => {
+  const select = await waitFor(
+    () => document.querySelector('.board-card[data-job-id="j5"] [data-board-status]'),
+    "j5 board status select exists",
+  );
+  const stateJob = state.jobs.find((job) => job.job_id === "j5");
+  assert.ok(stateJob, "state.jobs contains j5 for terminal cancel test");
+  stateJob.status = "interview";
+
+  for (const closeBy of ["escape", "backdrop"]) {
+    select.value = "withdrawn";
+    select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    const modal = await waitFor(
+      () => document.querySelector(".modal-backdrop"),
+      `${closeBy} terminal confirm modal opened`,
+    );
+    if (closeBy === "escape") {
+      document.dispatchEvent(
+        new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    } else {
+      modal.click();
+    }
+    await waitFor(
+      () => !document.querySelector(".modal-backdrop"),
+      `${closeBy} closes the confirm modal`,
+    );
+    assert.equal(select.value, "interview");
+  }
 });

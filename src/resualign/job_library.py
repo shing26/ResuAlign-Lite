@@ -111,6 +111,10 @@ def status_lifecycle_fields(
     provided = provided or {}
     out: dict[str, str] = {}
 
+    def pick(field: str, fallback: str) -> str:
+        value = provided.get(field)
+        return fallback if value is None else value
+
     if target == "draft":
         for field in (
             "applied_at",
@@ -124,34 +128,26 @@ def status_lifecycle_fields(
         return out
 
     if target == "applied":
-        out["applied_at"] = (
-            provided.get("applied_at")
-            or current.get("applied_at")
-            or today
-        )
+        out["applied_at"] = pick("applied_at", current.get("applied_at") or today)
         for field in ("offer_at", "rejected_at", "interview_stage"):
             out[field] = ""
         return out
 
     if target == "interview":
-        out["applied_at"] = (
-            provided.get("applied_at")
-            or current.get("applied_at")
-            or today
-        )
+        out["applied_at"] = pick("applied_at", current.get("applied_at") or today)
         for field in ("offer_at", "rejected_at"):
             out[field] = ""
         return out
 
     if target == "offer":
-        out["offer_at"] = provided.get("offer_at") or today
+        out["offer_at"] = pick("offer_at", today)
         out["rejected_at"] = ""
         for field in ("next_step", "next_step_due_at", "interview_stage"):
             out[field] = ""
         return out
 
     if target == "withdrawn":
-        out["rejected_at"] = provided.get("rejected_at") or today
+        out["rejected_at"] = pick("rejected_at", today)
         for field in ("next_step", "next_step_due_at", "interview_stage"):
             out[field] = ""
         return out

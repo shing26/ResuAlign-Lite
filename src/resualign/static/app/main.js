@@ -1145,8 +1145,18 @@ const actions = {
     navigate("jobs");
     toast(`未找到要求「${skill}」的岗位，已在岗位库带关键词搜索`, "info");
   },
-  "open-job-detail": (button) => {
-    const job = state.jobs.find((item) => item.job_id === button.dataset.id);
+  "open-job-detail": async (button) => {
+    let job = (state.jobs || []).find(
+      (item) => item.job_id === button.dataset.id,
+    );
+    if (!job) {
+      try {
+        job = await api(`/api/jobs/${encodeURIComponent(button.dataset.id)}`);
+      } catch (error) {
+        toast(error.message || "岗位不存在", "error");
+        return;
+      }
+    }
     if (job) openJobDetail(job);
   },
   "open-source-url": (button) => {
@@ -2089,9 +2099,17 @@ async function handleForm(formName, data, form) {
         seniority: data.seniority || null,
         tech_tags: (data.tech_tags || "").split(",").map((tag) => tag.trim()).filter(Boolean),
       };
-      const job = (state.jobs || []).find(
+      let job = (state.jobs || []).find(
         (item) => item.job_id === data.job_id,
       );
+      if (!job) {
+        try {
+          job = await api(`/api/jobs/${encodeURIComponent(data.job_id)}`);
+        } catch (error) {
+          toast(error.message || "岗位不存在", "error");
+          return;
+        }
+      }
       const targetStatus = canonicalJobStatus(data.status);
       const saveJob = async (extra = {}) => {
         const body = {
@@ -2158,6 +2176,10 @@ async function handleForm(formName, data, form) {
         );
         return;
       }
+      if (job && isBackwardJobStatus(job.status, targetStatus)) {
+        confirmBackwardStatus(job, targetStatus, saveJob, reopenJobEditor);
+        return;
+      }
       await saveJob();
       break;
     }
@@ -2175,9 +2197,17 @@ async function handleForm(formName, data, form) {
         next_step_due_at: data.next_step_due_at || null,
         interview_stage: data.interview_stage || null,
       };
-      const job = (state.jobs || []).find(
+      let job = (state.jobs || []).find(
         (item) => item.job_id === data.job_id,
       );
+      if (!job) {
+        try {
+          job = await api(`/api/jobs/${encodeURIComponent(data.job_id)}`);
+        } catch (error) {
+          toast(error.message || "岗位不存在", "error");
+          return;
+        }
+      }
       const targetStatus = canonicalJobStatus(data.status);
       const reopenDetail = () => {
         showModal(

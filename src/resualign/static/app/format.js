@@ -1736,7 +1736,7 @@ export function jobTimelineFormHtml(job) {
         <div class="field"><label>到期时间</label><input type="datetime-local" name="next_step_due_at" value="${esc(job.next_step_due_at || "")}"></div>
         <div class="field"><label>面试阶段</label><select name="interview_stage">${stageOptions}</select></div>
         <div class="field"><label>Offer 时间</label><input type="datetime-local" name="offer_at" value="${esc(job.offer_at || "")}"></div>
-        <div class="field"><label>拒绝时间</label><input type="datetime-local" name="rejected_at" value="${esc(job.rejected_at || "")}"></div>
+        <div class="field"><label>放弃日期</label><input type="datetime-local" name="rejected_at" value="${esc(job.rejected_at || "")}"></div>
         <div class="field wide"><label>备注</label><textarea name="notes" rows="3">${esc(job.notes || "")}</textarea></div>
       </div>
       <div class="actions">
@@ -1787,7 +1787,7 @@ export function jobTerminalConfirmFormHtml(job, targetStatus, options = {}) {
   const canonical = canonicalJobStatus(targetStatus);
   if (canonical !== "offer" && canonical !== "withdrawn") return "";
   const dateName = canonical === "offer" ? "offer_at" : "rejected_at";
-  const dateLabel = canonical === "offer" ? "Offer 日期" : "放弃/拒绝日期";
+  const dateLabel = canonical === "offer" ? "Offer 日期" : "放弃日期";
   const dateValue = String(
     options.date || options.today || localDateInputValue(),
   ).slice(0, 10);
