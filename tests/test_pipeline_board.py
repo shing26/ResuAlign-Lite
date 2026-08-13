@@ -1,7 +1,6 @@
 """Tests for the unified pipeline board status model and bulk updates."""
 
 import time
-
 from unittest.mock import patch
 
 import pytest
