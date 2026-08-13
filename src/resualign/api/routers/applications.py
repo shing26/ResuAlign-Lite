@@ -14,10 +14,10 @@ router = APIRouter()
 def create_application(req: ApplicationCreateRequest, user: dict[str, Any]=Depends(get_current_user)):
     """Create an application pinned to the master resume's current version.
 
-    Deprecated: application records are being replaced by the Job Library
-    entity (per-job workbench runs, status, and timeline fields). The
-    endpoint stays available for existing callers; migrate historical
-    records with ``merge_applications_into_jobs`` before retiring it.
+    Dormant: the delivery loop now treats Job as the single source of
+    truth (per-job workbench runs, status, and timeline fields). The
+    endpoint stays available for existing data/tools and is no longer
+    surfaced by the frontend; a separate cleanup ticket may retire it.
     """
     try:
         return api_module._applications.create_application(tenant_id=user['user_id'], title=req.title, master_resume_id=req.master_resume_id, jd_text=req.jd_text, jd_url=req.jd_url)
@@ -26,12 +26,12 @@ def create_application(req: ApplicationCreateRequest, user: dict[str, Any]=Depen
 
 @router.get('/api/applications')
 def list_applications(user: dict[str, Any]=Depends(get_current_user)):
-    """Return the current user's applications."""
+    """Return the current user's dormant application records."""
     return api_module._applications.list_applications(user['user_id'])
 
 @router.get('/api/applications/{application_id}')
 def get_application(application_id: str, user: dict[str, Any]=Depends(get_current_user)):
-    """Return one application and its pinned resume snapshot."""
+    """Return one dormant application and its pinned resume snapshot."""
     application = api_module._applications.get_application(user['user_id'], application_id)
     if application is None:
         raise HTTPException(status_code=404, detail='Application not found')
@@ -41,7 +41,7 @@ def get_application(application_id: str, user: dict[str, Any]=Depends(get_curren
 def update_application(application_id: str, req: ApplicationUpdateRequest, user: dict[str, Any]=Depends(get_current_user)):
     """Update application metadata without changing its resume snapshot.
 
-    Deprecated: application records are being replaced by the Job Library
+    Dormant: application records are being replaced by the Job Library
     entity. Kept available for existing callers; the frontend no longer
     surfaces this form.
     """
@@ -57,8 +57,8 @@ def update_application(application_id: str, req: ApplicationUpdateRequest, user:
 def delete_application(application_id: str, user: dict[str, Any]=Depends(get_current_user)):
     """Delete an application record.
 
-    Deprecated: application records are being replaced by the Job Library
-    entity. Kept available for existing callers.
+    Dormant: application records are being replaced by the Job Library
+    entity. Kept available for existing callers until the cleanup ticket.
     """
     if not api_module._applications.delete_application(user['user_id'], application_id):
         raise HTTPException(status_code=404, detail='Application not found')
@@ -66,7 +66,7 @@ def delete_application(application_id: str, user: dict[str, Any]=Depends(get_cur
 
 @router.post('/api/applications/{application_id}/run', status_code=202)
 def run_application(application_id: str, request: Request, user: dict[str, Any]=Depends(get_current_user)):
-    """Queue an analysis using the application's pinned resume and JD."""
+    """Queue an analysis using a dormant application's pinned resume and JD."""
     api_module._enforce_rate_limit(request, api_module._analyze_rate_limiter)
     application = api_module._applications.get_application(user['user_id'], application_id)
     if application is None:

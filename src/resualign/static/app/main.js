@@ -23,10 +23,8 @@ import {
   showModal,
   startBatchPolling,
   startDiagnosisPolling,
-  startPolling,
   state,
   stopAllPolling,
-  stopApplicationPolling,
   stopBatchPolling,
   stopDiagnosisPolling,
   toast,
@@ -1664,47 +1662,6 @@ const actions = {
     toast("岗位状态已保存", "success");
     await refreshWbCanvas();
   },
-  "run-application": async (button) => {
-    stopApplicationPolling();
-    const response = await api(
-      `/api/applications/${encodeURIComponent(button.dataset.id)}/run`,
-      { method: "POST" },
-    );
-    toast("已开始运行投递分析", "success");
-    const jobId = response.job_id;
-    const timer = startPolling("application", async () => {
-      try {
-        const job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
-        if (!["queued", "running"].includes(job.status)) {
-          stopApplicationPolling();
-          await refreshWbCanvas();
-          toast(
-            job.status === "succeeded" ? "投递分析完成" : `投递分析${job.status}`,
-            job.status === "succeeded" ? "success" : "error",
-          );
-        }
-      } catch (error) {
-        stopApplicationPolling();
-        toast(error.message, "error");
-      }
-    }, 1000);
-    state.applicationPoll = { jobId, timer };
-  },
-  "update-application-status": async (button) => {
-    const select = $(`[data-application-status][data-id="${button.dataset.id}"]`);
-    await api(`/api/applications/${encodeURIComponent(button.dataset.id)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ status: select.value }),
-    });
-    toast("投递状态已保存", "success");
-    await refreshWbCanvas();
-  },
-  "delete-application": async (button) => {
-    if (!window.confirm("确定删除这条投递记录？")) return;
-    await api(`/api/applications/${encodeURIComponent(button.dataset.id)}`, { method: "DELETE" });
-    toast("投递记录已删除", "success");
-    await refreshWbCanvas();
-  },
   "cancel-batch-align": async () => {
     if (!state.batchAlign) return;
     const batchId = state.batchAlign.batch_id;
@@ -2438,19 +2395,6 @@ async function handleForm(formName, data, form) {
       toast(`对齐任务已排队：${result.job_id}`, "success");
       break;
     }
-    case "application-create":
-      await api("/api/applications", {
-        method: "POST",
-        body: JSON.stringify({
-          title: data.title,
-          master_resume_id: data.master_resume_id,
-          jd_text: data.jd_text || null,
-          jd_url: data.jd_url || null,
-        }),
-      });
-      toast("投递记录已创建", "success");
-      await refreshWbCanvas();
-      break;
     case "login": {
       const response = await fetch("/api/auth/login", {
         method: "POST",

@@ -1918,7 +1918,7 @@
     "/api/applications": {
       "post": {
         "summary": "Create Application",
-        "description": "Create an application pinned to the master resume's current version.\n\nDeprecated: application records are being replaced by the Job Library\nentity (per-job workbench runs, status, and timeline fields). The\nendpoint stays available for existing callers; migrate historical\nrecords with ``merge_applications_into_jobs`` before retiring it.",
+        "description": "Create an application pinned to the master resume's current version.\n\nDormant: the delivery loop now treats Job as the single source of\ntruth (per-job workbench runs, status, and timeline fields). The\nendpoint stays available for existing data/tools and is no longer\nsurfaced by the frontend; a separate cleanup ticket may retire it.",
         "operationId": "create_application_api_applications_post",
         "parameters": [
           {
@@ -1965,7 +1965,7 @@
       },
       "get": {
         "summary": "List Applications",
-        "description": "Return the current user's applications.",
+        "description": "Return the current user's dormant application records.",
         "operationId": "list_applications_api_applications_get",
         "parameters": [
           {
@@ -2004,7 +2004,7 @@
     "/api/applications/{application_id}": {
       "get": {
         "summary": "Get Application",
-        "description": "Return one application and its pinned resume snapshot.",
+        "description": "Return one dormant application and its pinned resume snapshot.",
         "operationId": "get_application_api_applications__application_id__get",
         "parameters": [
           {
@@ -2050,7 +2050,7 @@
       },
       "patch": {
         "summary": "Update Application",
-        "description": "Update application metadata without changing its resume snapshot.\n\nDeprecated: application records are being replaced by the Job Library\nentity. Kept available for existing callers; the frontend no longer\nsurfaces this form.",
+        "description": "Update application metadata without changing its resume snapshot.\n\nDormant: application records are being replaced by the Job Library\nentity. Kept available for existing callers; the frontend no longer\nsurfaces this form.",
         "operationId": "update_application_api_applications__application_id__patch",
         "parameters": [
           {
@@ -2106,7 +2106,7 @@
       },
       "delete": {
         "summary": "Delete Application",
-        "description": "Delete an application record.\n\nDeprecated: application records are being replaced by the Job Library\nentity. Kept available for existing callers.",
+        "description": "Delete an application record.\n\nDormant: application records are being replaced by the Job Library\nentity. Kept available for existing callers until the cleanup ticket.",
         "operationId": "delete_application_api_applications__application_id__delete",
         "parameters": [
           {
@@ -2149,7 +2149,7 @@
     "/api/applications/{application_id}/run": {
       "post": {
         "summary": "Run Application",
-        "description": "Queue an analysis using the application's pinned resume and JD.",
+        "description": "Queue an analysis using a dormant application's pinned resume and JD.",
         "operationId": "run_application_api_applications__application_id__run_post",
         "parameters": [
           {

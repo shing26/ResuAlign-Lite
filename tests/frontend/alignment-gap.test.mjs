@@ -167,17 +167,28 @@ test("split-canvas.js renders the template workbench three-pane structure", () =
   assert.match(src, /data-job-switcher/, "job switcher contract");
 });
 
-test("split-canvas.js keeps application-record and legacy wb-run contracts", () => {
+test("split-canvas.js drops legacy application-record panel and keeps wb-run contract", () => {
   const src = read("split-canvas.js");
-  assert.match(src, /data-applications-panel/, "applications panel mount");
-  assert.match(src, /data-form="application-create"/, "application create form");
+  assert.doesNotMatch(src, /data-applications-panel/, "applications panel removed");
+  assert.doesNotMatch(src, /data-form="application-create"/, "application create form removed");
+  assert.doesNotMatch(src, /renderApplicationsPanel/, "applications renderer removed");
+  assert.doesNotMatch(src, /\/api\/applications/, "applications API fetch removed from canvas");
   assert.match(src, /data-form="wb-run"/, "legacy wb-run form contract");
-  assert.match(src, /data-action="update-application-status"/, "application status action");
-  assert.match(src, /data-action="run-application"/, "application run action");
-  assert.match(src, /data-action="delete-application"/, "application delete action");
+  assert.doesNotMatch(src, /data-action="update-application-status"/, "application status action removed");
+  assert.doesNotMatch(src, /data-action="run-application"/, "application run action removed");
+  assert.doesNotMatch(src, /data-action="delete-application"/, "application delete action removed");
   assert.match(src, /data-action="set-wb-tab-v3"/, "aux pane tabs use delegated actions");
   assert.match(src, /state\.wbOriginalContent = null/, "new run clears stale diff original");
   assert.match(src, /state\.wbAcceptedIndices = null/, "new run clears stale accepted indices");
+});
+
+test("main.js drops legacy application create/edit/delete actions", () => {
+  const src = read("main.js");
+  assert.doesNotMatch(src, /"run-application"/, "application run action removed");
+  assert.doesNotMatch(src, /"update-application-status"/, "application status action removed");
+  assert.doesNotMatch(src, /"delete-application"/, "application delete action removed");
+  assert.doesNotMatch(src, /case "application-create"/, "application create form removed");
+  assert.doesNotMatch(src, /stopApplicationPolling/, "application polling removed");
 });
 
 test("dashboard-view.js labels skill-gap frequency honestly", () => {

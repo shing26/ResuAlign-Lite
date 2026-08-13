@@ -1999,10 +1999,6 @@ h6 {
   border-left-color: var(--info);
 }
 
-.application-card {
-  border-left-color: var(--neutral);
-}
-
 .btn {
   min-height: 38px;
   padding: 9px 15px;
@@ -10358,32 +10354,6 @@ details > summary::-webkit-details-marker,
 
 .skill-count.warn {
   color: var(--ra-warn, #ff9f0a);
-}
-
-/* v3 detail pass: restored application-record panel inside the workbench. */
-.applications-panel {
-  border-top: 1px solid var(--ra-border, rgba(255, 255, 255, 0.1));
-  margin-top: 4px;
-}
-
-.applications-panel__box > summary {
-  cursor: pointer;
-  font-weight: 700;
-  color: var(--ra-text-secondary, rgba(255, 255, 255, 0.64));
-  list-style: none;
-}
-
-.applications-panel__box > summary::-webkit-details-marker {
-  display: none;
-}
-
-.applications-panel .application-card .row {
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.applications-panel .application-card select {
-  max-width: 160px;
 }
 
 .board-card__links {

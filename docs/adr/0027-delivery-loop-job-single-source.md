@@ -44,6 +44,11 @@ reminders ignore terminal states.
   funnel, reminders, and job detail consistent without a backend migration.
 - Old application data remains readable via dormant APIs until the cleanup
   ticket lands, so no data loss is forced by this change.
+- Follow-up cleanup: a dedicated issue should remove the dormant
+  `/api/applications` routes, `ApplicationStore`, the `applications` table,
+  and any remaining migration helper after confirming no local or SaaS tool
+  still depends on them. Until then, new UI must not render or write
+  Application records.
 - Tests must move from asserting the old free-form timeline behavior to the
   lifecycle policy, and contract snapshots stay compatible because no backend
   schema changes are required.
