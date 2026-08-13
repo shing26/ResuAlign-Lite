@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from resualign.job_library import status_lifecycle_fields
 
-
 TODAY = "2026-08-14"
 
 
