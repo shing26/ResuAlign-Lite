@@ -195,7 +195,7 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
               <summary>查看原始 JD</summary>
               <pre>${esc(job.jd_text || "")}</pre>
             </details>
-            <details class="inspector-controls" data-inspector-controls>
+            <details class="inspector-controls" data-inspector-controls ${state.wbControlsOpen ? "open" : ""}>
               <summary>对齐调优</summary>
               ${alignmentControls(session, resumes, jobId)}
             </details>
@@ -228,6 +228,19 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
     }
     if (previous.granularity && granularity) granularity.value = previous.granularity;
     if (previous.focus && focus) focus.value = previous.focus;
+  }
+  const inspectorControls = $("[data-inspector-controls]");
+  if (inspectorControls) {
+    inspectorControls.addEventListener("toggle", () => {
+      state.wbControlsOpen = inspectorControls.open;
+    });
+  }
+  const exportDockEl = $("[data-export-dock]");
+  if (exportDockEl) {
+    exportDockEl.open = Boolean(state.wbExportDockOpen);
+    exportDockEl.addEventListener("toggle", () => {
+      state.wbExportDockOpen = exportDockEl.open;
+    });
   }
   renderCanvasExtras();
   /* Sprint 2 T2: 每次画布重绘都同步 Live Sheet（SSE job.result / poll 终态 /
