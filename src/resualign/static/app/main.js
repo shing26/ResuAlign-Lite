@@ -77,6 +77,7 @@ import {
   dueReminders,
   fetchUrlResultMessage,
   isJdUrl,
+  jobApplyLinkHtml,
   jobEditFormHtml,
   jobSelectOptionsHtml,
   jobTimelineFormHtml,
@@ -979,8 +980,17 @@ const actions = {
     if (job) openJobDetail(job);
   },
   "record-application": async (button) => {
-    const job = state.wbJob;
-    if (!job) return;
+    const jobId = button.dataset.id || (state.wbJob && state.wbJob.job_id);
+    if (!jobId) return;
+    let job = state.wbJob && state.wbJob.job_id === jobId ? state.wbJob : null;
+    if (!job) {
+      try {
+        job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+      } catch (error) {
+        toast(error.message || "岗位不存在", "error");
+        return;
+      }
+    }
     if (jobStatusRank(job.status) >= jobStatusRank("applied")) {
       toast(
         `岗位已是「${jobStatusLabel(job.status)}」，无需重复记录投递`,
@@ -993,9 +1003,10 @@ const actions = {
     const appliedAt = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
     await api(`/api/jobs/${encodeURIComponent(job.job_id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ status: "已投递", applied_at: appliedAt }),
+      body: JSON.stringify({ status: "applied", applied_at: appliedAt }),
     });
     toast("已记录投递", "success");
+    if (button.closest(".modal-backdrop")) closeModal();
     render();
   },
   "toggle-batch-panel": (button) => {
@@ -1112,6 +1123,15 @@ const actions = {
   "open-job-detail": (button) => {
     const job = state.jobs.find((item) => item.job_id === button.dataset.id);
     if (job) openJobDetail(job);
+  },
+  "open-source-url": (button) => {
+    const url = String(button.dataset.url || "").trim();
+    if (!url) return;
+    if (!isJdUrl(url)) {
+      toast("链接不是有效的 http(s) 地址", "error");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
   },
   "bulk-move-status": async () => {
     const selected = $$("[data-board-check]:checked").map(
@@ -2079,6 +2099,7 @@ async function handleForm(formName, data, form) {
     case "job-detail-edit": {
       const payload = {
         status: data.status,
+        source_url: data.source_url || null,
         applied_at: data.applied_at || null,
         next_step: data.next_step || null,
         notes: data.notes || null,
@@ -2108,6 +2129,7 @@ async function handleForm(formName, data, form) {
             jobTimelineFormHtml({
               ...job,
               status: data.status,
+              source_url: data.source_url || "",
               applied_at: data.applied_at || "",
               next_step: data.next_step || "",
               notes: data.notes || "",

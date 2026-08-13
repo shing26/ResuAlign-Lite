@@ -24,6 +24,7 @@ import {
   formatElapsed,
   highlightSkillGapHtml,
   jdProfileSummary,
+  jobApplyLinkHtml,
   jobCompletenessBadge,
   renderGap,
   renderMatchBadge,
@@ -146,7 +147,11 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <select class="input input-sm" data-job-switcher aria-label="切换岗位">
             ${jobs.map((item) => `<option value="${esc(item.job_id)}" ${item.job_id === jobId ? "selected" : ""}>${esc(item.title)}${item.company ? ` · ${esc(item.company)}` : ""}</option>`).join("")}
           </select>
-          <button class="btn btn-primary" type="button" data-action="run-alignment" ${alignmentRunning ? "disabled" : ""}>${alignmentRunning ? "对齐生成中..." : "重新生成对齐"}</button>
+          <div class="row">
+            ${jobApplyLinkHtml(job)}
+            <button class="btn btn-primary" type="button" data-action="record-application" data-id="${esc(jobId)}">记录投递</button>
+            <button class="btn btn-primary" type="button" data-action="run-alignment" ${alignmentRunning ? "disabled" : ""}>${alignmentRunning ? "对齐生成中..." : "重新生成对齐"}</button>
+          </div>
         </div>
       </div>
       <div class="wb-grid" data-split-layout>
@@ -535,6 +540,7 @@ function renderFinalDraftPanel(app) {
   const panel = $("[data-final-draft-panel]");
   if (!panel) return;
   const draft = state.wbFinalDraft;
+  const job = state.wbJob || {};
   if (!draft || !draft.draft) {
     panel.hidden = true;
     panel.innerHTML = "";
@@ -553,7 +559,8 @@ function renderFinalDraftPanel(app) {
     </div>
     <div class="pre draft-preview">${esc(draft.draft)}</div>
     <div class="row final-draft-actions">
-      <button class="btn btn-primary btn-sm" data-action="record-application">记录投递</button>
+      ${jobApplyLinkHtml(job)}
+      <button class="btn btn-primary btn-sm" data-action="record-application" data-id="${esc(job.job_id || "")}">记录投递</button>
       <button class="btn btn-secondary btn-sm" data-action="export-final-draft">导出 PDF</button>
       <button class="btn btn-secondary btn-sm" data-action="export-final-draft-md">导出 Markdown</button>
       <button class="btn btn-secondary btn-sm" data-action="save-as-new-resume">另存为新主简历</button>
@@ -649,6 +656,8 @@ export async function renderOptimizerCanvas(app, jobId) {
   if (freshJob && session.job) {
     session.job = {
       ...session.job,
+      source_url: freshJob.source_url,
+      jd_url: freshJob.jd_url,
       final_draft: freshJob.final_draft,
       final_draft_version: freshJob.final_draft_version,
       final_draft_updated_at: freshJob.final_draft_updated_at,

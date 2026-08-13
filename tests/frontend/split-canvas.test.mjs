@@ -530,6 +530,17 @@ test("boardCard renders copilot card with drag handle and match badge", () => {
   assert.match(html, /20-30K/);
 });
 
+test("boardCard shows 去投递 when source_url exists", () => {
+  const html = boardCard({
+    job_id: "j1",
+    title: "后端",
+    status: "applied",
+    source_url: "https://example.com/jobs/1",
+  });
+  assert.match(html, /data-action="open-source-url"/);
+  assert.match(html, /去投递 ↗/);
+});
+
 test("boardCard shows 待分析 when no match score", () => {
   const html = boardCard({ job_id: "j1", title: "T", status: "applied" });
   assert.match(html, /待分析/);
@@ -554,6 +565,17 @@ test("renderBoardCard renders job-board card with check and edit actions", () =>
     renderBoardCard({ job_id: "j1", title: "T", status: "x", classification_pending: true }),
     /board-card--pending/,
   );
+});
+
+test("renderBoardCard shows 去投递 when source_url exists", () => {
+  const html = renderBoardCard({
+    job_id: "j1",
+    title: "前端",
+    status: "applied",
+    source_url: "https://example.com/jobs/1",
+  });
+  assert.match(html, /data-action="open-source-url"/);
+  assert.match(html, /去投递 ↗/);
 });
 
 /* F10: 看板卡片匹配徽章 title 标注来源（job.match_score 来自工作台评估） */

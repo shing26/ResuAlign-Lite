@@ -15,9 +15,11 @@ import {
   isBackwardJobStatus,
   isJdUrl,
   isJunkJd,
+  jobApplyLinkHtml,
   jobCompleteness,
   jobCompletenessBadge,
   jobEditFormHtml,
+  jobSourceUrl,
   jobStatusRank,
   jobStatusLabel,
   jobTimelineFormHtml,
@@ -579,6 +581,43 @@ test("jobTimelineFormHtml includes structured follow-up fields", () => {
   const empty = jobTimelineFormHtml({ job_id: "j2", status: "draft" });
   assert.match(empty, /name="interview_stage"><option value="" selected>无<\/option>/);
   assert.match(empty, /type="datetime-local" name="next_step_due_at" value=""/);});
+
+test("jobSourceUrl prefers source_url then jd_url", () => {
+  assert.equal(
+    jobSourceUrl({ source_url: "https://example.com/jobs/1", jd_url: "https://example.com/jd" }),
+    "https://example.com/jobs/1",
+  );
+  assert.equal(
+    jobSourceUrl({ jd_url: "https://example.com/jd" }),
+    "https://example.com/jd",
+  );
+  assert.equal(jobSourceUrl({}), "");
+  assert.equal(jobSourceUrl(null), "");
+});
+
+test("jobApplyLinkHtml renders 去投递 or 补链接", () => {
+  const withUrl = jobApplyLinkHtml({
+    job_id: "j1",
+    source_url: "https://example.com/jobs/1",
+  });
+  assert.match(withUrl, /data-action="open-source-url" data-url="https:\/\/example.com\/jobs\/1"/);
+  assert.match(withUrl, /去投递 ↗/);
+
+  const missing = jobApplyLinkHtml({ job_id: "j2" });
+  assert.match(missing, /data-action="open-job-detail" data-id="j2"/);
+  assert.match(missing, /补链接/);
+});
+
+test("jobTimelineFormHtml renders source link field and record button", () => {
+  const html = jobTimelineFormHtml({
+    job_id: "j1",
+    status: "draft",
+    source_url: "https://example.com/jobs/1",
+  });
+  assert.match(html, /name="source_url" value="https:\/\/example.com\/jobs\/1"/);
+  assert.match(html, /data-action="open-source-url"/);
+  assert.match(html, /data-action="record-application" data-id="j1"/);
+});
 
 test("jobEditFormHtml adds the reclassify secondary action", () => {
   const html = jobEditFormHtml(

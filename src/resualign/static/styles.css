@@ -10378,3 +10378,12 @@ details > summary::-webkit-details-marker,
 .applications-panel .application-card select {
   max-width: 160px;
 }
+
+.board-card__links {
+  margin-top: 6px;
+}
+
+.wb-context-actions .row {
+  flex-wrap: wrap;
+  gap: 6px;
+}
