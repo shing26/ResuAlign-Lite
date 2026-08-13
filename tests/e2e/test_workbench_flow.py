@@ -129,6 +129,7 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
         # from the previous view are gone; hash-only navigation could let a
         # stale callback pushState back to the workspace route on CI.
         page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")
+        page.wait_for_selector("#job-board", timeout=20000)
         page.reload(wait_until="domcontentloaded")
         page.wait_for_selector("#job-board", timeout=20000)
         card = page.locator(f'.board-card[data-job-id="{job_id}"]')
@@ -235,6 +236,10 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir):
         # no draft field, so the section renders the "尚未生成定稿" placeholder
         # in the current product. The accepted draft itself is exported from
         # the final-draft panel below.)
+        if not page.locator(
+            "[data-action='export-align-markdown']"
+        ).first.is_visible():
+            page.click("[data-export-dock] summary")
         with page.expect_download(timeout=15000) as download_info:
             page.click("[data-action='export-align-markdown']")
         dock_content = _read_download(download_info.value)

@@ -554,6 +554,8 @@ function renderFinalDraftPanel(app) {
     <div class="pre draft-preview">${esc(draft.draft)}</div>
     <div class="row final-draft-actions">
       <button class="btn btn-primary btn-sm" data-action="record-application">记录投递</button>
+      <button class="btn btn-secondary btn-sm" data-action="export-final-draft">导出 PDF</button>
+      <button class="btn btn-secondary btn-sm" data-action="export-final-draft-md">导出 Markdown</button>
       <button class="btn btn-secondary btn-sm" data-action="save-as-new-resume">另存为新主简历</button>
     </div>`;
 }
