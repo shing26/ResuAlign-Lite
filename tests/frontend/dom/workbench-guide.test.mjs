@@ -22,7 +22,6 @@ function job(overrides = {}) {
 
 function render(app, jobData, resumes = []) {
   state.wbResumes = resumes;
-  state.wbApplications = [];
   state.wbMobilePane = "controls";
   state.wbControlsOpen = true;
   state.wbExportDockOpen = false;

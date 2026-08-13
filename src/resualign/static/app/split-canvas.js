@@ -1,7 +1,6 @@
 /* Copilot board + Optimizer split canvas for the 2.0 workstation flow. */
 
 import {
-  APP_STATUS_LABELS,
   $,
   STAGE_LABELS,
   api,
@@ -207,7 +206,6 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
               <summary>对齐调优</summary>
               ${alignmentControls(session, resumes, jobId)}
             </details>
-            <section class="pane-section applications-panel" data-applications-panel></section>
           </div>
           <div class="wb-pane ${livesheetActive ? "active" : ""}" data-wb-pane="livesheet" data-live-sheet-pane></div>
         </aside>
@@ -490,50 +488,8 @@ function renderCanvasExtras() {
   const app = $("#app-router-view");
   if (!app) return;
   renderFinalDraftPanel(app);
-  renderApplicationsPanel(app);
   /* T3: 每次画布重绘都尝试 ?skill= 深链定位；gap 未就绪时保持 pending。 */
   tryFocusSkill();
-}
-
-function renderApplicationsPanel(app) {
-  const panel = $("[data-applications-panel]", app);
-  if (!panel) return;
-  const apps = Array.isArray(state.wbApplications)
-    ? state.wbApplications
-    : [];
-  const resumes = Array.isArray(state.wbResumes) ? state.wbResumes : [];
-  panel.innerHTML = `
-    <details class="applications-panel__box" open>
-      <summary>投递记录</summary>
-      <form data-form="application-create">
-        <div class="form-grid">
-          <label class="field"><span>标题</span><input type="text" name="title" required placeholder="例如：Acme 后端"></label>
-          <label class="field"><span>主简历</span><select name="master_resume_id" required><option value="">选择简历</option>${resumes.map((resume) => `<option value="${resume.resume_id}">${esc(resume.title)}</option>`).join("")}</select></label>
-          <label class="field wide"><span>JD 文本</span><textarea name="jd_text" rows="3"></textarea></label>
-          <label class="field wide"><span>JD 链接</span><input type="url" name="jd_url"></label>
-        </div>
-        <div class="row"><button class="btn btn-secondary btn-sm" type="submit">创建投递记录</button></div>
-      </form>
-      <div class="card-list motion-stagger">
-        ${apps.map((item) => `
-          <div class="card application-card card-base card-hover-soft">
-            <div class="card-head">
-              <div class="card-title">${esc(item.title)}</div>
-              <span class="badge badge-gray">${esc(APP_STATUS_LABELS[item.status] || item.status)}</span>
-            </div>
-            <div class="card-meta">简历 v${esc(item.resume_version)} · 更新于 ${formatDate(item.updated_at)}</div>
-            ${item.latest_job_id ? `<div class="small muted">最近任务：${esc(item.latest_job_id)}</div>` : ""}
-            <div class="row">
-              <select data-application-status data-id="${esc(item.application_id)}">
-                ${Object.entries(APP_STATUS_LABELS).map(([value, label]) => `<option value="${value}" ${item.status === value ? "selected" : ""}>${esc(label)}</option>`).join("")}
-              </select>
-              <button class="btn btn-outline btn-sm" data-action="update-application-status" data-id="${esc(item.application_id)}">保存状态</button>
-              <button class="btn btn-primary btn-sm" data-action="run-application" data-id="${esc(item.application_id)}">运行</button>
-              <button class="btn btn-danger btn-sm" data-action="delete-application" data-id="${esc(item.application_id)}">删除</button>
-            </div>
-          </div>`).join("") || `<div class="muted small">还没有投递记录</div>`}
-      </div>
-    </details>`;
 }
 
 /* 定稿面板（与遗留 renderWorkspaceView 的 renderFinalDraftPanel 同构）。
@@ -619,7 +575,6 @@ export async function renderOptimizerCanvas(app, jobId) {
     }
     const resumes = await api("/api/master-resumes");
     state.wbResumes = resumes;
-    state.wbApplications = await api("/api/applications").catch(() => []);
     app.innerHTML = `
       <div class="page-header page-header--workspace"><div><h2>单岗位工作台</h2>
         <div class="sub">从岗位库选择岗位，或使用顶部万能输入直接创建新岗位</div></div></div>
@@ -633,8 +588,7 @@ export async function renderOptimizerCanvas(app, jobId) {
           ${workbenchJobs.length ? '<button class="btn btn-primary" data-action="goto-selected-job">进入工作台</button>' : '<button class="btn btn-primary" data-action="open-command-panel">粘贴 JD / 链接</button>'}
         </div>
       </div>
-      <div data-applications-panel></div>`;
-    renderApplicationsPanel(app);
+    `;
     return;
   }
   let session = await loadSession(jobId);
@@ -679,7 +633,6 @@ export async function renderOptimizerCanvas(app, jobId) {
   state.wbJob = session.job || state.wbJob;
   const resumes = await api("/api/master-resumes");
   state.wbResumes = resumes;
-  state.wbApplications = await api("/api/applications").catch(() => []);
   renderSplitCanvas(app, session, resumes, workbenchJobs);
   startPollingFallback(session);
   startEventStream(session);

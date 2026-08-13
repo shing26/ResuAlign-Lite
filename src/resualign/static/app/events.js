@@ -51,15 +51,6 @@ export const $$ = (selector, root = document) => [...root.querySelectorAll(selec
 
 let vocabularyRequest = null;
 
-export const APP_STATUSES = ["draft", "applied", "interview", "offer", "rejected", "withdrawn"];
-export const APP_STATUS_LABELS = {
-  draft: "草稿",
-  applied: "已投递",
-  interview: "面试中",
-  offer: "已拿Offer",
-  rejected: "未通过",
-  withdrawn: "已放弃",
-};
 export const STAGE_WEIGHTS = {
   queued: 0.05,
   running: 0.1,
@@ -81,8 +72,6 @@ export const state = {
   limit: 20,
   wbJob: null,
   wbResumes: [],
-  wbApplications: [],
-  applicationPoll: null,
   wbResult: null,
   wbRun: null,
   wbOriginalContent: null,
@@ -608,9 +597,3 @@ export function setWbMobilePane(pane) {
   });
 }
 
-export function stopApplicationPolling() {
-  const poll = state.applicationPoll;
-  if (poll && poll.timer) window.clearInterval(poll.timer);
-  stopPolling("application");
-  state.applicationPoll = null;
-}
