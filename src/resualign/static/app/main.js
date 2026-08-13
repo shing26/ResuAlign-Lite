@@ -2,11 +2,17 @@ import {
   $,
   $$,
   api,
+  applyPendingStatusTransition,
   buildDiagnosisMarkdown,
+  cancelPendingStatusTransition,
   closeModal,
+  confirmBackwardStatus,
   download,
   esc,
   formatDate,
+  isBackwardJobStatus,
+  jobStatusLabel,
+  jobStatusRank,
   normalizeVocabulary,
   renderBatchResults,
   renderDiagnosisError,
@@ -975,6 +981,13 @@ const actions = {
   "record-application": async (button) => {
     const job = state.wbJob;
     if (!job) return;
+    if (jobStatusRank(job.status) >= jobStatusRank("applied")) {
+      toast(
+        `岗位已是「${jobStatusLabel(job.status)}」，无需重复记录投递`,
+        "info",
+      );
+      return;
+    }
     const today = new Date();
     const pad = (n) => String(n).padStart(2, "0");
     const appliedAt = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
@@ -1661,6 +1674,8 @@ const actions = {
     toast(`已取消 ${result.canceled} 个排队任务`, "success");
   },
   "close-modal": closeModal,
+  "confirm-status-back": () => applyPendingStatusTransition(),
+  "cancel-status-back": () => cancelPendingStatusTransition(),
   /* Sprint 3: Pipeline + Blocker（抓取 Bar + 阻断队列）。所有新按钮走
    * document 级 data-action 委托；Modal 开关复用 events.js 的
    * showModal / closeModal（close-modal action 已在此注册）。 */
@@ -1868,19 +1883,31 @@ document.addEventListener("change", (event) => {
     updateBatchSelection();
   }
   if (target.matches("[data-board-status]")) {
-    api("/api/kanban/bulk-status", {
-      method: "POST",
-      body: JSON.stringify({
-        job_ids: [target.dataset.id],
-        status: target.value,
-        idempotency_key: `fe-select-${target.dataset.id}-${target.value}`,
-      }),
-    })
-      .then(() => {
-        toast("岗位状态已更新", "success");
-        render();
+    const job = (state.jobs || []).find(
+      (item) => item.job_id === target.dataset.id,
+    );
+    const applyStatus = () => {
+      api("/api/kanban/bulk-status", {
+        method: "POST",
+        body: JSON.stringify({
+          job_ids: [target.dataset.id],
+          status: target.value,
+          idempotency_key: `fe-select-${target.dataset.id}-${target.value}`,
+        }),
       })
-      .catch((error) => toast(error.message, "error"));
+        .then(() => {
+          toast("岗位状态已更新", "success");
+          render();
+        })
+        .catch((error) => toast(error.message, "error"));
+    };
+    if (job && isBackwardJobStatus(job.status, target.value)) {
+      confirmBackwardStatus(job, target.value, applyStatus, () => {
+        target.value = job.status;
+      });
+    } else {
+      applyStatus();
+    }
   }
   if (target.matches("[data-job-switcher]") && target.value) {
     switchWorkspaceJob(target.value);
@@ -2062,13 +2089,38 @@ async function handleForm(formName, data, form) {
         next_step_due_at: data.next_step_due_at || null,
         interview_stage: data.interview_stage || null,
       };
-      await api(`/api/jobs/${encodeURIComponent(data.job_id)}`, {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-      });
-      toast("岗位时间线已保存", "success");
-      closeModal();
-      render();
+      const job = (state.jobs || []).find(
+        (item) => item.job_id === data.job_id,
+      );
+      const saveDetail = async () => {
+        await api(`/api/jobs/${encodeURIComponent(data.job_id)}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+        toast("岗位时间线已保存", "success");
+        closeModal();
+        render();
+      };
+      if (job && isBackwardJobStatus(job.status, data.status)) {
+        confirmBackwardStatus(job, data.status, saveDetail, () => {
+          showModal(
+            `岗位详情 · ${job.title}`,
+            jobTimelineFormHtml({
+              ...job,
+              status: data.status,
+              applied_at: data.applied_at || "",
+              next_step: data.next_step || "",
+              notes: data.notes || "",
+              offer_at: data.offer_at || "",
+              rejected_at: data.rejected_at || "",
+              next_step_due_at: data.next_step_due_at || "",
+              interview_stage: data.interview_stage || "",
+            }),
+          );
+        });
+        return;
+      }
+      await saveDetail();
       break;
     }
     case "job-filter":

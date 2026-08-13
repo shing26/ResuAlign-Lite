@@ -90,6 +90,75 @@ def _validate_status(status: str) -> str:
     raise UserStoreError(f"Invalid status: {value}")
 
 
+def status_lifecycle_fields(
+    current: dict[str, Any] | None,
+    target_status: str,
+    today: str | None = None,
+    provided: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """Return timeline field writes for a status transition (ADR-0027).
+
+    Values follow ``update_job``'s clear-on-empty contract: ``""`` clears a
+    field, a string sets it, and omitted keys leave it unchanged. Forward
+    moves fill the stage's missing timestamp with ``today``; terminal states
+    keep historical timestamps while clearing follow-up fields.
+    """
+    target = canonical_status(target_status)
+    if target not in JOB_STATUSES_CANONICAL:
+        return {}
+    today = today or time.strftime("%Y-%m-%d")
+    current = current or {}
+    provided = provided or {}
+    out: dict[str, str] = {}
+
+    if target == "draft":
+        for field in (
+            "applied_at",
+            "offer_at",
+            "rejected_at",
+            "next_step",
+            "next_step_due_at",
+            "interview_stage",
+        ):
+            out[field] = ""
+        return out
+
+    if target == "applied":
+        out["applied_at"] = (
+            provided.get("applied_at")
+            or current.get("applied_at")
+            or today
+        )
+        for field in ("offer_at", "rejected_at", "interview_stage"):
+            out[field] = ""
+        return out
+
+    if target == "interview":
+        out["applied_at"] = (
+            provided.get("applied_at")
+            or current.get("applied_at")
+            or today
+        )
+        for field in ("offer_at", "rejected_at"):
+            out[field] = ""
+        return out
+
+    if target == "offer":
+        out["offer_at"] = provided.get("offer_at") or today
+        out["rejected_at"] = ""
+        for field in ("next_step", "next_step_due_at", "interview_stage"):
+            out[field] = ""
+        return out
+
+    if target == "withdrawn":
+        out["rejected_at"] = provided.get("rejected_at") or today
+        for field in ("next_step", "next_step_due_at", "interview_stage"):
+            out[field] = ""
+        return out
+
+    return out
+
+
 RULE_TYPES = ("blacklist", "city_whitelist", "min_salary")
 
 BLOCKER_CATEGORIES = (
@@ -747,6 +816,37 @@ class JobLibraryStore(_SqliteStore):
         if jd_text is not None and not jd_text.strip():
             raise UserStoreError("Job description text cannot be empty")
 
+        lifecycle: dict[str, str] = {}
+        if status is not None:
+            current = self.get_job(tenant_id, job_id)
+            if current is None:
+                return None
+            lifecycle = status_lifecycle_fields(
+                current,
+                status,
+                provided={
+                    "applied_at": applied_at,
+                    "offer_at": offer_at,
+                    "rejected_at": rejected_at,
+                    "next_step": next_step,
+                    "next_step_due_at": next_step_due_at,
+                    "interview_stage": interview_stage,
+                },
+            )
+            for field, value in lifecycle.items():
+                if field == "applied_at":
+                    applied_at = value
+                elif field == "offer_at":
+                    offer_at = value
+                elif field == "rejected_at":
+                    rejected_at = value
+                elif field == "next_step":
+                    next_step = value
+                elif field == "next_step_due_at":
+                    next_step_due_at = value
+                elif field == "interview_stage":
+                    interview_stage = value
+
         sets = ["updated_at = ?"]
         values: list[Any] = [time.time()]
         if title is not None:
@@ -1162,10 +1262,24 @@ class JobLibraryStore(_SqliteStore):
                             }
                         )
                         continue
+                    timeline = status_lifecycle_fields(
+                        dict(row),
+                        status,
+                    )
+                    if timeline:
+                        columns = ["status = ?", "updated_at = ?"]
+                        params: list[Any] = [status, now]
+                        for field, value in timeline.items():
+                            columns.append(f"{field} = ?")
+                            params.append(value or None)
+                    else:
+                        columns = ["status = ?", "updated_at = ?"]
+                        params = [status, now]
+                    params.extend([job_id, tenant_id])
                     cursor = conn.execute(
-                        "UPDATE library_jobs SET status = ?, updated_at = ? "
+                        f"UPDATE library_jobs SET {', '.join(columns)} "
                         "WHERE job_id = ? AND tenant_id = ?",
-                        (status, now, job_id, tenant_id),
+                        params,
                     )
                     if cursor.rowcount == 0:
                         results.append(

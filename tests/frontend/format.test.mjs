@@ -12,11 +12,13 @@ import {
   formatSalary,
   hasEvalResult,
   inlineDiff,
+  isBackwardJobStatus,
   isJdUrl,
   isJunkJd,
   jobCompleteness,
   jobCompletenessBadge,
   jobEditFormHtml,
+  jobStatusRank,
   jobStatusLabel,
   jobTimelineFormHtml,
   lineDiff,
@@ -161,6 +163,23 @@ test("jobStatusLabel maps canonical back to Chinese label", () => {
   assert.equal(jobStatusLabel("draft"), "未投递");
   assert.equal(jobStatusLabel("未投递"), "未投递");
   assert.equal(jobStatusLabel("whatever"), "whatever");
+});
+
+test("jobStatusRank follows the five-column pipeline order", () => {
+  assert.equal(jobStatusRank("draft"), 0);
+  assert.equal(jobStatusRank("已投递"), 1);
+  assert.equal(jobStatusRank("interview"), 2);
+  assert.equal(jobStatusRank("已拿Offer"), 3);
+  assert.equal(jobStatusRank("withdrawn"), 4);
+  assert.equal(jobStatusRank("自定义"), -1);
+});
+
+test("isBackwardJobStatus only flags moves toward earlier columns", () => {
+  assert.equal(isBackwardJobStatus("interview", "applied"), true);
+  assert.equal(isBackwardJobStatus("已拿Offer", "draft"), true);
+  assert.equal(isBackwardJobStatus("applied", "interview"), false);
+  assert.equal(isBackwardJobStatus("applied", "applied"), false);
+  assert.equal(isBackwardJobStatus("applied", "自定义"), false);
 });
 
 /* ------------------------------------------------------------------ */
