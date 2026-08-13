@@ -88,6 +88,8 @@ export const state = {
   batchResumes: [],
   wbFinalDraft: null,
   wbRawJdOpen: false,
+  wbControlsOpen: true,
+  wbExportDockOpen: false,
   /* U7: 工作台工作草稿——采纳/应用基于当前草稿增量合并，连续采纳不丢前一条。
    * wbWorkingDraft = { jobId, draft }；wbAcceptedBullets = { [jobId]: [diffId] } */
   wbWorkingDraft: null,

@@ -255,8 +255,10 @@ def run_key_path(
     )
     page = new_page(context, errors)
 
-    # Import resume through the resume center.
-    page.goto(f"{base}/#/resume", wait_until="domcontentloaded")
+    # Import resume through the resume center. The default #/resume route
+    # opens the newest resume's detail once one exists, so the list route is
+    # used explicitly to keep each run able to create a fresh resume.
+    page.goto(f"{base}/#/resume/list", wait_until="domcontentloaded")
     page.wait_for_selector('[data-action="new-resume"]')
     page.locator('[data-action="new-resume"]').first.click()
     page.fill(
@@ -274,7 +276,10 @@ def run_key_path(
             break
         page.wait_for_timeout(200)
     match_count = page.locator(f"text={resume_title}").count()
-    expect(match_count >= 1, "imported resume card missing")
+    expect(match_count >= 1, "imported resume list card missing")
+    # v3 default route opens the newest resume's detail view; verify it too.
+    page.goto(f"{base}/#/resume", wait_until="domcontentloaded")
+    page.wait_for_selector("[data-resume-sheet-doc]", timeout=10000)
     assert_no_overflow(page, f"{prefix} resume center")
     resumes = api_call(base, "GET", "/api/master-resumes")
     resume_id = next(
@@ -324,6 +329,9 @@ def run_key_path(
     # Tailor in the Optimizer split canvas.
     page = new_page(context, errors)
     page.goto(f"{base}/#/workspace/{job_id}", wait_until="domcontentloaded")
+    page.wait_for_selector("[data-inspector-controls]")
+    if not page.locator("[data-form='split-align']").first.is_visible():
+        page.click("[data-inspector-controls] summary")
     page.wait_for_selector("[data-form='split-align']")
     page.select_option(
         '[data-form="split-align"] select[name="master_resume_id"]', resume_id
@@ -345,7 +353,12 @@ def run_key_path(
         "tailor diff controls missing",
     )
 
-    # Export markdown on every viewport.
+    # Export markdown on every viewport (the export dock is collapsed by
+    # default in v3; expand it before clicking a menu action).
+    if not page.locator(
+        '[data-action="export-align-markdown"]'
+    ).first.is_visible():
+        page.click("[data-export-dock] summary")
     with page.expect_download() as download_info:
         page.click('[data-action="export-align-markdown"]')
     download = download_info.value
@@ -363,6 +376,8 @@ def run_key_path(
 
     # Export PDF on the desktop viewport.
     if prefix == "Phase20":
+        if not page.locator('[data-action="export-align-pdf"]').first.is_visible():
+            page.click("[data-export-dock] summary")
         page.click('[data-action="export-align-pdf"]')
         page.wait_for_selector(
             "#print-root .resume-doc", state="attached"
