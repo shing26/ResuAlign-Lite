@@ -144,7 +144,6 @@ def _etag_for(session: dict[str, Any]) -> str:
             "resume",
             "gap",
             "alignment",
-            "appraisal",
             "crawl",
         )
     }
@@ -164,7 +163,6 @@ def public_state(session: dict[str, Any]) -> dict[str, Any]:
         "resume": session.get("resume"),
         "gap": session.get("gap"),
         "alignment": session.get("alignment"),
-        "appraisal": session.get("appraisal") or {},
         "crawl": session.get("crawl"),
         "meta": {
             "etag": session.get("_etag") or _etag_for(session),
@@ -260,7 +258,6 @@ class WorkstationSessionStore:
                     "draft": None,
                     "eval_score": None,
                 },
-                "appraisal": {},
                 "crawl": {
                     "crawl_id": None,
                     "status": "idle",

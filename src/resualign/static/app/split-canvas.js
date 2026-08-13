@@ -1,6 +1,7 @@
 /* Copilot board + Optimizer split canvas for the 2.0 workstation flow. */
 
 import {
+  APP_STATUS_LABELS,
   $,
   STAGE_LABELS,
   api,
@@ -29,8 +30,6 @@ import {
   renderSkills,
   stageStepper,
 } from "./format.js";
-import { renderAppraisal, renderAppraisalSync } from "./appraisal-panel.js";
-
 let activeSession = null;
 let activeSessionUrl = null;
 let activeJobId = null;
@@ -70,6 +69,7 @@ let liveSheetApiPromise = null;
    Kept until the gap list actually contains a matching item (the gap may
    arrive via SSE after the first paint). */
 let pendingSkillFocus = null;
+let activeAuxPane = "inspector";
 
 
 function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
@@ -97,93 +97,120 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
     (state.wbFinalDraft && state.wbFinalDraft.draft) ||
     (session && session.alignment && session.alignment.draft) ||
     null;
+  const alignment = (session && session.alignment) || {};
+  const alignmentRunning =
+    alignment.status === "running" || alignment.status === "queued";
+  const diffs = Array.isArray(alignment.diffs) ? alignment.diffs : [];
+  const acceptedIds = new Set((state.wbAcceptedBullets || {})[jobId] || []);
+  const acceptedCount = diffs.filter(
+    (diff) =>
+      acceptedIds.has(diff.diff_id) || diff.provenance_state === "accepted",
+  ).length;
+  const pendingCount = Math.max(0, diffs.length - acceptedCount);
+  const matchScore =
+    (alignment.eval_score && alignment.eval_score.jd_match_score) ||
+    gap.score ||
+    job.match_score ||
+    null;
+  const requiredSkills = Array.isArray(profile.required_skills)
+    ? profile.required_skills
+    : [];
+  const niceSkills = Array.isArray(profile.nice_to_have_skills)
+    ? profile.nice_to_have_skills
+    : [];
+  const tagItems = [...requiredSkills.slice(0, 6), ...niceSkills.slice(0, 3)];
+  const inspectorActive = activeAuxPane === "inspector" || state.wbMobilePane !== "diff";
+  const livesheetActive = activeAuxPane === "livesheet" || state.wbMobilePane === "diff";
+  const dutyText = String(
+    (summary && summary.summary) || job.jd_text || "",
+  ).trim().slice(0, 240);
   app.innerHTML = `
-    <div class="split-canvas" data-surface-mode="optimizer">
-      <div class="page-header page-header--workspace">
-        <div>
-          <button class="btn btn-ghost btn-sm" data-action="back-to-jobs">← 返回岗位库</button>
-          <h2 style="margin-top:6px">${esc(job.title || "岗位工作台")}</h2>
-          <div class="sub">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)} · ${esc(jobStatusLabel(job.status))} ${jobCompletenessBadge(job)}</div>
+    <div class="view view-fit workbench-view" data-surface-mode="optimizer">
+      ${crawlStatusLine(session)}
+      <div class="wb-mobile-tabs" role="tablist" aria-label="工作台面板">
+        <button type="button" class="segmented-button seg" data-action="set-wb-tab" data-wb-tab="controls" aria-selected="${state.wbMobilePane === "controls"}">调优</button>
+        <button type="button" class="segmented-button seg" data-action="set-wb-tab" data-wb-tab="diff" aria-selected="${state.wbMobilePane === "diff"}">结果</button>
+      </div>
+      <div class="wb-context">
+        <div class="wb-context-main">
+          <div class="wb-context-title">
+            <span class="context-kicker">目标岗位</span>
+            <h2>${esc(job.title || "岗位工作台")}</h2>
+            ${alignment.status === "succeeded" ? '<span class="pill pill-success">已对齐</span>' : ""}
+          </div>
+          <div class="wb-context-meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)} · ${esc(jobStatusLabel(job.status))} · 匹配 ${matchScore == null ? "—" : `${esc(matchScore)} / 100`}</div>
+          <div class="wb-tags">${tagItems.map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}</div>
         </div>
-        <div class="row">
-          <select class="workbench-job-switcher" data-job-switcher aria-label="切换岗位">
+        <div class="wb-context-actions">
+          <span class="status-line"><span class="dot dot-success" aria-hidden="true"></span>${esc(diffs.length)} 条改写建议 · ${esc(acceptedCount)} 已采纳 · ${esc(pendingCount)} 待采纳</span>
+          <select class="input input-sm" data-job-switcher aria-label="切换岗位">
             ${jobs.map((item) => `<option value="${esc(item.job_id)}" ${item.job_id === jobId ? "selected" : ""}>${esc(item.title)}${item.company ? ` · ${esc(item.company)}` : ""}</option>`).join("")}
           </select>
-          ${renderMatchBadge(session, job)}
-          ${job.source_url ? `<a class="btn btn-outline btn-sm" href="${esc(job.source_url)}" target="_blank" rel="noopener">原岗位链接</a>` : ""}
+          <button class="btn btn-primary" type="button" data-action="run-alignment" ${alignmentRunning ? "disabled" : ""}>${alignmentRunning ? "对齐生成中..." : "重新生成对齐"}</button>
         </div>
       </div>
-      ${crawlStatusLine(session)}
-      ${stageStepper(session)}
-      <div class="wb-mobile-tabs segmented" role="tablist" aria-label="工作台面板">
-        <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="controls" aria-selected="${state.wbMobilePane === "controls"}">调优</button>
-        <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="diff" aria-selected="${state.wbMobilePane === "diff"}">结果</button>
-        <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="appraisal" aria-selected="${state.wbMobilePane === "appraisal"}">评估</button>
-      </div>
-      <!-- Sprint 2 三栏 Workbench：22% Inspector / 48% Visual Diff / 30% Live Sheet。
-           列宽由 styles.css 的 .split-layout grid-template-columns 控制（B），
-           本模板只声明 data-* 结构标记。移动端（<=900px）单列堆叠由 B 的媒体查询处理。 -->
-      <div class="split-layout" data-split-layout>
-        <section class="split-pane split-pane--jd ${state.wbMobilePane === "controls" ? "is-active" : ""}" data-wb-pane="controls" data-inspector-pane data-jd-canvas>
-          <div class="split-pane__head">
+      <div class="wb-grid" data-split-layout>
+        <section class="wb-main ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>
+          <div class="wb-main-head">
             <div>
-              <div class="split-section-title">JD 智能解析</div>
-              <div class="small muted">${jd.status === "ready" ? "画像已就绪" : jd.status === "failed" ? `分析失败：${esc(jd.error || "")}` : "正在提取岗位画像..."}</div>
+              <h2>简历对齐画布</h2>
+              <p>逐条采纳 AI 精修建议，保留 Provenance 溯源标记</p>
             </div>
-            <div class="row">
-              ${jd.status === "ready" ? `<button class="btn btn-ghost btn-sm" data-action="toggle-raw-jd" type="button">原文</button>` : ""}
-              ${!jd.profile ? `<button class="btn btn-primary btn-sm" data-action="analyze-jd" type="button" ${jd.status === "queued" || jd.status === "running" ? "disabled" : ""}>${jd.status === "queued" || jd.status === "running" ? "解析中..." : jd.status === "failed" ? "重试解析" : "解析 JD"}</button>` : ""}
+            <div class="toolbar-group">
+              ${exportDock(jobId, session)}
+              ${alignment.diffs && alignment.diffs.length ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-live-compare">并排对比</button>` : ""}
             </div>
           </div>
-          ${jd.status === "ready" && summary ? `
-            <div class="jd-summary" data-jd-summary>
-              <div class="jd-summary__title">${esc(summary.title)}</div>
-              <div class="row">${summary.seniority ? `<span class="badge badge-gray">${esc(summary.seniority)}</span>` : ""}${summary.education.length ? `<span class="badge badge-gray">${esc(summary.education.join(" / "))}</span>` : ""}</div>
-              ${summary.summary ? `<div class="small jd-summary__text">${esc(String(summary.summary).slice(0, 220))}</div>` : ""}
-            </div>` : jd.status === "failed" ? `<div class="jd-error" role="alert">无法完成岗位画像，可点击右上角重试。</div>` : `<div class="split-skeleton is-shimmer">解析中</div>`}
-          <div class="split-bento">
-            <div class="split-bento__cell">${renderSkills(profile)}</div>
-            <div class="split-bento__cell">
-              <div class="split-section-title">岗位差距</div>
+          <div class="align-summary">
+            <div><span class="summary-score">${matchScore == null ? "—" : esc(matchScore)}</span><span class="summary-unit">/ 100</span></div>
+            <div class="align-metrics">
+              <div class="align-metric"><b>${esc(diffs.length)}</b><span>改写建议</span></div>
+              <div class="align-metric"><b>${esc(acceptedCount)}</b><span>已采纳</span></div>
+              <div class="align-metric"><b>${esc(pendingCount)}</b><span>待采纳</span></div>
+              <div class="align-metric"><b>${alignment.eval_score && alignment.eval_score.hallucination_detected === false ? "通过" : alignment.eval_score && alignment.eval_score.hallucination_detected === true ? "风险" : "—"}</b><span>幻觉检测</span></div>
+            </div>
+          </div>
+          <div class="panel panel--success final-draft-panel" data-final-draft-panel hidden></div>
+          <div class="diff-list">${diffList(session, jobId)}</div>
+        </section>
+        <aside class="wb-aux">
+          <div class="wb-tabs" role="tablist" aria-label="工作台辅助信息">
+            <button type="button" class="wb-tab ${activeAuxPane === "inspector" ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector" aria-selected="${activeAuxPane === "inspector"}">JD Inspector</button>
+            <button type="button" class="wb-tab ${activeAuxPane === "livesheet" ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="livesheet" aria-selected="${activeAuxPane === "livesheet"}">Live Sheet</button>
+          </div>
+          <div class="wb-pane ${inspectorActive ? "active" : ""}" data-wb-pane="controls" data-inspector-pane data-jd-canvas>
+            <section class="pane-section" data-jd-summary>
+              <h3>岗位职责萃取</h3>
+              ${dutyText ? `<p class="workbench-duty-text">${esc(dutyText)}</p>` : `<p class="small muted">岗位职责摘要生成中。</p>`}
+            </section>
+            <section class="pane-section">
+              <h3>硬技能</h3>
+              ${renderSkills(profile)}
+            </section>
+            <section class="pane-section workbench-gap">
+              <h3>技能缺口</h3>
               ${pendingSkillFocus ? (highlightSkillGapHtml(gap.gap_report || gap, pendingSkillFocus) || "") : (renderGap(gap.gap_report || gap) || "")}
-            </div>
+            </section>
+            <details class="raw-jd" data-raw-jd>
+              <summary>查看原始 JD</summary>
+              <pre>${esc(job.jd_text || "")}</pre>
+            </details>
+            <details class="inspector-controls" data-inspector-controls>
+              <summary>对齐调优</summary>
+              ${alignmentControls(session, resumes, jobId)}
+            </details>
+            <section class="pane-section applications-panel" data-applications-panel></section>
           </div>
-          <details class="raw-jd-details" data-raw-jd>
-            <summary class="small">查看原始 JD</summary>
-            <div class="pre raw-jd">${esc(job.jd_text || "")}</div>
-          </details>
-          <div class="inspector-controls" data-inspector-controls>
-            ${alignmentControls(session, resumes, jobId)}
-          </div>
-        </section>
-        <section class="split-pane split-pane--resume split-pane--diff ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>
-          <div class="split-pane__head">
-            <div>
-              <div class="split-section-title">简历对齐画布</div>
-              <div class="small muted">逐条采纳 AI 改写建议，保留来源标记</div>
-            </div>
-            ${((session && session.alignment && session.alignment.diffs) || []).length ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-live-compare">并排对比</button>` : ""}
-          </div>
-          ${exportDock(jobId, session)}
-          <div class="panel panel-card panel--success final-draft-panel" data-final-draft-panel hidden></div>
-          <div class="split-diff-area">${diffList(session, jobId)}</div>
-        </section>
-        <section class="split-pane split-pane--livesheet" data-live-sheet-pane>
-          <div class="split-pane__head">
-            <div>
-              <div class="split-section-title">实时定稿预览</div>
-              <div class="small muted">采纳建议后，此处实时增量更新</div>
-            </div>
-          </div>
-          <div class="live-sheet__paper" data-live-sheet-paper></div>
-        </section>
+          <div class="wb-pane ${livesheetActive ? "active" : ""}" data-wb-pane="livesheet" data-live-sheet-pane></div>
+        </aside>
+        <form data-form="wb-run" hidden aria-hidden="true">
+          <input type="hidden" name="job_id" value="${jobId}">
+          <input type="hidden" name="master_resume_id" value="">
+          <input type="hidden" name="granularity" value="medium">
+          <input type="hidden" name="prompt_focus" value="balanced">
+          <input type="checkbox" name="run_eval" hidden>
+        </form>
       </div>
-      <details class="panel panel-card panel--info appraisal-panel split-appraisal ${state.wbMobilePane === "appraisal" ? "is-active" : ""}" data-wb-pane="appraisal" data-appraisal-panel open>
-        <summary>投递价值评估</summary>
-        <div class="appraisal-body" data-appraisal-body>
-          <div class="muted small">运行一次对齐分析后生成</div>
-        </div>
-      </details>
     </div>`;
   const form = $("[data-form='split-align']");
   if (form) {
@@ -207,6 +234,14 @@ function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
    * 采纳后整画布刷新都会走到这里）。增量 patch 只发生在已填充的 live pane
    * 上（见 syncLiveSheetDraft）；全新画布的 body 为空，这里做整栏填充。 */
   mountLiveSheet(app, liveSheetDraft);
+  app.querySelectorAll("[data-diff-id]").forEach((card) => {
+    if (!acceptedIds.has(card.dataset.diffId)) return;
+    card.classList.add("accepted");
+    const actions = card.querySelector("[data-diff-actions]");
+    if (actions) {
+      actions.innerHTML = '<button type="button" class="btn btn-ghost btn-sm adopted" disabled>已采纳</button>';
+    }
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -242,8 +277,8 @@ function fallbackLiveSheetHtml(draft) {
     return `
       <div class="split-pane__head">
         <div>
-          <div class="split-section-title">实时定稿预览</div>
-          <div class="small muted">采纳建议后，此处实时增量更新</div>
+          <div class="split-section-title">定稿 Live Sheet</div>
+          <div class="small muted">实时同步</div>
         </div>
       </div>
       <div class="live-sheet__paper" data-live-sheet-paper>
@@ -253,8 +288,8 @@ function fallbackLiveSheetHtml(draft) {
   return `
     <div class="split-pane__head">
       <div>
-        <div class="split-section-title">实时定稿预览</div>
-        <div class="small muted">采纳建议后，此处实时增量更新</div>
+        <div class="split-section-title">定稿 Live Sheet</div>
+        <div class="small muted">实时同步</div>
       </div>
     </div>
     <div class="live-sheet__paper" data-live-sheet-paper>
@@ -427,17 +462,57 @@ function tryFocusSkill() {
   pendingSkillFocus = null;
 }
 
-/* Re-render the cached appraisal body and the final-draft panel after
- * every canvas repaint (SSE events replace #app.innerHTML wholesale, so
- * the panels would otherwise fall back to their placeholder states). */
+/* Re-render the final-draft panel after every canvas repaint (SSE events
+ * replace #app.innerHTML wholesale, so the panel would otherwise fall back
+ * to its placeholder state). */
 function renderCanvasExtras() {
   const app = $("#app-router-view");
   if (!app) return;
   renderFinalDraftPanel(app);
-  const appraisalPanel = $("[data-appraisal-panel]", app);
-  if (appraisalPanel && activeJobId) renderAppraisalSync(appraisalPanel, activeJobId);
+  renderApplicationsPanel(app);
   /* T3: 每次画布重绘都尝试 ?skill= 深链定位；gap 未就绪时保持 pending。 */
   tryFocusSkill();
+}
+
+function renderApplicationsPanel(app) {
+  const panel = $("[data-applications-panel]", app);
+  if (!panel) return;
+  const apps = Array.isArray(state.wbApplications)
+    ? state.wbApplications
+    : [];
+  const resumes = Array.isArray(state.wbResumes) ? state.wbResumes : [];
+  panel.innerHTML = `
+    <details class="applications-panel__box" open>
+      <summary>投递记录</summary>
+      <form data-form="application-create">
+        <div class="form-grid">
+          <label class="field"><span>标题</span><input type="text" name="title" required placeholder="例如：Acme 后端"></label>
+          <label class="field"><span>主简历</span><select name="master_resume_id" required><option value="">选择简历</option>${resumes.map((resume) => `<option value="${resume.resume_id}">${esc(resume.title)}</option>`).join("")}</select></label>
+          <label class="field wide"><span>JD 文本</span><textarea name="jd_text" rows="3"></textarea></label>
+          <label class="field wide"><span>JD 链接</span><input type="url" name="jd_url"></label>
+        </div>
+        <div class="row"><button class="btn btn-secondary btn-sm" type="submit">创建投递记录</button></div>
+      </form>
+      <div class="card-list motion-stagger">
+        ${apps.map((item) => `
+          <div class="card application-card card-base card-hover-soft">
+            <div class="card-head">
+              <div class="card-title">${esc(item.title)}</div>
+              <span class="badge badge-gray">${esc(APP_STATUS_LABELS[item.status] || item.status)}</span>
+            </div>
+            <div class="card-meta">简历 v${esc(item.resume_version)} · 更新于 ${formatDate(item.updated_at)}</div>
+            ${item.latest_job_id ? `<div class="small muted">最近任务：${esc(item.latest_job_id)}</div>` : ""}
+            <div class="row">
+              <select data-application-status data-id="${esc(item.application_id)}">
+                ${Object.entries(APP_STATUS_LABELS).map(([value, label]) => `<option value="${value}" ${item.status === value ? "selected" : ""}>${esc(label)}</option>`).join("")}
+              </select>
+              <button class="btn btn-outline btn-sm" data-action="update-application-status" data-id="${esc(item.application_id)}">保存状态</button>
+              <button class="btn btn-primary btn-sm" data-action="run-application" data-id="${esc(item.application_id)}">运行</button>
+              <button class="btn btn-danger btn-sm" data-action="delete-application" data-id="${esc(item.application_id)}">删除</button>
+            </div>
+          </div>`).join("") || `<div class="muted small">还没有投递记录</div>`}
+      </div>
+    </details>`;
 }
 
 /* 定稿面板（与遗留 renderWorkspaceView 的 renderFinalDraftPanel 同构）。
@@ -466,8 +541,6 @@ function renderFinalDraftPanel(app) {
     <div class="pre draft-preview">${esc(draft.draft)}</div>
     <div class="row final-draft-actions">
       <button class="btn btn-primary btn-sm" data-action="record-application">记录投递</button>
-      <button class="btn btn-outline btn-sm" data-action="export-final-draft">导出 PDF</button>
-      <button class="btn btn-outline btn-sm" data-action="export-final-draft-md">导出 Markdown</button>
       <button class="btn btn-secondary btn-sm" data-action="save-as-new-resume">另存为新主简历</button>
     </div>`;
 }
@@ -520,6 +593,8 @@ export async function renderOptimizerCanvas(app, jobId) {
       return renderOptimizerCanvas(app, targetId);
     }
     const resumes = await api("/api/master-resumes");
+    state.wbResumes = resumes;
+    state.wbApplications = await api("/api/applications").catch(() => []);
     app.innerHTML = `
       <div class="page-header page-header--workspace"><div><h2>单岗位工作台</h2>
         <div class="sub">从岗位库选择岗位，或使用顶部万能输入直接创建新岗位</div></div></div>
@@ -532,7 +607,9 @@ export async function renderOptimizerCanvas(app, jobId) {
         <div class="row" style="margin-top:10px">
           ${workbenchJobs.length ? '<button class="btn btn-primary" data-action="goto-selected-job">进入工作台</button>' : '<button class="btn btn-primary" data-action="open-command-panel">粘贴 JD / 链接</button>'}
         </div>
-      </div>`;
+      </div>
+      <div data-applications-panel></div>`;
+    renderApplicationsPanel(app);
     return;
   }
   let session = await loadSession(jobId);
@@ -567,14 +644,13 @@ export async function renderOptimizerCanvas(app, jobId) {
   activeJobId = (session.job && session.job.job_id) || jobId;
   state.wbJob = session.job || state.wbJob;
   const resumes = await api("/api/master-resumes");
+  state.wbResumes = resumes;
+  state.wbApplications = await api("/api/applications").catch(() => []);
   renderSplitCanvas(app, session, resumes, workbenchJobs);
   startPollingFallback(session);
   startEventStream(session);
   resumeAlignmentProgress();
   autoAnalyzeJd(session);
-  /* 投递价值评估挂到 live 工作台（#B5）：首次进入按需拉取，
-     之后的画布重绘由 renderCanvasExtras 用缓存填充，不再重复请求。 */
-  renderAppraisal(app);
 }
 
 async function autoAnalyzeJd(session) {
@@ -620,13 +696,13 @@ async function autoAnalyzeJd(session) {
 
 async function loadSession(jobId) {
   try {
-    const session = await api(`/api/workbench/session/${encodeURIComponent(jobId)}`);
+    const session = await api(`/api/workspace/session/${encodeURIComponent(jobId)}`);
     if (session && session.session_id) return session;
   } catch {
-    /* fall through to workspace session */
+    /* fall through to a direct workbench session id */
   }
   try {
-    return await api(`/api/workspace/session/${encodeURIComponent(jobId)}`);
+    return await api(`/api/workbench/session/${encodeURIComponent(jobId)}`);
   } catch {
     return null;
   }
@@ -858,9 +934,17 @@ function stopOptimizerStreams() {
 }
 
 async function resumeAlignmentProgress() {
-  const job = activeSession && activeSession.job;
+  const session = activeSession;
+  const job = session && session.job;
   const analysisId = job && job.workbench_job_id;
-  if (!analysisId) return;
+  if (
+    !analysisId ||
+    (session &&
+      typeof session.session_id === "string" &&
+      session.session_id.startsWith("job:"))
+  ) {
+    return;
+  }
   if (
     activeSession.alignment &&
     activeSession.alignment.status === "succeeded"
@@ -982,6 +1066,14 @@ export async function cancelActiveAlignment() {
 }
 
 export async function startAlignmentRun(jobId, resumeId, granularity, focus, runEval) {
+  /* A fresh run must not compare against the previous run's original text,
+     accepted indices, or accumulated draft. */
+  state.wbOriginalContent = null;
+  state.wbAcceptedIndices = null;
+  if (state.wbWorkingDraft && state.wbWorkingDraft.jobId === jobId) {
+    state.wbWorkingDraft = null;
+  }
+  if (state.wbAcceptedBullets) delete state.wbAcceptedBullets[jobId];
   const payload = {
     master_resume_id: resumeId,
     granularity: granularity || "medium",
@@ -1132,6 +1224,22 @@ function stopAlignmentPoll() {
   }
   activePollJobId = null;
   alignmentStartedAt = 0;
+}
+
+export function setWbAuxPane(pane) {
+  if (pane !== "inspector" && pane !== "livesheet") return;
+  activeAuxPane = pane;
+  const app = $("#app-router-view");
+  if (!app) return;
+  app.querySelectorAll("[data-wb-tab-v3]").forEach((tab) => {
+    const active = tab.dataset.wbTabV3 === pane;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+  });
+  const inspector = app.querySelector("[data-inspector-pane]");
+  const livesheet = app.querySelector("[data-live-sheet-pane]");
+  if (inspector) inspector.classList.toggle("active", pane === "inspector");
+  if (livesheet) livesheet.classList.toggle("active", pane === "livesheet");
 }
 
 export function closeSplitCanvas() {

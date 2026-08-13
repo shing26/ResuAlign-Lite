@@ -7,10 +7,7 @@ import {
   download,
   esc,
   formatDate,
-  formatSalary,
   normalizeVocabulary,
-  options,
-  recoverDiagnosis,
   renderBatchResults,
   renderDiagnosisError,
   renderDiagnosisProgress,
@@ -18,8 +15,10 @@ import {
   showModal,
   startBatchPolling,
   startDiagnosisPolling,
+  startPolling,
   state,
   stopAllPolling,
+  stopApplicationPolling,
   stopBatchPolling,
   stopDiagnosisPolling,
   toast,
@@ -48,6 +47,7 @@ import {
   exportAlignMarkdown,
   getLiveSheetDraft,
   renderOptimizerCanvas,
+  setWbAuxPane,
   startAlignmentRun,
   syncLiveSheetDraft,
 } from "./split-canvas.js";
@@ -55,15 +55,12 @@ import {
   renderKanban,
   setCanvasRenderHook,
 } from "./kanban.js";
-import {
-  bindColumnScrollSync,
-} from "./diff-editor.js";
+import { bindColumnScrollSync } from "./diff-editor.js";
 import {
   applyAcceptedDiffsToDraft,
   applyDiffToDraft,
   applyJdParseError,
   applyJdParseResult,
-  atsHealthCardHtml,
   backupRestoreGuide,
   batchPanelHtml,
   batchRowsToCsv,
@@ -71,12 +68,9 @@ import {
   blockerListHtml,
   buildJobsBackup,
   buildLiveCompareHtml,
-  dashboardKpiHtml,
   dueReminders,
   fetchUrlResultMessage,
-  formatElapsed,
   isJdUrl,
-  jobCompletenessBadge,
   jobEditFormHtml,
   jobSelectOptionsHtml,
   jobTimelineFormHtml,
@@ -86,7 +80,6 @@ import {
   nodeTestResultHtml,
   onboardingSteps,
   parseHashValue,
-  quickContinueHtml,
   renderMarkdown,
   renderOnboardingCard,
   renderReminderBanner,
@@ -95,30 +88,30 @@ import {
   ruleListHtml,
   runEvalFromForm,
   settingsBentoHtml,
-  skillGapHtml,
-  versionTimelineHtml,
 } from "./format.js";
 import {
-  appraisalWeightsPayload,
   buildAutomationRulePayload,
   buildLlmNodePayload,
   evalDefaultFromForm,
-  normalizeAppraisalWeights,
-  salaryCityOptions,
-  salaryReferenceFromForm,
-  salaryReferenceRowsHtml,
-  validateAppraisalWeights,
   validateAutomationRule,
   validateLlmNodePayload,
-  validateSalaryReference,
 } from "./settings-form.js";
 
 const ROUTE_LABELS = {
   resume: "简历中心",
   jobs: "岗位库",
-  workspace: "工作台",
-  settings: "设置",
-  dashboard: "工作台总览",
+  workspace: "对齐工作台",
+  settings: "系统设置",
+  dashboard: "驾驶舱",
+};
+
+/* v3 shell: 顶栏标题/副标题随路由联动。 */
+const PAGE_META = {
+  dashboard: ["驾驶舱", "主简历与岗位对齐态势"],
+  workspace: ["对齐工作台", "岗位上下文、Diff 画布与 JD/Live Sheet 辅助舱"],
+  jobs: ["岗位库", "URL 自动抓取、阻断队列与 5 列 Pipeline 看板"],
+  resume: ["简历中心", "Markdown 双态编辑、ATS 健康度与版本时间线"],
+  settings: ["系统设置", "LLM 节点、Guardrails、自动化规则与词表"],
 };
 
 function parseHash() {
@@ -141,6 +134,23 @@ function setActiveTab() {
     button.setAttribute("aria-selected", String(selected));
     button.classList.toggle("active", selected);
   });
+}
+
+function refreshHeaderMeta() {
+  const route = (state.route && state.route.name) || "dashboard";
+  const [title, subtitle] = PAGE_META[route] || PAGE_META.dashboard;
+  const titleNode = $("#page-title");
+  const subtitleNode = $("#page-subtitle");
+  if (titleNode) titleNode.textContent = title;
+  if (subtitleNode) subtitleNode.textContent = subtitle;
+}
+
+function refreshJobsRailCount(count) {
+  const badge = $("[data-jobs-rail-count]");
+  if (!badge) return;
+  const total = Math.max(0, Number(count) || 0);
+  badge.hidden = total === 0;
+  badge.textContent = total;
 }
 
 /* 蓝图路由收口：hash → 视图分发的唯一入口。route 名直接来自 hash
@@ -175,7 +185,10 @@ async function handleRoute(app) {
       break;
     case "resumes":
     case "resume":
-      await renderResumeCenter(app, { resumeId: state.route.resumeId });
+      await renderResumeCenter(app, {
+        resumeId: state.route.resumeId === "list" ? null : state.route.resumeId,
+        showList: state.route.resumeId === "list",
+      });
       break;
     case "settings":
       await renderSettingsView(app);
@@ -188,9 +201,9 @@ async function handleRoute(app) {
 
 async function render() {
   state.route = parseHash();
-  document.body.classList.remove("wb-appraisal-drawer-open");
   closeSplitCanvas();
   setActiveTab();
+  refreshHeaderMeta();
   stopAllPolling();
   const app = $("#app-router-view");
   const printNode = $("#print-root");
@@ -246,38 +259,6 @@ function renderApiKeyGuide(app) {
     </div>`;
 }
 
-/* ------------------------------------------------------------------ */
-/* Dashboard (Sprint 1)                                                */
-/* ------------------------------------------------------------------ */
-
-async function renderDashboardView(app) {
-  const data = await api("/api/dashboard");
-  const kpi = (data && data.kpi) || {};
-  const gaps = (data && data.skill_gaps) || [];
-  const quickContinue = (data && data.quick_continue) || null;
-  app.innerHTML = `
-    <div class="page-header page-header--dashboard">
-      <div>
-        <h2>工作台总览</h2>
-        <div class="sub">求职进度、技能缺口与最近工作</div>
-      </div>
-      <div class="row">
-        <button class="btn btn-primary btn-sm" data-action="open-command-panel">粘贴 JD / 链接</button>
-        <a href="#/jobs" class="btn btn-outline btn-sm">去岗位库</a>
-      </div>
-    </div>
-    ${dashboardKpiHtml(kpi)}
-    <section class="panel panel-card dashboard-panel" data-skill-gap-panel>
-      <div class="dashboard-panel__head">
-        <h3>技能缺口热力图</h3>
-        <span class="small muted">出现在岗位硬性要求中的高频技能，点击进入对应岗位工作台</span>
-      </div>
-      ${skillGapHtml(gaps, (skill) => `#/workspace?skill=${encodeURIComponent(skill)}`)}
-    </section>
-    ${quickContinueHtml(quickContinue)}
-  `;
-}
-
 /* T2: Header 岗位快速选择器。每次 render() 异步刷新（fetch 去重），
  * 成功后回填 option 并保持当前工作台岗位选中；非 workspace 页也显示，
  * change 事件直接跳 #/workspace/<job_id>。 */
@@ -291,6 +272,7 @@ function refreshHeaderJobSelect() {
     .then((jobs) => {
       headerJobsCache = Array.isArray(jobs) ? jobs : [];
       populateHeaderJobSelect(headerJobsCache);
+      refreshJobsRailCount(headerJobsCache.length);
       return headerJobsCache;
     })
     .catch(() => {
@@ -413,202 +395,15 @@ async function showDuplicateJobGuide(payload) {
   );
 }
 
-async function renderWorkspaceView(app) {
-  const [jobs, resumes, applications] = await Promise.all([
-    api("/api/jobs?limit=200"),
-    api("/api/master-resumes"),
-    api("/api/applications"),
-    ensureVocabulary(),
-  ]);
-  state.wbResumes = resumes;
-  state.wbApplications = applications;
-
-  let job = state.route.jobId ? state.wbJob : null;
-  if (state.route.jobId && (!job || job.job_id !== state.route.jobId)) {
-    try {
-      job = await api(`/api/jobs/${encodeURIComponent(state.route.jobId)}`);
-    } catch (error) {
-      job = null;
-    }
-  }
-  if (state.route.jobId && job && job.job_id !== state.route.jobId) {
-    state.route.jobId = job.job_id;
-  }
-  state.wbJob = job;
-  state.wbFinalDraft =
-    job && job.final_draft
-      ? {
-          draft: job.final_draft,
-          version: job.final_draft_version || 1,
-          updated_at: job.final_draft_updated_at,
-        }
-      : null;
-
-  if (!job) {
-    app.innerHTML = `
-      <div class="page-header page-header--workspace"><div><h2>单岗位工作台</h2>
-        <div class="sub">选择一个岗位，对比主简历并生成对齐版本</div></div></div>
-      <div class="panel panel-card">
-        <div class="field"><label>选择岗位</label>
-          <select data-wb-job-select>
-            <option value="">${jobs.length ? "选择岗位..." : "岗位库为空，先到岗位库添加"}</option>
-            ${jobs.map((item) => `<option value="${item.job_id}">${esc(item.title)} · ${esc(item.company || "")}</option>`).join("")}
-          </select></div>
-        ${jobs.length ? '<div class="row"><button class="btn btn-primary" data-action="goto-selected-job">进入工作台</button></div>' : `
-          <div class="row"><a href="#/jobs" class="btn btn-primary">去岗位库添加</a></div>`}
-      </div>
-      <div data-applications-panel></div>`;
-    renderApplicationsPanel(app);
-    return;
-  }
-
-  const appraisal = state.wbAppraisal && state.wbAppraisal.job_id === job.job_id
-    ? state.wbAppraisal
-    : null;
-  state.wbAppraisalOpen = false;
-  const savedGranularity = job.tailor_granularity || "medium";
-  const savedFocus = job.tailor_focus || "balanced";
-  const savedPrompt = job.custom_prompt || "";
-  app.innerHTML = `
-    <div class="page-header page-header--workspace">
-      <div>
-        <h2>${esc(job.title)}</h2>
-        <div class="sub">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)} · ${esc(job.status)} ${jobCompletenessBadge(job)}</div>
-      </div>
-      <div class="row">
-        <button class="btn btn-outline" data-action="toggle-raw-jd">${state.wbRawJdOpen ? "收起原始 JD" : "查看原始 JD"}</button>
-        <button class="btn btn-outline appraisal-drawer-toggle" data-action="toggle-appraisal-drawer" aria-expanded="${state.wbAppraisalOpen}" aria-controls="workbench-appraisal">${state.wbAppraisalOpen ? "收起评估" : "查看评估"}</button>
-        <button class="btn btn-ghost" data-action="back-workspace">换一个岗位</button>
-      </div>
-    </div>
-    <div class="workbench-3col ${state.wbAppraisalOpen ? "is-appraisal-open" : ""}" data-workbench-layout>
-      <div class="wb-mobile-tabs segmented" role="tablist" aria-label="工作台面板">
-        <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="controls" aria-selected="${state.wbMobilePane === "controls"}">调优</button>
-        <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="diff" aria-selected="${state.wbMobilePane === "diff"}">结果</button>
-        <button type="button" class="segmented-button" data-action="set-wb-tab" data-wb-tab="appraisal" aria-selected="${state.wbMobilePane === "appraisal"}">评估</button>
-      </div>
-      <div class="workbench-column workbench-controls ${state.wbMobilePane === "controls" ? "is-active" : ""}" data-wb-pane="controls">
-        <details class="panel panel-card job-raw-jd" ${state.wbRawJdOpen ? "open" : ""}>
-          <summary>岗位 JD</summary>
-          <div class="pre raw-jd">${esc(job.jd_text)}</div>
-        </details>
-        <form class="panel panel-card" data-form="wb-run">
-          <h3>对齐调优</h3>
-          <div class="field"><label>选择主简历</label>
-            <select name="master_resume_id" required>
-              <option value="">${resumes.length ? "选择简历..." : "先到简历中心创建主简历"}</option>
-              ${resumes.map((resume) => `<option value="${resume.resume_id}">${esc(resume.title)}（v${resume.current_version}）</option>`).join("")}
-            </select></div>
-          <div class="field"><label>改写颗粒度</label>
-            <div class="segmented segmented-card" role="group" aria-label="改写颗粒度">
-              <button type="button" class="segmented-button" data-granularity="fine" aria-pressed="${savedGranularity === "fine"}">微调</button>
-              <button type="button" class="segmented-button" data-granularity="medium" aria-pressed="${savedGranularity === "medium"}">重构</button>
-              <button type="button" class="segmented-button" data-granularity="coarse" aria-pressed="${savedGranularity === "coarse"}">重塑</button>
-            </div>
-            <div class="small muted">
-              <div>微调：只改不匹配 JD 的条目</div>
-              <div>重构：保持结构自由改写</div>
-              <div>重塑：重排合并条目</div>
-            </div>
-          </div>
-          <div class="field"><label>Prompt 聚焦策略</label>
-            <div class="segmented segmented-card" role="group" aria-label="Prompt 聚焦策略">
-              <button type="button" class="segmented-button" data-focus="balanced" aria-pressed="${savedFocus === "balanced"}">均衡</button>
-              <button type="button" class="segmented-button" data-focus="quantified" aria-pressed="${savedFocus === "quantified"}">量化数据</button>
-              <button type="button" class="segmented-button" data-focus="skills" aria-pressed="${savedFocus === "skills"}">技能匹配</button>
-            </div></div>
-          <div class="field"><label>自定义补充要求（可选）</label>
-            <textarea name="custom_prompt" rows="2" placeholder="例如：强调高并发缓存场景、突出量化结果">${esc(savedPrompt)}</textarea></div>
-          <label class="field eval-option">
-            <input type="checkbox" name="run_eval">
-            <span>本次运行评估（幻觉检测 / JD 匹配分）</span>
-          </label>
-          <div class="small muted" style="margin-top:-4px">每任务额外一次 LLM 调用；不勾选则按设置页默认执行。</div>
-          <div class="row">
-            <button class="btn btn-primary" type="submit" data-wb-run>一键生成对齐简历</button>
-            <button class="btn btn-danger" type="button" data-action="cancel-workbench" data-wb-cancel hidden>取消任务</button>
-          </div>
-        </form>
-        <div class="panel panel-card" data-wb-progress-panel hidden>
-          <h3>运行进度</h3>
-          <div class="progress-wrap">
-            <div class="progress-track"><div class="progress-fill" data-wb-progress-fill style="width:5%"></div></div>
-            <span class="small muted" data-wb-elapsed>0s</span>
-          </div>
-          <div class="small"><strong data-wb-stage>排队中</strong> · <span class="muted" data-wb-message></span></div>
-        </div>
-      </div>
-      <div class="workbench-column workbench-diff ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff">
-        <div class="panel panel-card panel--info" data-wb-result hidden></div>
-        <div class="panel panel-card panel--success final-draft-panel" data-final-draft-panel hidden></div>
-      </div>
-      <div class="workbench-column workbench-appraisal ${state.wbMobilePane === "appraisal" ? "is-active" : ""}" id="workbench-appraisal" data-wb-pane="appraisal">
-        <div class="panel panel-card jd-profile-panel" data-jd-profile-panel>
-          <h3>JD 画像</h3>
-          <div class="muted small">运行一次对齐分析后生成</div>
-        </div>
-        <div class="panel panel-card panel--info appraisal-panel" data-appraisal-panel>
-          <h3>投递价值评估</h3>
-          <div class="muted small">运行一次对齐分析后生成</div>
-        </div>
-        <div class="panel panel-card">
-          <h3>岗位状态</h3>
-          <div class="row">
-            <select data-job-status>${options(vocabularyList("statuses"), job.status)}</select>
-            <button class="btn btn-secondary btn-sm" data-action="update-job-status" data-id="${job.job_id}">保存</button>
-          </div>
-        </div>
-        <div data-applications-panel></div>
-      </div>
-    </div>`;
-  renderApplicationsPanel(app);
-  renderFinalDraftPanel(app);
-
-  const savedJob = state.wbJob;
-  if (savedJob && savedJob.workbench_job_id) {
-    try {
-      const snapshot = await api(
-        `/api/jobs/${encodeURIComponent(savedJob.workbench_job_id)}`,
-      );
-      if (
-        snapshot.status === "succeeded" ||
-        snapshot.status === "failed" ||
-        snapshot.status === "canceled"
-      ) {
-        if (snapshot.status === "succeeded") {
-          state.wbResult = snapshot.result;
-          renderWbResult(app);
-          await renderAppraisal(app);
-        } else {
-          renderWbError(app, snapshot);
-        }
-      } else if (
-        snapshot.status === "queued" ||
-        snapshot.status === "running"
-      ) {
-        startWbPolling(savedJob.workbench_job_id, app);
-      }
-    } catch {
-      /* expired or missing analysis job; leave the workspace idle */
-    }
-  } else if (state.wbResult) {
-    renderWbResult(app);
-    await renderAppraisal(app);
-  }
-  renderFinalDraftPanel(app);
-}
-
-async function refreshWbJob(app = $("#app-router-view")) {
-  if (!state.wbJob) return;
-  state.wbJob = await api(`/api/jobs/${encodeURIComponent(state.wbJob.job_id)}`);
-  state.wbResult = null;
-  state.wbAppraisal = null;
-  await renderWorkspaceView(app);
-}
-
 async function refreshOptimizerFromJob(jobId) {
   await renderOptimizerCanvas($("#app-router-view"), jobId);
   mountWorkspaceReminder($("#app-router-view"));
+}
+
+async function refreshWbCanvas() {
+  const job = state.wbJob;
+  if (!job || !job.job_id) return;
+  await refreshOptimizerFromJob(job.job_id);
 }
 
 /* T4: 岗位切换（Header select / 画布内 switcher 共用）。已在 workspace 页时
@@ -643,128 +438,17 @@ async function switchWorkspaceJob(jobId) {
   }
 }
 
-function startWbPolling(jobId, app = $("#app-router-view")) {
-  stopWbPolling();
-  /* U5: 前端计时起点，后端 elapsed_seconds 缺失时兜底显示运行时长。 */
-  state.wbElapsedStart = Date.now();
-  state.wbPolling = { jobId, app, timer: window.setInterval(() => pollWbJob(jobId), 1000) };
-  pollWbJob(jobId);
-}
-
-async function pollWbJob(jobId) {
-  if (!state.wbPolling || state.wbPolling.jobId !== jobId) return;
-  try {
-    const snapshot = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
-    if (!state.wbPolling || state.wbPolling.jobId !== jobId) return;
-    renderWbProgress(snapshot);
-    if (["succeeded", "failed", "canceled"].includes(snapshot.status)) {
-      const app = state.wbPolling ? state.wbPolling.app : $("#app-router-view");
-      stopWbPolling();
-      /* F5: 任务结束自动切到「结果」tab，让移动端用户直接看到 diff 面板。 */
-      setWbMobilePane("diff");
-      if (snapshot.status === "succeeded") {
-        state.wbResult = snapshot.result;
-        renderWbResult(app);
-        await renderAppraisal(app);
-        if (state.wbJob) {
-          try {
-            state.wbJob = await api(
-              `/api/jobs/${encodeURIComponent(state.wbJob.job_id)}`,
-            );
-          } catch {
-            /* keep the current job object */
-          }
-        }
-      } else {
-        renderWbError(app, snapshot);
-      }
-    }
-  } catch (error) {
-    stopWbPolling();
-    toast(error.message, "error");
-  }
-}
-
-function renderFinalDraftPanel(app) {
-  const panel = $("[data-final-draft-panel]");
-  if (!panel) return;
-  const draft = state.wbFinalDraft;
-  if (!draft || !draft.draft) {
-    panel.hidden = true;
-    panel.innerHTML = "";
-    return;
-  }
-  panel.hidden = false;
-  panel.innerHTML = `
-    <div class="final-draft-head">
-      <div>
-        <h3>定稿简历</h3>
-        <div class="draft-meta">
-          <span class="badge badge-green">已保存</span>
-          <span class="small muted">${formatDate(draft.updated_at)} · 第 ${draft.version} 版</span>
-        </div>
-      </div>
-    </div>
-    <div class="pre draft-preview">${esc(draft.draft)}</div>
-    <div class="row final-draft-actions">
-      <button class="btn btn-primary btn-sm" data-action="record-application">记录投递</button>
-      <button class="btn btn-outline btn-sm" data-action="export-final-draft">导出 PDF</button>
-      <button class="btn btn-outline btn-sm" data-action="export-final-draft-md">导出 Markdown</button>
-      <button class="btn btn-secondary btn-sm" data-action="save-as-new-resume">另存为新主简历</button>
-    </div>`;
-}
-
-function renderApplicationsPanel(app) {
-  const panel = $("[data-applications-panel]", app);
-  if (!panel) return;
-  const apps = state.wbApplications || [];
-  panel.innerHTML = `
-        <div class="panel panel-card">
-      <h3>投递记录</h3>
-      <form data-form="application-create" class="drawer" style="margin-top:8px">
-        <div class="form-grid">
-          <div class="field"><label>标题</label><input type="text" name="title" required placeholder="例如：Acme 后端"></div>
-          <div class="field"><label>主简历</label><select name="master_resume_id" required><option value="">选择简历</option>${state.wbResumes.map((resume) => `<option value="${resume.resume_id}">${esc(resume.title)}</option>`).join("")}</select></div>
-          <div class="field wide"><label>JD 文本</label><textarea name="jd_text" rows="3"></textarea></div>
-          <div class="field wide"><label>JD 链接</label><input type="url" name="jd_url"></div>
-        </div>
-        <div class="row"><button class="btn btn-secondary btn-sm" type="submit">创建投递记录</button></div>
-      </form>
-      <div class="card-list motion-stagger" style="margin-top:10px">
-        ${apps.map((item) => `
-          <div class="card application-card card-base card-hover-soft">
-            <div class="card-head">
-              <div class="card-title">${esc(item.title)}</div>
-              <span class="badge badge-gray">${esc(APP_STATUS_LABELS[item.status] || item.status)}</span>
-            </div>
-            <div class="card-meta">简历 v${item.resume_version} · 更新于 ${formatDate(item.updated_at)}</div>
-            ${item.latest_job_id ? `<div class="small muted">最近任务：${esc(item.latest_job_id)}</div>` : ""}
-            <div class="row" style="margin-top:8px">
-              <select data-application-status data-id="${item.application_id}">
-                ${Object.entries(APP_STATUS_LABELS).map(([value, label]) => `<option value="${value}" ${item.status === value ? "selected" : ""}>${esc(label)}</option>`).join("")}
-              </select>
-              <button class="btn btn-outline btn-sm" data-action="update-application-status" data-id="${item.application_id}">保存状态</button>
-              <button class="btn btn-primary btn-sm" data-action="run-application" data-id="${item.application_id}">运行</button>
-              <button class="btn btn-danger btn-sm" data-action="delete-application" data-id="${item.application_id}">删除</button>
-            </div>
-          </div>`).join("") || `<div class="muted small">还没有投递记录</div>`}
-      </div>
-    </div>`;
-}
-
 /* ------------------------------------------------------------------ */
 /* Settings                                                            */
 /* ------------------------------------------------------------------ */
-
+/* Sprint 5 T1: 用纯函数 settingsBentoHtml 重渲染 Bento 概览（节点测试后
+ * 刷新延迟卡）。state.llmNodeTests 由 renderSettingsView 与
+ * llm-node-test action 维护。 */
 async function renderSettingsView(app) {
-  /* Sprint 5: 并行拉取设置 / 运行状态 / LLM 节点 / Dashboard KPI /
-   * 自动化规则。后端未就绪（404）时静默降级为空数组/空对象，不打断
-   * 设置页渲染（节点列表空态 + 新增按钮仍可用，后端就绪后真实走）。 */
-  const [settings, status, nodes, dashboard, rules] = await Promise.all([
+  const [settings, status, nodes, rules] = await Promise.all([
     api("/api/settings"),
     api("/api/settings/status"),
     api("/api/llm/nodes").catch(() => []),
-    api("/api/dashboard").catch(() => null),
     api("/api/automation/rules").catch(() => []),
   ]);
   state.settings = settings;
@@ -772,157 +456,92 @@ async function renderSettingsView(app) {
   state.automationRules = Array.isArray(rules) ? rules : [];
   const vocabulary = settings.classification_vocabulary;
   state.vocabulary = normalizeVocabulary(vocabulary);
-  const kpi = (dashboard && dashboard.kpi) || {};
-  const bentoCounts = {
-    resumes: Math.max(0, Number(kpi.resumes) || 0),
-    jobs: Math.max(0, Number(kpi.jobs) || 0),
-  };
-  state.settingsBentoCounts = bentoCounts;
   const activeNode = state.llmNodes.find((node) => node.is_active) || null;
   const activeLastTest = activeNode
     ? (state.llmNodeTests || {})[activeNode.node_id]
     : null;
   const latency = activeLastTest && activeLastTest.ok ? activeLastTest.latency_ms : null;
-  /* U12: 薪资基准 + 投递评估权重。权重总是回填四个默认键（老库可能只有
-   * 部分键），显示合计并让表单校验兜底。 */
-  const weights = normalizeAppraisalWeights(settings.appraisal_weights);
-  const weightsSum = Object.values(weights).reduce((acc, value) => acc + Number(value || 0), 0);
   const nodeCards = state.llmNodes
     .map((node) => llmNodeCardHtml(node, (state.llmNodeTests || {})[node.node_id]))
     .join("");
   app.innerHTML = `
-    <div class="page-header page-header--settings"><div><h2>设置</h2><div class="sub">内置默认配置可直接使用，按需调整后保存立即生效</div></div></div>
-    ${settingsBentoHtml(activeNode, bentoCounts, latency)}
-    <section class="panel panel-card settings-status">
-      <div class="settings-status__head">
+    <div class="view view-scroll settings-view">
+      <div class="settings-head">
         <div>
-          <h3>运行状态</h3>
-          <div class="small muted">模型、API 与本地数据概览</div>
+          <h2>系统设置</h2>
+          <p>配置多个 LLM API 节点、超时护杠与粗筛规则引擎</p>
         </div>
-        <span class="badge ${status.api_key_configured ? "badge-green" : "badge-amber"}">${status.api_key_configured ? "LLM 已配置" : "LLM 未配置"}</span>
-      </div>
-      <div class="settings-status__grid">
-        <div><span>模型</span><strong>${esc(status.provider)} · ${esc(status.model)}</strong></div>
-        <div><span>运行模式</span><strong>${status.personal_mode ? "个人模式" : "多租户模式"}</strong></div>
-        <div><span>数据量</span><strong>简历 ${status.resume_count} · 岗位 ${status.job_count} · 投递 ${status.application_count}</strong></div>
-      </div>
-      <div class="row" style="margin-top:12px">
-        <button class="btn btn-outline btn-sm" type="button" data-action="reset-settings">恢复默认设置</button>
-        <button class="btn btn-ghost btn-sm" type="button" data-action="go-resumes">去简历中心</button>
-        <button class="btn btn-ghost btn-sm" type="button" data-action="go-jobs">去岗位库</button>
-      </div>
-    </section>
-    <section class="panel panel-card llm-nodes-panel" data-llm-nodes-panel>
-      <div class="settings-status__head">
-        <div>
-          <h3>LLM 模型节点</h3>
-          <div class="small muted">配置多个 API 节点，可切换当前生效节点或测试连通性</div>
+        <div class="settings-head-actions">
+          <span class="status-line"><span class="dot ${status.api_key_configured ? "dot-success" : "dot-warn"}" aria-hidden="true"></span>${status.api_key_configured ? "LLM 已配置" : "LLM 未配置"}</span>
+          <button class="btn btn-outline btn-sm" type="button" data-action="reset-settings">恢复默认设置</button>
         </div>
-        <button class="btn btn-primary btn-sm" type="button" data-action="llm-node-add">新增节点</button>
       </div>
-      <div class="llm-node-grid" data-llm-node-grid>
-        ${nodeCards || `<div class="muted small" data-llm-node-empty>还没有配置节点，点击「新增节点」创建第一个。</div>`}
+      ${settingsBentoHtml(activeNode, latency)}
+      <div class="settings-main">
+        <section class="panel console-main" data-llm-nodes-panel>
+          <div class="panel-head">
+            <div>
+              <h2>LLM 节点</h2>
+              <p>主节点与备用节点</p>
+            </div>
+            <button class="btn btn-primary btn-sm" type="button" data-action="llm-node-add">新增节点</button>
+          </div>
+          <div class="panel-body">
+            <div class="llm-node-grid node-grid" data-llm-node-grid>
+              ${nodeCards || `<div class="muted small" data-llm-node-empty>还没有配置节点，点击「新增节点」创建第一个。</div>`}
+            </div>
+            <form data-form="settings-eval-default" class="llm-eval-default">
+              <label class="check-line">
+                <input type="checkbox" name="eval_default" ${settings.eval_default ? "checked" : ""}>
+                运行对齐时默认开启评估（幻觉检测 / JD 匹配分）
+              </label>
+              <div class="small muted">每任务额外一次 LLM 调用；工作台可按次覆盖。</div>
+              <div class="row" style="margin-top:10px">
+                <button class="btn btn-outline btn-sm" type="submit">保存评估开关</button>
+              </div>
+            </form>
+          </div>
+        </section>
+        <aside class="panel" data-guardrails-panel>
+          <div class="panel-head">
+            <div>
+              <h2>Guardrails</h2>
+              <p>运行护栅与评估默认</p>
+            </div>
+          </div>
+          <div class="guardrail-box">
+            <div class="guardrail-row"><span>超时熔断</span><b>40s</b></div>
+            <div class="guardrail-row"><span>并发额度</span><b>1</b></div>
+            <div class="guardrail-row"><span>评估默认</span><label class="check-line"><input type="checkbox" checked> 默认运行对齐评估</label></div>
+          </div>
+          <div class="panel-head">
+            <div>
+              <h2>自动化规则</h2>
+              <p>抓取与导入前置拦截</p>
+            </div>
+            <button class="btn btn-outline btn-sm" type="button" data-action="automation-rule-add">新增规则</button>
+          </div>
+          <div data-automation-rules-panel>${ruleListHtml(state.automationRules)}</div>
+        </aside>
       </div>
-      <form data-form="settings-eval-default" class="llm-eval-default">
-        <label class="field eval-option">
-          <input type="checkbox" name="eval_default" ${settings.eval_default ? "checked" : ""}>
-          <span>运行对齐时默认开启评估（幻觉检测 / JD 匹配分）</span>
-        </label>
-        <div class="small muted">每任务额外一次 LLM 调用；工作台可按次覆盖。</div>
-        <div class="row" style="margin-top:10px">
-          <button class="btn btn-outline btn-sm" type="submit">保存评估开关</button>
+      <form class="panel vocab-panel" data-form="settings-vocabulary">
+        <div class="panel-head">
+          <div>
+            <h2>词表</h2>
+            <p>岗位职能 / 职级 / 状态选项</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" type="submit">保存词表</button>
+        </div>
+        <div class="panel-body">
+          <div class="vocab-grid">
+            <label><span>岗位职能</span><textarea name="job_functions" rows="6">${esc(vocabulary.job_functions.join("\n"))}</textarea></label>
+            <label><span>职级</span><textarea name="seniorities" rows="4">${esc(vocabulary.seniorities.join("\n"))}</textarea></label>
+            <label><span>状态</span><textarea name="statuses" rows="5">${esc(vocabulary.statuses.join("\n"))}</textarea></label>
+          </div>
         </div>
       </form>
-    </section>
-    <section class="panel panel-card guardrails-panel" data-guardrails-panel>
-      <h3>调用护栏</h3>
-      <div class="guardrails-grid">
-        <div class="guardrail-item guardrail-item--timeout">
-          <span class="guardrail-item__label">Read Timeout</span>
-          <strong class="guardrail-item__value">40s</strong>
-          <span class="guardrail-item__hint">超过 40s 自动熔断提示，不无脑死等</span>
-        </div>
-        <div class="guardrail-item guardrail-item--concurrency">
-          <span class="guardrail-item__label">并发额度</span>
-          <strong class="guardrail-item__value">1</strong>
-          <span class="guardrail-item__hint">同一时间仅一个 LLM 请求在途，其余排队执行</span>
-        </div>
-      </div>
-    </section>
-    <section class="panel panel-card" data-automation-rules-panel>
-      <div class="settings-status__head">
-        <div>
-          <h3>自动化规则</h3>
-          <div class="small muted">抓取管线粗筛：黑名单 / 城市白名单 / 最低薪资</div>
-        </div>
-        <button class="btn btn-primary btn-sm" type="button" data-action="automation-rule-add">新增规则</button>
-      </div>
-      ${ruleListHtml(state.automationRules)}
-    </section>
-    <div class="grid-2">
-      <form class="panel panel-card" data-form="settings-vocabulary">
-        <h3>分类词表</h3>
-        <div class="field"><label>岗位职能（每行一个）</label>
-          <textarea name="job_functions" rows="6">${esc(vocabulary.job_functions.join("\n"))}</textarea></div>
-        <div class="field"><label>级别（每行一个）</label>
-          <textarea name="seniorities" rows="4">${esc(vocabulary.seniorities.join("\n"))}</textarea></div>
-        <div class="field"><label>状态（每行一个）</label>
-          <textarea name="statuses" rows="5">${esc(vocabulary.statuses.join("\n"))}</textarea></div>
-        <div class="row"><button class="btn btn-primary" type="submit">保存词表</button></div>
-      </form>
-      <form class="panel panel-card" data-form="settings-weights">
-        <h3>投递评估权重</h3>
-        <div class="small muted">投递价值评估各维度权重，合计必须为 100。</div>
-        <div class="form-grid weights-grid">
-          <label class="field"><span class="small">匹配度（match）</span>
-            <input type="number" name="weight_match" min="0" max="100" step="1" value="${esc(weights.match)}"></label>
-          <label class="field"><span class="small">薪资（salary）</span>
-            <input type="number" name="weight_salary" min="0" max="100" step="1" value="${esc(weights.salary)}"></label>
-          <label class="field"><span class="small">硬性条件（hard_conditions）</span>
-            <input type="number" name="weight_hard_conditions" min="0" max="100" step="1" value="${esc(weights.hard_conditions)}"></label>
-          <label class="field"><span class="small">岗位质量（quality）</span>
-            <input type="number" name="weight_quality" min="0" max="100" step="1" value="${esc(weights.quality)}"></label>
-        </div>
-        <div class="small muted" data-weights-sum>合计：${esc(weightsSum)}%</div>
-        <div class="row" style="margin-top:10px">
-          <button class="btn btn-primary" type="submit">保存权重</button>
-        </div>
-        <div data-weights-save-result></div>
-      </form>
-    </div>
-    <form class="panel panel-card" data-form="settings-salary">
-      <h3>薪资基准</h3>
-      <div class="small muted">投递价值评估用它对岗位薪资做市场对比；p50 / p75 为税前月薪（元）。</div>
-      <div class="table-wrap">
-        <table class="data salary-ref-table">
-          <thead>
-            <tr><th>职能</th><th>城市</th><th>p50（元/月）</th><th>p75（元/月）</th><th></th></tr>
-          </thead>
-          <tbody data-salary-rows>${salaryReferenceRowsHtml(settings.salary_reference)}</tbody>
-        </table>
-      </div>
-      <div class="salary-ref-add">
-        <label class="field"><span class="small">职能</span>
-          <select name="salary_add_function">
-            <option value="">选择职能</option>${options(vocabulary.job_functions, "")}
-          </select></label>
-        <label class="field"><span class="small">城市</span>
-          <input type="text" name="salary_add_city" list="salary-city-options" placeholder="如 杭州"></label>
-        <datalist id="salary-city-options">${salaryCityOptions()}</datalist>
-        <label class="field"><span class="small">p50</span>
-          <input type="number" name="salary_add_p50" min="0" step="500" placeholder="28000"></label>
-        <label class="field"><span class="small">p75</span>
-          <input type="number" name="salary_add_p75" min="0" step="500" placeholder="42000"></label>
-        <button class="btn btn-outline btn-sm" type="button" data-action="add-salary-row">添加一行</button>
-      </div>
-      <div class="row" style="margin-top:12px">
-        <button class="btn btn-primary" type="submit">保存薪资基准</button>
-      </div>
-      <div data-salary-save-result></div>
-    </form>`;
+    </div>`;
 
-  /* Sprint 5 T1: 活跃节点无缓存测试结果时，后台测一次填充 Bento 延迟卡
-   *（不阻塞渲染；后端 test 有 40s 超时护栏，慢节点只更新卡片不卡页面）。 */
   if (
     activeNode &&
     !activeLastTest &&
@@ -943,7 +562,7 @@ async function renderSettingsView(app) {
         updateSettingsBento($("#app-router-view"));
       })
       .catch(() => {
-        /* 保持 "—" 直到用户显式测试 */
+        /* keep the latency cell at — until the user tests explicitly */
       })
       .finally(() => {
         state.llmNodeTestInflight = {
@@ -954,9 +573,6 @@ async function renderSettingsView(app) {
   }
 }
 
-/* Sprint 5 T1: 用纯函数 settingsBentoHtml 重渲染 Bento 概览（节点测试后
- * 刷新延迟卡）。state.settingsBentoCounts / state.llmNodeTests 由
- * renderSettingsView 与 llm-node-test action 维护。 */
 function updateSettingsBento(app = $("#app-router-view")) {
   if (!app) return;
   const mount = app.querySelector("[data-settings-bento]");
@@ -966,30 +582,14 @@ function updateSettingsBento(app = $("#app-router-view")) {
     ? (state.llmNodeTests || {})[activeNode.node_id]
     : null;
   const latency = lastTest && lastTest.ok ? lastTest.latency_ms : null;
-  mount.outerHTML = settingsBentoHtml(
-    activeNode,
-    state.settingsBentoCounts || {},
-    latency,
-  );
+  mount.outerHTML = settingsBentoHtml(activeNode, latency);
 }
 
 /* ------------------------------------------------------------------ */
 /* Event delegation                                                    */
 /* ------------------------------------------------------------------ */
 
-function toggleAppraisalDrawer(button) {
-  state.wbAppraisalOpen = !state.wbAppraisalOpen;
-  const layout = $("[data-workbench-layout]");
-  if (layout) layout.classList.toggle("is-appraisal-open", state.wbAppraisalOpen);
-  document.body.classList.toggle("wb-appraisal-drawer-open", state.wbAppraisalOpen);
-  if (button) {
-    button.setAttribute("aria-expanded", String(state.wbAppraisalOpen));
-    button.textContent = state.wbAppraisalOpen ? "收起评估" : "查看评估";
-  }
-}
-
-/* setWbMobilePane 实现在 events.js（F5：controls / diff / appraisal 三面板），
- * 供 delegation 与 pollWbJob 终态自动切 tab 共用。 */
+/* setWbMobilePane 实现在 events.js（F5：controls / diff 双面板）。 */
 
 async function printTarget(kind) {
   const printNode = $("#print-root");
@@ -1101,7 +701,9 @@ const actions = {
     if (input) input.click();
   },
   "open-resume-archive": (button) => navigate("resume", button.dataset.id),
-  "back-resume-center": () => navigate("resume"),
+  "back-resume-center": () => {
+    window.location.hash = "#/resume/list";
+  },
   "print-resume": () => printTarget("resume"),
   "print-workbench": () => printTarget("workbench"),
   /* Sprint 4 T3: 复制简历 Markdown（data-action=copy-resume-md，data-id=resume_id） */
@@ -1517,7 +1119,6 @@ const actions = {
     );
     render();
   },
-  "regenerate-diff": () => regenerateDiff(),
   "goto-selected-job": () => {
     const select = $("[data-wb-job-select]");
     if (select && select.value) navigate("workspace", select.value);
@@ -1633,46 +1234,6 @@ const actions = {
     toast("规则已删除", "success");
     render();
   },
-  /* U12: 薪资基准表格新增/删除行（表单提交时统一解析为 salary_reference）。 */
-  "add-salary-row": () => {
-    const tbody = $("[data-salary-rows]");
-    const form = $("[data-form='settings-salary']");
-    if (!tbody || !form) return;
-    const jobFunction = String(
-      (form.querySelector('[name="salary_add_function"]') || {}).value || "",
-    ).trim();
-    const city = String(
-      (form.querySelector('[name="salary_add_city"]') || {}).value || "",
-    ).trim();
-    if (!jobFunction || !city) {
-      toast("请选择职能并填写城市", "error");
-      return;
-    }
-    const p50 = String(
-      (form.querySelector('[name="salary_add_p50"]') || {}).value || "",
-    ).trim();
-    const p75 = String(
-      (form.querySelector('[name="salary_add_p75"]') || {}).value || "",
-    ).trim();
-    if (p50 === "" || p75 === "") {
-      toast("请填写该行的 p50 与 p75 月薪", "error");
-      return;
-    }
-    tbody.insertAdjacentHTML(
-      "beforeend",
-      salaryReferenceRowsHtml([
-        { job_function: jobFunction, city, p50: Number(p50), p75: Number(p75) },
-      ]),
-    );
-    form.querySelector('[name="salary_add_city"]').value = "";
-    form.querySelector('[name="salary_add_p50"]').value = "";
-    form.querySelector('[name="salary_add_p75"]').value = "";
-    toast("已添加一行，保存后生效", "success");
-  },
-  "remove-salary-row": (button) => {
-    const row = button.closest("[data-salary-row]");
-    if (row) row.remove();
-  },
   "analyze-jd": async () => {
     try {
       await analyzeActiveJd();
@@ -1685,10 +1246,24 @@ const actions = {
       }
     }
   },
+  "run-alignment": () => {
+    const form = $("[data-form='split-align']");
+    if (!form) {
+      toast("请先在左侧「对齐调优」中配置主简历", "error");
+      return;
+    }
+    if (typeof form.requestSubmit === "function") {
+      form.requestSubmit();
+    } else {
+      form.dispatchEvent(
+        new window.Event("submit", { bubbles: true, cancelable: true }),
+      );
+    }
+  },
   "open-optimizer": (button) => navigate("workspace", button.dataset.id),
-  /* #17: live 工作台「并排对比」——复用 legacy result 的字符级并排视图
-   * （buildLiveCompareHtml -> buildCmpSideHtml），只读弹窗展示，不动卡片
-   * 的逐条采纳交互。 */
+  /* #17: live 工作台「并排对比」——复用 buildLiveCompareHtml ->
+   * buildCmpSideHtml 的字符级并排视图，只读弹窗展示，不动卡片的逐条采纳
+   * 交互。 */
   "toggle-live-compare": async () => {
     const session = activeSessionForExport();
     if (!session) {
@@ -1927,33 +1502,16 @@ const actions = {
     toast("已恢复最近一次批次结果", "success");
   },
   "toggle-theme": () => toggleTheme(),
-  "toggle-appraisal-drawer": (button) => toggleAppraisalDrawer(button),
   "set-wb-tab": (button) => setWbMobilePane(button.dataset.wbTab),
-  "cancel-workbench": async () => {
-    const snapshot = state.wbJob && state.wbJob.workbench_job_id
-      ? await api(`/api/jobs/${encodeURIComponent(state.wbJob.workbench_job_id)}`)
-      : null;
-    if (!snapshot || !["queued", "running"].includes(snapshot.status)) {
-      toast("当前没有可取消的任务", "error");
-      return;
-    }
-    if (snapshot.status === "queued") {
-      await api(`/api/jobs/${encodeURIComponent(snapshot.job_id)}/cancel`, { method: "POST" });
-      stopWbPolling();
-      toast("任务已取消", "success");
-      await refreshWbJob();
-    } else {
-      stopWbPolling();
-      toast("任务运行中无法中断，已停止本地等待", "info");
-    }
-  },
+  "set-wb-tab-v3": (button) => setWbAuxPane(button.dataset.wbTabV3),
+  "cancel-workbench": () => cancelActiveAlignment(),
   "retry-workbench": () => {
-    const form = $('[data-form="wb-run"]');
+    const form = $('[data-form="split-align"]') || $('[data-form="wb-run"]');
     if (form) form.dispatchEvent(new Event("submit", { cancelable: true }));
   },
   /* F1: Eval 折叠块里的「重新运行（开启评估）」——先勾选 per-run 开关再提交。 */
   "retry-workbench-eval": () => {
-    const form = $('[data-form="wb-run"]');
+    const form = $('[data-form="split-align"]') || $('[data-form="wb-run"]');
     if (!form) {
       toast("当前工作台无法重新运行", "error");
       return;
@@ -1963,35 +1521,6 @@ const actions = {
     form.dispatchEvent(new Event("submit", { cancelable: true }));
   },
   "cancel-align-job": () => cancelActiveAlignment(),
-  "toggle-wb-view": (button) => toggleWbView(button),
-  "accept-diffs": () => acceptSelectedDiffs(),
-  "save-final-draft": async () => {
-    const node = $("[data-accept-result] .pre");
-    const draft = node ? node.textContent : "";
-    if (!draft.trim()) {
-      toast("草稿为空，无法保存", "error");
-      return;
-    }
-    const jobId = state.wbJob.job_id;
-    const saved = await api(`/api/jobs/${encodeURIComponent(jobId)}/final-draft`, {
-      method: "POST",
-      body: JSON.stringify({ draft }),
-    });
-    state.wbFinalDraft = {
-      draft: saved.draft,
-      version: saved.version,
-      updated_at: saved.updated_at,
-    };
-    renderFinalDraftPanel($("#app-router-view"));
-    const finalPanel = $("[data-final-draft-panel]");
-    if (finalPanel) finalPanel.classList.add("is-saved");
-    try {
-      state.wbJob = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
-    } catch {
-      /* keep the current job object */
-    }
-    toast(`定稿已保存为第 ${saved.version} 版`, "success");
-  },
   "export-final-draft": () => printTarget("final-draft"),
   "export-final-draft-md": () => {
     const draft = state.wbFinalDraft && state.wbFinalDraft.draft;
@@ -2066,10 +1595,6 @@ const actions = {
       "application/json",
     );
   },
-  "export-draft": () => {
-    const node = $("[data-accept-result] .pre");
-    if (node) download("resualign-draft.md", node.textContent, "text/markdown;charset=utf-8");
-  },
   "update-job-status": async (button) => {
     const select = $("[data-job-status]");
     await api(`/api/jobs/${encodeURIComponent(button.dataset.id)}`, {
@@ -2077,7 +1602,7 @@ const actions = {
       body: JSON.stringify({ status: select.value }),
     });
     toast("岗位状态已保存", "success");
-    await refreshWbJob();
+    await refreshWbCanvas();
   },
   "run-application": async (button) => {
     stopApplicationPolling();
@@ -2087,12 +1612,12 @@ const actions = {
     );
     toast("已开始运行投递分析", "success");
     const jobId = response.job_id;
-    const timer = window.setInterval(async () => {
+    const timer = startPolling("application", async () => {
       try {
         const job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
         if (!["queued", "running"].includes(job.status)) {
           stopApplicationPolling();
-          await refreshWbJob();
+          await refreshWbCanvas();
           toast(
             job.status === "succeeded" ? "投递分析完成" : `投递分析${job.status}`,
             job.status === "succeeded" ? "success" : "error",
@@ -2112,13 +1637,13 @@ const actions = {
       body: JSON.stringify({ status: select.value }),
     });
     toast("投递状态已保存", "success");
-    await refreshWbJob();
+    await refreshWbCanvas();
   },
   "delete-application": async (button) => {
     if (!window.confirm("确定删除这条投递记录？")) return;
     await api(`/api/applications/${encodeURIComponent(button.dataset.id)}`, { method: "DELETE" });
     toast("投递记录已删除", "success");
-    await refreshWbJob();
+    await refreshWbCanvas();
   },
   "cancel-batch-align": async () => {
     if (!state.batchAlign) return;
@@ -2314,6 +1839,14 @@ document.addEventListener("click", async (event) => {
   }
 });
 
+function updateBatchSelection() {
+  const count = $$("[data-board-check]:checked").length;
+  const label = $("[data-board-selected-count]");
+  if (label) label.textContent = `已选 ${count}`;
+  const fab = $("[data-batch-fab]");
+  if (fab) fab.hidden = count === 0;
+}
+
 document.addEventListener("change", (event) => {
   const target = event.target;
   if (target.matches("[data-mode]")) {
@@ -2329,14 +1862,10 @@ document.addEventListener("change", (event) => {
     $$("[data-board-check]").forEach(
       (input) => (input.checked = target.checked),
     );
-    const count = target.checked ? $$("[data-board-check]").length : 0;
-    const label = $("[data-board-selected-count]");
-    if (label) label.textContent = `已选 ${count}`;
+    updateBatchSelection();
   }
   if (target.matches("[data-board-check]")) {
-    const count = $$("[data-board-check]:checked").length;
-    const label = $("[data-board-selected-count]");
-    if (label) label.textContent = `已选 ${count}`;
+    updateBatchSelection();
   }
   if (target.matches("[data-board-status]")) {
     api("/api/kanban/bulk-status", {
@@ -2379,25 +1908,6 @@ document.addEventListener("change", (event) => {
         target.checked = !enabled;
         toast(error.message, "error");
       });
-  }
-  /* U12: 权重输入变化时实时刷新合计提示。 */
-  if (
-    target.matches('[data-form="settings-weights"] input[type="number"]')
-  ) {
-    const form = target.closest("[data-form='settings-weights']");
-    const sumNode = form && form.querySelector("[data-weights-sum]");
-    if (form && sumNode) {
-      const weights = appraisalWeightsPayload(
-        Object.fromEntries(new FormData(form).entries()),
-      );
-      const values = Object.values(weights);
-      const sum = values.some((value) => value == null)
-        ? "?"
-        : values.reduce((acc, value) => acc + value, 0);
-      const ok = Math.abs(sum - 100) < 1e-6;
-      sumNode.textContent = `合计：${sum}%`;
-      sumNode.className = `small muted${ok ? "" : " form-error"}`;
-    }
   }
 });
 
@@ -2603,36 +2113,25 @@ async function handleForm(formName, data, form) {
     }
     case "wb-run": {
       const masterResumeId = data.master_resume_id;
-      const granularity = ($('[data-granularity][aria-pressed="true"]') || {}).dataset?.granularity || "medium";
-      const promptFocus = ($('[data-focus][aria-pressed="true"]') || {}).dataset?.focus || "balanced";
-      const customPrompt = data.custom_prompt || "";
+      const granularity = data.granularity || "medium";
+      const promptFocus = data.prompt_focus || "balanced";
       if (!masterResumeId) {
         toast("请先选择主简历", "error");
         return;
       }
-      const pinnedResume = (state.wbResumes || []).find(
-        (item) => item.resume_id === masterResumeId,
-      );
-      state.wbOriginalContent = (pinnedResume && pinnedResume.content) || "";
-      state.wbAcceptedIndices = null;
-      state.wbCompareView = "list";
-      state.wbRun = { masterResumeId, granularity, promptFocus, customPrompt };
-      /* F1: per-run 评估开关，勾选传 true，不勾选不传（后端回退全局默认）。 */
-      const runEval = runEvalFromForm(data);
-      const payload = {
-        master_resume_id: masterResumeId,
+      const jobId = state.wbJob && state.wbJob.job_id;
+      if (!jobId) {
+        toast("当前没有可对齐的岗位", "error");
+        return;
+      }
+      const result = await startAlignmentRun(
+        jobId,
+        masterResumeId,
         granularity,
-        prompt_focus: promptFocus,
-        custom_prompt: customPrompt,
-      };
-      if (runEval !== undefined) payload.run_eval = runEval;
-      const result = await api(`/api/jobs/${encodeURIComponent(state.wbJob.job_id)}/workbench`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      $("[data-wb-progress-panel]").hidden = false;
-      startWbPolling(result.job_id);
-      toast("任务已排队，正在运行", "success");
+        promptFocus,
+        runEvalFromForm(data),
+      );
+      toast(`对齐任务已排队：${result.job_id}`, "success");
       break;
     }
     case "application-create":
@@ -2646,7 +2145,7 @@ async function handleForm(formName, data, form) {
         }),
       });
       toast("投递记录已创建", "success");
-      await refreshWbJob();
+      await refreshWbCanvas();
       break;
     case "login": {
       const response = await fetch("/api/auth/login", {
@@ -2676,48 +2175,6 @@ async function handleForm(formName, data, form) {
       });
       state.vocabulary = normalizeVocabulary(vocabulary);
       toast("分类词表已保存", "success");
-      render();
-      break;
-    }
-    case "settings-salary": {
-      const { rows, invalid } = salaryReferenceFromForm(form);
-      const resultNode = form && form.querySelector("[data-salary-save-result]");
-      if (invalid.length) {
-        const msg = `存在无法解析的薪资行：${invalid.map((r) => `${r.job_function} · ${r.city}`).join("、")}`;
-        if (resultNode) resultNode.innerHTML = `<div class="form-error" role="alert">${esc(msg)}</div>`;
-        toast(msg, "error");
-        return;
-      }
-      const validation = validateSalaryReference(rows);
-      if (!validation.ok) {
-        if (resultNode) resultNode.innerHTML = `<div class="form-error" role="alert">${esc(validation.message)}</div>`;
-        toast(validation.message, "error");
-        return;
-      }
-      await api("/api/settings", {
-        method: "PUT",
-        body: JSON.stringify({ salary_reference: rows }),
-      });
-      if (resultNode) resultNode.innerHTML = `<div class="form-success" role="status">已保存 ${rows.length} 行薪资基准</div>`;
-      toast(`薪资基准已保存（${rows.length} 行）`, "success");
-      render();
-      break;
-    }
-    case "settings-weights": {
-      const weights = appraisalWeightsPayload(data);
-      const validation = validateAppraisalWeights(weights);
-      const resultNode = form && form.querySelector("[data-weights-save-result]");
-      if (!validation.ok) {
-        if (resultNode) resultNode.innerHTML = `<div class="form-error" role="alert">${esc(validation.message)}</div>`;
-        toast(validation.message, "error");
-        return;
-      }
-      await api("/api/settings", {
-        method: "PUT",
-        body: JSON.stringify({ appraisal_weights: weights }),
-      });
-      if (resultNode) resultNode.innerHTML = `<div class="form-success" role="status">权重已保存（合计 100）</div>`;
-      toast("投递评估权重已保存", "success");
       render();
       break;
     }
@@ -2893,14 +2350,14 @@ async function loadResumesForOnboarding() {
    （仅当存在未完成且未跳过的步骤）。通过第二个 canvas hook 挂载，
    不动 kanban.js 的 renderKanban。 */
 setCanvasRenderHook(async (app) => {
+  const header = app.querySelector(".jobs-topbar") || app.querySelector(".page-header");
   if (
-    !app.querySelector(".page-header") ||
+    !header ||
     app.querySelector("[data-reminder-strip]") ||
     app.querySelector("[data-onboarding-card]")
   ) {
     return;
   }
-  const header = app.querySelector(".page-header");
   const fragments = [];
   const strip = renderReminderStrip(dueReminders(state.jobs || [], new Date()));
   if (strip) fragments.push(strip);
@@ -2976,8 +2433,8 @@ function mountWorkspaceReminder(app) {
 /* ------------------------------------------------------------------ */
 
 setCanvasRenderHook(async (app) => {
-  const toolbar = app.querySelector(".board-toolbar");
-  if (!toolbar || app.querySelector("[data-batch-wrap]")) return;
+  const mount = app.querySelector("[data-jobs-batch-mount]");
+  if (!mount || app.querySelector("[data-batch-wrap]")) return;
   let resumes = state.batchResumes;
   /* #B2: state.batchResumes starts as [] (truthy), so the old `if (!resumes)`
      guard never re-fetched and the panel was stuck on "先到简历中心创建主简历". */
@@ -2989,45 +2446,40 @@ setCanvasRenderHook(async (app) => {
       resumes = [];
     }
   }
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "btn btn-outline btn-sm";
-  toggle.setAttribute("data-action", "toggle-batch-panel");
-  toggle.textContent = "批量对比";
+  const fab = document.createElement("div");
+  fab.className = "batch-fab";
+  fab.hidden = true;
+  fab.setAttribute("data-batch-fab", "");
+  fab.innerHTML = `
+    <label class="board-check"><input type="checkbox" data-board-select-all aria-label="全选岗位"><span></span></label>
+    <span class="batch-fab__count" data-board-selected-count>已选 0</span>
+    <button class="btn btn-primary btn-sm" type="button" data-action="toggle-batch-panel">批量对比</button>
+  `;
   const wrap = document.createElement("div");
   wrap.className = "panel panel-card batch-panel-wrap";
   wrap.hidden = true;
   wrap.setAttribute("data-batch-wrap", "");
   wrap.innerHTML = batchPanelHtml(state.jobs || [], resumes || []);
-  toolbar.append(toggle, wrap);
+  mount.append(fab, wrap);
 
-  const headerRow = app.querySelector(".page-header .row");
-  if (headerRow && !app.querySelector('[data-form="job-create"]')) {
-    const addBtn = document.createElement("button");
-    addBtn.type = "button";
-    addBtn.className = "btn btn-outline";
-    addBtn.setAttribute("data-action", "show-add-job");
-    addBtn.textContent = "添加岗位";
-    const importBtn = document.createElement("button");
-    importBtn.type = "button";
-    importBtn.className = "btn btn-ghost";
-    importBtn.setAttribute("data-action", "show-import");
-    importBtn.textContent = "批量导入";
-    headerRow.append(addBtn, importBtn);
+  const formsMount = app.querySelector("[data-jobs-forms-mount]");
+  if (formsMount && !formsMount.querySelector('[data-form="job-create"]')) {
     const createForm = document.createElement("div");
     createForm.innerHTML = JOB_CREATE_FORM_HTML.trim();
     const importForm = document.createElement("div");
     importForm.innerHTML = JOB_IMPORT_FORM_HTML.trim();
-    app.insertBefore(createForm.firstChild, app.querySelector("#job-board"));
-    app.insertBefore(importForm.firstChild, app.querySelector("#job-board"));
+    formsMount.append(createForm.firstChild, importForm.firstChild);
+    renderBlockerBadge();
+    refreshBlockerBadge();
   }
 });
 
 /* ------------------------------------------------------------------ */
 /* Sprint 3: Pipeline + Blocker（抓取 Bar + 阻断微标/Modal）             */
 /* ------------------------------------------------------------------ */
-/* 页面结构在 kanban.js 的 renderKanban，因此通过
- * 第三个 canvas render hook 挂载到岗位库 Top Bar（page-header .row）：
+/* 页面结构在 kanban.js 的 renderKanban：抓取 Bar 与阻断微标挂载点
+ * （data-fetch-url-bar / data-blocker-badge）已由 kanban.js 直接渲染，
+ * 此处只负责微标数据刷新与 Modal 流程。
  *  - 抓取 Bar：<input data-fetch-url> + 「自动抓取」（data-action=fetch-job-url）
  *  - 阻断微标：blockerCountBadge 输出 <button class="blocker-badge"
  *    data-action="open-blockers">，有 pending 时显示并带闪烁动画（CSS）。
@@ -3075,36 +2527,6 @@ async function openBlockersModal() {
     toast(error.message, "error");
   }
 }
-
-setCanvasRenderHook(async (app) => {
-  const headerRow = app.querySelector(".page-header--jobs .row");
-  if (!headerRow || app.querySelector("[data-fetch-url-bar]")) return;
-
-  const fetchBar = document.createElement("div");
-  fetchBar.className = "fetch-url-bar";
-  fetchBar.setAttribute("data-fetch-url-bar", "");
-  fetchBar.innerHTML = `
-    <input type="url" data-fetch-url placeholder="https://… 粘贴岗位链接，自动抓取入库" aria-label="岗位链接" autocomplete="off">
-    <button type="button" class="btn btn-primary btn-sm" data-action="fetch-job-url">自动抓取</button>`;
-  fetchBar
-    .querySelector("[data-fetch-url]")
-    .addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        const button = fetchBar.querySelector('[data-action="fetch-job-url"]');
-        if (button) button.click();
-      }
-    });
-
-  const badgeMount = document.createElement("span");
-  badgeMount.className = "blocker-badge-mount";
-  badgeMount.setAttribute("data-blocker-badge", "");
-
-  headerRow.append(fetchBar, badgeMount);
-  /* 先渲染缓存计数（若有），再异步拉最新计数，避免每次进岗位库闪一下。 */
-  renderBlockerBadge();
-  refreshBlockerBadge();
-});
 
 async function boot() {
   initTheme();

@@ -17,7 +17,7 @@ test("renderLiveSheetHtml renders the dark paper shell with placeholder for empt
   const html = renderLiveSheetHtml(null);
   assert.match(html, /data-live-sheet/);
   assert.match(html, /data-live-sheet-paper/);
-  assert.match(html, />定稿预览</);
+  assert.match(html, />定稿 Live Sheet</);
   assert.match(html, /采纳右侧提案后，此处实时预览定稿/);
   assert.doesNotMatch(html, /<h1|<p>|<ul>/);
   /* whitespace-only draft is treated as empty too */

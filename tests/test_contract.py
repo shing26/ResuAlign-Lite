@@ -32,7 +32,6 @@ CRITICAL_ROUTES = {
     "/api/jobs/import",
     "/api/jobs/{job_id}",
     "/api/jobs/{job_id}/workbench",
-    "/api/jobs/{job_id}/appraisal",
     "/api/jobs/{job_id}/workbench/accept",
     "/api/master-resumes",
     "/api/master-resumes/{resume_id}",
@@ -94,7 +93,16 @@ def _auth_headers(client: TestClient) -> dict[str, str]:
     return _auth_cache
 
 
-def _assert_additive_schema(golden: dict, current: dict, path: str) -> None:
+def _manifest() -> dict:
+    return json.loads(INCREMENTAL_MANIFEST.read_text(encoding="utf-8"))
+
+
+def _assert_additive_schema(
+    golden: dict,
+    current: dict,
+    path: str,
+    removed_props=frozenset(),
+) -> None:
     if not isinstance(golden, dict) or not isinstance(current, dict):
         return
     if "required" in golden:
@@ -106,11 +114,14 @@ def _assert_additive_schema(golden: dict, current: dict, path: str) -> None:
     if isinstance(golden_props, dict):
         current_props = current.get("properties", {})
         for name, prop_schema in golden_props.items():
+            if name in removed_props:
+                continue
             assert name in current_props, f"{path}.properties.{name} removed"
             _assert_additive_schema(
                 prop_schema,
                 current_props[name],
                 f"{path}.properties.{name}",
+                removed_props,
             )
     if "items" in golden:
         _assert_additive_schema(golden["items"], current.get("items", {}), f"{path}.items")
@@ -124,11 +135,17 @@ def _assert_additive_schema(golden: dict, current: dict, path: str) -> None:
 def test_openapi_is_additive_over_golden():
     current = app.openapi()
     golden = json.loads(OPENAPI_GOLDEN.read_text(encoding="utf-8"))
+    manifest = _manifest()
+    removed_paths = set(manifest.get("removed_paths", []))
     current_paths = current["paths"]
     golden_paths = golden["paths"]
-    missing_paths = set(golden_paths) - set(current_paths)
+    missing_paths = (
+        set(golden_paths) - set(current_paths) - removed_paths
+    )
     assert not missing_paths, f"Golden routes removed: {sorted(missing_paths)}"
     for path, ops in golden_paths.items():
+        if path in removed_paths:
+            continue
         for method, op in ops.items():
             if method.lower() not in {
                 "get", "post", "put", "patch", "delete",
@@ -145,9 +162,15 @@ def test_openapi_is_additive_over_golden():
                 )
     golden_schemas = golden["components"]["schemas"]
     current_schemas = current["components"]["schemas"]
+    removed_props = manifest.get("removed_schema_properties", {})
     for name, schema in golden_schemas.items():
         assert name in current_schemas, f"Golden schema removed: {name}"
-        _assert_additive_schema(schema, current_schemas[name], f"schemas.{name}")
+        _assert_additive_schema(
+            schema,
+            current_schemas[name],
+            f"schemas.{name}",
+            set(removed_props.get(name, [])),
+        )
 
 
 def test_openapi_current_snapshot_matches():
@@ -160,7 +183,7 @@ def test_openapi_current_snapshot_matches():
 
 
 def test_incremental_manifest_matches_openapi_diff():
-    manifest = json.loads(INCREMENTAL_MANIFEST.read_text(encoding="utf-8"))
+    manifest = _manifest()
     current = app.openapi()
     golden = json.loads(OPENAPI_GOLDEN.read_text(encoding="utf-8"))
     new_paths = set(current["paths"]) - set(golden["paths"])
@@ -168,10 +191,44 @@ def test_incremental_manifest_matches_openapi_diff():
         set(current["components"]["schemas"])
         - set(golden["components"]["schemas"])
     )
+    removed_paths = set(golden["paths"]) - set(current["paths"])
+    removed_props: dict[str, list[str]] = {}
+    for name, schema in golden["components"]["schemas"].items():
+        if name not in current["components"]["schemas"]:
+            continue
+        golden_props = set((schema.get("properties") or {}).keys())
+        current_props = set(
+            (current["components"]["schemas"][name].get("properties") or {}).keys()
+        )
+        missing = sorted(golden_props - current_props)
+        if missing:
+            removed_props[name] = missing
     assert set(manifest["paths"]) == new_paths
     assert set(manifest["schemas"]) == new_schemas
+    assert set(manifest["removed_paths"]) == removed_paths
+    declared_removed_props = manifest["removed_schema_properties"]
+    for name, props in declared_removed_props.items():
+        assert name in current["components"]["schemas"], (
+            f"removed props declared for unknown schema {name}"
+        )
+        current_props = set(
+            (current["components"]["schemas"][name].get("properties") or {}).keys()
+        )
+        for prop in props:
+            assert prop not in current_props, f"{name}.properties.{prop} still present"
+    for name, props in removed_props.items():
+        assert declared_removed_props.get(name) == props
     assert manifest["operations"] == []
-    assert manifest["breaking_changes"] == []
+    break_types = [item["type"] for item in manifest["breaking_changes"]]
+    assert break_types.count("remove_path") == len(manifest["removed_paths"])
+    assert break_types.count("remove_schema_property") == sum(
+        len(props) for props in declared_removed_props.values()
+    )
+    for item in manifest["breaking_changes"]:
+        if item["type"] == "remove_path":
+            assert item["path"] in removed_paths
+        elif item["type"] == "remove_schema_property":
+            assert item["property"] in declared_removed_props.get(item["schema"], [])
 
 
 def test_critical_routes_exist():

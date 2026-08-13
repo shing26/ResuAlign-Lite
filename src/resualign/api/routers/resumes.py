@@ -61,10 +61,17 @@ def list_master_resumes(user: dict[str, Any]=Depends(get_current_user)):
 
 @router.get('/api/master-resumes/{resume_id}')
 def get_master_resume(resume_id: str, user: dict[str, Any]=Depends(get_current_user)):
-    """Return one master resume with its full version history."""
+    """Return one master resume, dropping dangling diagnosis job references."""
     resume = api_module._resumes.get_master_resume(user['user_id'], resume_id)
     if resume is None:
         raise HTTPException(status_code=404, detail='Master resume not found')
+    job_id = resume.get('latest_diagnosis_job_id')
+    if job_id and api_module._registry.snapshot(job_id, tenant_id=user['user_id']) is None:
+        cleared = api_module._resumes.clear_latest_diagnosis_job(
+            user['user_id'], resume_id
+        )
+        if cleared is not None:
+            resume = cleared
     return resume
 
 @router.post('/api/master-resumes/{resume_id}/diagnose', status_code=202)

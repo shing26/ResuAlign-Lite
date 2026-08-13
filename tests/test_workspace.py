@@ -300,6 +300,29 @@ def test_old_master_resume_database_migrates_diagnosis_column(tmp_path):
     assert linked["latest_diagnosis_job_id"] == "job-abc"
 
 
+def test_master_resume_clears_dangling_diagnosis_job(db_path):
+    store = MasterResumeStore(db_path=db_path)
+    created = store.create_master_resume(
+        "tenant-1", "Master Resume", "Python developer."
+    )
+    linked = store.set_latest_diagnosis_job(
+        "tenant-1", created["resume_id"], "job-1"
+    )
+    assert linked["latest_diagnosis_job_id"] == "job-1"
+
+    cleared = store.clear_latest_diagnosis_job(
+        "tenant-1", created["resume_id"]
+    )
+    assert cleared is not None
+    assert cleared["latest_diagnosis_job_id"] is None
+    detail = store.get_master_resume("tenant-1", created["resume_id"])
+    assert detail["latest_diagnosis_job_id"] is None
+    assert (
+        store.clear_latest_diagnosis_job("tenant-2", created["resume_id"])
+        is None
+    )
+
+
 def test_application_creation_snapshots_resume_version(db_path):
     resume_store = MasterResumeStore(db_path=db_path)
     app_store = ApplicationStore(db_path=db_path)

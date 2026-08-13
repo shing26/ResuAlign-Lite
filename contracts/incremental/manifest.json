@@ -1,5 +1,5 @@
 {
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Incremental API additions over the immutable contracts/openapi-v1.json golden. tests/test_contract.py checks the additive superset, and contracts/openapi-current.json snapshots the resulting OpenAPI document.",
   "paths": [
     "/api/automation/rules",
@@ -63,5 +63,41 @@
     "crawl.status",
     "heartbeat"
   ],
-  "breaking_changes": []
+  "removed_paths": [
+    "/api/jobs/{job_id}/appraisal"
+  ],
+  "removed_schema_properties": {
+    "SettingsUpdateRequest": [
+      "appraisal_weights",
+      "salary_reference"
+    ],
+    "WorkstationState": [
+      "appraisal"
+    ]
+  },
+  "breaking_changes": [
+    {
+      "type": "remove_path",
+      "path": "/api/jobs/{job_id}/appraisal",
+      "reason": "delivery appraisal removed per ADR-0025"
+    },
+    {
+      "type": "remove_schema_property",
+      "schema": "SettingsUpdateRequest",
+      "property": "appraisal_weights",
+      "reason": "delivery weight evaluation removed per ADR-0025"
+    },
+    {
+      "type": "remove_schema_property",
+      "schema": "SettingsUpdateRequest",
+      "property": "salary_reference",
+      "reason": "salary benchmark removed per ADR-0025"
+    },
+    {
+      "type": "remove_schema_property",
+      "schema": "WorkstationState",
+      "property": "appraisal",
+      "reason": "delivery appraisal removed per ADR-0025"
+    }
+  ]
 }

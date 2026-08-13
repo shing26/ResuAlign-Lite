@@ -141,6 +141,22 @@ def _queue_diagnosis(resume_id):
     return r.json()
 
 
+def test_master_resume_detail_clears_dangling_diagnosis_job():
+    resume = _create_resume()
+    token = _auth_headers()["Authorization"].split(" ", 1)[1]
+    user = api_module._users.user_for_token(token)
+    assert user is not None
+    linked = api_module._resumes.set_latest_diagnosis_job(
+        user["user_id"], resume["resume_id"], "missing-diagnosis-job"
+    )
+    assert linked["latest_diagnosis_job_id"] == "missing-diagnosis-job"
+
+    detail = client.get(
+        f"/api/master-resumes/{resume['resume_id']}", headers=_auth_headers()
+    ).json()
+    assert detail["latest_diagnosis_job_id"] is None
+
+
 def test_diagnose_success_polls_and_survives_refresh():
     resume = _create_resume()
     report = Report(

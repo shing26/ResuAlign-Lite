@@ -7,6 +7,9 @@ function preferredTheme() {
   } catch {
     /* storage can be unavailable in embedded contexts */
   }
+  if (document.documentElement.classList.contains("dark")) {
+    return "dark";
+  }
   if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
     return "dark";
   }
@@ -14,6 +17,7 @@ function preferredTheme() {
 }
 
 export function applyTheme(theme) {
+  document.documentElement.classList.toggle("dark", theme === "dark");
   document.documentElement.dataset.theme = theme;
   const toggle = document.querySelector("[data-theme-toggle]");
   if (!toggle) return;

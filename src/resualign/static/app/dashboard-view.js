@@ -1,142 +1,196 @@
-/* Apple Native Dashboard renderer (v2.0 shell).
-   Pulls the real /api/dashboard payload and renders the unified
-   Dashboard with the Apple card language. Keeps the #app mount point
-   used by main.js routing. */
-import { esc } from "./events.js";
+/* ResuAlign v3 Dashboard: metric strip + quick continue + skill gaps.
+   All values are derived from the live API, never hard-coded. */
+import { esc, formatDate, jobStatusLabel, state } from "./events.js";
 
-function esc_attr(value) {
+function escAttr(value) {
   return esc(String(value ?? ""));
 }
 
+function toNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : 0;
+}
+
+function diagnosisFromSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const result = snapshot.result || {};
+  return result.diagnosis || result || null;
+}
+
 export async function renderDashboard(container) {
-  let kpi = { resumes: 0, jobs: 0, applied: 0, active_followups: 0 };
-  let skillGaps = [];
-  let quick = null;
+  const defaults = {
+    kpi: {
+      resumes: 0,
+      jobs: 0,
+      applied: 0,
+      interview: 0,
+      offer: 0,
+      declined: 0,
+      active_followups: 0,
+    },
+    skill_gaps: [],
+    quick_continue: null,
+  };
+  let payload = defaults;
+  let jobs = [];
+  let resumes = [];
   try {
-    const res = await fetch("/api/dashboard");
-    if (res.ok) {
-      const data = await res.json();
-      kpi = { ...kpi, ...(data.kpi || {}) };
-      skillGaps = data.skill_gaps || [];
-      quick = data.quick_continue || null;
+    const [dashboardResponse, jobsResponse, resumesResponse] = await Promise.all([
+      fetch("/api/dashboard"),
+      fetch("/api/jobs?limit=500"),
+      fetch("/api/master-resumes"),
+    ]);
+    if (dashboardResponse.ok) {
+      payload = { ...defaults, ...(await dashboardResponse.json()) };
     }
+    if (jobsResponse.ok) jobs = (await jobsResponse.json()) || [];
+    if (resumesResponse.ok) resumes = (await resumesResponse.json()) || [];
   } catch (error) {
     console.warn("Dashboard fallback data", error);
   }
 
-  const maxCount = Math.max(
-    1,
-    ...skillGaps.map((gap) => Number(gap.count) || 0),
-  );
-  const appliedRate =
-    kpi.jobs > 0 ? Math.round((kpi.applied / kpi.jobs) * 100) : 0;
+  const kpi = { ...defaults.kpi, ...(payload.kpi || {}) };
+  const jobsTotal = toNumber(kpi.jobs) || jobs.length;
+  const applied = toNumber(kpi.applied);
+  const interview = toNumber(kpi.interview);
+  const offer = toNumber(kpi.offer);
+  const declined = toNumber(kpi.declined);
+  const followups = toNumber(kpi.active_followups);
+
+  const alignedCount = jobs.filter(
+    (job) => job && job.alignment_status === "succeeded",
+  ).length;
+  const completionRate =
+    jobsTotal > 0 ? Math.round((alignedCount / jobsTotal) * 100) : 0;
+
+  const currentResume = Array.isArray(resumes) ? resumes[0] : null;
+  const diagnosis =
+    state.diagnosis &&
+    currentResume &&
+    currentResume.latest_diagnosis_job_id &&
+    state.diagnosis.job_id === currentResume.latest_diagnosis_job_id
+      ? diagnosisFromSnapshot(state.diagnosis)
+      : null;
+  const rawScore = diagnosis && Number(diagnosis.score);
+  const atsScore =
+    Number.isFinite(rawScore) && rawScore >= 0
+      ? Math.round(Math.min(100, rawScore))
+      : null;
 
   const kpiCards = `
-    <div class="apple-card p-4 rounded-xl space-y-1">
-      <div class="text-white/40 text-[11px] font-medium uppercase tracking-wider">基准简历数</div>
-      <div class="text-2xl font-bold text-white font-mono flex items-center justify-between">
-        <span>${esc_attr(kpi.resumes)} <span class="text-xs text-white/40 font-normal">份</span></span>
-        <span class="text-xs text-applegreen bg-applegreen/10 px-2 py-0.5 rounded-full font-sans font-medium">主简历</span>
-      </div>
-      <p class="text-[11px] text-white/40">简历库总量</p>
+    <div class="metric-cell" data-kpi="jobs">
+      <div class="metric-label">跟踪岗位</div>
+      <div class="metric-value">${escAttr(jobsTotal)} <span>个</span></div>
+      <div class="metric-hint">已投递 ${escAttr(applied)} · 面试中 ${escAttr(interview)} · Offer ${escAttr(offer)} · 放弃 ${escAttr(declined)}</div>
     </div>
-    <div class="apple-card p-4 rounded-xl space-y-1">
-      <div class="text-white/40 text-[11px] font-medium uppercase tracking-wider">跟踪目标岗位</div>
-      <div class="text-2xl font-bold text-white font-mono flex items-center justify-between">
-        <span>${esc_attr(kpi.jobs)} <span class="text-xs text-white/40 font-normal">个</span></span>
-        <span class="text-xs text-appleblue bg-appleblue/10 px-2 py-0.5 rounded-full font-sans font-medium">${esc_attr(kpi.applied)} 已投递</span>
-      </div>
-      <p class="text-[11px] text-white/40">投递转化 ${appliedRate}%</p>
+    <div class="metric-cell" data-kpi="aligned">
+      <div class="metric-label">已完成对齐</div>
+      <div class="metric-value">${escAttr(alignedCount)} <span>/ ${escAttr(jobsTotal)}</span></div>
+      <div class="metric-hint">完成率 ${escAttr(completionRate)}%</div>
     </div>
-    <div class="apple-card p-4 rounded-xl space-y-1">
-      <div class="text-white/40 text-[11px] font-medium uppercase tracking-wider">投递 / 面试 / Offer</div>
-      <div class="text-2xl font-bold text-white font-mono flex items-center justify-between">
-        <span>${esc_attr(kpi.applied)} <span class="text-xs text-white/40 font-normal">投递</span></span>
-        <span class="text-xs text-appleamber bg-appleamber/10 px-2 py-0.5 rounded-full font-sans font-medium">${esc_attr(kpi.interview)} 面试</span>
-      </div>
-      <p class="text-[11px] text-white/40">Offer ${esc_attr(kpi.offer)} · 放弃 ${esc_attr(kpi.declined)}</p>
+    <div class="metric-cell" data-kpi="ats">
+      <div class="metric-label">主简历 ATS</div>
+      <div class="metric-value">${atsScore == null ? "—" : escAttr(atsScore)}</div>
+      <div class="metric-hint">${atsScore == null ? "未诊断" : `${escAttr(currentResume ? currentResume.title : "主简历")} · v${escAttr(currentResume ? currentResume.current_version : 1)}`}</div>
     </div>
-    <div class="apple-card p-4 rounded-xl space-y-1">
-      <div class="text-white/40 text-[11px] font-medium uppercase tracking-wider">待跟进事项</div>
-      <div class="text-2xl font-bold text-appleamber font-mono flex items-center justify-between">
-        <span>${esc_attr(kpi.active_followups)} <span class="text-xs text-white/40 font-normal">条</span></span>
-        <span class="text-xs text-appleamber font-sans">48h 到期提醒</span>
-      </div>
-      <p class="text-[11px] text-white/40">面试 / 下一步到期跟踪</p>
+    <div class="metric-cell" data-kpi="followups">
+      <div class="metric-label">待跟进</div>
+      <div class="metric-value">${escAttr(followups)} <span>条</span></div>
+      <div class="metric-hint">48h 内到期口径</div>
     </div>`;
 
-  const quickHtml = quick
+  const quick = payload.quick_continue || null;
+  const quickHtml = quick && quick.job_id
     ? `
-    <div class="p-4 rounded-xl bg-black/20 border border-white/[0.06] space-y-3">
-      <div class="flex items-center justify-between">
-        <div>
-          <h4 class="font-bold text-white text-[14px]">${esc_attr(quick.title)}</h4>
-          <p class="text-[11px] text-white/50">${esc_attr(quick.company || "未知公司")} · ${esc_attr(quick.alignment_status)}</p>
+      <div class="quick-row" data-quick-continue>
+        <div class="quick-main">
+          <div class="quick-title">${escAttr(quick.title || "未命名岗位")}</div>
+          <div class="quick-meta">${escAttr(quick.company || "未知公司")} · ${escAttr(quick.alignment_status || "待分析")}</div>
         </div>
-        <span class="text-[11px] bg-appleamber/10 text-appleamber border border-appleamber/20 px-2.5 py-1 rounded-full font-mono">继续对齐</span>
-      </div>
-      <div class="flex items-center justify-between pt-1 text-[11px]">
-        <span class="text-white/40">最近更新的待完成岗位</span>
-        <a href="#/workspace/${esc_attr(quick.job_id)}" class="apple-press px-3.5 py-1.5 bg-appleblue text-white rounded-lg font-medium shadow-sm inline-block">继续治理对齐 ›</a>
-      </div>
-    </div>`
+        <div class="quick-right">
+          <span class="pill ${quick.alignment_status === "succeeded" ? "pill-success" : "pill-warn"}">${escAttr(quick.alignment_status || "待分析")}</span>
+          <a class="btn btn-primary btn-sm" href="#/workspace/${encodeURIComponent(quick.job_id)}">继续对齐</a>
+        </div>
+      </div>`
     : `
-    <div class="p-4 rounded-xl bg-black/20 border border-white/[0.06] text-[12px] text-white/40">
-      暂无待完成的对齐岗位，去岗位库导入一个新 JD 开始。
-    </div>`;
+      <div class="quick-row" data-quick-continue>
+        <div class="quick-main">
+          <div class="quick-title">暂无待继续的对齐任务</div>
+          <div class="quick-meta">到岗位库粘贴 JD，或从完整工作台继续处理。</div>
+        </div>
+      </div>`;
 
-  const gapHtml =
-    skillGaps.length > 0
-      ? skillGaps
-          .map((gap) => {
-            const count = Number(gap.count) || 0;
-            const pct = Math.round((count / maxCount) * 100);
-            const open = count > 0;
-            return `
-            <button type="button"
-               data-action="goto-skill" data-skill="${esc_attr(gap.skill || "")}"
-               class="gap-action-card w-full text-left border ${open ? "border-applered/20 bg-applered/[0.04]" : "border-white/[0.04] bg-black/10"} p-2.5 rounded-lg cursor-pointer space-y-1.5 group">
-              <div class="flex justify-between text-[11.5px]">
-                <span class="text-white font-medium ${open ? "group-hover:text-applered" : ""} transition flex items-center gap-1">
-                  ${esc_attr(gap.skill)}
-                  ${open ? '<span class="text-[10px] text-applered opacity-0 group-hover:opacity-100 transition">⚡ 点击进入专项补全</span>' : ""}
-                </span>
-                <span class="${open ? "text-applered font-bold" : "text-applegreen"} font-mono">
-                  ${open ? `缺口 ${pct}% (${count} 岗位)` : "已覆盖"}
-                </span>
-              </div>
-              <div class="w-full h-1.5 bg-black/40 rounded-full overflow-hidden">
-                <div class="h-full ${open ? "bg-applered" : "bg-applegreen"} rounded-full" style="width: ${open ? pct : 100}%"></div>
-              </div>
+  const gaps = Array.isArray(payload.skill_gaps) ? payload.skill_gaps : [];
+  const maxCount = Math.max(1, ...gaps.map((gap) => Number(gap.count) || 0));
+  const gapHtml = gaps.length
+    ? gaps
+        .map((gap) => {
+          const count = Math.max(0, Number(gap.count) || 0);
+          const pct = Math.round((count / maxCount) * 100);
+          const peak = pct === 100;
+          return `
+            <button type="button" class="skill-row" data-action="goto-skill" data-skill="${escAttr(gap.skill || "")}">
+              <span class="skill-main">
+                <span class="skill-name">${escAttr(gap.skill || "未命名技能")}</span>
+                <span class="skill-track"><span class="skill-fill${peak ? "" : " warn"}" style="width:${peak ? 100 : pct}%"></span></span>
+              </span>
+              <span class="skill-count${peak ? " peak" : " warn"}">${peak ? `需求最多 · ${count} 岗` : `${count} 岗`}</span>
             </button>`;
-          })
-          .join("")
-      : `<div class="text-[12px] text-white/40">暂无岗位缺口数据，导入 JD 后自动汇总。</div>`;
+        })
+        .join("")
+    : `<div class="muted small" data-skill-gaps>暂无技能缺口数据</div>`;
+
+  const recentJobs = jobs
+    .filter((job) => job && job.job_id)
+    .sort(
+      (a, b) =>
+        (Number(b.updated_at) || 0) - (Number(a.updated_at) || 0),
+    )
+    .slice(0, 3);
+  const recentHtml = recentJobs.length
+    ? recentJobs
+        .map(
+          (job) => `
+            <a class="recent-job" href="#/workspace/${encodeURIComponent(job.job_id)}">
+              <span class="recent-job__title">${escAttr(job.title || "未命名岗位")}</span>
+              <span class="recent-job__meta">${escAttr(jobStatusLabel(job.status))} · ${escAttr(formatDate(job.updated_at))}</span>
+            </a>`,
+        )
+        .join("")
+    : `<div class="recent-job recent-job--empty">暂无岗位动态</div>`;
 
   container.innerHTML = `
-    <div class="h-full p-6 overflow-y-auto space-y-6">
-      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">${kpiCards}</section>
-      <section class="grid grid-cols-12 gap-6">
-        <div class="col-span-12 lg:col-span-7 apple-card p-5 rounded-xl space-y-4">
-          <div class="flex items-center justify-between border-b border-white/[0.08] pb-3">
-            <div class="flex items-center space-x-2">
-              <span class="text-base">⚡</span>
-              <h3 class="font-bold text-white text-[14px]">最近对齐工作台 (Quick Continue)</h3>
+    <div class="view view-scroll dashboard-view">
+      <div class="metric-strip dashboard-strip" data-dashboard-kpis>${kpiCards}</div>
+      <div class="dash-grid">
+        <section class="panel main-pane">
+          <div class="panel-head">
+            <div>
+              <h2>快速继续</h2>
+              <p>最近更新的待完成对齐任务</p>
             </div>
-            <a href="#/workspace" class="text-[12px] text-appleblue hover:underline">进入完整工作台 ›</a>
+            <a class="link" href="#/workspace">进入完整工作台</a>
           </div>
-          ${quickHtml}
-        </div>
-        <div class="col-span-12 lg:col-span-5 apple-card p-5 rounded-xl space-y-4">
-          <div class="flex items-center justify-between border-b border-white/[0.08] pb-3">
-            <div class="flex items-center space-x-2">
-              <span class="text-base">🎯</span>
-              <h3 class="font-bold text-white text-[14px]">目标岗位高频硬技能缺口</h3>
+          <div class="panel-body">
+            ${quickHtml}
+            <div class="recent-jobs">
+              <div class="recent-jobs__head">
+                <h3>最近岗位动态</h3>
+                <span class="small muted">最近 3 条 · 对齐快照</span>
+              </div>
+              <div class="recent-jobs__list" data-dashboard-recent>${recentHtml}</div>
             </div>
-            <span class="text-[10px] text-appleblue bg-appleblue/10 px-2 py-0.5 rounded-full font-mono">点击直接生成改写</span>
           </div>
-          <div class="space-y-3.5">${gapHtml}</div>
-        </div>
-      </section>
+        </section>
+        <aside class="panel aux-pane">
+          <div class="panel-head">
+            <div>
+              <h2>技能缺口</h2>
+              <p>目标岗位高频硬技能</p>
+            </div>
+          </div>
+          <div class="panel-body" data-skill-gaps>${gapHtml}</div>
+        </aside>
+      </div>
     </div>`;
 }

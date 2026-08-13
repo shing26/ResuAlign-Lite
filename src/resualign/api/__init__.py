@@ -23,7 +23,6 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
-from ..appraisal import compute_appraisal, resume_profile
 from ..batch import BatchAlignStore
 from ..cache import ContentCache
 from ..classifier import classify_job
@@ -141,7 +140,6 @@ __all__ = [
     "_queue_batch_align",
     "build_config",
     "classify_job",
-    "compute_appraisal",
     "crawl_jd",
     "extract_salary_range",
     "extract_text",
@@ -153,7 +151,6 @@ __all__ = [
     "proactive_jd_profile",
     "profile_and_gaps",
     "profile_jd",
-    "resume_profile",
     "rewrite_bullet",
     "run",
     "structured_resume_sections",
@@ -508,7 +505,6 @@ update_library_job = _jobs_router.update_library_job
 bulk_update_job_status = _jobs_router.bulk_update_job_status
 delete_library_job = _jobs_router.delete_library_job
 run_workbench = _jobs_router.run_workbench
-get_workbench_appraisal = _jobs_router.get_workbench_appraisal
 accept_workbench_diffs = _jobs_router.accept_workbench_diffs
 preanalyze_library_job = _jobs_router.preanalyze_library_job
 rewrite_workbench_bullet = _jobs_router.rewrite_workbench_bullet

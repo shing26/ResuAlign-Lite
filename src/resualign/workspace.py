@@ -485,6 +485,22 @@ class MasterResumeStore(_SqliteStore):
                     return None
         return self.get_master_resume(tenant_id, resume_id)
 
+    def clear_latest_diagnosis_job(
+        self, tenant_id: str, resume_id: str
+    ) -> Optional[dict[str, Any]]:
+        """Drop a diagnosis job reference whose analysis job no longer exists."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "UPDATE master_resumes SET latest_diagnosis_job_id = NULL "
+                    "WHERE resume_id = ? AND tenant_id = ?",
+                    (resume_id, tenant_id),
+                )
+                if cursor.rowcount == 0:
+                    return None
+        return self.get_master_resume(tenant_id, resume_id)
+
     def delete_master_resume(
         self, tenant_id: str, resume_id: str
     ) -> bool:
