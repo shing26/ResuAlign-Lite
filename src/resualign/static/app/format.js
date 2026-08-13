@@ -1092,13 +1092,25 @@ export function applyJdParseError(status, detail) {
  * - 投递/总数  = jobs that reached submission (applied + interview + offer) / total
  * - 面试/投递  = jobs that reached interview (interview + offer) / submission count
  * - Offer/面试 = jobs that reached offer (offer) / interview count
- * Withdrawn jobs are excluded from the funnel (their pre-abandon stage is
- * unknown); they still appear in the five-state counts. Any zero denominator
- * yields null, which the UI renders as "—". */
+ * Stages are derived from historical peak evidence (ADR-0027): offer_at,
+ * then applied_at, then the current canonical status. A withdrawn job with
+ * applied_at or offer_at keeps its historical funnel segment; the five-state
+ * counts still show the current status. Any zero denominator yields null,
+ * which the UI renders as "—". */
 export function funnelPercent(numerator, denominator) {
   const bottom = Number(denominator);
   if (!Number.isFinite(bottom) || bottom <= 0) return null;
   return Math.round((Number(numerator) / bottom) * 100);
+}
+
+export function jobFunnelStage(job) {
+  if (!job || typeof job !== "object") return "";
+  const stages = ["draft", "applied", "interview", "offer"];
+  let peak = stages.indexOf(canonicalJobStatus(job.status));
+  if (peak < 0) peak = 0;
+  if (job.applied_at) peak = Math.max(peak, 1);
+  if (job.offer_at) peak = Math.max(peak, 3);
+  return stages[peak] || "";
 }
 
 export function computeJobStats(jobs) {
@@ -1108,9 +1120,18 @@ export function computeJobStats(jobs) {
     const key = canonicalJobStatus(job.status);
     if (key in counts) counts[key] += 1;
   }
-  const applied = counts.applied + counts.interview + counts.offer;
-  const interview = counts.interview + counts.offer;
-  const offer = counts.offer;
+  const peak = { applied: 0, interview: 0, offer: 0 };
+  for (const job of list) {
+    const stage = jobFunnelStage(job);
+    if (stage === "offer") peak.offer += 1;
+    if (stage === "interview" || stage === "offer") peak.interview += 1;
+    if (stage === "applied" || stage === "interview" || stage === "offer") {
+      peak.applied += 1;
+    }
+  }
+  const applied = peak.applied;
+  const interview = peak.interview;
+  const offer = peak.offer;
   const total = list.length;
   return {
     total,
@@ -1429,6 +1450,7 @@ export const REMINDER_WINDOW_MS = 48 * 60 * 60 * 1000; /* 48h */
 
 /* 到期提醒：优先读结构化的 next_step_due_at（时间线弹窗的 datetime-local
  * 字段），其次回退到 next_step 自由文本里的日期正则；均无日期则跳过。
+ * 只对已投递/面试中生效：已拿Offer/放弃即使保留 next_step 也不再提醒。
  * 返回按紧迫度升序（最早到期在前）的列表：
  * { job, dueAt, overdue, hoursUntil, stage }——stage 为面试阶段（可能为空）。 */
 export function dueReminders(jobs, now = new Date()) {
@@ -1437,6 +1459,8 @@ export function dueReminders(jobs, now = new Date()) {
   const reminders = [];
   for (const job of list) {
     if (!job || typeof job !== "object") continue;
+    const status = canonicalJobStatus(job.status);
+    if (status !== "applied" && status !== "interview") continue;
     const structured = String(job.next_step_due_at || "").trim();
     const text = String(job.next_step || "").trim();
     if (!structured && !text) continue;

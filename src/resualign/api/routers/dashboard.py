@@ -25,10 +25,27 @@ from ..schemas import (
 
 router = APIRouter()
 
-# Canonical statuses counted as "已投递" (applied pipeline states).
-_APPLIED_STATUSES = {"applied", "interview", "offer"}
+# Canonical statuses that still produce an active follow-up reminder.
+_ACTIVE_REMINDER_STATUSES = {"applied", "interview"}
 # Upper bound for the returned skill-gap ranking.
 _SKILL_GAP_LIMIT = 8
+
+
+def _job_funnel_stage(job: dict[str, Any]) -> str:
+    """Return the highest historical pipeline stage for a library job.
+
+    ADR-0027: the funnel stage is the peak of the current canonical status,
+    ``applied_at`` evidence, and ``offer_at`` evidence. Withdrawn jobs keep
+    their pre-abandon stage when a historical timestamp exists.
+    """
+    stages = ("draft", "applied", "interview", "offer")
+    current = job.get("status_canonical", "draft")
+    peak = stages.index(current) if current in stages else 0
+    if job.get("applied_at"):
+        peak = max(peak, 1)
+    if job.get("offer_at"):
+        peak = max(peak, 3)
+    return stages[peak]
 
 
 def _due_date_key(value: str | None) -> str | None:
@@ -49,10 +66,11 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
     """Return aggregated KPI, skill-gap, and quick-continue data.
 
     - ``kpi.resumes`` counts the tenant's master resumes.
-    - ``kpi.jobs`` counts the tenant's library jobs; the applied/interview/
-      offer/declined counters derive from the canonical five-state status.
+    - ``kpi.jobs`` counts the tenant's library jobs; applied/interview/offer
+      use the historical peak stage (offer_at > applied_at > current status),
+      while declined stays the current withdrawn count.
     - ``kpi.active_followups`` counts jobs whose ``next_step_due_at`` is
-      non-empty and not in the past.
+      non-empty and not in the past, restricted to applied/interview jobs.
     - ``skill_gaps`` ranks the frequencies of ``must_have_skills`` across
       all job JD profiles, descending (top 8).
     - ``quick_continue`` is the most recently updated job whose
@@ -71,16 +89,21 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
     today = date.today().isoformat()
     for job in jobs:
         canonical = job["status_canonical"]
-        if canonical in _APPLIED_STATUSES:
+        stage = _job_funnel_stage(job)
+        if stage in {"applied", "interview", "offer"}:
             applied += 1
-        if canonical == "interview":
+        if stage in {"interview", "offer"}:
             interview += 1
-        elif canonical == "offer":
+        if stage == "offer":
             offer += 1
-        elif canonical == "withdrawn":
+        if canonical == "withdrawn":
             declined += 1
         due = _due_date_key(job["next_step_due_at"])
-        if due is not None and due >= today:
+        if (
+            canonical in _ACTIVE_REMINDER_STATUSES
+            and due is not None
+            and due >= today
+        ):
             active_followups += 1
 
     skill_counts: dict[str, int] = {}

@@ -54,8 +54,18 @@ test("onboarding card DOM: partial progress keeps remaining steps numbered", () 
 test("reminder strip DOM: badges link to workspace and carry due labels", () => {
   const reminders = dueReminders(
     [
-      { job_id: "j1", title: "后端开发", next_step: "2026-08-09 10:00 二面" },
-      { job_id: "j2", title: "前端开发", next_step: "2026-08-11 09:00" },
+      {
+        job_id: "j1",
+        title: "后端开发",
+        status: "interview",
+        next_step: "2026-08-09 10:00 二面",
+      },
+      {
+        job_id: "j2",
+        title: "前端开发",
+        status: "interview",
+        next_step: "2026-08-11 09:00",
+      },
     ],
     NOW,
   );
@@ -78,6 +88,7 @@ test("reminder strip DOM: structured fields render stage badge with due time", (
       {
         job_id: "j3",
         title: "数据工程师",
+        status: "interview",
         next_step: "等 HR 通知",
         next_step_due_at: "2026-08-10 18:00",
         interview_stage: "二面",
@@ -94,7 +105,14 @@ test("reminder strip DOM: structured fields render stage badge with due time", (
 
 test("reminder banner DOM: shows active job follow-up", () => {
   const reminders = dueReminders(
-    [{ job_id: "j9", title: "算法工程师", next_step: "2026-08-09 15:00 三面" }],
+    [
+      {
+        job_id: "j9",
+        title: "算法工程师",
+        status: "interview",
+        next_step: "2026-08-09 15:00 三面",
+      },
+    ],
     NOW,
   );
   const body = bodyFrom(renderReminderBanner(reminders[0]));
@@ -111,6 +129,7 @@ test("reminder banner DOM: structured stage shows as 阶段 · 到期时间", ()
       {
         job_id: "j9",
         title: "算法工程师",
+        status: "interview",
         next_step: "准备系统设计",
         next_step_due_at: "2026-08-11 14:00",
         interview_stage: "HR面",
@@ -121,4 +140,26 @@ test("reminder banner DOM: structured stage shows as 阶段 · 到期时间", ()
   const body = bodyFrom(renderReminderBanner(reminders[0]));
   const banner = body.querySelector("[data-reminder-banner]");
   assert.ok(banner.textContent.includes("HR面 · 8/11 14:00"));
+});
+
+test("reminder strip DOM: terminal jobs produce no reminders", () => {
+  const reminders = dueReminders(
+    [
+      {
+        job_id: "j-offer",
+        title: "已拿Offer",
+        status: "offer",
+        next_step_due_at: "2026-08-09 10:00",
+      },
+      {
+        job_id: "j-withdrawn",
+        title: "放弃",
+        status: "withdrawn",
+        next_step: "2026-08-09 10:00",
+      },
+    ],
+    NOW,
+  );
+  assert.deepEqual(reminders, []);
+  assert.equal(renderReminderStrip(reminders), "");
 });

@@ -71,7 +71,12 @@ test("parseNextStepDate rejects non-date and impossible dates", () => {
 const NOW = new Date(2026, 7, 10, 12, 0, 0); /* 2026-08-10 12:00 local */
 
 function job(id, nextStep) {
-  return { job_id: id, title: `岗位 ${id}`, next_step: nextStep };
+  return {
+    job_id: id,
+    title: `岗位 ${id}`,
+    next_step: nextStep,
+    status: "interview",
+  };
 }
 
 test("dueReminders flags overdue and within-48h next steps", () => {
@@ -143,6 +148,19 @@ test("dueReminders accepts a timestamp string as now", () => {
   assert.equal(reminders.length, 1);
 });
 
+test("dueReminders ignores terminal and draft jobs even with next_step", () => {
+  const reminders = dueReminders(
+    [
+      { job_id: "offer", title: "offer", status: "offer", next_step: "2026-08-09 10:00" },
+      { job_id: "withdrawn", title: "withdrawn", status: "withdrawn", next_step_due_at: "2026-08-09 10:00" },
+      { job_id: "draft", title: "draft", status: "draft", next_step_due_at: "2026-08-09 10:00" },
+      { job_id: "active", title: "active", status: "interview", next_step_due_at: "2026-08-09 10:00" },
+    ],
+    NOW,
+  );
+  assert.deepEqual(reminders.map((r) => r.job.job_id), ["active"]);
+});
+
 /* F6: 结构化 next_step_due_at 优先于 next_step 自由文本正则 */
 test("dueReminders prefers structured next_step_due_at over free text", () => {
   /* 自由文本无日期、结构化字段有日期 → 提醒来自结构化字段 */
@@ -151,6 +169,7 @@ test("dueReminders prefers structured next_step_due_at over free text", () => {
       {
         job_id: "a",
         title: "岗位 a",
+        status: "interview",
         next_step: "等 HR 通知",
         next_step_due_at: "2026-08-11 09:00",
       },
@@ -166,6 +185,7 @@ test("dueReminders prefers structured next_step_due_at over free text", () => {
       {
         job_id: "b",
         title: "岗位 b",
+        status: "interview",
         next_step: "2026-08-09 10:00", /* 已过期，会被旧逻辑命中 */
         next_step_due_at: "2026-08-20 10:00", /* 48h 外 → 不应提醒 */
       },
@@ -180,6 +200,7 @@ test("dueReminders prefers structured next_step_due_at over free text", () => {
       {
         job_id: "c",
         title: "岗位 c",
+        status: "interview",
         next_step: "面试 2026-08-10 18:00",
         next_step_due_at: "",
       },
@@ -196,6 +217,7 @@ test("dueReminders carries the interview stage on reminders", () => {
       {
         job_id: "a",
         title: "岗位 a",
+        status: "interview",
         next_step: "二面",
         next_step_due_at: "2026-08-11 09:00",
         interview_stage: "二面",
@@ -203,6 +225,7 @@ test("dueReminders carries the interview stage on reminders", () => {
       {
         job_id: "b",
         title: "岗位 b",
+        status: "interview",
         next_step: "2026-08-11 10:00",
         next_step_due_at: "2026-08-11 10:00",
         interview_stage: null,
@@ -220,6 +243,7 @@ test("reminderWhen formats stage + local due time, or time only", () => {
       {
         job_id: "a",
         title: "岗位 a",
+        status: "applied",
         next_step_due_at: "2026-08-10 15:00",
         interview_stage: "二面",
       },
@@ -229,7 +253,14 @@ test("reminderWhen formats stage + local due time, or time only", () => {
   assert.equal(reminderWhen(withStage[0]), "二面 · 8/10 15:00");
 
   const timeOnly = dueReminders(
-    [{ job_id: "b", title: "岗位 b", next_step: "2026-08-09 15:00" }],
+    [
+      {
+        job_id: "b",
+        title: "岗位 b",
+        status: "interview",
+        next_step: "2026-08-09 15:00",
+      },
+    ],
     NOW,
   );
   assert.equal(reminderWhen(timeOnly[0]), "8/9 15:00");
@@ -422,7 +453,12 @@ test("renderReminderStrip renders amber badges linking to the workspace", () => 
 test("renderReminderStrip escapes titles and encodes job ids", () => {
   const reminders = dueReminders(
     [
-      { job_id: "a b", title: "<A&B>", next_step: "2026-08-10 13:00" },
+      {
+        job_id: "a b",
+        title: "<A&B>",
+        status: "interview",
+        next_step: "2026-08-10 13:00",
+      },
     ],
     NOW,
   );
@@ -451,6 +487,7 @@ test("renderReminderBanner shows structured stage + due time", () => {
       {
         job_id: "j9",
         title: "岗位 j9",
+        status: "interview",
         next_step: "等 HR 通知",
         next_step_due_at: "2026-08-10 18:00",
         interview_stage: "二面",

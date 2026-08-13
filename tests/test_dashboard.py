@@ -141,6 +141,7 @@ def test_dashboard_kpi_counts_and_followups():
         title="Applied",
         jd_text="Applied role text.",
         status="已投递",
+        applied_at="2026-08-01",
         next_step_due_at="2999-12-31T09:00:00Z",
     )
     _create_job(
@@ -148,6 +149,7 @@ def test_dashboard_kpi_counts_and_followups():
         title="Interview",
         jd_text="Interview role text.",
         status="面试中",
+        applied_at="2026-08-02",
         next_step_due_at="2999-12-31T09:00:00Z",
     )
     _create_job(
@@ -155,12 +157,15 @@ def test_dashboard_kpi_counts_and_followups():
         title="Offer",
         jd_text="Offer role text.",
         status="已拿Offer",
+        applied_at="2026-08-03",
+        offer_at="2026-08-10",
     )
     _create_job(
         tenant,
         title="Withdrawn",
         jd_text="Withdrawn role text.",
         status="放弃",
+        applied_at="2026-08-04",
         next_step_due_at="2000-01-01T00:00:00Z",
     )
 
@@ -169,13 +174,74 @@ def test_dashboard_kpi_counts_and_followups():
     kpi = r.json()["kpi"]
     assert kpi["resumes"] == 1
     assert kpi["jobs"] == 5
-    # applied系 = applied + interview + offer
-    assert kpi["applied"] == 3
-    assert kpi["interview"] == 1
+    # applied系 = current applied/interview/offer + withdrawn with applied_at
+    assert kpi["applied"] == 4
+    assert kpi["interview"] == 2
     assert kpi["offer"] == 1
     assert kpi["declined"] == 1
     # future due dates count, past/no due dates do not
     assert kpi["active_followups"] == 2
+
+
+def test_dashboard_kpi_uses_historical_peak_for_withdrawn_jobs():
+    tenant = _tenant_id()
+    _create_job(
+        tenant,
+        title="Withdrawn Applied",
+        jd_text="Withdrawn applied text.",
+        status="放弃",
+        applied_at="2026-08-01",
+    )
+    _create_job(
+        tenant,
+        title="Withdrawn Offer",
+        jd_text="Withdrawn offer text.",
+        status="放弃",
+        applied_at="2026-08-02",
+        offer_at="2026-08-10",
+    )
+
+    kpi = client.get(
+        "/api/dashboard", headers=_auth_headers()
+    ).json()["kpi"]
+    assert kpi["applied"] == 2
+    assert kpi["interview"] == 1
+    assert kpi["offer"] == 1
+    assert kpi["declined"] == 2
+
+
+def test_dashboard_active_followups_excludes_terminal_statuses():
+    tenant = _tenant_id()
+    _create_job(
+        tenant,
+        title="Offer",
+        jd_text="Offer text.",
+        status="已拿Offer",
+        applied_at="2026-08-01",
+        offer_at="2026-08-10",
+        next_step_due_at="2999-12-31T09:00:00Z",
+    )
+    _create_job(
+        tenant,
+        title="Withdrawn",
+        jd_text="Withdrawn text.",
+        status="放弃",
+        applied_at="2026-08-02",
+        next_step_due_at="2999-12-31T09:00:00Z",
+    )
+    _create_job(
+        tenant,
+        title="Interview",
+        jd_text="Interview text.",
+        status="面试中",
+        applied_at="2026-08-03",
+        next_step_due_at="2999-12-31T09:00:00Z",
+    )
+
+    kpi = client.get(
+        "/api/dashboard", headers=_auth_headers()
+    ).json()["kpi"]
+    assert kpi["active_followups"] == 1
 
 
 def test_dashboard_skill_gaps_frequency_and_order():
