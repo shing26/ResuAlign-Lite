@@ -61,6 +61,16 @@ export function canonicalJobStatus(status) {
   return JOB_STATUS_ALIASES[value] || value;
 }
 
+export function jobStatusRank(status) {
+  return JOB_STATUS_CANONICAL.indexOf(canonicalJobStatus(status));
+}
+
+export function isBackwardJobStatus(current, target) {
+  const from = jobStatusRank(current);
+  const to = jobStatusRank(target);
+  return from >= 0 && to >= 0 && to < from;
+}
+
 export function jobStatusLabel(status) {
   const canonical = canonicalJobStatus(status);
   return JOB_STATUS_LABELS[canonical] || canonical;

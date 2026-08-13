@@ -13,8 +13,10 @@ import {
   JOB_STATUS_LABELS,
   api,
   canonicalJobStatus,
+  confirmBackwardStatus,
   ensureVocabulary,
   esc,
+  isBackwardJobStatus,
   state,
   toast,
   vocabularyList,
@@ -188,12 +190,22 @@ function bindBoardDrag(root) {
       const jobId = draggingJobId || (event.dataTransfer && event.dataTransfer.getData("text/plain"));
       if (!jobId) return;
       const status = column.dataset.status;
-      try {
-        const result = await moveBoardJob(jobId, status);
-        if (result.updated) toast("岗位状态已更新", "success");
-        renderKanban($("#app-router-view"));
-      } catch (error) {
-        toast(error.message, "error");
+      const applyMove = async () => {
+        try {
+          const result = await moveBoardJob(jobId, status);
+          if (result.updated) toast("岗位状态已更新", "success");
+          renderKanban($("#app-router-view"));
+        } catch (error) {
+          toast(error.message, "error");
+        }
+      };
+      const job = (state.jobs || []).find(
+        (item) => item.job_id === jobId,
+      );
+      if (job && isBackwardJobStatus(job.status, status)) {
+        confirmBackwardStatus(job, status, applyMove);
+      } else {
+        applyMove();
       }
     });
   });

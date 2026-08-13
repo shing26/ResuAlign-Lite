@@ -14,6 +14,9 @@ import {
   buildDiagnosisMarkdownFrom,
   esc,
   formatElapsed,
+  isBackwardJobStatus,
+  jobStatusLabel,
+  jobStatusRank,
   normalizeVocabulary,
   normalizeVocabularyList,
   renderBatchMatrixHtml,
@@ -34,6 +37,8 @@ export {
   esc,
   formatDate,
   formatSalary,
+  isBackwardJobStatus,
+  jobStatusRank,
   jobStatusLabel,
   normalizeVocabulary,
   normalizeVocabularyList,
@@ -258,6 +263,36 @@ export function closeModal() {
   unlockBodyScroll(document.body);
   restoreFocus(modalReturnFocus);
   modalReturnFocus = null;
+}
+
+let pendingStatusTransition = null;
+
+export function confirmBackwardStatus(job, targetStatus, onConfirm, onCancel) {
+  pendingStatusTransition = { onConfirm, onCancel };
+  const title = job && job.title ? job.title : "该岗位";
+  showModal(
+    "确认后退状态",
+    `<p>将「${esc(title)}」从「${esc(jobStatusLabel(job && job.status))}」后退到「${esc(jobStatusLabel(targetStatus))}」，会清理后续阶段的时间戳与跟进信息。确定继续吗？</p>
+     <div class="actions">
+       <button class="btn btn-ghost" type="button" data-action="cancel-status-back">取消</button>
+       <button class="btn btn-primary" type="button" data-action="confirm-status-back">确认后退</button>
+     </div>`,
+  );
+}
+
+export function applyPendingStatusTransition() {
+  const pending = pendingStatusTransition;
+  if (!pending) return;
+  pendingStatusTransition = null;
+  closeModal();
+  if (typeof pending.onConfirm === "function") pending.onConfirm();
+}
+
+export function cancelPendingStatusTransition() {
+  const pending = pendingStatusTransition;
+  pendingStatusTransition = null;
+  closeModal();
+  if (pending && typeof pending.onCancel === "function") pending.onCancel();
 }
 
 export function openLoginModal() {

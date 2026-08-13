@@ -1,5 +1,7 @@
 """Tests for the unified pipeline board status model and bulk updates."""
 
+import time
+
 from unittest.mock import patch
 
 import pytest
@@ -91,6 +93,18 @@ def _other_headers():
     return _other_cache
 
 
+def _create_job(**overrides):
+    payload = {
+        "title": "Backend Engineer",
+        "jd_text": "Python backend engineer with Redis.",
+    }
+    payload.update(overrides)
+    with patch("resualign.api._classify_job", side_effect=_classify):
+        r = client.post("/api/jobs", json=payload, headers=_auth_headers())
+    assert r.status_code == 201
+    return r.json()
+
+
 def test_board_status_migration_maps_legacy_chinese_status(tmp_path):
     store = JobLibraryStore(db_path=tmp_path / "store.db")
     job = store.create_job(
@@ -140,9 +154,102 @@ def test_timeline_fields_round_trip_via_api():
     assert body["applied_at"] == "2026-08-04T10:30"
     assert body["next_step"] == "\u51c6\u5907\u9762\u8bd5"
     assert body["notes"] == "\u5df2\u6295\u9012\u5185\u63a8"
-    assert body["offer_at"] == "2026-08-10T12:00"
+    # ADR-0027: moving to applied clears later-stage offer_at even when passed.
+    assert body["offer_at"] is None
     # U10: an empty string clears a timeline field (NULL in storage, None out).
     assert body["rejected_at"] is None
+
+
+def test_patch_status_interview_auto_fills_applied_at():
+    job = _create_job()
+    r = client.patch(
+        f"/api/jobs/{job['job_id']}",
+        json={"status": "interview"},
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["applied_at"] == time.strftime("%Y-%m-%d")
+    assert body["offer_at"] is None
+    assert body["rejected_at"] is None
+
+
+def test_kanban_bulk_status_offer_writes_offer_at_and_clears_followup():
+    job = _create_job()
+    job_id = job["job_id"]
+    client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "applied", "applied_at": "2026-08-04T10:30"},
+        headers=_auth_headers(),
+    )
+    client.patch(
+        f"/api/jobs/{job_id}",
+        json={
+            "next_step": "prepare",
+            "next_step_due_at": "2026-08-20T09:00:00Z",
+            "interview_stage": "first round",
+        },
+        headers=_auth_headers(),
+    )
+
+    r = client.post(
+        "/api/kanban/bulk-status",
+        json={
+            "job_ids": [job_id],
+            "status": "offer",
+            "expected_status": "applied",
+        },
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["updated"] == 1
+    updated = body["results"][0]["job"]
+    assert updated["offer_at"] == time.strftime("%Y-%m-%d")
+    assert updated["applied_at"] == "2026-08-04T10:30"
+    assert updated["next_step"] is None
+    assert updated["next_step_due_at"] is None
+    assert updated["interview_stage"] is None
+    assert updated["rejected_at"] is None
+
+
+def test_kanban_bulk_status_withdrawn_keeps_history_and_clears_followup():
+    job = _create_job()
+    job_id = job["job_id"]
+    client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "applied", "applied_at": "2026-08-04T10:30"},
+        headers=_auth_headers(),
+    )
+    client.patch(
+        f"/api/jobs/{job_id}",
+        json={
+            "next_step": "final round",
+            "next_step_due_at": "2026-08-25T09:00:00Z",
+            "interview_stage": "final round",
+        },
+        headers=_auth_headers(),
+    )
+
+    r = client.post(
+        "/api/kanban/bulk-status",
+        json={
+            "job_ids": [job_id],
+            "status": "withdrawn",
+            "expected_status": "applied",
+        },
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["updated"] == 1
+    updated = body["results"][0]["job"]
+    assert updated["applied_at"] == "2026-08-04T10:30"
+    assert updated["rejected_at"] == time.strftime("%Y-%m-%d")
+    assert updated["next_step"] is None
+    assert updated["next_step_due_at"] is None
+    assert updated["interview_stage"] is None
+    assert updated["offer_at"] is None
 
 
 def test_bulk_status_endpoint_validates_tenant_ownership():
