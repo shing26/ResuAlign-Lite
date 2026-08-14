@@ -33,7 +33,10 @@ def _job_failure_detail(stage: str, exc: BaseException) -> str:
     stage_label = _STAGE_LABELS.get(stage, stage or "未知阶段")
     message = str(exc) or exc.__class__.__name__
     if isinstance(exc, api_module.LLMResponseError):
-        reason = "模型服务暂时不可用或返回异常，请检查 API Key 与网络连接后重试"
+        if "timeout" in message.lower() or "timed out" in message.lower():
+            reason = "模型响应超时，请检查 API Key 与网络连接后重试"
+        else:
+            reason = "模型服务暂时不可用或返回异常，请检查 API Key 与网络连接后重试"
     else:
         reason = message[:300] or "内部错误"
     return f"对齐分析在「{stage_label}」阶段失败：{reason}"

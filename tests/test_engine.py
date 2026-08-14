@@ -24,6 +24,40 @@ def test_engine_full_pipeline():
     assert mock.call_count == 3
 
 
+def test_engine_tailoring_uses_extended_timeout(monkeypatch):
+    seen_timeouts = []
+    shared = MockLLMClient([_diag(), _jd_analysis(), _tailor()])
+
+    class Factory:
+        def __init__(self, config, timeout=None):
+            seen_timeouts.append(timeout)
+
+        def __enter__(self):
+            return shared
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def close(self):
+            pass
+
+        def chat_json(self, system, user, model=None):
+            return shared.chat_json(system, user, model=model)
+
+        def chat_structured(self, system, user, schema_model, model=None):
+            return shared.chat_structured(
+                system, user, schema_model, model=model
+            )
+
+    monkeypatch.setattr("resualign.engine.OpenAIClient", Factory)
+    run(
+        ResuAlignConfig(model="m"),
+        "Python dev resume",
+        jd_text="Java backend",
+    )
+    assert seen_timeouts == [None, 120.0]
+
+
 def test_engine_no_jd_no_extra_stages():
     mock = MockLLMClient([_diag()])
     report = run(ResuAlignConfig(model="m"), "Python dev", llm_client=mock)

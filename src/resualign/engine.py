@@ -9,6 +9,7 @@ from .tailor import tailor_resume
 
 MAX_JD_INPUT_CHARS = 8000
 MAX_JD_CONTEXT_CHARS = 6000
+TAILOR_LLM_TIMEOUT = 120.0
 
 
 def truncate_text(text: str, limit: int) -> str:
@@ -43,6 +44,8 @@ def run(
     workbench runs on the same resume skip one LLM round trip.
     """
     client = llm_client or OpenAIClient(config)
+    tailor_client = client
+    tailor_client_owned = False
     try:
         def notify(stage: str, message: str) -> None:
             if on_stage is not None:
@@ -97,8 +100,13 @@ def run(
                     filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
                 ),
             }, ensure_ascii=False)
+            if llm_client is None:
+                tailor_client = OpenAIClient(
+                    config, timeout=TAILOR_LLM_TIMEOUT
+                )
+                tailor_client_owned = True
             report.tailored_resume = tailor_resume(
-                client,
+                tailor_client,
                 resume_text,
                 gap_report_str,
                 granularity=granularity,
@@ -116,7 +124,7 @@ def run(
                     report.tailored_resume.sections.values()
                 ) if report.tailored_resume.sections else resume_text
                 report.eval_score = evaluate(
-                    client,
+                    tailor_client,
                     resume_text,
                     sections_text,
                     truncate_text(jd_text, MAX_JD_CONTEXT_CHARS),
@@ -124,5 +132,7 @@ def run(
                 )
         return report
     finally:
+        if tailor_client_owned:
+            tailor_client.close()
         if llm_client is None:
             client.close()

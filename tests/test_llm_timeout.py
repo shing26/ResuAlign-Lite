@@ -293,6 +293,19 @@ def test_diagnosis_job_timeout_error_message_is_user_readable():
     assert "模型服务不可用或返回异常" in data["error"]
     assert "请检查 API Key 与网络连接后重试" in data["error"]
 
+def test_workbench_timeout_error_names_timeout_stage():
+    detail = api_module._job_failure_detail(
+        "tailoring",
+        LLMResponseError(
+            "Structured LLM call failed after 3 attempts: "
+            "The read operation timed out"
+        ),
+    )
+    assert "简历定制" in detail
+    assert "模型响应超时" in detail
+    assert "模型服务不可用" not in detail
+
+
 def test_timeout_defaults_bound_request_hangs():
     """LLM request timeouts must be tight enough that a stuck provider
     cannot hang the frontend for minutes: 40s read (x3 attempts = 120s
