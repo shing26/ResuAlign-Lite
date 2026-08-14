@@ -63,6 +63,16 @@ test("source contracts keep the new UX gap fixes wired", () => {
     "workbench reads analysis snapshots without 404 noise",
   );
   assert.match(splitCanvas, /reconcileAlignmentFailure/, "workbench reconciles failed jobs");
+  assert.match(
+    splitCanvas,
+    /isTerminalAlignment/,
+    "workbench recognizes terminal sessions",
+  );
+  assert.match(
+    splitCanvas,
+    /stopWorkbenchLiveChannels/,
+    "workbench stops polling terminal sessions",
+  );
   assert.match(splitCanvas, /session\.alignment\.draft/, "guide recognizes session draft");
 
   const events = read("events.js");

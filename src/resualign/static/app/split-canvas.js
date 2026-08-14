@@ -680,10 +680,15 @@ export async function renderOptimizerCanvas(app, jobId) {
   const resumes = await api("/api/master-resumes");
   state.wbResumes = resumes;
   renderSplitCanvas(app, session, resumes, workbenchJobs);
-  startPollingFallback(session);
-  startEventStream(session);
-  resumeAlignmentProgress();
-  autoAnalyzeJd(session);
+  const terminalAlignment = isTerminalAlignment(session);
+  if (terminalAlignment) {
+    stopWorkbenchLiveChannels();
+  } else {
+    startPollingFallback(session);
+    startEventStream(session);
+    resumeAlignmentProgress();
+    autoAnalyzeJd(session);
+  }
 }
 
 async function autoAnalyzeJd(session) {
@@ -743,6 +748,10 @@ async function loadSession(jobId) {
 
 function startEventStream(session) {
   if (!session || !session.meta || !session.meta.event_url) return;
+  if (isTerminalAlignment(session)) {
+    stopEventStream();
+    return;
+  }
   stopEventStream();
   const controller = new AbortController();
   activeEventAbort = controller;
@@ -790,6 +799,9 @@ function startEventStream(session) {
 function startPollingFallback(session) {
   stopPollingFallback();
   if (!session || !session.session_id) return;
+  if (isTerminalAlignment(session)) {
+    return;
+  }
   fallbackEtag = (session.meta && session.meta.etag) || "";
   fallbackPollTimer = window.setInterval(() => pollSessionFallback(session.session_id), 2500);
   pollSessionFallback(session.session_id);
@@ -801,6 +813,18 @@ function stopPollingFallback() {
     fallbackPollTimer = 0;
   }
   fallbackEtag = "";
+}
+
+function isTerminalAlignment(session) {
+  return ["failed", "canceled", "succeeded"].includes(
+    session && session.alignment && session.alignment.status,
+  );
+}
+
+function stopWorkbenchLiveChannels() {
+  stopAlignmentPoll();
+  stopPollingFallback();
+  stopEventStream();
 }
 
 async function pollSessionFallback(sessionId) {
@@ -1020,7 +1044,7 @@ async function resumeAlignmentProgress() {
 /* Reset the alignment state to a terminal status (failed/canceled) and
  * repaint, so the run button becomes usable again ("重新运行对齐"). */
 function setAlignmentTerminal(snapshot) {
-  stopAlignmentPoll();
+  stopWorkbenchLiveChannels();
   alignmentReconciled = true;
   if (!activeSession) return;
   const status = snapshot.status === "canceled" ? "canceled" : "failed";
@@ -1213,7 +1237,7 @@ async function pollAlignmentJob() {
           snapshot.status,
         )
       ) {
-        stopAlignmentPoll();
+        stopWorkbenchLiveChannels();
         alignmentReconciled = true;
         if (resolvedStatus === "succeeded") {
           const reloadTarget =
