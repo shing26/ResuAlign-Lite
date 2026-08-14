@@ -103,6 +103,19 @@ def get_library_job(job_id: str, user: dict[str, Any]=Depends(get_current_user))
         return job
     return api_module.job_status(job_id, user)
 
+
+@router.get('/api/jobs/{job_id}/analysis-status')
+def get_analysis_status(
+    job_id: str, user: dict[str, Any]=Depends(get_current_user)
+):
+    """Return an analysis job snapshot, treating a missing job as expired."""
+    snapshot = api_module._registry.snapshot(
+        job_id, tenant_id=user['user_id']
+    )
+    if snapshot is None:
+        return {'job_id': job_id, 'status': 'expired'}
+    return snapshot
+
 @router.post('/api/jobs/{job_id}/cancel')
 def cancel_analysis_job(job_id: str, user: dict[str, Any]=Depends(get_current_user)):
     """Cancel a queued analysis job; running jobs cannot be interrupted."""

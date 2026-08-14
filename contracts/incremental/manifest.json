@@ -9,6 +9,7 @@
     "/api/blockers/{blocker_id}/resolve",
     "/api/dashboard",
     "/api/jobs/fetch-url",
+    "/api/jobs/{job_id}/analysis-status",
     "/api/jobs/{job_id}/preanalyze",
     "/api/jobs/{job_id}/workbench/rewrite",
     "/api/kanban/bulk-status",

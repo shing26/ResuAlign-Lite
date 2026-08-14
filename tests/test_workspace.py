@@ -293,6 +293,7 @@ def test_old_master_resume_database_migrates_diagnosis_column(tmp_path):
         "tenant-1", "Legacy", "Old content."
     )
     assert created["latest_diagnosis_job_id"] is None
+    assert created["latest_diagnosis"] is None
 
     linked = store.set_latest_diagnosis_job(
         "tenant-1", created["resume_id"], "job-abc"
@@ -321,6 +322,71 @@ def test_master_resume_clears_dangling_diagnosis_job(db_path):
         store.clear_latest_diagnosis_job("tenant-2", created["resume_id"])
         is None
     )
+
+
+def test_master_resume_snapshot_survives_dangling_job_clear(db_path):
+    import hashlib
+
+    store = MasterResumeStore(db_path=db_path)
+    created = store.create_master_resume(
+        "tenant-1", "Master Resume", "Python developer."
+    )
+    diagnosis = {
+        "score": 88,
+        "skills": ["Python"],
+        "issues": [],
+        "model": "test-model",
+    }
+    source_hash = hashlib.sha256(b"Python developer.").hexdigest()
+
+    saved = store.set_latest_diagnosis_snapshot(
+        "tenant-1", created["resume_id"], diagnosis, source_hash
+    )
+    assert saved is not None
+    assert saved["latest_diagnosis"] == diagnosis
+    assert store.get_latest_diagnosis_snapshot(
+        "tenant-1", created["resume_id"]
+    ) == (diagnosis, source_hash)
+
+    cleared = store.clear_latest_diagnosis_job(
+        "tenant-1", created["resume_id"]
+    )
+    assert cleared["latest_diagnosis_job_id"] is None
+    assert cleared["latest_diagnosis"] == diagnosis
+
+
+def test_master_resume_edit_and_rollback_clear_diagnosis_snapshot(db_path):
+    import hashlib
+
+    store = MasterResumeStore(db_path=db_path)
+    created = store.create_master_resume(
+        "tenant-1", "Master Resume", "Python developer."
+    )
+    diagnosis = {
+        "score": 88,
+        "skills": ["Python"],
+        "issues": [],
+        "model": "test-model",
+    }
+    source_hash = hashlib.sha256(b"Python developer.").hexdigest()
+    store.set_latest_diagnosis_job(
+        "tenant-1", created["resume_id"], "job-1"
+    )
+    store.set_latest_diagnosis_snapshot(
+        "tenant-1", created["resume_id"], diagnosis, source_hash
+    )
+
+    updated = store.update_master_resume(
+        "tenant-1", created["resume_id"], "Python developer. FastAPI."
+    )
+    assert updated["latest_diagnosis_job_id"] is None
+    assert updated["latest_diagnosis"] is None
+
+    rolled = store.rollback_master_resume(
+        "tenant-1", created["resume_id"], 1
+    )
+    assert rolled["latest_diagnosis_job_id"] is None
+    assert rolled["latest_diagnosis"] is None
 
 
 def test_application_creation_snapshots_resume_version(db_path):

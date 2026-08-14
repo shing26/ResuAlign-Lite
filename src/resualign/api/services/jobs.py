@@ -298,6 +298,21 @@ def _run_job(job_id: str) -> None:
             if payload.get('diagnosis'):
                 result['diagnosis'] = api_module._build_diagnosis_section(result)
                 result['diagnosis_source_hash'] = api_module._content_sha256(payload.get('resume_text') or '')
+                master_resume_id = payload.get('master_resume_id')
+                if master_resume_id:
+                    try:
+                        api_module._resumes.set_latest_diagnosis_snapshot(
+                            tenant_id,
+                            master_resume_id,
+                            result['diagnosis'],
+                            result['diagnosis_source_hash'],
+                        )
+                    except Exception:
+                        logger.exception(
+                            'Failed to persist diagnosis snapshot for '
+                            'master resume %s',
+                            master_resume_id,
+                        )
             # Persist the library alignment product BEFORE marking the
             # registry job succeeded. If save_alignment crashes, the registry
             # job stays non-terminal and startup recovery can requeue or flag

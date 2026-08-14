@@ -322,27 +322,57 @@ export function openLoginModal() {
 export async function recoverDiagnosis(resume) {
   stopDiagnosisPolling();
   const jobId = resume.latest_diagnosis_job_id;
-  if (!jobId) {
-    renderDiagnosisIdle();
-    return;
-  }
   state.diagnosisResumeId = resume.resume_id || state.diagnosisResumeId;
-  let snapshot;
-  try {
-    snapshot = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
-  } catch {
-    renderDiagnosisIdle();
+  const fallback = resume.latest_diagnosis;
+  if (jobId) {
+    let snapshot;
+    try {
+      snapshot = await api(
+        `/api/jobs/${encodeURIComponent(jobId)}/analysis-status`,
+      );
+    } catch {
+      if (fallback) {
+        state.diagnosis = {
+          job_id: jobId,
+          status: "succeeded",
+          elapsed_seconds: fallback.elapsed_seconds || 0,
+          result: { diagnosis: fallback },
+        };
+        renderDiagnosisResult(state.diagnosis);
+      } else {
+        renderDiagnosisIdle();
+      }
+      return;
+    }
+    state.diagnosis = { job_id: jobId, ...snapshot };
+    if (snapshot.status === "succeeded") {
+      renderDiagnosisResult(snapshot);
+    } else if (snapshot.status === "failed" || snapshot.status === "canceled") {
+      renderDiagnosisError(snapshot);
+    } else if (snapshot.status === "expired") {
+      renderDiagnosisIdle();
+    } else {
+      renderDiagnosisProgress(snapshot);
+      startDiagnosisPolling(jobId, resume.resume_id);
+    }
     return;
   }
-  state.diagnosis = { job_id: jobId, ...snapshot };
-  if (snapshot.status === "succeeded") {
-    renderDiagnosisResult(snapshot);
-  } else if (snapshot.status === "failed" || snapshot.status === "canceled") {
-    renderDiagnosisError(snapshot);
+  if (fallback) {
+    state.diagnosis = {
+      job_id: "",
+      status: "succeeded",
+      elapsed_seconds: fallback.elapsed_seconds || 0,
+      result: { diagnosis: fallback },
+    };
+    renderDiagnosisResult(state.diagnosis);
   } else {
-    renderDiagnosisProgress(snapshot);
-    startDiagnosisPolling(jobId, resume.resume_id);
+    renderDiagnosisIdle();
   }
+}
+
+function syncResumeBandStatus(text) {
+  const node = $("[data-resume-band-status-text]");
+  if (node) node.textContent = text;
 }
 
 export function startDiagnosisPolling(jobId, resumeId) {
@@ -360,15 +390,23 @@ export function stopDiagnosisPolling() {
 export async function pollDiagnosisJob(jobId) {
   if (!state.diagnosisPolling || state.diagnosisPolling.jobId !== jobId) return;
   try {
-    const snapshot = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+    const snapshot = await api(
+      `/api/jobs/${encodeURIComponent(jobId)}/analysis-status`,
+    );
     if (!state.diagnosisPolling || state.diagnosisPolling.jobId !== jobId) return;
     renderDiagnosisProgress(snapshot);
-    if (["succeeded", "failed", "canceled"].includes(snapshot.status)) {
+    if (
+      ["succeeded", "failed", "canceled", "expired"].includes(
+        snapshot.status,
+      )
+    ) {
       stopDiagnosisPolling();
       state.diagnosis = { job_id: jobId, ...snapshot };
       if (snapshot.status === "succeeded") {
         renderDiagnosisResult(snapshot);
         toast(`简历诊断完成，得分 ${snapshot.result && snapshot.result.diagnosis ? snapshot.result.diagnosis.score : snapshot.result ? snapshot.result.score : ""}`, "success");
+      } else if (snapshot.status === "expired") {
+        renderDiagnosisIdle();
       } else {
         renderDiagnosisError(snapshot);
       }
@@ -382,6 +420,7 @@ export async function pollDiagnosisJob(jobId) {
 export function renderDiagnosisIdle() {
   const panel = $("[data-diagnosis-panel]");
   if (!panel) return;
+  syncResumeBandStatus("最近诊断：尚未诊断");
   const meta = $("[data-diagnosis-meta]", panel);
   if (meta) meta.textContent = "尚未诊断";
   const progress = $("[data-diagnosis-progress]", panel);
@@ -461,6 +500,7 @@ export function renderDiagnosisResult(snapshot) {
   const result = snapshot.result || {};
   const diagnosis = result.diagnosis || result;
   const score = Math.max(0, Math.min(100, Number(diagnosis.score) || 0));
+  syncResumeBandStatus(`最近诊断：${score} 分`);
   const skills = diagnosis.skills || [];
   const issues = diagnosis.issues || [];
   const suggestions = diagnosis.suggestions || [];
@@ -510,6 +550,9 @@ export function renderDiagnosisResult(snapshot) {
 export function renderDiagnosisError(snapshot) {
   const panel = $("[data-diagnosis-panel]");
   if (!panel) return;
+  syncResumeBandStatus(
+    `最近诊断：${snapshot.status === "canceled" ? "已取消" : "失败"}`,
+  );
   const meta = $("[data-diagnosis-meta]", panel);
   if (meta) meta.textContent = "最近一次诊断失败";
   const progress = $("[data-diagnosis-progress]", panel);

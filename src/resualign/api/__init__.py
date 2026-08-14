@@ -278,6 +278,7 @@ _library_dedupe_key = _workbench_service._library_dedupe_key
 
 _content_sha256 = _resumes_service._content_sha256
 _cached_diagnosis = _resumes_service._cached_diagnosis
+_backfill_diagnosis_snapshots = _resumes_service.backfill_diagnosis_snapshots
 
 _queue_batch_align = _batch_service.queue_batch_align
 _get_batch_align = _batch_service.get_batch_align
@@ -340,6 +341,7 @@ async def lifespan(_: FastAPI):
         "Analysis worker concurrency: %s (RESUALIGN_WORKER_CONCURRENCY=1 means serial)",
         _WORKER_CONCURRENCY,
     )
+    _backfill_diagnosis_snapshots()
     _recover_pending_jobs()
     yield
 

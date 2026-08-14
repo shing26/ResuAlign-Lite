@@ -268,6 +268,76 @@ def test_diagnosis_result_contains_source_hash():
     )
 
 
+def test_diagnose_success_persists_snapshot_and_recovers_without_registry_job():
+    resume = _create_resume(content="Python developer.")
+    body = _queue_diagnosis(resume["resume_id"])
+    report = Report(score=80, skills=["Python"], issues=[], model="test-model")
+
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api.run", return_value=report
+    ):
+        api_module._run_job(body["job_id"])
+
+    detail = client.get(
+        f"/api/master-resumes/{resume['resume_id']}", headers=_auth_headers()
+    ).json()
+    assert detail["latest_diagnosis"]["score"] == 80
+    assert detail["latest_diagnosis"]["model"] == "test-model"
+
+    token = _auth_headers()["Authorization"].split(" ", 1)[1]
+    user = api_module._users.user_for_token(token)
+    assert user is not None
+    assert api_module._registry.delete(
+        body["job_id"], tenant_id=user["user_id"]
+    )
+
+    detail = client.get(
+        f"/api/master-resumes/{resume['resume_id']}", headers=_auth_headers()
+    ).json()
+    assert detail["latest_diagnosis_job_id"] is None
+    assert detail["latest_diagnosis"]["score"] == 80
+    cached = api_module._cached_diagnosis(
+        detail, _config(), tenant_id=user["user_id"]
+    )
+    assert cached == {"score": 80, "skills": ["Python"], "issues": []}
+
+
+def test_startup_backfill_persists_registry_diagnosis():
+    resume = _create_resume(content="Python developer.")
+    token = _auth_headers()["Authorization"].split(" ", 1)[1]
+    user = api_module._users.user_for_token(token)
+    assert user is not None
+    job = api_module._registry.create(
+        {"resume_text": "Python developer."},
+        _config(),
+        tenant_id=user["user_id"],
+    )
+    source_hash = api_module._content_sha256("Python developer.")
+    api_module._registry.succeed(job.job_id, {
+        "score": 82,
+        "diagnosis": {
+            "score": 82,
+            "skills": ["Python"],
+            "issues": [],
+            "model": "test-model",
+        },
+        "diagnosis_source_hash": source_hash,
+    })
+    api_module._resumes.set_latest_diagnosis_job(
+        user["user_id"], resume["resume_id"], job.job_id
+    )
+
+    before = api_module._resumes.get_master_resume(
+        user["user_id"], resume["resume_id"]
+    )
+    assert before["latest_diagnosis"] is None
+    assert api_module._backfill_diagnosis_snapshots() == 1
+    after = api_module._resumes.get_master_resume(
+        user["user_id"], resume["resume_id"]
+    )
+    assert after["latest_diagnosis"]["score"] == 82
+
+
 def test_diagnose_failure_is_actionable_and_retry_updates_link():
     resume = _create_resume()
     first = _queue_diagnosis(resume["resume_id"])

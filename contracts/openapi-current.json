@@ -551,6 +551,54 @@
         }
       }
     },
+    "/api/jobs/{job_id}/analysis-status": {
+      "get": {
+        "summary": "Get Analysis Status",
+        "description": "Return an analysis job snapshot, treating a missing job as expired.",
+        "operationId": "get_analysis_status_api_jobs__job_id__analysis_status_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs/{job_id}/cancel": {
       "post": {
         "summary": "Cancel Analysis Job",

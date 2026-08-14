@@ -83,13 +83,20 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const jobId = job.job_id || "";
   /* Mirror the legacy workbench contract so renderFinalDraftPanel /
      record-application work identically on the live canvas. */
+  const sessionDraft = (session && session.alignment && session.alignment.draft) || null;
   state.wbFinalDraft = job.final_draft
     ? {
         draft: job.final_draft,
         version: job.final_draft_version || 1,
         updated_at: job.final_draft_updated_at,
       }
-    : null;
+    : sessionDraft
+      ? {
+          draft: sessionDraft,
+          version: job.final_draft_version || 1,
+          updated_at: job.final_draft_updated_at,
+        }
+      : null;
   const previous = {
     resumeId: $("[data-form='split-align'] [name='master_resume_id']")?.value,
     granularity: $("[data-form='split-align'] [name='granularity']")?.value,
@@ -123,6 +130,9 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const tagItems = [...requiredSkills.slice(0, 6), ...niceSkills.slice(0, 3)];
   const inspectorActive = activeAuxPane === "inspector" || state.wbMobilePane !== "diff";
   const livesheetActive = activeAuxPane === "livesheet" || state.wbMobilePane === "diff";
+  const guideJob = job.final_draft
+    ? job
+    : { ...job, final_draft: (session && session.alignment && session.alignment.draft) || null };
   const dutyText = String(
     (summary && summary.summary) || job.jd_text || "",
   ).trim().slice(0, 240);
@@ -155,7 +165,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           </div>
         </div>
       </div>
-      ${workbenchGuideHtml(job)}
+      ${workbenchGuideHtml(guideJob)}
       <div class="wb-grid" data-split-layout>
         <section class="wb-main ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>
           <div class="wb-main-head">
@@ -553,6 +563,40 @@ function buildSessionFromJob(job) {
   };
 }
 
+async function reconcileAlignmentFailure(session) {
+  const job = (session && session.job) || {};
+  if (!job || job.alignment_status === "succeeded") return session;
+  const workbenchJobId = job.workbench_job_id;
+  if (!workbenchJobId) return session;
+  try {
+    const snapshot = await api(
+      `/api/jobs/${encodeURIComponent(workbenchJobId)}/analysis-status`,
+    );
+    const terminalStatus =
+      snapshot.status === "expired" ? "failed" : snapshot.status;
+    if (terminalStatus === "failed" || terminalStatus === "canceled") {
+      session.alignment = {
+        ...(session.alignment || {}),
+        status: terminalStatus,
+        stage: snapshot.status === "expired" ? "" : snapshot.stage || "",
+        error:
+          snapshot.error ||
+          (snapshot.status === "expired"
+            ? "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成"
+            : "对齐任务失败，请重试"),
+      };
+    }
+  } catch {
+    session.alignment = {
+      ...(session.alignment || {}),
+      status: "failed",
+      stage: "",
+      error: "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成",
+    };
+  }
+  return session;
+}
+
 export async function renderOptimizerCanvas(app, jobId) {
   stopOptimizerStreams();
   /* T3: 解析 #/workspace/<jobId>?skill=X 深链；renderSplitCanvas 重绘后由
@@ -625,8 +669,10 @@ export async function renderOptimizerCanvas(app, jobId) {
       final_draft: freshJob.final_draft,
       final_draft_version: freshJob.final_draft_version,
       final_draft_updated_at: freshJob.final_draft_updated_at,
+      workbench_job_id: freshJob.workbench_job_id,
     };
   }
+  session = await reconcileAlignmentFailure(session);
   activeSession = session;
   activeSessionUrl = session.meta && session.meta.event_url;
   activeJobId = (session.job && session.job.job_id) || jobId;
@@ -940,12 +986,21 @@ async function resumeAlignmentProgress() {
   }
   let snapshot;
   try {
-    snapshot = await api(`/api/jobs/${encodeURIComponent(analysisId)}`);
+    snapshot = await api(
+      `/api/jobs/${encodeURIComponent(analysisId)}/analysis-status`,
+    );
   } catch {
     /* The pinned analysis job was cleaned up (TTL). Keep the canvas open
      * with the persisted data and let the user rerun alignment; never
      * bounce a valid job's workspace back to the Dashboard. */
     stopAlignmentPoll();
+    return;
+  }
+  if (snapshot.status === "expired") {
+    setAlignmentTerminal({
+      status: "failed",
+      error: "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成",
+    });
     return;
   }
   if (snapshot.status === "failed" || snapshot.status === "canceled") {
@@ -1014,10 +1069,19 @@ export async function cancelActiveAlignment() {
   }
   let snapshot;
   try {
-    snapshot = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+    snapshot = await api(
+      `/api/jobs/${encodeURIComponent(jobId)}/analysis-status`,
+    );
   } catch {
     stopAlignmentPoll();
     window.location.hash = "#/dashboard";
+    return;
+  }
+  if (snapshot.status === "expired") {
+    setAlignmentTerminal({
+      status: "failed",
+      error: "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成",
+    });
     return;
   }
   if (!["queued", "running"].includes(snapshot.status)) {
@@ -1124,22 +1188,34 @@ async function pollAlignmentJob() {
   const jobId = activePollJobId;
   if (!jobId) return;
   try {
-    const snapshot = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+    const snapshot = await api(
+      `/api/jobs/${encodeURIComponent(jobId)}/analysis-status`,
+    );
     const app = $("#app-router-view");
     if (activeSession && app) {
+      const resolvedStatus =
+        snapshot.status === "expired" ? "failed" : snapshot.status;
       activeSession.alignment = {
-        status: snapshot.status === "succeeded" ? "succeeded" : snapshot.status === "failed" ? "failed" : "running",
+        status: resolvedStatus === "succeeded" ? "succeeded" : resolvedStatus === "failed" ? "failed" : "running",
         stage: snapshot.stage || snapshot.status || "",
-        error: snapshot.error || null,
+        error:
+          snapshot.error ||
+          (snapshot.status === "expired"
+            ? "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成"
+            : null),
         diffs: (snapshot.result && snapshot.result.diffs) || [],
         invalid_diffs: (snapshot.result && snapshot.result.invalid_diffs) || [],
         draft: (snapshot.result && snapshot.result.draft) || activeSession.alignment?.draft || null,
         eval_score: (snapshot.result && snapshot.result.eval_score) || null,
       };
-      if (["succeeded", "failed", "canceled"].includes(snapshot.status)) {
+      if (
+        ["succeeded", "failed", "canceled", "expired"].includes(
+          snapshot.status,
+        )
+      ) {
         stopAlignmentPoll();
         alignmentReconciled = true;
-        if (snapshot.status === "succeeded") {
+        if (resolvedStatus === "succeeded") {
           const reloadTarget =
             activeJobId ||
             activeSession.session_id ||
@@ -1158,8 +1234,9 @@ async function pollAlignmentJob() {
             workbenchJobs,
           );
           toast(
-            snapshot.error || `对齐任务：${snapshot.status}`,
-            snapshot.status === "failed" ? "error" : "info",
+            activeSession.alignment.error ||
+              `对齐任务：${resolvedStatus}`,
+            resolvedStatus === "failed" ? "error" : "info",
           );
         }
         return;

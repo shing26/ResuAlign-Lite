@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import secrets
 import sqlite3
 import time
@@ -40,7 +41,9 @@ CREATE TABLE IF NOT EXISTS master_resumes (
     current_version INTEGER NOT NULL DEFAULT 1,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
-    latest_diagnosis_job_id TEXT
+    latest_diagnosis_job_id TEXT,
+    latest_diagnosis_json TEXT,
+    latest_diagnosis_source_hash TEXT
 );
 CREATE TABLE IF NOT EXISTS resume_versions (
     version_id TEXT PRIMARY KEY,
@@ -283,6 +286,16 @@ class MasterResumeStore(_SqliteStore):
             "ALTER TABLE master_resumes "
             "ADD COLUMN latest_diagnosis_job_id TEXT",
         ),
+        (
+            2,
+            "ALTER TABLE master_resumes "
+            "ADD COLUMN latest_diagnosis_json TEXT",
+        ),
+        (
+            3,
+            "ALTER TABLE master_resumes "
+            "ADD COLUMN latest_diagnosis_source_hash TEXT",
+        ),
     )
 
     def create_master_resume(
@@ -302,8 +315,9 @@ class MasterResumeStore(_SqliteStore):
                 conn.execute(
                     "INSERT INTO master_resumes ("
                     "resume_id, tenant_id, title, current_version, "
-                    "created_at, updated_at, latest_diagnosis_job_id"
-                    ") VALUES (?, ?, ?, 1, ?, ?, NULL)",
+                    "created_at, updated_at, latest_diagnosis_job_id, "
+                    "latest_diagnosis_json, latest_diagnosis_source_hash"
+                    ") VALUES (?, ?, ?, 1, ?, ?, NULL, NULL, NULL)",
                     (resume_id, tenant_id, title, now, now),
                 )
                 conn.execute(
@@ -323,7 +337,8 @@ class MasterResumeStore(_SqliteStore):
             with self._connect() as conn:
                 row = conn.execute(
                     "SELECT resume_id, tenant_id, title, current_version, "
-                    "created_at, updated_at, latest_diagnosis_job_id "
+                    "created_at, updated_at, latest_diagnosis_job_id, "
+                    "latest_diagnosis_json, latest_diagnosis_source_hash "
                     "FROM master_resumes "
                     "WHERE resume_id = ? AND tenant_id = ?",
                     (resume_id, tenant_id),
@@ -362,6 +377,9 @@ class MasterResumeStore(_SqliteStore):
                     "latest_diagnosis_job_id": row[
                         "latest_diagnosis_job_id"
                     ],
+                    "latest_diagnosis": self._latest_diagnosis_for_row(
+                        row, current["content"] if current else ""
+                    ),
                     "versions": versions,
                 }
 
@@ -371,7 +389,8 @@ class MasterResumeStore(_SqliteStore):
             with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT resume_id, tenant_id, title, current_version, "
-                    "created_at, updated_at, latest_diagnosis_job_id "
+                    "created_at, updated_at, latest_diagnosis_job_id, "
+                    "latest_diagnosis_json, latest_diagnosis_source_hash "
                     "FROM master_resumes "
                     "WHERE tenant_id = ? ORDER BY updated_at DESC",
                     (tenant_id,),
@@ -400,6 +419,10 @@ class MasterResumeStore(_SqliteStore):
                             "latest_diagnosis_job_id": row[
                                 "latest_diagnosis_job_id"
                             ],
+                            "latest_diagnosis": self._latest_diagnosis_for_row(
+                                row,
+                                version_row["content"] if version_row else "",
+                            ),
                         }
                     )
                 return result
@@ -443,7 +466,10 @@ class MasterResumeStore(_SqliteStore):
                 )
                 conn.execute(
                     "UPDATE master_resumes SET current_version = ?, "
-                    "updated_at = ? WHERE resume_id = ? AND tenant_id = ?",
+                    "updated_at = ?, latest_diagnosis_job_id = NULL, "
+                    "latest_diagnosis_json = NULL, "
+                    "latest_diagnosis_source_hash = NULL "
+                    "WHERE resume_id = ? AND tenant_id = ?",
                     (next_version, now, resume_id, tenant_id),
                 )
         return self.get_master_resume(tenant_id, resume_id)
@@ -464,7 +490,10 @@ class MasterResumeStore(_SqliteStore):
                 now = self._clock()
                 conn.execute(
                     "UPDATE master_resumes SET current_version = ?, "
-                    "updated_at = ? WHERE resume_id = ? AND tenant_id = ?",
+                    "updated_at = ?, latest_diagnosis_job_id = NULL, "
+                    "latest_diagnosis_json = NULL, "
+                    "latest_diagnosis_source_hash = NULL "
+                    "WHERE resume_id = ? AND tenant_id = ?",
                     (version, now, resume_id, tenant_id),
                 )
         return self.get_master_resume(tenant_id, resume_id)
@@ -500,6 +529,103 @@ class MasterResumeStore(_SqliteStore):
                 if cursor.rowcount == 0:
                     return None
         return self.get_master_resume(tenant_id, resume_id)
+
+    def set_latest_diagnosis_snapshot(
+        self,
+        tenant_id: str,
+        resume_id: str,
+        diagnosis: dict[str, Any],
+        source_hash: str,
+    ) -> Optional[dict[str, Any]]:
+        """Persist the latest successful diagnosis for a master resume."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "UPDATE master_resumes SET latest_diagnosis_json = ?, "
+                    "latest_diagnosis_source_hash = ? "
+                    "WHERE resume_id = ? AND tenant_id = ?",
+                    (
+                        json.dumps(
+                            diagnosis, ensure_ascii=False, separators=(",", ":")
+                        ),
+                        source_hash,
+                        resume_id,
+                        tenant_id,
+                    ),
+                )
+                if cursor.rowcount == 0:
+                    return None
+        return self.get_master_resume(tenant_id, resume_id)
+
+    def get_latest_diagnosis_snapshot(
+        self, tenant_id: str, resume_id: str
+    ) -> Optional[tuple[dict[str, Any], str]]:
+        """Return (diagnosis, source_hash) when a snapshot exists."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT latest_diagnosis_json, "
+                    "latest_diagnosis_source_hash FROM master_resumes "
+                    "WHERE resume_id = ? AND tenant_id = ?",
+                    (resume_id, tenant_id),
+                ).fetchone()
+                if row is None or not row["latest_diagnosis_json"]:
+                    return None
+                try:
+                    diagnosis = json.loads(row["latest_diagnosis_json"])
+                except json.JSONDecodeError:
+                    return None
+                return diagnosis, row["latest_diagnosis_source_hash"] or ""
+
+    def list_resume_diagnosis_refs(self) -> list[dict[str, Any]]:
+        """Return every resume row for the startup snapshot backfill."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT r.resume_id, r.tenant_id, r.current_version, "
+                    "r.latest_diagnosis_job_id, r.latest_diagnosis_json, "
+                    "v.content FROM master_resumes r "
+                    "JOIN resume_versions v ON v.resume_id = r.resume_id "
+                    "AND v.version = r.current_version "
+                    "WHERE r.latest_diagnosis_job_id IS NOT NULL"
+                ).fetchall()
+                return [
+                    {
+                        "resume_id": row["resume_id"],
+                        "tenant_id": row["tenant_id"],
+                        "latest_diagnosis_job_id": row[
+                            "latest_diagnosis_job_id"
+                        ],
+                        "has_snapshot": bool(row["latest_diagnosis_json"]),
+                        "content": row["content"] or "",
+                    }
+                    for row in rows
+                ]
+
+    def _latest_diagnosis_for_row(
+        self,
+        row: sqlite3.Row,
+        content: str,
+    ) -> Optional[dict[str, Any]]:
+        """Return the persisted diagnosis only when content still matches."""
+        raw = row["latest_diagnosis_json"] if "latest_diagnosis_json" in row.keys() else None
+        source_hash = (
+            row["latest_diagnosis_source_hash"]
+            if "latest_diagnosis_source_hash" in row.keys()
+            else None
+        )
+        if not raw or not source_hash:
+            return None
+        if source_hash != hashlib.sha256((content or "").encode("utf-8")).hexdigest():
+            return None
+        try:
+            diagnosis = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        return diagnosis if isinstance(diagnosis, dict) else None
 
     def delete_master_resume(
         self, tenant_id: str, resume_id: str

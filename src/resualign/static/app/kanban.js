@@ -104,7 +104,7 @@ export async function renderKanban(app) {
         </div>
         <span class="blocker-btn" data-blocker-badge></span>
         <div class="conversion" data-jobs-conversion aria-label="投递面试转化统计">
-          <span>投递转化 <b data-jobs-apply-rate>${esc(percent(funnel.applyRate))}</b>（${esc(funnel.applied || 0)}/${esc(funnel.total || 0)}）</span>
+          <span>投递转化 <b data-jobs-apply-rate>${esc(percent(funnel.applyRate))}</b>（${esc(funnel.applied || 0)}/${esc(stats.total || 0)}）</span>
           <span>面试转化 <b data-jobs-interview-rate>${esc(percent(funnel.interviewRate))}</b>（${esc(funnel.interview || 0)}/${esc(funnel.applied || 0)}）</span>
         </div>
       </div>

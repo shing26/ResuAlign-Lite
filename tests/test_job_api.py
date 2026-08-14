@@ -759,3 +759,20 @@ def test_delete_job_keeps_other_tenants_analysis_job():
     r = client.delete(f"/api/jobs/{job['job_id']}")
     assert r.status_code == 204
     assert api_module._registry.get(analysis.job_id) is not None
+
+
+def test_analysis_status_reports_expired_without_404():
+    r = client.get("/api/jobs/missing-analysis/analysis-status")
+    assert r.status_code == 200
+    assert r.json() == {
+        "job_id": "missing-analysis",
+        "status": "expired",
+    }
+
+    analysis = api_module._registry.create(
+        {"jd_text": "Python backend engineer."}, None, tenant_id="local"
+    )
+    r = client.get(f"/api/jobs/{analysis.job_id}/analysis-status")
+    assert r.status_code == 200
+    assert r.json()["job_id"] == analysis.job_id
+    assert r.json()["status"] == "queued"

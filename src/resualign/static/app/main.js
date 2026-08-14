@@ -1023,6 +1023,16 @@ const actions = {
       );
       return;
     }
+    const activeSession = activeSessionForExport();
+    const draft =
+      (state.wbFinalDraft && state.wbFinalDraft.draft) ||
+      job.final_draft ||
+      (activeSession && activeSession.alignment && activeSession.alignment.draft) ||
+      "";
+    if (!draft) {
+      toast("请先生成并保存定稿，再记录投递", "error");
+      return;
+    }
     const today = new Date();
     const pad = (n) => String(n).padStart(2, "0");
     const appliedAt = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;

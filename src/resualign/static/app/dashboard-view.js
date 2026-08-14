@@ -65,12 +65,13 @@ export async function renderDashboard(container) {
 
   const currentResume = Array.isArray(resumes) ? resumes[0] : null;
   const diagnosis =
-    state.diagnosis &&
-    currentResume &&
-    currentResume.latest_diagnosis_job_id &&
-    state.diagnosis.job_id === currentResume.latest_diagnosis_job_id
+    (currentResume && currentResume.latest_diagnosis) ||
+    (state.diagnosis &&
+      currentResume &&
+      currentResume.latest_diagnosis_job_id &&
+      state.diagnosis.job_id === currentResume.latest_diagnosis_job_id
       ? diagnosisFromSnapshot(state.diagnosis)
-      : null;
+      : null);
   const rawScore = diagnosis && Number(diagnosis.score);
   const atsScore =
     Number.isFinite(rawScore) && rawScore >= 0

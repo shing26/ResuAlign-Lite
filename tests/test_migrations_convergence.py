@@ -294,7 +294,7 @@ def test_master_resume_store_migrates_legacy_db(tmp_path):
         store.get_master_resume("t1", "r1")["latest_diagnosis_job_id"]
         == "job-1"
     )
-    assert _migrated_versions(store) == {1}
+    assert _migrated_versions(store) == {1, 2, 3}
 
 
 def test_job_registry_inherits_shared_store(tmp_path):
