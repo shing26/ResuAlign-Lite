@@ -24,7 +24,7 @@ def test_engine_full_pipeline():
     assert mock.call_count == 3
 
 
-def test_engine_tailoring_uses_extended_timeout(monkeypatch):
+def test_engine_jd_and_tailoring_use_extended_timeouts(monkeypatch):
     seen_timeouts = []
     shared = MockLLMClient([_diag(), _jd_analysis(), _tailor()])
 
@@ -55,7 +55,7 @@ def test_engine_tailoring_uses_extended_timeout(monkeypatch):
         "Python dev resume",
         jd_text="Java backend",
     )
-    assert seen_timeouts == [None, 120.0]
+    assert seen_timeouts == [None, 90.0, 120.0]
 
 
 def test_engine_no_jd_no_extra_stages():

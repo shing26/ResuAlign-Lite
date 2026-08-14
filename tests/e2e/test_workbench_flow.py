@@ -225,10 +225,13 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
             ACCEPTED_TEXT in panel.locator(".pre.draft-preview").inner_text(),
             "final-draft panel should show the accepted text",
         )
-        after = api_call("GET", f"/api/jobs/{job_id}")
-        expect(
-            ACCEPTED_TEXT in (after.get("final_draft") or ""),
+        poll_until(
+            lambda: ACCEPTED_TEXT
+            in ((api_call("GET", f"/api/jobs/{job_id}") or {}).get(
+                "final_draft"
+            ) or ""),
             "final_draft should persist the accepted text",
+            timeout=15.0,
         )
 
         # #23: 补链接与记录投递入口必须同时出现在上下文条和定稿面板。

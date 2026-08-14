@@ -221,6 +221,63 @@ def test_batch_align_accepts_five_jobs():
     assert r.json()["total"] == 5
 
 
+def _queue_batch(job_ids, resume_id, **overrides):
+    queued = []
+
+    def fake_queue_job(user, payload, workbench=False):
+        queued.append((payload, workbench))
+        return f"analysis-{len(queued)}"
+
+    with patch(
+        "resualign.api._queue_job", side_effect=fake_queue_job
+    ), patch("resualign.api.build_config", return_value=_config()):
+        r = client.post(
+            "/api/batch-align",
+            json=_queue_payloads(
+                job_ids, resume_id, **overrides
+            ),
+            headers=_auth_headers(),
+        )
+    assert r.status_code == 202
+    return queued
+
+
+def test_batch_align_run_eval_defaults_to_false_when_unset():
+    resume = _create_resume()
+    job_ids = _create_library_jobs(2)
+    queued = _queue_batch(job_ids, resume["resume_id"])
+    assert all(payload["run_eval"] is False for payload, _ in queued)
+
+
+def test_batch_align_run_eval_falls_back_to_global_default():
+    client.put(
+        "/api/settings", json={"eval_default": True}, headers=_auth_headers()
+    )
+    resume = _create_resume()
+    job_ids = _create_library_jobs(2)
+    queued = _queue_batch(job_ids, resume["resume_id"])
+    assert all(payload["run_eval"] is True for payload, _ in queued)
+
+
+def test_batch_align_run_eval_explicit_false_overrides_global_default():
+    client.put(
+        "/api/settings", json={"eval_default": True}, headers=_auth_headers()
+    )
+    resume = _create_resume()
+    job_ids = _create_library_jobs(2)
+    queued = _queue_batch(
+        job_ids, resume["resume_id"], run_eval=False
+    )
+    assert all(payload["run_eval"] is False for payload, _ in queued)
+
+
+def test_batch_align_run_eval_explicit_true_wins():
+    resume = _create_resume()
+    job_ids = _create_library_jobs(2)
+    queued = _queue_batch(job_ids, resume["resume_id"], run_eval=True)
+    assert all(payload["run_eval"] is True for payload, _ in queued)
+
+
 def test_batch_align_rejects_out_of_range_job_counts():
     headers = _auth_headers()
     r = client.post(

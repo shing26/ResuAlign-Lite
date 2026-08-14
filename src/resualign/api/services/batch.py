@@ -136,12 +136,20 @@ def queue_batch_align(
         custom_prompt=request.custom_prompt,
     )
 
+    # F1: per-run Eval switch. Explicit True/False from the request wins;
+    # None (not specified) falls back to the settings-page global default.
+    run_eval = request.run_eval
+    if run_eval is None:
+        run_eval = api_module._settings_store.get_settings(
+            tenant_id
+        ).get('eval_default', False)
+
     for row, job in zip(rows, jobs):
         payload = {
             'resume_text': resume['content'],
             'jd_text': job.get('jd_text'),
             'jd_url': job.get('source_url'),
-            'run_eval': True,
+            'run_eval': run_eval,
             'granularity': request.granularity,
             'prompt_focus': request.prompt_focus,
             'custom_prompt': request.custom_prompt,

@@ -1695,7 +1695,11 @@ const actions = {
     renderBatchResults(batch);
     const cancel = $("[data-batch-cancel]");
     if (cancel) cancel.hidden = true;
-    toast(`已取消 ${result.canceled} 个排队任务`, "success");
+    if (result.canceled === 0) {
+      toast("任务已开始运行，无法取消", "error");
+    } else {
+      toast(`已取消 ${result.canceled} 个排队任务`, "success");
+    }
   },
   "close-modal": closeModal,
   "confirm-status-back": () => applyPendingStatusTransition(),

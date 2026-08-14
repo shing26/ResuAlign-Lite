@@ -1216,7 +1216,7 @@
     "/api/blockers": {
       "get": {
         "summary": "List Blockers",
-        "description": "List the tenant's blocker queue, optionally filtered by status.",
+        "description": "List the tenant's blocker queue, optionally filtered by status.\n\nstatus 参数缺省时返回全部状态（含 pending/ignored/resolved）；统计与展示请显式传 status=pending。",
         "operationId": "list_blockers_api_blockers_get",
         "parameters": [
           {
@@ -3489,6 +3489,17 @@
               }
             ],
             "title": "Custom Prompt"
+          },
+          "run_eval": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Eval"
           }
         },
         "type": "object",

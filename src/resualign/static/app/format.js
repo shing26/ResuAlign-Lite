@@ -1769,6 +1769,7 @@ export function jobFollowupFormHtml(job) {
         <div class="field wide"><label>下一步</label><input type="text" name="next_step" value="${esc(job.next_step || "")}"></div>
         <div class="field wide"><label>到期时间</label><input type="datetime-local" name="next_step_due_at" value="${esc(job.next_step_due_at || "")}"></div>
       </div>
+      <p class="small muted" style="margin:6px 0 0;color:var(--danger,#c0392b)">提示：保存后岗位状态将更新为「面试中」并记录投递日期。</p>
       <div class="actions">
         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
         <button class="btn btn-primary" type="submit">保存跟进</button>

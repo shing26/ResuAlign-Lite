@@ -10,6 +10,7 @@ from .tailor import tailor_resume
 MAX_JD_INPUT_CHARS = 8000
 MAX_JD_CONTEXT_CHARS = 6000
 TAILOR_LLM_TIMEOUT = 120.0
+JD_ANALYSIS_LLM_TIMEOUT = 90.0
 
 
 def truncate_text(text: str, limit: int) -> str:
@@ -44,6 +45,8 @@ def run(
     workbench runs on the same resume skip one LLM round trip.
     """
     client = llm_client or OpenAIClient(config)
+    jd_client = client
+    jd_client_owned = False
     tailor_client = client
     tailor_client_owned = False
     try:
@@ -80,8 +83,13 @@ def run(
                 "jd_analysis",
                 "Extracting JD profile and analyzing gaps...",
             )
+            if llm_client is None:
+                jd_client = OpenAIClient(
+                    config, timeout=JD_ANALYSIS_LLM_TIMEOUT
+                )
+                jd_client_owned = True
             report.jd_profile, report.gap_report = profile_and_gaps(
-                client,
+                jd_client,
                 resume_text,
                 jd_input,
                 cache=cache,
@@ -132,6 +140,8 @@ def run(
                 )
         return report
     finally:
+        if jd_client_owned:
+            jd_client.close()
         if tailor_client_owned:
             tailor_client.close()
         if llm_client is None:

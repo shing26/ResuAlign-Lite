@@ -1715,7 +1715,10 @@ class JobLibraryStore(_SqliteStore):
         status: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, Any]]:
-        """Return a tenant's blocker queue, newest first."""
+        """Return a tenant's blocker queue, newest first.
+
+        status 参数缺省时返回全部状态（含 pending/ignored/resolved）；统计与展示请显式传 status=pending。
+        """
         if status is not None and status not in BLOCKER_STATUSES:
             raise UserStoreError(f"Invalid blocker status: {status}")
         sql = "SELECT * FROM blocker_queue WHERE tenant_id = ?"

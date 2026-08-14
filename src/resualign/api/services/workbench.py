@@ -667,7 +667,7 @@ def _run_session_pipeline(session_id: str) -> None:
         profile_dict: Optional[dict[str, Any]] = None
         gap_dict: Optional[dict[str, Any]] = None
         gap_score: Optional[float] = None
-        with api_module.OpenAIClient(config, timeout=60.0) as client:
+        with api_module.OpenAIClient(config, timeout=90.0) as client:
             if resume_text.strip():
                 profile, gap = api_module.profile_and_gaps(
                     client,

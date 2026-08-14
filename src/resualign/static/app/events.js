@@ -614,10 +614,17 @@ export async function pollBatch(batchId) {
     const batch = await api(`/api/batch-align/${encodeURIComponent(batchId)}`);
     state.batchAlign = batch;
     renderBatchResults(batch);
+    const hasQueued = batch.rows.some((row) => row.status === "queued");
+    const hasRunning = batch.rows.some((row) => row.status === "running");
     if (batch.summary.completed === batch.summary.total) {
       stopBatchPolling();
-      const cancel = $("[data-batch-cancel]");
-      if (cancel) cancel.hidden = true;
+    }
+    const cancel = $("[data-batch-cancel]");
+    if (
+      cancel &&
+      (batch.summary.completed === batch.summary.total || (!hasQueued && hasRunning))
+    ) {
+      cancel.hidden = true;
     }
   } catch (error) {
     stopBatchPolling();
