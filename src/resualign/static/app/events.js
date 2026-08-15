@@ -10,6 +10,7 @@ import {
 import {
   DEFAULT_VOCABULARY,
   STAGE_LABELS,
+  alignmentStatusLabel,
   atsHealthCardHtml,
   buildDiagnosisMarkdownFrom,
   esc,
@@ -34,6 +35,7 @@ export {
   JOB_STATUSES,
   SENIORITIES,
   STAGE_LABELS,
+  alignmentStatusLabel,
   canonicalJobStatus,
   esc,
   formatDate,

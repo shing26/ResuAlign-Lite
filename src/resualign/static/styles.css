@@ -9814,7 +9814,9 @@ summary,
   }
 
   .app-rail .rail-brand {
+    display: none;
     padding: 0;
+    margin: 0;
   }
 
   .app-rail .brand-tag {

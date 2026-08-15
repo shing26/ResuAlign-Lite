@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
-from resualign.api.services.jobs import _derive_title
+from resualign.api.services.jobs import _derive_title, _extract_company_location
 from resualign.crawler import CrawlError
 from resualign.jobs import JobRegistry
 from resualign.settings_store import SettingsStore
@@ -703,6 +703,58 @@ def test_derive_title_skips_salary_first_line():
 def test_derive_title_keeps_english_first_line():
     text = "Senior Backend Engineer\nPython and FastAPI required"
     assert _derive_title(text) == "Senior Backend Engineer"
+
+
+def test_derive_title_strips_generic_bracket_prefix():
+    text = "【测试岗位】高级数据分析师\n岗位职责：负责数据建模"
+    assert _derive_title(text) == "高级数据分析师"
+
+
+def test_derive_title_keeps_recruit_line_with_role_keyword():
+    text = "【招聘】高级数据分析师，岗位职责：负责数据建模，任职要求：..."
+    assert _derive_title(text) == "高级数据分析师"
+
+
+def test_derive_title_strips_company_recruit_prefix():
+    text = "公司招聘高级数据分析师 岗位职责：负责数据建模"
+    assert _derive_title(text) == "高级数据分析师"
+
+
+def test_derive_title_truncates_single_line_jd():
+    text = "公司：XX科技，地点：上海，高级数据分析师，负责数据建模，任职要求：..."
+    assert _derive_title(text) == "高级数据分析师"
+
+
+def test_derive_title_truncates_single_line_jd_without_separator():
+    text = "高级数据分析师岗位职责：负责数据建模任职要求：本科"
+    assert _derive_title(text) == "高级数据分析师"
+
+
+def test_extract_company_location_from_labeled_jd():
+    company, location = _extract_company_location(
+        "公司：XX科技，地点：上海\n高级数据分析师\n岗位职责：..."
+    )
+    assert company == "XX科技"
+    assert location == "上海"
+
+
+def test_create_job_extracts_company_location_from_jd():
+    with patch("resualign.api._classify_job", return_value={}):
+        r = client.post(
+            "/api/jobs",
+            json={
+                "jd_text": (
+                    "公司：XX科技，地点：上海\n"
+                    "高级数据分析师\n"
+                    "岗位职责：负责数据建模"
+                )
+            },
+        )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["title"] == "高级数据分析师"
+    assert body["company"] == "XX科技"
+    assert body["location"] == "上海"
 
 
 def test_derive_title_fallback_when_all_noise():

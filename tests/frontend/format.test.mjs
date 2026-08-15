@@ -858,6 +858,15 @@ test("workbenchGuideHtml hides without a final draft", () => {
     status: "draft",
   });
   assert.equal(steps[0].done, false);
+
+  const sessionDraft = workbenchGuideHtml(
+    { job_id: "j1", status: "draft" },
+    true,
+  );
+  assert.match(sessionDraft, /data-workbench-guide/);
+  assert.match(sessionDraft, /data-guide-current="draft"/);
+  assert.match(sessionDraft, /已生成草稿/);
+  assert.doesNotMatch(sessionDraft, /data-action="record-application"/);
 });
 
 test("workbenchGuideHtml advances from record to follow-up", () => {

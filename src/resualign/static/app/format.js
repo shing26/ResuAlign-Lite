@@ -654,7 +654,7 @@ export function alignmentControls(session, resumes, jobId) {
       </div>
       <div class="align-form__row">
         <button class="btn btn-primary" type="submit" data-align-run ${running ? "disabled" : ""}>${running ? "对齐运行中..." : failed ? "重新运行对齐" : "一键生成对齐简历"}</button>
-        <button class="btn btn-outline btn-sm" type="button" data-action="cancel-align-job" ${running ? "" : "hidden"}>取消任务</button>
+        <button class="btn btn-outline btn-sm" type="button" data-action="cancel-align-job" ${running ? "" : "hidden"}>${alignment.status === "queued" ? "取消任务" : "停止等待"}</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="apply-accepted-bullets" data-id="${esc(jobId)}" ${!alignment.draft ? "disabled" : ""}>应用已采纳</button>
         <span class="small muted" data-align-status>${alignment.status === "succeeded" ? "已生成对齐版本" : alignment.status === "failed" ? `任务失败：${esc(alignment.error || "请重试")}` : alignment.status === "running" || alignment.status === "queued" ? "正在生成..." : ""}</span>
       </div>
@@ -684,7 +684,7 @@ export function exportDock(jobId, session) {
         <button class="btn btn-secondary btn-sm" type="button" data-action="export-align-markdown" data-id="${esc(jobId)}">下载 Markdown</button>
         <button class="btn btn-secondary btn-sm" type="button" data-action="export-align-pdf" data-id="${esc(jobId)}">导出 PDF</button>
         <button class="btn btn-outline btn-sm" type="button" data-action="export-align-json" data-id="${esc(jobId)}">导出 JSON</button>
-        ${alignment.draft ? `<span class="badge badge-green">已生成</span>` : ""}
+        ${alignment.draft ? `<span class="badge badge-green">草稿已生成</span>` : ""}
       </div>
     </details>`;
 }
@@ -1566,7 +1566,7 @@ export function renderReminderBanner(reminder) {
 
 /* #26: 工作台定稿后的投递闭环引导。final_draft 生成后显示三步，
  * 记录投递完成前进到安排跟进；终态或已安排跟进视为全部完成。 */
-export function workbenchGuideSteps(job) {
+export function workbenchGuideSteps(job, hasDraft = false) {
   const status = canonicalJobStatus(job && job.status);
   const applied = ["applied", "interview", "offer", "withdrawn"].includes(
     status,
@@ -1576,20 +1576,21 @@ export function workbenchGuideSteps(job) {
       (job.next_step_due_at || job.next_step || job.interview_stage),
   );
   const terminal = status === "offer" || status === "withdrawn";
+  const savedDraft = Boolean(job && job.final_draft);
   return [
     {
       key: "draft",
-      label: "已生成定稿",
-      done: Boolean(job && job.final_draft),
+      label: savedDraft ? "已生成定稿" : "已生成草稿",
+      done: savedDraft,
     },
     { key: "record", label: "记录投递", done: applied },
     { key: "followup", label: "安排跟进", done: followedUp || terminal },
   ];
 }
 
-export function workbenchGuideHtml(job) {
-  if (!job || !job.final_draft) return "";
-  const steps = workbenchGuideSteps(job);
+export function workbenchGuideHtml(job, hasDraft = false) {
+  if (!job || !(job.final_draft || hasDraft)) return "";
+  const steps = workbenchGuideSteps(job, hasDraft);
   const current = steps.find((step) => !step.done);
   const currentKey = current ? current.key : "";
   const action =
@@ -2021,14 +2022,19 @@ const ALIGNMENT_STATUS_LABELS = {
   running: "分析中",
   queued: "排队中",
   failed: "分析失败",
+  canceled: "已取消",
   idle: "待分析",
   pending: "待分析",
 };
 
+export function alignmentStatusLabel(status) {
+  return ALIGNMENT_STATUS_LABELS[status]
+    || (status ? String(status) : "待分析");
+}
+
 export function quickContinueHtml(qc) {
   if (!qc || typeof qc !== "object" || !qc.job_id) return "";
-  const status = ALIGNMENT_STATUS_LABELS[qc.alignment_status]
-    || (qc.alignment_status ? String(qc.alignment_status) : "待分析");
+  const status = alignmentStatusLabel(qc.alignment_status);
   return `
     <section class="panel panel-card quick-continue" data-quick-continue>
       <div class="quick-continue__head">

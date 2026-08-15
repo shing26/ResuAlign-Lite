@@ -3677,6 +3677,13 @@
             "type": "string",
             "maxLength": 200000,
             "title": "Draft"
+          },
+          "accepted_diff_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Accepted Diff Ids"
           }
         },
         "type": "object",

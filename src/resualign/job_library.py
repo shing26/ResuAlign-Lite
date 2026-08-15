@@ -1074,6 +1074,7 @@ class JobLibraryStore(_SqliteStore):
         tenant_id: str,
         job_id: str,
         draft: str,
+        accepted_diff_ids: list[str] | None = None,
     ) -> Optional[dict[str, Any]]:
         """Persist a job's final draft and increment its saved version."""
         if not draft or not draft.strip():
@@ -1082,13 +1083,33 @@ class JobLibraryStore(_SqliteStore):
             self._ensure_initialized()
             with self._connect() as conn:
                 current = conn.execute(
-                    "SELECT final_draft_version FROM library_jobs "
+                    "SELECT final_draft_version, diffs_json FROM library_jobs "
                     "WHERE job_id = ? AND tenant_id = ?",
                     (job_id, tenant_id),
                 ).fetchone()
                 if current is None:
                     return None
                 version = int(current["final_draft_version"] or 0) + 1
+                accepted_ids = set(accepted_diff_ids or [])
+                diffs = json.loads(current["diffs_json"] or "[]")
+                changed = False
+                for diff in diffs:
+                    if (
+                        diff.get("diff_id") in accepted_ids
+                        and diff.get("provenance_state") != "accepted"
+                    ):
+                        diff["provenance_state"] = "accepted"
+                        changed = True
+                if changed:
+                    conn.execute(
+                        "UPDATE library_jobs SET diffs_json = ? "
+                        "WHERE job_id = ? AND tenant_id = ?",
+                        (
+                            json.dumps(diffs, ensure_ascii=False),
+                            job_id,
+                            tenant_id,
+                        ),
+                    )
                 now = time.time()
                 conn.execute(
                     "UPDATE library_jobs SET final_draft = ?, "

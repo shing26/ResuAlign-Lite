@@ -259,6 +259,7 @@ from ..rules import RuleFilterEngine, RuleVerdict  # noqa: E402
 _settings_vocabulary = _jobs_service._settings_vocabulary
 _classify_job = _jobs_service._classify_job
 _derive_title = _jobs_service._derive_title
+_extract_company_location = _jobs_service._extract_company_location
 _crawl_jd_or_502 = _jobs_service._crawl_jd_or_502
 _jd_parse_error_detail = _jobs_service._jd_parse_error_detail
 _create_job_from_source = _jobs_service._create_job_from_source

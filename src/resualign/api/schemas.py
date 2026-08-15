@@ -180,6 +180,7 @@ class WorkbenchAcceptRequest(BaseModel):
 
 class FinalDraftRequest(BaseModel):
     draft: str = Field(max_length=_DRAFT_MAX)
+    accepted_diff_ids: list[str] = Field(default_factory=list)
 
 
 class WorkbenchSessionInitRequest(BaseModel):

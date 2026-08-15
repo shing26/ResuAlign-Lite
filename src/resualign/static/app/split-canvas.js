@@ -110,6 +110,20 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const alignmentRunning =
     alignment.status === "running" || alignment.status === "queued";
   const diffs = Array.isArray(alignment.diffs) ? alignment.diffs : [];
+  if (jobId) {
+    const persistedAccepted = (Array.isArray(job.diffs) ? job.diffs : [])
+      .filter((diff) => diff && diff.provenance_state === "accepted")
+      .map((diff) => diff.diff_id)
+      .filter(Boolean);
+    if (persistedAccepted.length) {
+      const merged = new Set((state.wbAcceptedBullets || {})[jobId] || []);
+      persistedAccepted.forEach((id) => merged.add(id));
+      state.wbAcceptedBullets = {
+        ...(state.wbAcceptedBullets || {}),
+        [jobId]: [...merged],
+      };
+    }
+  }
   const acceptedIds = new Set((state.wbAcceptedBullets || {})[jobId] || []);
   const acceptedCount = diffs.filter(
     (diff) =>
@@ -130,9 +144,10 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const tagItems = [...requiredSkills.slice(0, 6), ...niceSkills.slice(0, 3)];
   const inspectorActive = activeAuxPane === "inspector" || state.wbMobilePane !== "diff";
   const livesheetActive = activeAuxPane === "livesheet" || state.wbMobilePane === "diff";
-  const guideJob = job.final_draft
-    ? job
-    : { ...job, final_draft: (session && session.alignment && session.alignment.draft) || null };
+  const hasGuideDraft = Boolean(
+    job.final_draft ||
+      (session && session.alignment && session.alignment.draft),
+  );
   const dutyText = String(
     (summary && summary.summary) || job.jd_text || "",
   ).trim().slice(0, 240);
@@ -165,7 +180,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           </div>
         </div>
       </div>
-      ${workbenchGuideHtml(guideJob)}
+      ${workbenchGuideHtml(job, hasGuideDraft)}
       <div class="wb-grid" data-split-layout>
         <section class="wb-main ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>
           <div class="wb-main-head">
@@ -556,7 +571,7 @@ function buildSessionFromJob(job) {
       error: null,
       diffs: job.diffs || [],
       invalid_diffs: job.invalid_diffs || [],
-      draft: job.final_draft || null,
+      draft: job.draft || job.final_draft || null,
       eval_score: job.eval_score || null,
     },
     meta: {},
@@ -670,6 +685,9 @@ export async function renderOptimizerCanvas(app, jobId) {
       final_draft_version: freshJob.final_draft_version,
       final_draft_updated_at: freshJob.final_draft_updated_at,
       workbench_job_id: freshJob.workbench_job_id,
+      diffs: freshJob.diffs,
+      invalid_diffs: freshJob.invalid_diffs,
+      draft: freshJob.draft,
     };
   }
   session = await reconcileAlignmentFailure(session);
@@ -1125,7 +1143,8 @@ export async function cancelActiveAlignment() {
     return;
   }
   /* running: cancel is a no-op server-side; stop local waiting and reset
-     to idle so the workspace is not stuck with a disabled run button. */
+     to idle so the workspace is not stuck with a disabled run button. The
+     task still finishes in the background and its result is persisted. */
   stopAlignmentPoll();
   alignmentReconciled = false;
   if (activeSession) {
@@ -1137,7 +1156,7 @@ export async function cancelActiveAlignment() {
     };
     rerenderActiveCanvas();
   }
-  toast("任务运行中无法中断，已停止本地等待", "info");
+  toast("任务将继续在后台完成，结果仍会保存；已停止本地等待", "info");
 }
 
 export async function startAlignmentRun(jobId, resumeId, granularity, focus, runEval) {

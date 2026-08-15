@@ -861,7 +861,7 @@ const actions = {
       toast("诊断任务已取消", "success");
     } else {
       stopDiagnosisPolling();
-      toast("任务运行中无法中断，已停止本地等待", "info");
+      toast("任务将继续在后台完成，结果仍会保存；已停止本地等待", "info");
     }
   },
   "export-resume-md": async (button) => {
@@ -1414,8 +1414,10 @@ const actions = {
     }
     /* U7: 每条采纳都在当前工作草稿上增量合并，不再从原始简历重建，
      * 连续采纳多条时前一条不会丢失。 */
-    const accepted = new Set(state.wbAcceptedBullets[jobId] || []);
-    if (accepted.has(diffId)) {
+    const currentAccepted = new Set(
+      (state.wbAcceptedBullets || {})[jobId] || [],
+    );
+    if (currentAccepted.has(diffId)) {
       toast("该条已采纳过", "info");
       return;
     }
@@ -1429,13 +1431,14 @@ const actions = {
       "";
     const draft = applyDiffToDraft(base, diff);
     state.wbWorkingDraft = { jobId, draft };
+    const acceptedIds = [...currentAccepted, diffId];
     state.wbAcceptedBullets = {
       ...state.wbAcceptedBullets,
-      [jobId]: [...accepted, diffId],
+      [jobId]: acceptedIds,
     };
     await api(`/api/jobs/${encodeURIComponent(jobId)}/final-draft`, {
       method: "POST",
-      body: JSON.stringify({ draft }),
+      body: JSON.stringify({ draft, accepted_diff_ids: acceptedIds }),
     });
     /* T2: 采纳成功后先做 Live Sheet 毫秒级增量更新（liveSheetPatch 只 patch
      * 变化行 + 高亮新增行），不等整画布刷新；整画布刷新后再同步一次，让
@@ -1508,7 +1511,7 @@ const actions = {
     state.wbWorkingDraft = { jobId, draft };
     await api(`/api/jobs/${encodeURIComponent(jobId)}/final-draft`, {
       method: "POST",
-      body: JSON.stringify({ draft }),
+      body: JSON.stringify({ draft, accepted_diff_ids: acceptedIds }),
     });
     /* T2: 同 accept-bullet——先毫秒级增量 patch Live Sheet，再整画布刷新后
      * 重放高亮。 */
@@ -2009,7 +2012,9 @@ async function handleForm(formName, data, form) {
   switch (formName) {
     case "command-panel": {
       const session = await confirmCommandPanel();
-      if (session && session.session_id) {
+      if (session && session.job && session.job.job_id) {
+        navigate("workspace", session.job.job_id);
+      } else if (session && session.session_id) {
         navigate("workspace", session.session_id);
       }
       break;

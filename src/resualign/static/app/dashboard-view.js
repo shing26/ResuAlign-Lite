@@ -1,6 +1,6 @@
 /* ResuAlign v3 Dashboard: metric strip + quick continue + skill gaps.
    All values are derived from the live API, never hard-coded. */
-import { esc, formatDate, jobStatusLabel, state } from "./events.js";
+import { alignmentStatusLabel, esc, formatDate, jobStatusLabel, state } from "./events.js";
 
 function escAttr(value) {
   return esc(String(value ?? ""));
@@ -106,10 +106,10 @@ export async function renderDashboard(container) {
       <div class="quick-row" data-quick-continue>
         <div class="quick-main">
           <div class="quick-title">${escAttr(quick.title || "未命名岗位")}</div>
-          <div class="quick-meta">${escAttr(quick.company || "未知公司")} · ${escAttr(quick.alignment_status || "待分析")}</div>
+          <div class="quick-meta">${escAttr(quick.company || "未知公司")} · ${escAttr(alignmentStatusLabel(quick.alignment_status))}</div>
         </div>
         <div class="quick-right">
-          <span class="pill ${quick.alignment_status === "succeeded" ? "pill-success" : "pill-warn"}">${escAttr(quick.alignment_status || "待分析")}</span>
+          <span class="pill ${quick.alignment_status === "succeeded" ? "pill-success" : "pill-warn"}">${escAttr(alignmentStatusLabel(quick.alignment_status))}</span>
           <a class="btn btn-primary btn-sm" href="#/workspace/${encodeURIComponent(quick.job_id)}">继续对齐</a>
         </div>
       </div>`

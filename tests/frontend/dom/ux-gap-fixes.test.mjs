@@ -55,6 +55,16 @@ test("source contracts keep the new UX gap fixes wired", () => {
 
   const main = read("main.js");
   assert.match(main, /请先生成并保存定稿，再记录投递/, "record-application guards draft");
+  assert.match(
+    main,
+    /session\.job\.job_id/,
+    "command panel navigates to the durable job id",
+  );
+  assert.match(
+    main,
+    /accepted_diff_ids/,
+    "accept flow persists accepted diff ids with the draft",
+  );
 
   const splitCanvas = read("split-canvas.js");
   assert.match(
@@ -163,5 +173,10 @@ test("workbench guide renders from a session-only draft", () => {
   );
   const guide = document.querySelector("[data-workbench-guide]");
   assert.ok(guide, "guide renders when only the session carries a draft");
-  assert.equal(guide.getAttribute("data-guide-current"), "record");
+  assert.equal(guide.getAttribute("data-guide-current"), "draft");
+  assert.match(guide.textContent, /已生成草稿/);
+  assert.equal(
+    guide.querySelector('[data-action="record-application"]'),
+    null,
+  );
 });

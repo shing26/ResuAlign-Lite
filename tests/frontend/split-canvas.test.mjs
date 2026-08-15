@@ -467,12 +467,14 @@ test("alignmentControls shows cancel button while queued/running only", () => {
   );
   assert.match(running, /data-action="cancel-align-job"/);
   assert.doesNotMatch(running, /cancel-align-job" hidden/);
+  assert.match(running, />停止等待</);
   const queued = alignmentControls(
     { alignment: { status: "queued" } },
     [],
     "job-9",
   );
   assert.doesNotMatch(queued, /cancel-align-job" hidden/);
+  assert.match(queued, />取消任务</);
   const idle = alignmentControls({ alignment: { status: "idle" } }, [], "job-9");
   assert.match(idle, /cancel-align-job" hidden/);
   const failed = alignmentControls({ alignment: { status: "failed", error: "x" } }, [], "job-9");
@@ -502,7 +504,7 @@ test("exportDock renders all export actions and draft badge", () => {
   assert.match(html, /export-align-markdown/);
   assert.match(html, /export-align-pdf/);
   assert.match(html, /export-align-json/);
-  assert.match(html, /badge-green">已生成/);
+  assert.match(html, /badge-green">草稿已生成/);
   assert.doesNotMatch(exportDock("job-1", {}), /已生成/);
 });
 

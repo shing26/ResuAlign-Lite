@@ -158,7 +158,12 @@ def reclassify_library_job(job_id: str, user: dict[str, Any]=Depends(get_current
 def save_final_draft(job_id: str, req: FinalDraftRequest, user: dict[str, Any]=Depends(get_current_user)):
     """Persist a job-specific final draft and return its new version."""
     try:
-        saved = api_module._jobs.save_final_draft(user['user_id'], job_id, req.draft)
+        saved = api_module._jobs.save_final_draft(
+            user['user_id'],
+            job_id,
+            req.draft,
+            accepted_diff_ids=req.accepted_diff_ids,
+        )
     except api_module.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if saved is None:

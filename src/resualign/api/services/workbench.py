@@ -399,6 +399,14 @@ def _create_library_job_without_llm(
     if not jd_text:
         raise api_module.UserStoreError("Job description text is required")
     title = (payload.get("title") or "").strip() or api_module._derive_title(jd_text)
+    company = (payload.get("company") or "").strip() or None
+    location = (payload.get("location") or "").strip() or None
+    if not company or not location:
+        extracted_company, extracted_location = (
+            api_module._extract_company_location(jd_text)
+        )
+        company = company or extracted_company
+        location = location or extracted_location
     salary_min = payload.get("salary_min")
     salary_max = payload.get("salary_max")
     if salary_min is None or salary_max is None:
@@ -410,8 +418,8 @@ def _create_library_job_without_llm(
         tenant_id=user["user_id"],
         title=title,
         jd_text=jd_text,
-        company=payload.get("company"),
-        location=payload.get("location"),
+        company=company,
+        location=location,
         salary_min=salary_min,
         salary_max=salary_max,
         salary_currency=payload.get("salary_currency") or "CNY",

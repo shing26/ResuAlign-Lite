@@ -73,19 +73,39 @@ _TITLE_JOB_KEYWORDS = (
 _TITLE_NOISE_PREFIXES = (
     "公司简介", "企业简介", "公司介绍", "我们正在", "正在寻找", "诚聘",
     "急聘", "招聘简章", "岗位职责", "职位描述", "任职要求", "工作内容",
-    "薪资", "薪酬", "工作地点",
+    "薪资", "薪酬", "工作地点", "公司名称", "公司：", "企业名称",
+    "招聘单位", "用人单位", "地点", "城市",
 )
 _TITLE_BRACKET_RECRUIT = re.compile(r"^【\s*(招聘|急聘|诚聘|高薪|直招)\s*】")
+_TITLE_BRACKET_PREFIX = re.compile(r"^【[^】]*】\s*")
+_TITLE_LEAD_RECRUIT = re.compile(
+    r"^(?:公司|企业|单位)?\s*(?:招聘|急聘|诚聘|高薪诚聘|直招)\s*"
+)
 _TITLE_ROLE_PREFIX = re.compile(r"^(岗位|职位|岗位名称|职位名称)\s*[:：]\s*")
 _TITLE_SALARY_SUFFIX = re.compile(
     r"\s*\d+(?:\.\d+)?\s*[kK万]?\s*[-—~到]?\s*\d+(?:\.\d+)?\s*[kK万]\S*(?:\s+\S+)*"
     r"|\s*\d+(?:\.\d+)?\s*[kK万]\S*(?:\s+\S+)*"
 )
+_TITLE_INLINE_SPLIT = re.compile(
+    r"[，,；;。]|"
+    r"\s*(?:岗位职责|职位描述|任职要求|工作内容|工作职责|岗位要求|"
+    r"职位要求|公司简介|企业简介|薪资待遇|薪酬福利|工作地点)\s*"
+)
+_COMPANY_FIELD_RE = re.compile(
+    r"(?:公司|企业|招聘单位|用人单位|单位)\s*(?:名称)?\s*[:：]\s*"
+    r"([^\n\r，,；;|]+)"
+)
+_LOCATION_FIELD_RE = re.compile(
+    r"(?:工作地点|工作城市|工作地址|办公地点|办公地址|所在城市|"
+    r"工作地|地点|城市)\s*[:：]\s*([^\n\r，,；;|]+)"
+)
 
 def _clean_title_candidate(line: str) -> str:
     """Normalize a candidate line into a readable job title."""
     candidate = line.strip().lstrip('#-*·• ').strip()
-    candidate = _TITLE_BRACKET_RECRUIT.sub("", candidate).strip(" 【】")
+    candidate = _TITLE_BRACKET_RECRUIT.sub("", candidate)
+    candidate = _TITLE_BRACKET_PREFIX.sub("", candidate)
+    candidate = _TITLE_LEAD_RECRUIT.sub("", candidate).strip(" 【】")
     candidate = _TITLE_ROLE_PREFIX.sub("", candidate).strip()
     candidate = _TITLE_SALARY_SUFFIX.sub("", candidate).strip(" ，,·-—–")
     return candidate[:120]
@@ -96,7 +116,11 @@ def _is_title_noise(line: str) -> bool:
     if not stripped:
         return True
     if _TITLE_BRACKET_RECRUIT.search(stripped):
-        return True
+        remainder = _TITLE_BRACKET_RECRUIT.sub("", stripped).strip()
+        if not any(
+            keyword in remainder.lower() for keyword in _TITLE_JOB_KEYWORDS
+        ):
+            return True
     if any(stripped.startswith(prefix) for prefix in _TITLE_NOISE_PREFIXES):
         return True
     if re.match(r'^https?://', stripped, re.IGNORECASE):
@@ -107,7 +131,15 @@ def _is_title_noise(line: str) -> bool:
 
 def _derive_title(jd_text: str) -> str:
     """Derive a job title from JD text, skipping company/recruit noise lines."""
-    lines = (jd_text or '').splitlines()
+    raw = jd_text or ''
+    if '\n' not in raw:
+        lines = [
+            part.strip()
+            for part in _TITLE_INLINE_SPLIT.split(raw)
+            if part.strip()
+        ]
+    else:
+        lines = raw.splitlines()
     first_clean: str | None = None
     for line in lines:
         if _is_title_noise(line):
@@ -120,6 +152,26 @@ def _derive_title(jd_text: str) -> str:
         if any(keyword in candidate.lower() for keyword in _TITLE_JOB_KEYWORDS):
             return candidate
     return first_clean or '未命名岗位'
+
+
+def _extract_company_location(
+    jd_text: str,
+) -> tuple[str | None, str | None]:
+    """Extract an explicit company and location from labeled JD fields."""
+    company: str | None = None
+    location: str | None = None
+    for line in (jd_text or "").splitlines():
+        if company is None:
+            match = _COMPANY_FIELD_RE.search(line)
+            if match:
+                company = match.group(1).strip().strip(" 　，,;；|") or None
+        if location is None:
+            match = _LOCATION_FIELD_RE.search(line)
+            if match:
+                location = match.group(1).strip().strip(" 　，,;；|") or None
+        if company and location:
+            break
+    return company, location
 
 def _crawl_jd_or_502(jd_url: str, meta: dict[str, Any] | None=None) -> str:
     """Crawl a JD URL, mapping crawler failures to a stable 502 response."""
@@ -164,6 +216,12 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
     if not jd_text:
         raise api_module.UserStoreError('Job description text is required')
     title = (payload.get('title') or '').strip() or api_module._derive_title(jd_text)
+    company = (payload.get('company') or '').strip() or None
+    location = (payload.get('location') or '').strip() or None
+    if not company or not location:
+        extracted_company, extracted_location = _extract_company_location(jd_text)
+        company = company or extracted_company
+        location = location or extracted_location
     salary_min = payload.get('salary_min')
     salary_max = payload.get('salary_max')
     if salary_min is None or salary_max is None:
@@ -183,7 +241,7 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
     source_type = payload.get('source_type') or ('url' if jd_url else 'paste')
     job_function = payload.get('job_function') or classification.get('job_function')
     seniority = payload.get('seniority') or classification.get('seniority')
-    return api_module._jobs.create_job(tenant_id=user['user_id'], title=title, jd_text=jd_text, company=payload.get('company'), location=payload.get('location'), salary_min=salary_min, salary_max=salary_max, salary_currency=payload.get('salary_currency') or 'CNY', source_type=source_type, source_url=payload.get('source_url') or (jd_url or None), job_function=job_function, seniority=seniority, tech_tags=payload.get('tech_tags') or classification.get('tech_tags') or [], status=payload.get('status') or '未投递', classification_pending=classification_pending, posting_date=payload.get('posting_date'), applied_at=payload.get('applied_at'), next_step=payload.get('next_step'), notes=payload.get('notes'), offer_at=payload.get('offer_at'), rejected_at=payload.get('rejected_at'), allowed_job_functions=job_functions, allowed_seniorities=seniorities)
+    return api_module._jobs.create_job(tenant_id=user['user_id'], title=title, jd_text=jd_text, company=company, location=location, salary_min=salary_min, salary_max=salary_max, salary_currency=payload.get('salary_currency') or 'CNY', source_type=source_type, source_url=payload.get('source_url') or (jd_url or None), job_function=job_function, seniority=seniority, tech_tags=payload.get('tech_tags') or classification.get('tech_tags') or [], status=payload.get('status') or '未投递', classification_pending=classification_pending, posting_date=payload.get('posting_date'), applied_at=payload.get('applied_at'), next_step=payload.get('next_step'), notes=payload.get('notes'), offer_at=payload.get('offer_at'), rejected_at=payload.get('rejected_at'), allowed_job_functions=job_functions, allowed_seniorities=seniorities)
 
 def _collect_import_rows(req: JobImportRequest) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = list(req.jobs or [])
