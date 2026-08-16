@@ -166,6 +166,17 @@ A one-click action that stamps today's applied_at and moves the Job to 已投递
 it is idempotent and never downgrades a later stage.
 _Avoid_: 重复记录, 倒回状态
 
+**投递定稿快照 (Applied Draft Snapshot)**
+An immutable per-application copy of the Job's final_draft, match_score,
+master-resume reference, and applied_at, captured atomically when 记录投递
+transitions a Job into 已投递. The snapshot, not the mutable final_draft,
+is what a later 面试回溯 shows.
+Snapshots are append-only: re-recording the same Job appends a new
+`version_index` row instead of overwriting, and the drawer lists them newest
+first. Legacy applied Jobs without a snapshot fall back to the current
+final_draft with an explicit 早期投递版本 warning.
+_Avoid_: 当前定稿冒充投递版, 快照可被覆盖, 同岗多轮覆盖
+
 **安排跟进 (Schedule Follow-up)**
 A quick capture of interview stage, next step, and due time that updates the
 Job and its active reminder in one step.
@@ -196,6 +207,27 @@ _Avoid_: fetcher, scraper
 **Site Handler**
 A site-specific extraction strategy for a known job board, such as LinkedIn or
 BOSS直聘. Unknown boards use generic extraction rather than failing.
+
+**双模摄入 (Dual-Mode Ingestion)**
+The client-side JD capture strategy: a Specific mode with a high-precision
+extractor for 实习僧 (shixiseng.com) job pages, plus a Universal mode that
+ingests any user-selected JD text from any career-site page together with
+document.title and the page URL. Both modes POST to the local-ingest endpoint.
+_Avoid_: 反爬对抗, 后端常驻无头浏览器
+
+**本地摄入端点 (Local Ingest Endpoint)**
+`POST /api/jobs/local-ingest`, a dedicated local-only job-creation endpoint
+that accepts structured page fields or raw selected JD text. It performs only
+deterministic parsing on the request path, marks new jobs
+`classification_pending=1`, and never overwrites an existing Job on duplicate.
+_Avoid_: 复用批量导入, 公网导入入口
+
+**Local Ingest Token**
+The secret carried in the `X-ResuAlign-Token` request header for the
+local-ingest endpoint. The server generates it on first start, the settings
+page can copy or regenerate it, and the userscript prompts for it once and
+re-prompts on 401.
+_Avoid_: 免鉴权 localhost 信任, 用户自填双端 token
 
 ## Benchmark & Quality
 
