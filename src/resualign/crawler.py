@@ -871,6 +871,11 @@ def _extract_site_text(
         or host.endswith(".jobs.feishu.cn")
     ) and re.search(r"/position/\d+", path):
         return _feishu_job_text(url, soup, ip, timeout, meta)
+    if (
+        host == "jobs.bytedance.com"
+        or host.endswith(".jobs.bytedance.com")
+    ) and re.search(r"/position/\d+", path):
+        return _bytedance_job_text(url, soup, ip, timeout, meta)
     for matcher, handler in SITE_HANDLERS:
         if matcher(host, path):
             text = handler(soup)
@@ -1085,6 +1090,65 @@ def _feishu_job_text(
     ]
     if not parts:
         return _generic_job_text(soup)
+    return "\n\n".join(str(part) for part in parts)
+
+
+def _bytedance_job_text(
+    url: str,
+    soup: BeautifulSoup,
+    ip: str | None,
+    timeout: int,
+    meta: dict | None = None,
+) -> str:
+    """Extract a ByteDance campus JD from its JSON detail API."""
+    parsed = urlparse(url)
+    match = re.search(r"/position/(\d+)", parsed.path)
+    if match is None:
+        return _generic_job_text(soup)
+    post_id = match.group(1)
+    portal_type = 3 if "/campus/" in parsed.path.lower() else 2
+    api_url = (
+        f"https://{parsed.netloc}/api/v1/job/posts/{post_id}"
+        f"?portal_type={portal_type}&with_recommend=false"
+    )
+    headers = dict(HEADERS)
+    headers["Referer"] = url
+    headers["Accept"] = "application/json, text/plain, */*"
+    try:
+        response = _fetch_with_retry(
+            api_url, timeout=timeout, ip=ip, headers=headers
+        )
+        if response.status_code != 200:
+            return _generic_job_text(soup)
+        content = response.content
+    except (httpx.HTTPError, CrawlError):
+        return _generic_job_text(soup)
+    try:
+        payload = json.loads(content.decode("utf-8", errors="replace"))
+    except (UnicodeDecodeError, ValueError):
+        return _generic_job_text(soup)
+    detail = ((payload.get("data") or {}).get("job_post_detail") or {})
+    parts = [
+        part
+        for part in (
+            detail.get("title"),
+            _strip_html(str(detail.get("description") or "")),
+            _strip_html(str(detail.get("requirement") or "")),
+        )
+        if part
+    ]
+    if not parts:
+        return _generic_job_text(soup)
+    if meta is not None:
+        meta["title"] = detail.get("title")
+        fallback = _meta_from_soup(soup)
+        meta.setdefault("company", fallback.get("company"))
+        meta.setdefault("company", "字节跳动")
+        cities = detail.get("city_list") or detail.get(
+            "city_info_list_for_delivery"
+        ) or []
+        if cities:
+            meta["city"] = cities[0].get("name")
     return "\n\n".join(str(part) for part in parts)
 
 

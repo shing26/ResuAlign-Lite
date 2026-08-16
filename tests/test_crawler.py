@@ -152,6 +152,55 @@ def test_crawl_jd_feishu_job_detail_handler(monkeypatch):
     assert meta["city"] == "Shenzhen"
 
 
+def test_crawl_jd_bytedance_job_detail_handler(monkeypatch):
+    import json
+
+    responses = [
+        _response(
+            '<html><head>'
+            '<meta property="og:site_name" content="字节跳动校园招聘">'
+            "</head><body>"
+            '<script type="text/json">{"pageConfig":{"moduleTitle":"八大领域"}}</script>'
+            '<div id="app">Loading...</div>'
+            "</body></html>"
+        ),
+        _FakeResponse(
+            json.dumps(
+                {
+                    "code": 0,
+                    "data": {
+                        "job_post_detail": {
+                            "id": "7602946666605709573",
+                            "title": "后端开发实习生-剪映CapCut",
+                            "description": "负责剪映后端系统的设计和开发。",
+                            "requirement": "熟悉 Python/Go/Java 之一。",
+                            "city_list": [{"name": "深圳"}],
+                        }
+                    },
+                }
+            ).encode("utf-8")
+        ),
+    ]
+
+    def fake_stream(url, **kwargs):
+        return _FakeStream(responses.pop(0))
+
+    monkeypatch.setattr("resualign.crawler._fetch_stream", fake_stream)
+
+    meta = {}
+    text = crawl_jd(
+        "https://jobs.bytedance.com/campus/position/7602946666605709573/detail",
+        meta=meta,
+    )
+
+    assert "后端开发实习生-剪映CapCut" in text
+    assert "负责剪映后端系统的设计和开发。" in text
+    assert "熟悉 Python/Go/Java 之一。" in text
+    assert meta["title"] == "后端开发实习生-剪映CapCut"
+    assert meta["company"] == "字节跳动"
+    assert meta["city"] == "深圳"
+
+
 def test_crawl_jd_cleans_text(monkeypatch):
     html = """
     <html><body>
