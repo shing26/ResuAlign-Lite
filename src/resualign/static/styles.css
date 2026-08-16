@@ -4174,14 +4174,19 @@ body.is-printing #print-root {
   background: var(--surface);
 }
 
-.command-palette__input-row input {
+.command-palette__input-row textarea {
   flex: 1;
   min-width: 0;
+  min-height: 44px;
+  max-height: 220px;
   border: 0;
   outline: 0;
+  resize: none;
   background: transparent;
   color: var(--ink);
   font-size: var(--text-15);
+  line-height: 1.45;
+  padding: 4px 0;
 }
 
 .command-palette__preview {
@@ -9674,14 +9679,18 @@ button:active:not(:disabled),
   border-bottom: 1px solid var(--ra-border-hairline);
 }
 
-.command-search input {
+.command-search textarea {
   flex: 1;
   min-width: 0;
-  padding: 0;
+  min-height: 40px;
+  max-height: 200px;
+  padding: 8px 0;
   background: transparent;
   border: 0;
   color: var(--ra-text-primary);
   font-size: 13px;
+  line-height: 1.5;
+  resize: none;
 }
 
 .command-search kbd {

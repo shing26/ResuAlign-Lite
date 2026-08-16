@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ResuAlign - Career Studio</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/static/styles.css?v=26">
+  <link rel="stylesheet" href="/static/styles.css?v=27">
 </head>
 <body class="app-body app-shell bg-appbg text-white/90 h-screen flex overflow-hidden select-none text-[13px]">
   <aside class="app-rail rail" aria-label="主导航栏">
@@ -87,14 +87,14 @@
       <form class="command-palette__form" data-form="command-panel">
         <div class="command-palette__input-row command-search">
           <span class="command-palette__glyph" aria-hidden="true">/</span>
-          <input
-            type="text"
+          <textarea
             name="command"
             data-command-input
+            rows="2"
             autocomplete="off"
             spellcheck="false"
             placeholder="搜索岗位或命令"
-          >
+          ></textarea>
           <kbd>Esc</kbd>
         </div>
         <div class="command-palette__suggestions command-groups" data-command-suggestions hidden></div>
@@ -106,6 +106,6 @@
       </form>
     </div>
   </div>
-  <script type="module" src="/static/app/main.js?v=26"></script>
+  <script type="module" src="/static/app/main.js?v=27"></script>
 </body>
 </html>
