@@ -96,6 +96,7 @@ export const state = {
   diagnosisResumeId: null,
   settings: null,
   vocabulary: null,
+  applicationSnapshots: {},
   pollers: {},
   token: localStorage.getItem("resualign_token") || "",
 };

@@ -78,6 +78,7 @@ from .schemas import (
     JobCreateRequest,
     JobImportRequest,
     JobUpdateRequest,
+    LocalIngestRequest,
     LoginRequest,
     MasterResumeCreateRequest,
     MasterResumeRollbackRequest,
@@ -114,6 +115,7 @@ __all__ = [
     "JobLibraryStore",
     "JobRegistry",
     "JobUpdateRequest",
+    "LocalIngestRequest",
     "LLMResponseError",
     "LoginRequest",
     "MasterResumeCreateRequest",
@@ -237,6 +239,7 @@ _configure_logging()
 # resolve ``resualign.api`` during import.
 from .state import *  # noqa: E402, F401, F403, I001
 from .state import (  # noqa: F401, I001  (explicit bindings used below)
+    _PERSONAL_MODE,
     _MAX_BODY_BYTES,
     _WORKER_CONCURRENCY,
     _WORKER_SEMAPHORE,
@@ -245,6 +248,7 @@ from .state import (  # noqa: F401, I001  (explicit bindings used below)
     _fetcher,
     _jobs,
     _registry,
+    _settings_store,
 )
 
 
@@ -263,6 +267,8 @@ _extract_company_location = _jobs_service._extract_company_location
 _crawl_jd_or_502 = _jobs_service._crawl_jd_or_502
 _jd_parse_error_detail = _jobs_service._jd_parse_error_detail
 _create_job_from_source = _jobs_service._create_job_from_source
+_deterministic_job_fields = _jobs_service._deterministic_job_fields
+_local_ingest_job = _jobs_service._local_ingest_job
 _collect_import_rows = _jobs_service._collect_import_rows
 _run_import = _jobs_service._run_import
 _prune_import_batches = _jobs_service._prune_import_batches
@@ -342,6 +348,8 @@ async def lifespan(_: FastAPI):
         "Analysis worker concurrency: %s (RESUALIGN_WORKER_CONCURRENCY=1 means serial)",
         _WORKER_CONCURRENCY,
     )
+    if _PERSONAL_MODE:
+        _settings_store.get_or_create_local_ingest_token("local")
     _backfill_diagnosis_snapshots()
     _recover_pending_jobs()
     yield

@@ -139,7 +139,7 @@ def test_job_library_migrates_legacy_db_and_keeps_data(tmp_path):
     assert job["interview_stage"] is None
     # Every historical ALTER recorded exactly once (27 column upgrades plus
     # the Sprint 3 automation_rules / blocker_queue table migrations).
-    assert _migrated_versions(store) == set(range(1, 30))
+    assert _migrated_versions(store) == set(range(1, 31))
 
 
 def test_fresh_job_library_db_records_migrations_as_applied(tmp_path):
@@ -148,7 +148,7 @@ def test_fresh_job_library_db_records_migrations_as_applied(tmp_path):
         tenant_id="t1", title="Fresh", jd_text="Python backend."
     )
     assert job["alignment_status"] == "idle"
-    assert _migrated_versions(store) == set(range(1, 30))
+    assert _migrated_versions(store) == set(range(1, 31))
 
 
 def test_migrated_legacy_db_supports_workbench_columns(tmp_path):
@@ -215,7 +215,7 @@ def test_settings_store_migrates_legacy_db(tmp_path):
     assert updated["llm_model"] == "deepseek-chat"
     assert updated["llm"]["provider"] == "deepseek"
     assert updated["llm"]["model"] == "deepseek-chat"
-    assert _migrated_versions(store) == {1, 2, 3, 4}
+    assert _migrated_versions(store) == {1, 2, 3, 4, 5, 6}
 
 
 def test_settings_store_backfills_llm_from_legacy_columns(tmp_path):

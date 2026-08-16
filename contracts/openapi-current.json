@@ -309,6 +309,55 @@
         }
       }
     },
+    "/api/jobs/local-ingest": {
+      "post": {
+        "summary": "Local Ingest",
+        "description": "Ingest a job from the collector userscript without LLM classification.",
+        "operationId": "local_ingest_api_jobs_local_ingest_post",
+        "parameters": [
+          {
+            "name": "x-resualign-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Resualign-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalIngestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs/import": {
       "post": {
         "summary": "Import Library Jobs",
@@ -537,6 +586,54 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{job_id}/snapshots": {
+      "get": {
+        "summary": "List Application Snapshots",
+        "description": "Return a job's immutable applied-draft snapshots, newest first.",
+        "operationId": "list_application_snapshots_api_jobs__job_id__snapshots_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -2306,6 +2403,45 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/local-ingest-token/reset": {
+      "post": {
+        "summary": "Reset Local Ingest Token",
+        "description": "Generate a fresh local-ingest token, invalidating the old one.",
+        "operationId": "reset_local_ingest_token_api_settings_local_ingest_token_reset_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -4575,6 +4711,90 @@
         "type": "object",
         "title": "LLMSettingsUpdate",
         "description": "Editable LLM configuration persisted per user.\n\n``api_key`` is accepted only on writes; reads return a masked hint.\nOmitted keys keep their stored value; explicit ``null`` clears a field."
+      },
+      "LocalIngestRequest": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "salary_text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Salary Text"
+          },
+          "job_page_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Page Url"
+          },
+          "jd_text": {
+            "type": "string",
+            "maxLength": 100000,
+            "title": "Jd Text"
+          },
+          "site": {
+            "type": "string",
+            "enum": [
+              "shixiseng",
+              "universal"
+            ],
+            "title": "Site",
+            "default": "universal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jd_text"
+        ],
+        "title": "LocalIngestRequest",
+        "description": "Structured page fields or raw selection text from the collector script."
       },
       "LoginRequest": {
         "properties": {

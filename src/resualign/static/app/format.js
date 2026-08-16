@@ -1711,9 +1711,64 @@ export function jobApplyLinkHtml(job) {
   return `<button type="button" class="btn btn-ghost btn-sm" data-action="open-job-detail" data-id="${esc(job && job.job_id ? job.job_id : "")}">补链接</button>`;
 }
 
+const SUBMITTED_JOB_STATUSES = new Set([
+  "applied",
+  "interview",
+  "offer",
+  "withdrawn",
+]);
+
+/* 岗位详情抽屉的投递定稿快照区。created_at DESC 由后端排序；无快照的存量
+ * 已投递岗位降级展示当前 final_draft，并明确标注“早期投递版本”。 */
+export function applicationSnapshotsHtml(job, snapshots = []) {
+  const items = (Array.isArray(snapshots) ? snapshots : [])
+    .map((snapshot) => {
+      const score =
+        snapshot.match_score != null ? Math.round(snapshot.match_score) : "—";
+      const appliedAt =
+        snapshot.applied_at || formatDate(snapshot.created_at);
+      return `<div class="snapshot-item" data-snapshot-item data-snapshot-id="${esc(snapshot.snapshot_id)}">
+        <div class="snapshot-item__head">
+          <strong>第 ${esc(snapshot.version_index)} 版投递定稿</strong>
+          <span class="small muted">${esc(appliedAt)}</span>
+        </div>
+        <div class="snapshot-item__meta">匹配度 ${esc(score)}${snapshot.master_resume_id ? ` · 主简历 ${esc(snapshot.master_resume_id)}` : ""}</div>
+        <div class="row">
+          <button type="button" class="btn btn-secondary btn-sm" data-action="open-snapshot" data-id="${esc(snapshot.snapshot_id)}">查看 Markdown</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="export-snapshot-md" data-id="${esc(snapshot.snapshot_id)}">下载 Markdown</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="export-snapshot-pdf" data-id="${esc(snapshot.snapshot_id)}">导出 PDF</button>
+        </div>
+      </div>`;
+    })
+    .join("");
+  if (items) {
+    return `<div class="snapshot-section"><h4>投递定稿快照</h4><div class="snapshot-list">${items}</div></div>`;
+  }
+  const canonical = canonicalJobStatus(job && job.status);
+  if (
+    SUBMITTED_JOB_STATUSES.has(canonical) &&
+    job &&
+    (job.final_draft || "").trim()
+  ) {
+    return `<div class="snapshot-section snapshot-section--legacy" data-legacy-snapshot>
+      <h4>投递定稿快照</h4>
+      <div class="snapshot-item snapshot-item--legacy">
+        <p class="legacy-warning">⚠️ 早期投递版本（未生成不可篡改快照）</p>
+        <p class="small muted">岗位已投递但尚无不可篡改快照，以下为当前 final_draft。</p>
+        <div class="row">
+          <button type="button" class="btn btn-secondary btn-sm" data-action="view-legacy-draft" data-id="${esc(job.job_id)}">查看当前定稿 Markdown</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="export-legacy-draft-md" data-id="${esc(job.job_id)}">下载 Markdown</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="export-legacy-draft-pdf" data-id="${esc(job.job_id)}">导出 PDF</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  return "";
+}
+
 /* 岗位详情/时间线弹窗表单。next_step_due_at 为 datetime-local（本地时间，
  * 无时区，与 parseNextStepDate 语义一致）；interview_stage 值域含“无”。 */
-export function jobTimelineFormHtml(job) {
+export function jobTimelineFormHtml(job, snapshots = []) {
   const statusOptions = JOB_STATUS_CANONICAL.map(
     (value) =>
       `<option value="${value}" ${canonicalJobStatus(job.status) === value ? "selected" : ""}>${esc(JOB_STATUS_LABELS[value])}</option>`,
@@ -1740,6 +1795,7 @@ export function jobTimelineFormHtml(job) {
         <div class="field"><label>放弃日期</label><input type="datetime-local" name="rejected_at" value="${esc(job.rejected_at || "")}"></div>
         <div class="field wide"><label>备注</label><textarea name="notes" rows="3">${esc(job.notes || "")}</textarea></div>
       </div>
+      ${applicationSnapshotsHtml(job, snapshots)}
       <div class="actions">
         <button class="btn btn-primary btn-sm" type="button" data-action="record-application" data-id="${esc(job.job_id)}">记录投递</button>
         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>

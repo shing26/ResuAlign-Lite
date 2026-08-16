@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import resualign.api as api_module
 
-from ..deps import get_current_user
+from ..deps import get_current_user, get_local_ingest_user
 from ..schemas import (
     BulkStatusRequest,
     FinalDraftRequest,
@@ -19,6 +19,7 @@ from ..schemas import (
     JobImportRequest,
     JobPreanalyzeResponse,
     JobUpdateRequest,
+    LocalIngestRequest,
     WorkbenchAcceptRequest,
     WorkbenchRewriteRequest,
     WorkbenchRewriteResponse,
@@ -66,6 +67,33 @@ def parse_jd_preview(req: JDParseRequest, request: Request, user: dict[str, Any]
     )
     return {'title': title, 'jd_text': jd_text, 'company': meta.get('company'), 'city': meta.get('city'), 'salary_min': salary_min, 'salary_max': salary_max, 'salary_currency': 'CNY' if has_salary else None, 'source_url': jd_url}
 
+
+@router.post('/api/jobs/local-ingest')
+def local_ingest(
+    req: LocalIngestRequest,
+    request: Request,
+    user: dict[str, Any] = Depends(get_local_ingest_user),
+):
+    """Ingest a job from the collector userscript without LLM classification."""
+    api_module._enforce_rate_limit(request, api_module._import_rate_limiter)
+    if not (req.jd_text or '').strip():
+        raise HTTPException(status_code=422, detail='jd_text is required')
+    try:
+        return api_module._local_ingest_job(
+            user,
+            {
+                'title': req.title,
+                'company': req.company,
+                'location': req.location,
+                'salary_text': req.salary_text,
+                'job_page_url': req.job_page_url,
+                'jd_text': req.jd_text,
+                'site': req.site,
+            },
+        )
+    except api_module.UserStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 @router.post('/api/jobs/import')
 def import_library_jobs(req: JobImportRequest, request: Request, user: dict[str, Any]=Depends(get_current_user)):
     """Queue a batch import so crawl/classification never blocks the API."""
@@ -102,6 +130,16 @@ def get_library_job(job_id: str, user: dict[str, Any]=Depends(get_current_user))
     if job is not None:
         return job
     return api_module.job_status(job_id, user)
+
+
+@router.get('/api/jobs/{job_id}/snapshots')
+def list_application_snapshots(
+    job_id: str, user: dict[str, Any] = Depends(get_current_user)
+):
+    """Return a job's immutable applied-draft snapshots, newest first."""
+    return api_module._jobs.list_application_snapshots(
+        user['user_id'], job_id
+    )
 
 
 @router.get('/api/jobs/{job_id}/analysis-status')

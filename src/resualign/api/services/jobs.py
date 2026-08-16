@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 import resualign.api as api_module
 
+from ...job_library import _normalize_source_url, _text_dedupe_key
 from ..schemas import JobImportRequest
 
 logger = logging.getLogger(__name__)
@@ -207,14 +208,9 @@ def _jd_parse_error_detail(exc: api_module.CrawlError) -> dict[str, str]:
         return {'code': 'site_error', 'reason': '目标站点返回错误，暂时无法解析正文', 'action': '请改用粘贴 JD 或稍后重试'}
     return {'code': 'site_error', 'reason': '未能解析该岗位链接', 'action': '请改用粘贴 JD 或稍后重试'}
 
-def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    """Crawl/derive/extract/classify one job and store it in the library."""
+def _deterministic_job_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    """Resolve title/company/location/salary without any LLM round-trip."""
     jd_text = (payload.get('jd_text') or '').strip()
-    jd_url = (payload.get('jd_url') or '').strip()
-    if jd_url and (not jd_text):
-        jd_text = api_module.crawl_jd(jd_url)
-    if not jd_text:
-        raise api_module.UserStoreError('Job description text is required')
     title = (payload.get('title') or '').strip() or api_module._derive_title(jd_text)
     company = (payload.get('company') or '').strip() or None
     location = (payload.get('location') or '').strip() or None
@@ -225,9 +221,37 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
     salary_min = payload.get('salary_min')
     salary_max = payload.get('salary_max')
     if salary_min is None or salary_max is None:
-        extracted_min, extracted_max = api_module.extract_salary_range(jd_text)
+        salary_text = (payload.get('salary_text') or '').strip()
+        extracted_min, extracted_max = api_module.extract_salary_range(
+            salary_text or jd_text
+        )
         salary_min = salary_min if salary_min is not None else extracted_min
         salary_max = salary_max if salary_max is not None else extracted_max
+    return {
+        'title': title,
+        'company': company,
+        'location': location,
+        'salary_min': salary_min,
+        'salary_max': salary_max,
+    }
+
+
+def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """Crawl/derive/extract/classify one job and store it in the library."""
+    payload = dict(payload or {})
+    jd_text = (payload.get('jd_text') or '').strip()
+    jd_url = (payload.get('jd_url') or '').strip()
+    if jd_url and (not jd_text):
+        jd_text = api_module.crawl_jd(jd_url)
+    if not jd_text:
+        raise api_module.UserStoreError('Job description text is required')
+    payload['jd_text'] = jd_text
+    fields = _deterministic_job_fields(payload)
+    title = fields['title']
+    company = fields['company']
+    location = fields['location']
+    salary_min = fields['salary_min']
+    salary_max = fields['salary_max']
     job_functions, seniorities = api_module._settings_vocabulary(user['user_id'])
     classification = {}
     classification_pending = 0
@@ -242,6 +266,59 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
     job_function = payload.get('job_function') or classification.get('job_function')
     seniority = payload.get('seniority') or classification.get('seniority')
     return api_module._jobs.create_job(tenant_id=user['user_id'], title=title, jd_text=jd_text, company=company, location=location, salary_min=salary_min, salary_max=salary_max, salary_currency=payload.get('salary_currency') or 'CNY', source_type=source_type, source_url=payload.get('source_url') or (jd_url or None), job_function=job_function, seniority=seniority, tech_tags=payload.get('tech_tags') or classification.get('tech_tags') or [], status=payload.get('status') or '未投递', classification_pending=classification_pending, posting_date=payload.get('posting_date'), applied_at=payload.get('applied_at'), next_step=payload.get('next_step'), notes=payload.get('notes'), offer_at=payload.get('offer_at'), rejected_at=payload.get('rejected_at'), allowed_job_functions=job_functions, allowed_seniorities=seniorities)
+
+
+def _local_ingest_job(
+    user: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Create a classification-pending library job from the collector script.
+
+    The request path is deterministic only: title/company/location/salary
+    come from page fields or the existing regex derivation, and duplicates
+    are resolved by URL (specific sites) or normalized JD text (universal).
+    """
+    jd_text = (payload.get('jd_text') or '').strip()
+    if not jd_text:
+        raise api_module.UserStoreError('Job description text is required')
+    site = (payload.get('site') or 'universal').strip().lower()
+    job_page_url = (payload.get('job_page_url') or '').strip()
+    fields = _deterministic_job_fields(payload)
+    if site == 'universal':
+        dedupe_key = _text_dedupe_key(jd_text)
+    else:
+        normalized_url = (
+            _normalize_source_url(job_page_url) if job_page_url else ''
+        )
+        dedupe_key = (
+            'url:' + normalized_url
+            if normalized_url
+            else _text_dedupe_key(jd_text)
+        )
+    existing = api_module._jobs.find_by_dedupe_key(
+        user['user_id'], dedupe_key
+    )
+    if existing is not None:
+        return {
+            'status': 'duplicate',
+            'job_id': existing['job_id'],
+            'job': existing,
+        }
+    job = api_module._jobs.create_job(
+        tenant_id=user['user_id'],
+        title=fields['title'],
+        jd_text=jd_text,
+        company=fields['company'],
+        location=fields['location'],
+        salary_min=fields['salary_min'],
+        salary_max=fields['salary_max'],
+        salary_currency=payload.get('salary_currency') or 'CNY',
+        source_type='url' if job_page_url else 'paste',
+        source_url=job_page_url or None,
+        status='未投递',
+        classification_pending=1,
+        dedupe_key=dedupe_key,
+    )
+    return {'status': 'created', 'job_id': job['job_id'], 'job': job}
 
 def _collect_import_rows(req: JobImportRequest) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = list(req.jobs or [])

@@ -303,6 +303,21 @@ CREATE INDEX IF NOT EXISTS idx_blocker_queue_tenant
     ON blocker_queue(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_blocker_queue_status
     ON blocker_queue(status);
+
+CREATE TABLE IF NOT EXISTS application_snapshots (
+    snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    job_id TEXT NOT NULL,
+    version_index INTEGER NOT NULL,
+    final_draft TEXT NOT NULL,
+    match_score REAL,
+    master_resume_id TEXT,
+    applied_at TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    UNIQUE(tenant_id, job_id, version_index)
+);
+CREATE INDEX IF NOT EXISTS idx_application_snapshots_job
+    ON application_snapshots(tenant_id, job_id, created_at DESC);
 """
 
 
@@ -403,6 +418,19 @@ class JobLibraryStore(_SqliteStore):
             "manual_text TEXT, created_at REAL NOT NULL, "
             "updated_at REAL NOT NULL)",
         ),
+        (
+            30,
+            "CREATE TABLE IF NOT EXISTS application_snapshots ("
+            "snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "tenant_id TEXT NOT NULL, job_id TEXT NOT NULL, "
+            "version_index INTEGER NOT NULL, "
+            "final_draft TEXT NOT NULL, match_score REAL, "
+            "master_resume_id TEXT, applied_at TEXT NOT NULL, "
+            "created_at REAL NOT NULL, "
+            "UNIQUE(tenant_id, job_id, version_index)); "
+            "CREATE INDEX IF NOT EXISTS idx_application_snapshots_job "
+            "ON application_snapshots(tenant_id, job_id, created_at DESC)",
+        ),
     )
 
     def validate_status(self, status: str) -> str:
@@ -448,6 +476,7 @@ class JobLibraryStore(_SqliteStore):
         model: str | None = None,
         prompt_version: str | None = None,
         generated_at: float | None = None,
+        dedupe_key: str | None = None,
         allowed_job_functions: Sequence[str] | None = None,
         allowed_seniorities: Sequence[str] | None = None,
     ) -> dict[str, Any]:
@@ -484,16 +513,19 @@ class JobLibraryStore(_SqliteStore):
         ):
             raise UserStoreError(f"Invalid alignment_status: {alignment_status}")
 
-        normalized_url = (
-            _normalize_source_url(source_url)
-            if source_type == "url" and source_url
-            else ""
-        )
-        dedupe_key = (
-            "url:" + normalized_url
-            if normalized_url
-            else _text_dedupe_key(text)
-        )
+        if dedupe_key is None:
+            normalized_url = (
+                _normalize_source_url(source_url)
+                if source_type == "url" and source_url
+                else ""
+            )
+            dedupe_key = (
+                "url:" + normalized_url
+                if normalized_url
+                else _text_dedupe_key(text)
+            )
+        else:
+            dedupe_key = dedupe_key.strip()
         job_id = uuid.uuid4().hex
         now = time.time()
         tags = self._normalize_tags(tech_tags)
@@ -642,6 +674,151 @@ class JobLibraryStore(_SqliteStore):
                 if row["dedupe_key"] == key:
                     return self.get_job(tenant_id, row["job_id"])
         return None
+
+    def append_application_snapshot(
+        self,
+        tenant_id: str,
+        job_id: str,
+        *,
+        final_draft: str | None = None,
+        match_score: float | None = None,
+        master_resume_id: str | None = None,
+        applied_at: str | None = None,
+        created_at: float | None = None,
+    ) -> Optional[dict[str, Any]]:
+        """Append an immutable applied-draft snapshot for one job.
+
+        ``version_index`` continues 1, 2, 3... within a job. Missing jobs
+        and empty drafts return None without creating a row.
+        """
+        if not final_draft or not final_draft.strip():
+            return None
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT final_draft, match_score, workbench_resume_id, "
+                    "applied_at FROM library_jobs "
+                    "WHERE job_id = ? AND tenant_id = ?",
+                    (job_id, tenant_id),
+                ).fetchone()
+                if row is None:
+                    return None
+                if match_score is None:
+                    match_score = row["match_score"]
+                if master_resume_id is None:
+                    master_resume_id = row["workbench_resume_id"]
+                if not applied_at:
+                    applied_at = row["applied_at"] or time.strftime(
+                        "%Y-%m-%d"
+                    )
+                snapshot = self._insert_application_snapshot(
+                    conn,
+                    tenant_id,
+                    job_id,
+                    final_draft=final_draft or row["final_draft"],
+                    match_score=match_score,
+                    master_resume_id=master_resume_id,
+                    applied_at=applied_at,
+                    created_at=created_at,
+                )
+                return snapshot
+
+    def list_application_snapshots(
+        self, tenant_id: str, job_id: str
+    ) -> list[dict[str, Any]]:
+        """Return a job's immutable applied-draft snapshots, newest first."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM application_snapshots "
+                    "WHERE tenant_id = ? AND job_id = ? "
+                    "ORDER BY created_at DESC, version_index DESC",
+                    (tenant_id, job_id),
+                ).fetchall()
+                return [self._row_to_snapshot(row) for row in rows]
+
+    def get_application_snapshot(
+        self, tenant_id: str, snapshot_id: int
+    ) -> Optional[dict[str, Any]]:
+        """Return one immutable applied-draft snapshot."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM application_snapshots "
+                    "WHERE tenant_id = ? AND snapshot_id = ?",
+                    (tenant_id, snapshot_id),
+                ).fetchone()
+                return self._row_to_snapshot(row) if row else None
+
+    @staticmethod
+    def _insert_application_snapshot(
+        conn,
+        tenant_id: str,
+        job_id: str,
+        *,
+        final_draft: str,
+        match_score: float | None,
+        master_resume_id: str | None,
+        applied_at: str,
+        created_at: float | None = None,
+    ) -> Optional[dict[str, Any]]:
+        """Insert the next snapshot version inside an existing transaction."""
+        if not final_draft or not final_draft.strip():
+            return None
+        if not applied_at:
+            applied_at = time.strftime("%Y-%m-%d")
+        created_at = time.time() if created_at is None else created_at
+        version_row = conn.execute(
+            "SELECT COALESCE(MAX(version_index), 0) + 1 AS next_version "
+            "FROM application_snapshots "
+            "WHERE tenant_id = ? AND job_id = ?",
+            (tenant_id, job_id),
+        ).fetchone()
+        version_index = int(version_row["next_version"])
+        cursor = conn.execute(
+            "INSERT INTO application_snapshots ("
+            "tenant_id, job_id, version_index, final_draft, "
+            "match_score, master_resume_id, applied_at, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                tenant_id,
+                job_id,
+                version_index,
+                final_draft,
+                match_score,
+                master_resume_id,
+                applied_at,
+                created_at,
+            ),
+        )
+        return {
+            "snapshot_id": cursor.lastrowid,
+            "tenant_id": tenant_id,
+            "job_id": job_id,
+            "version_index": version_index,
+            "final_draft": final_draft,
+            "match_score": match_score,
+            "master_resume_id": master_resume_id,
+            "applied_at": applied_at,
+            "created_at": created_at,
+        }
+
+    @staticmethod
+    def _row_to_snapshot(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "snapshot_id": row["snapshot_id"],
+            "tenant_id": row["tenant_id"],
+            "job_id": row["job_id"],
+            "version_index": row["version_index"],
+            "final_draft": row["final_draft"],
+            "match_score": row["match_score"],
+            "master_resume_id": row["master_resume_id"],
+            "applied_at": row["applied_at"],
+            "created_at": row["created_at"],
+        }
 
     def list_jobs(
         self,
@@ -816,35 +993,61 @@ class JobLibraryStore(_SqliteStore):
             raise UserStoreError("Job description text cannot be empty")
 
         lifecycle: dict[str, str] = {}
+        append_only_snapshot = False
+        snapshot_applied_at: str | None = None
         if status is not None:
             current = self.get_job(tenant_id, job_id)
             if current is None:
                 return None
-            lifecycle = status_lifecycle_fields(
-                current,
-                status,
-                provided={
-                    "applied_at": applied_at,
-                    "offer_at": offer_at,
-                    "rejected_at": rejected_at,
-                    "next_step": next_step,
-                    "next_step_due_at": next_step_due_at,
-                    "interview_stage": interview_stage,
-                },
-            )
-            for field, value in lifecycle.items():
-                if field == "applied_at":
-                    applied_at = value
-                elif field == "offer_at":
-                    offer_at = value
-                elif field == "rejected_at":
-                    rejected_at = value
-                elif field == "next_step":
-                    next_step = value
-                elif field == "next_step_due_at":
-                    next_step_due_at = value
-                elif field == "interview_stage":
-                    interview_stage = value
+            if (
+                canonical_status(status) == "applied"
+                and canonical_status(current["status"]) != "draft"
+            ):
+                # Re-recording an already-submitted job appends a new
+                # immutable snapshot without downgrading status or rewriting
+                # the existing timeline history (ADR-0028).
+                append_only_snapshot = True
+                snapshot_applied_at = (
+                    applied_at
+                    or current.get("applied_at")
+                    or time.strftime("%Y-%m-%d")
+                )
+            else:
+                lifecycle = status_lifecycle_fields(
+                    current,
+                    status,
+                    provided={
+                        "applied_at": applied_at,
+                        "offer_at": offer_at,
+                        "rejected_at": rejected_at,
+                        "next_step": next_step,
+                        "next_step_due_at": next_step_due_at,
+                        "interview_stage": interview_stage,
+                    },
+                )
+                for field, value in lifecycle.items():
+                    if field == "applied_at":
+                        applied_at = value
+                    elif field == "offer_at":
+                        offer_at = value
+                    elif field == "rejected_at":
+                        rejected_at = value
+                    elif field == "next_step":
+                        next_step = value
+                    elif field == "next_step_due_at":
+                        next_step_due_at = value
+                    elif field == "interview_stage":
+                        interview_stage = value
+
+        if append_only_snapshot:
+            # The status and every timeline field stay untouched on append.
+            applied_at = None
+            next_step = None
+            notes = None
+            offer_at = None
+            rejected_at = None
+            next_step_due_at = None
+            interview_stage = None
 
         sets = ["updated_at = ?"]
         values: list[Any] = [time.time()]
@@ -886,7 +1089,7 @@ class JobLibraryStore(_SqliteStore):
             values.append(
                 json.dumps(self._normalize_tags(tech_tags), ensure_ascii=False)
             )
-        if status is not None:
+        if status is not None and not append_only_snapshot:
             sets.append("status = ?")
             values.append(status)
         if classification_pending is not None:
@@ -1067,6 +1270,39 @@ class JobLibraryStore(_SqliteStore):
                     ) from exc
                 if cursor.rowcount == 0:
                     return None
+                should_snapshot = append_only_snapshot or (
+                    status is not None
+                    and canonical_status(status) == "applied"
+                )
+                if should_snapshot:
+                    snapshot_row = conn.execute(
+                        "SELECT final_draft, match_score, "
+                        "workbench_resume_id, applied_at "
+                        "FROM library_jobs "
+                        "WHERE job_id = ? AND tenant_id = ?",
+                        (job_id, tenant_id),
+                    ).fetchone()
+                    if snapshot_row is not None and (
+                        snapshot_row["final_draft"] or ""
+                    ).strip():
+                        self._insert_application_snapshot(
+                            conn,
+                            tenant_id,
+                            job_id,
+                            final_draft=snapshot_row["final_draft"],
+                            match_score=snapshot_row["match_score"],
+                            master_resume_id=snapshot_row[
+                                "workbench_resume_id"
+                            ],
+                            applied_at=(
+                                snapshot_applied_at
+                                if append_only_snapshot
+                                else (
+                                    snapshot_row["applied_at"]
+                                    or time.strftime("%Y-%m-%d")
+                                )
+                            ),
+                        )
         return self.get_job(tenant_id, job_id)
 
     def save_final_draft(
@@ -1282,6 +1518,33 @@ class JobLibraryStore(_SqliteStore):
                             }
                         )
                         continue
+                    if (
+                        canonical_status(status) == "applied"
+                        and canonical_status(row["status"]) != "draft"
+                    ):
+                        # Append-only re-record: keep the existing status and
+                        # timeline, and only freeze a new snapshot version.
+                        self._insert_application_snapshot(
+                            conn,
+                            tenant_id,
+                            job_id,
+                            final_draft=row["final_draft"],
+                            match_score=row["match_score"],
+                            master_resume_id=row["workbench_resume_id"],
+                            applied_at=(
+                                row["applied_at"]
+                                or time.strftime("%Y-%m-%d")
+                            ),
+                        )
+                        results.append(
+                            {
+                                "job_id": job_id,
+                                "updated": True,
+                                "status": "updated",
+                                "job": self._row_to_job(row),
+                            }
+                        )
+                        continue
                     timeline = status_lifecycle_fields(
                         dict(row),
                         status,
@@ -1316,6 +1579,21 @@ class JobLibraryStore(_SqliteStore):
                         "WHERE job_id = ? AND tenant_id = ?",
                         (job_id, tenant_id),
                     ).fetchone()
+                    if canonical_status(status) == "applied":
+                        self._insert_application_snapshot(
+                            conn,
+                            tenant_id,
+                            job_id,
+                            final_draft=updated_row["final_draft"],
+                            match_score=updated_row["match_score"],
+                            master_resume_id=updated_row[
+                                "workbench_resume_id"
+                            ],
+                            applied_at=(
+                                updated_row["applied_at"]
+                                or time.strftime("%Y-%m-%d")
+                            ),
+                        )
                     results.append(
                         {
                             "job_id": job_id,
@@ -1403,6 +1681,11 @@ class JobLibraryStore(_SqliteStore):
                 )
                 conn.execute(
                     "DELETE FROM crawl_tasks "
+                    "WHERE job_id = ? AND tenant_id = ?",
+                    (job_id, tenant_id),
+                )
+                conn.execute(
+                    "DELETE FROM application_snapshots "
                     "WHERE job_id = ? AND tenant_id = ?",
                     (job_id, tenant_id),
                 )

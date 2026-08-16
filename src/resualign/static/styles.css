@@ -10422,3 +10422,72 @@ details > summary::-webkit-details-marker,
     justify-content: flex-end;
   }
 }
+
+/* V4: Local Ingest Token + 投递定稿快照 */
+.local-ingest-panel {
+  margin-bottom: 14px;
+}
+
+.token-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.token-value {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft, #e6edf5);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-2, #f2f5f9);
+  font-size: 12px;
+}
+
+.snapshot-section {
+  margin-top: 12px;
+}
+
+.snapshot-section h4 {
+  margin-bottom: 8px;
+}
+
+.snapshot-list {
+  display: grid;
+  gap: 8px;
+}
+
+.snapshot-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border, #d5dde7);
+  border-radius: var(--radius-md, 6px);
+  background: var(--surface, #ffffff);
+}
+
+.snapshot-item--legacy {
+  border-style: dashed;
+  background: var(--surface-pending, #fffbeb);
+}
+
+.snapshot-item__head,
+.snapshot-item__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.legacy-warning {
+  color: var(--danger, #dc2626);
+  font-weight: 700;
+}
+
+.snapshot-preview .resume-doc {
+  max-height: 60vh;
+  overflow: auto;
+  margin-bottom: 10px;
+}

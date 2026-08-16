@@ -142,9 +142,24 @@ def _validate_vocabulary_update(req: SettingsUpdateRequest) -> None:
 @router.get('/api/settings')
 def get_settings(user: dict[str, Any]=Depends(get_current_user)):
     """Return the current user's editable workbench settings."""
-    return _public_settings(
-        api_module._settings_store.get_settings(user['user_id'])
+    settings = api_module._settings_store.get_settings(user['user_id'])
+    if not settings.get('local_ingest_token'):
+        api_module._settings_store.get_or_create_local_ingest_token(
+            user['user_id']
+        )
+        settings = api_module._settings_store.get_settings(user['user_id'])
+    return _public_settings(settings)
+
+
+@router.post('/api/settings/local-ingest-token/reset')
+def reset_local_ingest_token(
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Generate a fresh local-ingest token, invalidating the old one."""
+    token = api_module._settings_store.reset_local_ingest_token(
+        user['user_id']
     )
+    return {'local_ingest_token': token}
 
 @router.put('/api/settings')
 def update_settings(req: SettingsUpdateRequest, user: dict[str, Any]=Depends(get_current_user)):
@@ -312,5 +327,11 @@ def test_llm_connection(
 def reset_settings(user: dict[str, Any] = Depends(get_current_user)):
     """Restore the built-in vocabulary and default settings."""
     api_module._settings_store.update_settings(user["user_id"], default_settings())
+    # The local-ingest token is a security credential, not a preference:
+    # restoring defaults keeps the current token so the userscript keeps
+    # working until the user explicitly resets it.
+    api_module._settings_store.get_or_create_local_ingest_token(
+        user["user_id"]
+    )
     clear_runtime_llm()
     return _public_settings(api_module._settings_store.get_settings(user["user_id"]))

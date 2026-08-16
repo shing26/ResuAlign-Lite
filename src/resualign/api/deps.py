@@ -56,3 +56,41 @@ def get_current_user(token: Optional[str]=Depends(_bearer_token)) -> dict[str, A
         raise HTTPException(status_code=401, detail='Not authenticated', headers={'WWW-Authenticate': 'Bearer'})
     raise HTTPException(status_code=401, detail='Invalid or expired token', headers={'WWW-Authenticate': 'Bearer'})
 
+
+def get_local_ingest_user(
+    x_resualign_token: str = Header(default=''),
+) -> dict[str, Any]:
+    """Resolve the X-ResuAlign-Token header to a tenant for local ingestion."""
+    token = x_resualign_token.strip()
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                'code': 'missing_token',
+                'reason': '缺少 X-ResuAlign-Token 请求头',
+                'action': (
+                    '请在系统设置页复制本地摄入 Token，'
+                    '并粘贴到油猴脚本配置中'
+                ),
+            },
+        )
+    store = getattr(api_module, '_settings_store', None)
+    tenant_id = (
+        store.find_tenant_by_local_ingest_token(token)
+        if store is not None
+        else None
+    )
+    if tenant_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                'code': 'invalid_token',
+                'reason': 'X-ResuAlign-Token 无效或已重置',
+                'action': (
+                    '请在系统设置页重新复制 Token，'
+                    '并同步更新油猴脚本配置'
+                ),
+            },
+        )
+    return {'user_id': tenant_id}
+

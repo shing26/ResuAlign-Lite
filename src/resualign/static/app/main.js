@@ -374,7 +374,25 @@ const JOB_IMPORT_FORM_HTML = `
     </form>`;
 
 async function openJobDetail(job) {
-  showModal(`岗位详情 · ${job.title}`, jobTimelineFormHtml(job));
+  let snapshots = [];
+  try {
+    snapshots = await api(
+      `/api/jobs/${encodeURIComponent(job.job_id)}/snapshots`,
+    );
+  } catch {
+    snapshots = [];
+  }
+  state.applicationSnapshots = {
+    ...(state.applicationSnapshots || {}),
+    [job.job_id]: {
+      snapshots: Array.isArray(snapshots) ? snapshots : [],
+      legacyDraft: job.final_draft || null,
+    },
+  };
+  showModal(
+    `岗位详情 · ${job.title}`,
+    jobTimelineFormHtml(job, snapshots),
+  );
 }
 
 async function showDuplicateJobGuide(payload) {
@@ -490,6 +508,22 @@ async function renderSettingsView(app) {
         </div>
       </div>
       ${settingsBentoHtml(activeNode, latency)}
+      <section class="panel local-ingest-panel" data-local-ingest-panel>
+        <div class="panel-head">
+          <div>
+            <h2>本地摄入 Token</h2>
+            <p>油猴脚本访问 /api/jobs/local-ingest 的密钥</p>
+          </div>
+          <button class="btn btn-outline btn-sm" type="button" data-action="reset-local-ingest-token">重置</button>
+        </div>
+        <div class="panel-body">
+          <div class="token-row">
+            <code class="token-value" data-local-ingest-token>${esc(settings.local_ingest_token || "生成中…")}</code>
+            <button class="btn btn-secondary btn-sm" type="button" data-action="copy-local-ingest-token">复制</button>
+          </div>
+          <p class="small muted">首次启动自动生成；重置后旧 Token 立即失效，需同步更新油猴脚本配置。</p>
+        </div>
+      </section>
       <div class="settings-main">
         <section class="panel console-main" data-llm-nodes-panel>
           <div class="panel-head">
@@ -604,7 +638,7 @@ function updateSettingsBento(app = $("#app-router-view")) {
 
 /* setWbMobilePane 实现在 events.js（F5：controls / diff 双面板）。 */
 
-async function printTarget(kind) {
+async function printTarget(kind, options = {}) {
   const printNode = $("#print-root");
   if (!printNode) return;
   let title = "ResuAlign";
@@ -652,6 +686,14 @@ async function printTarget(kind) {
       `<h1>${esc(title)}</h1>` +
       `<div class="print-meta">匹配度 ${matchScore}/100</div>` +
       `<div class="resume-doc">${renderMarkdown(aligned || fallbackDraft)}</div>`;
+  } else if (kind === "snapshot") {
+    const snapshot = options || {};
+    const job = state.wbJob || {};
+    title = `${snapshot.job_title || job.title || "投递定稿"} · 第 ${snapshot.version_index || 1} 版`;
+    body =
+      `<h1>${esc(title)}</h1>` +
+      `<div class="print-meta">投递于 ${esc(snapshot.applied_at || formatDate(snapshot.created_at))}${snapshot.match_score != null ? ` · 匹配度 ${Math.round(snapshot.match_score)}` : " · 匹配度 —"}</div>` +
+      `<div class="resume-doc">${renderMarkdown(snapshot.final_draft || "")}</div>`;
   } else if (kind === "diagnosis") {
     const resumeId = state.diagnosisResumeId || (state.route && state.route.resumeId);
     let content = "";
@@ -702,6 +744,63 @@ function fallbackCopyMarkdown(text) {
     toast("复制失败，请手动选择", "error");
   }
   node.remove();
+}
+
+function copyTextToClipboard(text, successMessage = "已复制") {
+  const onOk = () => toast(successMessage, "success");
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(onOk, () => fallbackCopyText(text, successMessage));
+  } else {
+    fallbackCopyText(text, successMessage);
+  }
+}
+
+function fallbackCopyText(text, successMessage) {
+  const node = document.createElement("textarea");
+  node.value = text;
+  node.style.position = "fixed";
+  node.style.opacity = "0";
+  document.body.append(node);
+  node.select();
+  try {
+    document.execCommand("copy");
+    toast(successMessage, "success");
+  } catch {
+    toast("复制失败，请手动选择", "error");
+  }
+  node.remove();
+}
+
+function todayDateString() {
+  const today = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+}
+
+async function persistApplicationRecord(job, appliedAt, button, message) {
+  await api(`/api/jobs/${encodeURIComponent(job.job_id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: "applied", applied_at: appliedAt }),
+  });
+  toast(message, "success");
+  if (button && button.closest(".modal-backdrop")) closeModal();
+  await render();
+}
+
+function findApplicationSnapshot(snapshotId) {
+  const entries = state.applicationSnapshots || {};
+  for (const jobId of Object.keys(entries)) {
+    const found = (entries[jobId].snapshots || []).find(
+      (snapshot) => String(snapshot.snapshot_id) === String(snapshotId),
+    );
+    if (found) return found;
+  }
+  return null;
+}
+
+function findApplicationEntry(jobId) {
+  const entries = state.applicationSnapshots || {};
+  return entries[jobId] || null;
 }
 
 const actions = {
@@ -1017,9 +1116,13 @@ const actions = {
       }
     }
     if (jobStatusRank(job.status) >= jobStatusRank("applied")) {
-      toast(
-        `岗位已是「${jobStatusLabel(job.status)}」，无需重复记录投递`,
-        "info",
+      showModal(
+        "再次记录投递",
+        `<p>岗位已是「${esc(jobStatusLabel(job.status))}」。再次记录会追加一轮不可篡改的投递定稿快照，不会改变当前状态或时间线。</p>
+        <div class="actions">
+          <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+          <button class="btn btn-primary" type="button" data-action="confirm-append-application" data-id="${esc(job.job_id)}">确认追加</button>
+        </div>`,
       );
       return;
     }
@@ -1033,16 +1136,31 @@ const actions = {
       toast("请先生成并保存定稿，再记录投递", "error");
       return;
     }
-    const today = new Date();
-    const pad = (n) => String(n).padStart(2, "0");
-    const appliedAt = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-    await api(`/api/jobs/${encodeURIComponent(job.job_id)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ status: "applied", applied_at: appliedAt }),
-    });
-    toast("已记录投递", "success");
-    if (button.closest(".modal-backdrop")) closeModal();
-    await render();
+    await persistApplicationRecord(
+      job,
+      todayDateString(),
+      button,
+      "已记录投递",
+    );
+  },
+  "confirm-append-application": async (button) => {
+    const jobId = button.dataset.id;
+    if (!jobId) return;
+    let job = (state.jobs || []).find((item) => item.job_id === jobId);
+    if (!job) {
+      try {
+        job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+      } catch (error) {
+        toast(error.message || "岗位不存在", "error");
+        return;
+      }
+    }
+    await persistApplicationRecord(
+      job,
+      todayDateString(),
+      button,
+      "已追加投递快照",
+    );
   },
   "toggle-batch-panel": (button) => {
     const wrap = button.parentElement && button.parentElement.querySelector("[data-batch-wrap]");
@@ -1215,6 +1333,25 @@ const actions = {
     await api("/api/settings/reset", { method: "POST" });
     toast("已恢复默认设置", "success");
     render();
+  },
+  "copy-local-ingest-token": () => {
+    const token = state.settings && state.settings.local_ingest_token;
+    if (!token) {
+      toast("本地摄入 Token 尚未生成", "error");
+      return;
+    }
+    copyTextToClipboard(token, "本地摄入 Token 已复制");
+  },
+  "reset-local-ingest-token": async () => {
+    const body = await api("/api/settings/local-ingest-token/reset", {
+      method: "POST",
+    });
+    if (state.settings) {
+      state.settings.local_ingest_token = body.local_ingest_token;
+    }
+    const node = $("[data-local-ingest-token]");
+    if (node) node.textContent = body.local_ingest_token;
+    toast("本地摄入 Token 已重置，请同步更新油猴脚本", "success");
   },
   /* Sprint 5 T2: LLM 节点管理（新增 / 编辑 / 测试 / 激活 / 删除）。 */
   "llm-node-add": () => {
@@ -1603,6 +1740,76 @@ const actions = {
   },
   "cancel-align-job": () => cancelActiveAlignment(),
   "export-final-draft": () => printTarget("final-draft"),
+  "open-snapshot": (button) => {
+    const snapshot = findApplicationSnapshot(button.dataset.id);
+    if (!snapshot) {
+      toast("投递定稿快照不存在", "error");
+      return;
+    }
+    showModal(
+      `投递定稿快照 · 第 ${snapshot.version_index} 版`,
+      `<div class="snapshot-preview">
+        <div class="resume-doc">${renderMarkdown(snapshot.final_draft || "")}</div>
+        <div class="actions">
+          <button class="btn btn-ghost" type="button" data-action="close-modal">关闭</button>
+          <button class="btn btn-secondary btn-sm" type="button" data-action="export-snapshot-md" data-id="${esc(snapshot.snapshot_id)}">下载 Markdown</button>
+          <button class="btn btn-primary btn-sm" type="button" data-action="export-snapshot-pdf" data-id="${esc(snapshot.snapshot_id)}">导出 PDF</button>
+        </div>
+      </div>`,
+    );
+  },
+  "export-snapshot-md": (button) => {
+    const snapshot = findApplicationSnapshot(button.dataset.id);
+    if (!snapshot) return;
+    download(
+      `resualign-snapshot-v${snapshot.version_index}.md`,
+      snapshot.final_draft || "",
+      "text/markdown;charset=utf-8",
+    );
+  },
+  "export-snapshot-pdf": (button) => {
+    const snapshot = findApplicationSnapshot(button.dataset.id);
+    if (snapshot) printTarget("snapshot", snapshot);
+  },
+  "view-legacy-draft": (button) => {
+    const entry = findApplicationEntry(button.dataset.id);
+    const draft = entry && entry.legacyDraft;
+    if (!draft) {
+      toast("当前岗位没有定稿", "error");
+      return;
+    }
+    showModal(
+      "早期投递版本（未生成不可篡改快照）",
+      `<div class="snapshot-preview">
+        <p class="legacy-warning">⚠️ 早期投递版本（未生成不可篡改快照）</p>
+        <div class="resume-doc">${renderMarkdown(draft)}</div>
+        <div class="actions">
+          <button class="btn btn-ghost" type="button" data-action="close-modal">关闭</button>
+          <button class="btn btn-secondary btn-sm" type="button" data-action="export-legacy-draft-md" data-id="${esc(button.dataset.id)}">下载 Markdown</button>
+          <button class="btn btn-primary btn-sm" type="button" data-action="export-legacy-draft-pdf" data-id="${esc(button.dataset.id)}">导出 PDF</button>
+        </div>
+      </div>`,
+    );
+  },
+  "export-legacy-draft-md": (button) => {
+    const entry = findApplicationEntry(button.dataset.id);
+    if (!entry || !entry.legacyDraft) return;
+    download(
+      "resualign-legacy-applied-draft.md",
+      entry.legacyDraft,
+      "text/markdown;charset=utf-8",
+    );
+  },
+  "export-legacy-draft-pdf": (button) => {
+    const entry = findApplicationEntry(button.dataset.id);
+    if (!entry || !entry.legacyDraft) return;
+    printTarget("snapshot", {
+      version_index: 0,
+      final_draft: entry.legacyDraft,
+      applied_at: "",
+      match_score: null,
+    });
+  },
   "export-final-draft-md": () => {
     const draft = state.wbFinalDraft && state.wbFinalDraft.draft;
     if (!draft) return;

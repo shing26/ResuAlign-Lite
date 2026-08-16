@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import time
 from typing import Any
 
@@ -17,6 +18,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     llm_model TEXT,
     llm_json TEXT,
     eval_default INTEGER NOT NULL DEFAULT 0,
+    local_ingest_token TEXT,
     updated_at REAL NOT NULL
 );
 """
@@ -38,6 +40,7 @@ def default_settings() -> dict[str, Any]:
             "api_key": None,
             "base_url": None,
         },
+        "local_ingest_token": None,
     }
 
 
@@ -113,7 +116,76 @@ class SettingsStore(_SqliteStore):
             "ALTER TABLE user_settings ADD COLUMN "
             "eval_default INTEGER NOT NULL DEFAULT 0",
         ),
+        (
+            5,
+            "ALTER TABLE user_settings ADD COLUMN local_ingest_token TEXT; "
+            "CREATE INDEX IF NOT EXISTS "
+            "idx_user_settings_local_ingest_token "
+            "ON user_settings(local_ingest_token)",
+        ),
+        (
+            6,
+            "CREATE INDEX IF NOT EXISTS "
+            "idx_user_settings_local_ingest_token "
+            "ON user_settings(local_ingest_token)",
+        ),
     )
+
+    def get_or_create_local_ingest_token(self, tenant_id: str) -> str:
+        """Return the tenant's token, generating and persisting one lazily."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT local_ingest_token FROM user_settings "
+                    "WHERE tenant_id = ?",
+                    (tenant_id,),
+                ).fetchone()
+                if row is not None and row["local_ingest_token"]:
+                    return row["local_ingest_token"]
+                return self._upsert_local_ingest_token(conn, tenant_id)
+
+    def reset_local_ingest_token(self, tenant_id: str) -> str:
+        """Replace the tenant's token and invalidate the old value."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                return self._upsert_local_ingest_token(conn, tenant_id)
+
+    def find_tenant_by_local_ingest_token(
+        self, token: str | None
+    ) -> str | None:
+        """Return the tenant owning a local-ingest token, or None."""
+        token = (token or "").strip()
+        if not token:
+            return None
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT tenant_id FROM user_settings "
+                    "WHERE local_ingest_token = ? LIMIT 1",
+                    (token,),
+                ).fetchone()
+                return row["tenant_id"] if row else None
+
+    @staticmethod
+    def _upsert_local_ingest_token(conn, tenant_id: str) -> str:
+        """Insert or replace a token row and return the token."""
+        token = secrets.token_urlsafe(32)
+        now = time.time()
+        conn.execute(
+            "INSERT INTO user_settings ("
+            "tenant_id, classification_vocabulary_json, "
+            "llm_provider, llm_model, llm_json, eval_default, "
+            "local_ingest_token, updated_at"
+            ") VALUES (?, '{}', NULL, NULL, NULL, 0, ?, ?) "
+            "ON CONFLICT(tenant_id) DO UPDATE SET "
+            "local_ingest_token = excluded.local_ingest_token, "
+            "updated_at = excluded.updated_at",
+            (tenant_id, token, now),
+        )
+        return token
 
     def get_settings(self, tenant_id: str) -> dict[str, Any]:
         defaults = default_settings()
@@ -122,7 +194,7 @@ class SettingsStore(_SqliteStore):
             with self._connect() as conn:
                 row = conn.execute(
                     "SELECT classification_vocabulary_json, llm_provider, "
-                    "llm_model, llm_json, eval_default "
+                    "llm_model, llm_json, eval_default, local_ingest_token "
                     "FROM user_settings "
                     "WHERE tenant_id = ?",
                     (tenant_id,),
@@ -144,8 +216,10 @@ class SettingsStore(_SqliteStore):
             "llm_model": llm.get("model"),
             "eval_default": bool(row["eval_default"]),
             "llm": llm,
+            "local_ingest_token": row["local_ingest_token"],
         }
         settings = _merge_defaults(defaults, settings)
+        settings["local_ingest_token"] = row["local_ingest_token"]
         repaired, changed = _repair_classification_vocabulary(
             settings["classification_vocabulary"]
         )
@@ -174,6 +248,12 @@ class SettingsStore(_SqliteStore):
         """Merge and validate partial settings updates, then persist."""
         current = self.get_settings(tenant_id)
         merged = _merge_defaults(current, updates)
+        # The token is managed only by get/reset endpoints; regular settings
+        # updates and reset must never clear a persisted token.
+        token = updates.get("local_ingest_token")
+        merged["local_ingest_token"] = (
+            token if token else current.get("local_ingest_token")
+        )
         _validate_settings(merged)
         now = time.time()
         with self._lock:
@@ -183,7 +263,8 @@ class SettingsStore(_SqliteStore):
                     "INSERT INTO user_settings ("
                     "tenant_id, classification_vocabulary_json, "
                     "llm_provider, llm_model, llm_json, eval_default, updated_at"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?) "
+                    ", local_ingest_token"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(tenant_id) DO UPDATE SET "
                     "classification_vocabulary_json = "
                     "excluded.classification_vocabulary_json, "
@@ -191,6 +272,7 @@ class SettingsStore(_SqliteStore):
                     "llm_model = excluded.llm_model, "
                     "llm_json = excluded.llm_json, "
                     "eval_default = excluded.eval_default, "
+                    "local_ingest_token = excluded.local_ingest_token, "
                     "updated_at = excluded.updated_at",
                     (
                         tenant_id,
@@ -203,6 +285,7 @@ class SettingsStore(_SqliteStore):
                         json.dumps(merged["llm"], ensure_ascii=False),
                         int(merged["eval_default"]),
                         now,
+                        merged.get("local_ingest_token"),
                     ),
                 )
         return self.get_settings(tenant_id)

@@ -10,6 +10,7 @@ _CUSTOM_PROMPT_MAX = 4_000
 _TITLE_MAX = 200
 _COMPANY_MAX = 200
 _LOCATION_MAX = 100
+_SALARY_TEXT_MAX = 500
 _URL_MAX = 2_000
 _RULE_VALUE_MAX = 2_000
 _LABEL_MAX = 200
@@ -101,6 +102,18 @@ class BulkStatusRequest(BaseModel):
 class JobImportRequest(BaseModel):
     jobs: list[dict[str, Any]] | None = None
     csv_text: str | None = Field(default=None, max_length=_CSV_TEXT_MAX)
+
+
+class LocalIngestRequest(BaseModel):
+    """Structured page fields or raw selection text from the collector script."""
+
+    title: str | None = Field(default=None, max_length=_TITLE_MAX)
+    company: str | None = Field(default=None, max_length=_COMPANY_MAX)
+    location: str | None = Field(default=None, max_length=_LOCATION_MAX)
+    salary_text: str | None = Field(default=None, max_length=_SALARY_TEXT_MAX)
+    job_page_url: str | None = Field(default=None, max_length=_URL_MAX)
+    jd_text: str = Field(max_length=_JD_TEXT_MAX)
+    site: Literal["shixiseng", "universal"] = "universal"
 
 _LLM_KEY_MAX = 2_000
 
