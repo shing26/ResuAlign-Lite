@@ -1,6 +1,7 @@
 /* ResuAlign v3 Dashboard: metric strip + quick continue + skill gaps.
    All values are derived from the live API, never hard-coded. */
 import { alignmentStatusLabel, esc, formatDate, jobStatusLabel, state } from "./events.js";
+import { dashboardEmptyGuideHtml } from "./format.js";
 
 function escAttr(value) {
   return esc(String(value ?? ""));
@@ -56,6 +57,7 @@ export async function renderDashboard(container) {
   const offer = toNumber(kpi.offer);
   const declined = toNumber(kpi.declined);
   const followups = toNumber(kpi.active_followups);
+  const resumeList = Array.isArray(resumes) ? resumes : [];
 
   const alignedCount = jobs.filter(
     (job) => job && job.alignment_status === "succeeded",
@@ -77,6 +79,9 @@ export async function renderDashboard(container) {
     Number.isFinite(rawScore) && rawScore >= 0
       ? Math.round(Math.min(100, rawScore))
       : null;
+  const emptyGuide = jobsTotal === 0 && resumeList.length === 0 && followups === 0
+    ? dashboardEmptyGuideHtml()
+    : "";
 
   const kpiCards = `
     <div class="metric-cell" data-kpi="jobs">
@@ -106,7 +111,7 @@ export async function renderDashboard(container) {
       <div class="quick-row" data-quick-continue>
         <div class="quick-main">
           <div class="quick-title">${escAttr(quick.title || "未命名岗位")}</div>
-          <div class="quick-meta">${escAttr(quick.company || "未知公司")} · ${escAttr(alignmentStatusLabel(quick.alignment_status))}</div>
+          <div class="quick-meta">${escAttr(quick.company || "未识别公司")} · ${escAttr(alignmentStatusLabel(quick.alignment_status))}</div>
         </div>
         <div class="quick-right">
           <span class="pill ${quick.alignment_status === "succeeded" ? "pill-success" : "pill-warn"}">${escAttr(alignmentStatusLabel(quick.alignment_status))}</span>
@@ -162,6 +167,7 @@ export async function renderDashboard(container) {
 
   container.innerHTML = `
     <div class="view view-scroll dashboard-view">
+      ${emptyGuide}
       <div class="metric-strip dashboard-strip" data-dashboard-kpis>${kpiCards}</div>
       <div class="dash-grid">
         <section class="panel main-pane">

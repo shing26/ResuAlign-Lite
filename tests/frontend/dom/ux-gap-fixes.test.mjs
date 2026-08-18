@@ -49,6 +49,7 @@ test("source contracts keep the new UX gap fixes wired", () => {
 
   const dashboard = read("dashboard-view.js");
   assert.match(dashboard, /currentResume\.latest_diagnosis/, "dashboard reads persisted diagnosis");
+  assert.match(dashboard, /未识别公司/, "dashboard quick continue uses 未识别公司 fallback");
 
   const resumeCenter = read("resume-center.js");
   assert.match(resumeCenter, /data-resume-band-status-text/, "resume band status slot");
@@ -84,6 +85,16 @@ test("source contracts keep the new UX gap fixes wired", () => {
     "workbench stops polling terminal sessions",
   );
   assert.match(splitCanvas, /session\.alignment\.draft/, "guide recognizes session draft");
+  assert.match(
+    splitCanvas,
+    /岗位不存在，已返回驾驶舱/,
+    "invalid workspace deep link toasts and redirects",
+  );
+  assert.match(
+    splitCanvas,
+    /已自动打开最近岗位，可在顶部切换/,
+    "workspace auto-select explains the jump to the latest job",
+  );
 
   const events = read("events.js");
   assert.match(
@@ -159,6 +170,7 @@ test("workbench guide renders from a session-only draft", () => {
   state.wbControlsOpen = true;
   state.wbExportDockOpen = false;
   state.wbAcceptedBullets = {};
+  state.route = { name: "workspace", jobId: jobData.job_id, resumeId: null };
   renderSplitCanvas(
     document.querySelector("#app-router-view"),
     {

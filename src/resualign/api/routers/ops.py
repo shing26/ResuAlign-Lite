@@ -25,6 +25,8 @@ def metrics() -> dict:
     registry = api_module._registry
     outcomes = registry.outcome_stats()
     terminal = outcomes.get("succeeded", 0) + outcomes.get("failed", 0)
+    llm_snapshot = llm_metrics_snapshot()
+    llm_snapshot["daily"] = api_module.llm_daily_status("local")
     return {
         "queue": {
             "depth": registry.queue_depth(),
@@ -38,6 +40,6 @@ def metrics() -> dict:
                 else None
             ),
         },
-        "llm": llm_metrics_snapshot(),
+        "llm": llm_snapshot,
         "uptime_seconds": round(time.monotonic() - _STARTED_AT, 1),
     }

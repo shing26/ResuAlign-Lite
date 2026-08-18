@@ -21,6 +21,7 @@ function job(overrides = {}) {
 }
 
 function render(app, jobData, resumes = []) {
+  state.route = { name: "workspace", jobId: jobData.job_id, resumeId: null };
   state.wbResumes = resumes;
   state.wbMobilePane = "controls";
   state.wbControlsOpen = true;

@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { Window } from "happy-dom";
 
 import {
+  dashboardEmptyGuideHtml,
   dashboardKpiHtml,
+  jobsEmptyGuideHtml,
   jobSelectOptionsHtml,
   matchJobSuggestions,
   parseHashValue,
@@ -87,6 +89,30 @@ test("dashboardKpiHtml coerces non-numeric values and never injects HTML", () =>
   assert.equal(card.querySelector("script"), null);
   // 数值被 Number() 强制转换：非数字字符串 → 0，天然避免注入
   assert.equal(card.querySelector(".dashboard-kpi__value").textContent, "0");
+});
+
+test("dashboardEmptyGuideHtml renders only for a truly empty workspace", () => {
+  const empty = bodyFrom(dashboardEmptyGuideHtml());
+  assert.ok(empty.querySelector("[data-dashboard-empty]"));
+  assert.equal(empty.querySelectorAll("a.btn").length, 2);
+  assert.equal(empty.querySelector("a[href='#/resume']").textContent, "上传简历");
+  assert.equal(empty.querySelector("a[href='#/jobs']").textContent, "导入 JD");
+  assert.equal(
+    bodyFrom(dashboardEmptyGuideHtml({ hasJobs: true })).querySelector("[data-dashboard-empty]"),
+    null,
+  );
+  assert.equal(
+    bodyFrom(dashboardEmptyGuideHtml({ hasResume: true })).querySelector("[data-dashboard-empty]"),
+    null,
+  );
+});
+
+test("jobsEmptyGuideHtml renders an actionable empty state", () => {
+  const body = bodyFrom(jobsEmptyGuideHtml());
+  const guide = body.querySelector("[data-jobs-empty]");
+  assert.ok(guide);
+  assert.match(guide.textContent, /还没有岗位/);
+  assert.equal(guide.querySelector('[data-action="show-add-job"]').textContent, "粘贴 JD");
 });
 
 /* ------------------------------------------------------------------ */

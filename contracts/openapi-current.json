@@ -228,6 +228,16 @@
             }
           },
           {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "updated_at_desc",
+              "title": "Sort"
+            }
+          },
+          {
             "name": "authorization",
             "in": "header",
             "required": false,
@@ -850,6 +860,66 @@
         }
       }
     },
+    "/api/jobs/{job_id}/exports": {
+      "post": {
+        "summary": "Export Final Draft",
+        "description": "Export a persisted final draft as Markdown, JSON, or print HTML.",
+        "operationId": "export_final_draft_api_jobs__job_id__exports_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobExportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobExportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs/{job_id}/workbench": {
       "post": {
         "summary": "Run Workbench",
@@ -999,6 +1069,56 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/JobPreanalyzeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{job_id}/match": {
+      "post": {
+        "summary": "Recompute Job Match",
+        "description": "Recompute the four-dimension match score with a one-sentence reason.",
+        "operationId": "recompute_job_match_api_jobs__job_id__match_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchScoreResponse"
                 }
               }
             }
@@ -2339,6 +2459,156 @@
         }
       }
     },
+    "/api/settings/role-bindings": {
+      "get": {
+        "summary": "Get Role Bindings",
+        "description": "Return the current role-to-node bindings, available roles, and nodes.",
+        "operationId": "get_role_bindings_api_settings_role_bindings_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update Role Bindings",
+        "description": "Update role bindings. Accepts a dict of {role: node_id_or_null}.",
+        "operationId": "update_role_bindings_api_settings_role_bindings_put",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/role-bindings/presets": {
+      "post": {
+        "summary": "Apply Role Preset",
+        "description": "Apply a one-click preset: unified, hybrid, or local.",
+        "operationId": "apply_role_preset_api_settings_role_bindings_presets_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings": {
       "get": {
         "summary": "Get Settings",
@@ -2861,6 +3131,148 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{job_id}/refresh": {
+      "post": {
+        "summary": "Refresh Library Job",
+        "description": "Queue and run one in-place refresh for an existing URL job.",
+        "operationId": "refresh_library_job_api_jobs__job_id__refresh_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobRefreshResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/refresh-all": {
+      "post": {
+        "summary": "Refresh All Library Jobs",
+        "description": "Queue and run refresh for every eligible URL-sourced job.",
+        "operationId": "refresh_all_library_jobs_api_jobs_refresh_all_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobRefreshAllResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reminders": {
+      "get": {
+        "summary": "List Reminders",
+        "description": "Return the tenant's today/overdue follow-up list.",
+        "operationId": "list_reminders_api_reminders_get",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "today",
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReminderListResponse"
+                }
               }
             }
           },
@@ -4035,6 +4447,180 @@
         "type": "object",
         "title": "JobCreateRequest"
       },
+      "JobExportMeta": {
+        "properties": {
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "generated_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated At"
+          },
+          "final_draft_updated_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Draft Updated At"
+          },
+          "match_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Score"
+          },
+          "workbench_resume_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workbench Resume Id"
+          }
+        },
+        "type": "object",
+        "title": "JobExportMeta",
+        "description": "Traceability metadata attached to every final-draft export."
+      },
+      "JobExportRequest": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json",
+              "pdf"
+            ],
+            "title": "Format",
+            "default": "markdown"
+          }
+        },
+        "type": "object",
+        "title": "JobExportRequest",
+        "description": "Request one canonical final-draft export for a library job."
+      },
+      "JobExportResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "job_title": {
+            "type": "string",
+            "title": "Job Title"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json",
+              "pdf"
+            ],
+            "title": "Format"
+          },
+          "final_draft_version": {
+            "type": "integer",
+            "title": "Final Draft Version",
+            "default": 0
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "default": ""
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "default": ""
+          },
+          "meta": {
+            "$ref": "#/components/schemas/JobExportMeta"
+          },
+          "accepted_diff_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Accepted Diff Ids"
+          },
+          "accepted_diffs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Accepted Diffs"
+          },
+          "render": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render"
+          },
+          "print_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Print Target"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "job_title",
+          "format"
+        ],
+        "title": "JobExportResponse",
+        "description": "Canonical export payload derived only from persisted job fields."
+      },
       "JobImportRequest": {
         "properties": {
           "jobs": {
@@ -4118,6 +4704,60 @@
             ],
             "title": "Match Score"
           },
+          "match_score_detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Score Detail"
+          },
+          "match_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Reason"
+          },
+          "match_reason_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "llm",
+                  "fallback"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Reason Source"
+          },
+          "match_updated_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Updated At"
+          },
+          "match_stale": {
+            "type": "boolean",
+            "title": "Match Stale",
+            "default": false
+          },
           "classification": {
             "anyOf": [
               {
@@ -4152,6 +4792,123 @@
           "job_id"
         ],
         "title": "JobPreanalyzeResponse"
+      },
+      "JobRefreshAllResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JobRefreshResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "title": "JobRefreshAllResponse"
+      },
+      "JobRefreshResponse": {
+        "properties": {
+          "queued": {
+            "type": "boolean",
+            "title": "Queued",
+            "default": false
+          },
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "crawl_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crawl Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "changed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changed"
+          },
+          "changed_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changed Fields"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "title": "JobRefreshResponse",
+        "description": "Result of queueing or running one URL job refresh."
       },
       "JobUpdateRequest": {
         "properties": {
@@ -4861,6 +5618,303 @@
         ],
         "title": "MasterResumeUpdateRequest"
       },
+      "MatchScoreResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "blocked",
+              "fallback"
+            ],
+            "title": "Status",
+            "default": "ready"
+          },
+          "recomputed": {
+            "type": "boolean",
+            "title": "Recomputed",
+            "default": false
+          },
+          "match_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Score"
+          },
+          "match_score_detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Score Detail"
+          },
+          "match_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Reason"
+          },
+          "match_reason_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "llm",
+                  "fallback"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Reason Source"
+          },
+          "match_updated_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Updated At"
+          },
+          "match_stale": {
+            "type": "boolean",
+            "title": "Match Stale",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "title": "MatchScoreResponse"
+      },
+      "ReminderItem": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "status_canonical": {
+            "type": "string",
+            "title": "Status Canonical",
+            "default": "applied"
+          },
+          "next_step_due_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Step Due At"
+          },
+          "interview_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Stage"
+          },
+          "next_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Step"
+          },
+          "overdue": {
+            "type": "boolean",
+            "title": "Overdue",
+            "default": false
+          },
+          "reminder_sent_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reminder Sent At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "title"
+        ],
+        "title": "ReminderItem",
+        "description": "One follow-up due today or overdue for the tenant."
+      },
+      "ReminderListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReminderItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "title": "ReminderListResponse"
+      },
+      "ReminderSettingsUpdate": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "auto_followup_reminder": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Followup Reminder"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "generic",
+                  "feishu",
+                  "wecom",
+                  "telegram"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "smtp_host": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Smtp Host"
+          },
+          "smtp_port": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 65535.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Smtp Port"
+          },
+          "smtp_user": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Smtp User"
+          },
+          "smtp_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Smtp From"
+          },
+          "smtp_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Smtp To"
+          }
+        },
+        "type": "object",
+        "title": "ReminderSettingsUpdate",
+        "description": "Editable reminder delivery settings (secrets stay environment-only)."
+      },
       "SettingsTestConnectionRequest": {
         "properties": {
           "provider": {
@@ -4981,6 +6035,52 @@
                 "type": "null"
               }
             ]
+          },
+          "reminder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReminderSettingsUpdate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "daily_llm_cap": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Llm Cap"
+          },
+          "llm_cost_per_1k_in": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Cost Per 1K In"
+          },
+          "llm_cost_per_1k_out": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Cost Per 1K Out"
           }
         },
         "type": "object",

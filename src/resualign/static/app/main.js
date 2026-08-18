@@ -49,8 +49,6 @@ import {
   cancelActiveAlignment,
   closeSplitCanvas,
   copyAlignMarkdown,
-  exportAlignJson,
-  exportAlignMarkdown,
   getLiveSheetDraft,
   renderOptimizerCanvas,
   setWbAuxPane,
@@ -74,6 +72,7 @@ import {
   blockerListHtml,
   buildJobsBackup,
   buildLiveCompareHtml,
+  costGuardPanelHtml,
   dueReminders,
   fetchUrlResultMessage,
   isJdUrl,
@@ -86,8 +85,10 @@ import {
   llmNodeCardHtml,
   llmNodeFormHtml,
   nodeTestResultHtml,
+  offerCelebrationHtml,
   onboardingSteps,
   parseHashValue,
+  reminderSettingsPanelHtml,
   renderMarkdown,
   renderOnboardingCard,
   renderReminderBanner,
@@ -96,18 +97,34 @@ import {
   ruleListHtml,
   runEvalFromForm,
   settingsBentoHtml,
+  todayViewHtml,
 } from "./format.js";
 import {
   buildAutomationRulePayload,
+  buildCostGuardPayload,
   buildLlmNodePayload,
+  buildReminderPayload,
   evalDefaultFromForm,
   validateAutomationRule,
+  validateCostGuardPayload,
   validateLlmNodePayload,
+  validateReminderPayload,
 } from "./settings-form.js";
 
 function isTerminalJobStatus(status) {
   const canonical = canonicalJobStatus(status);
   return canonical === "offer" || canonical === "withdrawn";
+}
+
+function celebrateOffer(job) {
+  const html = offerCelebrationHtml(job);
+  if (!html) return;
+  const holder = document.createElement("div");
+  holder.innerHTML = html;
+  const overlay = holder.firstElementChild;
+  if (!overlay) return;
+  document.body.append(overlay);
+  setTimeout(() => overlay.remove(), 2800);
 }
 
 const ROUTE_LABELS = {
@@ -116,6 +133,7 @@ const ROUTE_LABELS = {
   workspace: "对齐工作台",
   settings: "系统设置",
   dashboard: "驾驶舱",
+  today: "今日待办",
 };
 
 /* v3 shell: 顶栏标题/副标题随路由联动。 */
@@ -125,6 +143,7 @@ const PAGE_META = {
   jobs: ["岗位库", "URL 自动抓取、阻断队列与 5 列 Pipeline 看板"],
   resume: ["简历中心", "Markdown 双态编辑、ATS 健康度与版本时间线"],
   settings: ["系统设置", "LLM 节点、Guardrails、自动化规则与词表"],
+  today: ["今日待办", "今天到期与已逾期的跟进，直接跳转工作台安排下一步"],
 };
 
 function parseHash() {
@@ -193,9 +212,17 @@ async function handleRoute(app) {
       mountWorkspaceReminder(app);
       break;
     }
-    case "jobs":
+    case "jobs": {
+      const sort = params.get("sort");
+      if (
+        sort &&
+        ["updated_at_desc", "match_score_desc", "match_score_asc"].includes(sort)
+      ) {
+        state.filters.sort = sort;
+      }
       await renderKanban(app);
       break;
+    }
     case "resumes":
     case "resume":
       await renderResumeCenter(app, {
@@ -206,10 +233,26 @@ async function handleRoute(app) {
     case "settings":
       await renderSettingsView(app);
       break;
+    case "today":
+      await renderTodayView(app);
+      break;
     default:
       await renderDashboard(app);
       break;
   }
+}
+
+async function renderTodayView(app) {
+  let items = [];
+  try {
+    const body = await api("/api/reminders?scope=today", {
+      cacheKey: "today:reminders",
+    });
+    items = (body && Array.isArray(body.items)) ? body.items : [];
+  } catch (error) {
+    console.warn("Today view fallback", error);
+  }
+  app.innerHTML = todayViewHtml(items);
 }
 
 async function render() {
@@ -255,7 +298,7 @@ function isApiKeyUnconfigured(error) {
   return (
     error &&
     error.status === 503 &&
-    /API key not configured/i.test(error.message || "")
+    /LLM 町配置|API key not configured/i.test(error.message || "")
   );
 }
 
@@ -264,7 +307,7 @@ function renderApiKeyGuide(app) {
     <div class="page-header page-header--workspace"><div><h2>单岗位工作台</h2>
       <div class="sub">先配置 LLM，再开始对齐分析</div></div></div>
     <div class="panel panel-card empty-state">
-      <div class="big">尚未配置 API Key</div>
+      <div class="big">LLM 尚未配置</div>
       <div>工作台的分析、对齐与改写需要调用大模型 API。到设置页填入 Key 并保存后即可开始。</div>
       <div class="actions">
         <a href="#/settings" class="btn btn-primary">去设置页配置 LLM</a>
@@ -508,6 +551,8 @@ async function renderSettingsView(app) {
         </div>
       </div>
       ${settingsBentoHtml(activeNode, latency)}
+      ${costGuardPanelHtml(settings, status.daily || {})}
+      ${reminderSettingsPanelHtml(settings, status.reminder || {})}
       <section class="panel local-ingest-panel" data-local-ingest-panel>
         <div class="panel-head">
           <div>
@@ -803,8 +848,50 @@ function findApplicationEntry(jobId) {
   return entries[jobId] || null;
 }
 
+/* MVP-09: 定稿导出统一走 POST /api/jobs/{job_id}/exports。PDF 响应把
+ * print-html 写入 #print-root 后触发打印；Markdown/JSON 用响应里的
+ * canonical 内容与文件名下载，不再从 transient session 拼装。 */
+async function exportFinalDraft(format) {
+  const jobId = (state.wbJob && state.wbJob.job_id) || (state.route && state.route.jobId);
+  if (!jobId) {
+    toast("当前没有可导出的岗位", "error");
+    return;
+  }
+  let body;
+  try {
+    body = await api(`/api/jobs/${encodeURIComponent(jobId)}/exports`, {
+      method: "POST",
+      body: JSON.stringify({ format }),
+    });
+  } catch (error) {
+    toast(error.message || "导出失败", "error");
+    return;
+  }
+  if (format === "pdf") {
+    const printNode = $("#print-root");
+    if (!printNode) return;
+    printNode.innerHTML = body.render === "print-html"
+      ? (body.content || "")
+      : `<h1>${esc(body.job_title || "定稿简历")}</h1><div class="resume-doc">${renderMarkdown(body.content || "")}</div>`;
+    window.print();
+    printNode.innerHTML = "";
+    toast("已生成打印预览", "success");
+    return;
+  }
+  const ext = format === "json" ? "json" : "md";
+  download(
+    body.filename || `resualign-${body.job_title || "job"}.${ext}`,
+    body.content || "",
+    format === "json"
+      ? "application/json;charset=utf-8"
+      : "text/markdown;charset=utf-8",
+  );
+  toast(`已导出 ${body.filename || "定稿"}`, "success");
+}
+
 const actions = {
   reload: () => render(),
+  "goto-today": () => navigate("today"),
   /* v2.0: 新建主简历走模态框（主视图无内联 textarea）。 */
   "new-resume": () => openResumeCreator(),
   "cancel-new-resume": () => closeModal(),
@@ -1059,7 +1146,13 @@ const actions = {
     $('[data-form="job-import"]').hidden = true;
   },
   "clear-filters": () => {
-    state.filters = { job_function: "", seniority: "", status: "", search: "" };
+    state.filters = {
+      job_function: "",
+      seniority: "",
+      status: "",
+      search: "",
+      sort: "updated_at_desc",
+    };
     state.offset = 0;
     render();
   },
@@ -1229,6 +1322,28 @@ const actions = {
         "error",
       );
     } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+      button.classList.remove("is-loading");
+    }
+  },
+  "recompute-match": async (button) => {
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = "评分中...";
+    button.classList.add("is-loading");
+    try {
+      const updated = await api(
+        `/api/jobs/${encodeURIComponent(button.dataset.id)}/match`,
+        { method: "POST" },
+      );
+      toast(
+        updated.match_reason || `匹配分已更新：${updated.match_score ?? "—"}`,
+        "success",
+      );
+      renderKanban($("#app-router-view"));
+    } catch (error) {
+      toast(error.message, "error");
       button.disabled = false;
       button.textContent = originalText;
       button.classList.remove("is-loading");
@@ -1661,15 +1776,9 @@ const actions = {
     state.route.jobId,
     activeSessionForExport(),
   ),
-  "export-align-markdown": () => exportAlignMarkdown(
-    state.route.jobId,
-    activeSessionForExport(),
-  ),
+  "export-align-markdown": () => exportFinalDraft("markdown"),
   "export-align-pdf": () => printTarget("workbench"),
-  "export-align-json": () => exportAlignJson(
-    state.route.jobId,
-    activeSessionForExport(),
-  ),
+  "export-align-json": () => exportFinalDraft("json"),
   "export-jobs-csv": () => {
     if (!state.jobs.length) {
       toast("岗位库为空，暂无可导出的岗位", "error");
@@ -1739,7 +1848,7 @@ const actions = {
     form.dispatchEvent(new Event("submit", { cancelable: true }));
   },
   "cancel-align-job": () => cancelActiveAlignment(),
-  "export-final-draft": () => printTarget("final-draft"),
+  "export-final-draft": () => exportFinalDraft("pdf"),
   "open-snapshot": (button) => {
     const snapshot = findApplicationSnapshot(button.dataset.id);
     if (!snapshot) {
@@ -1810,16 +1919,8 @@ const actions = {
       match_score: null,
     });
   },
-  "export-final-draft-md": () => {
-    const draft = state.wbFinalDraft && state.wbFinalDraft.draft;
-    if (!draft) return;
-    const job = state.wbJob || {};
-    download(
-      `resualign-${job.title || "final-draft"}.md`,
-      draft,
-      "text/markdown;charset=utf-8",
-    );
-  },
+  "export-final-draft-md": () => exportFinalDraft("markdown"),
+  "export-final-draft-json": () => exportFinalDraft("json"),
   "save-as-new-resume": () => {
     const draft = state.wbFinalDraft && state.wbFinalDraft.draft;
     if (!draft) {
@@ -2232,6 +2333,7 @@ async function handleForm(formName, data, form) {
         seniority: data.seniority || "",
         status: data.status || "",
         search: data.search || "",
+        sort: state.filters.sort || "updated_at_desc",
       };
       state.offset = 0;
       render();
@@ -2475,6 +2577,9 @@ async function handleForm(formName, data, form) {
         toast("岗位时间线已保存", "success");
         closeModal();
         render();
+        if (targetStatus === "offer") {
+          celebrateOffer({ ...job, status: "offer" });
+        }
       };
       if (job && isTerminalJobStatus(targetStatus)) {
         confirmTerminalStatus(
@@ -2550,6 +2655,9 @@ async function handleForm(formName, data, form) {
         toast("跟进已安排", "success");
         closeModal();
         render();
+        if (targetStatus === "offer") {
+          celebrateOffer({ ...job, status: "offer" });
+        }
       };
       if (job && isTerminalJobStatus(targetStatus)) {
         confirmTerminalStatus(
@@ -2594,6 +2702,7 @@ async function handleForm(formName, data, form) {
         seniority: data.seniority || "",
         status: data.status || "",
         search: data.search || "",
+        sort: state.filters.sort || "updated_at_desc",
       };
       state.offset = 0;
       render();
@@ -2689,6 +2798,36 @@ async function handleForm(formName, data, form) {
         body: JSON.stringify({ eval_default: evalDefaultFromForm(data) }),
       });
       toast("对齐评估默认开关已保存", "success");
+      render();
+      break;
+    }
+    case "settings-cost-guard": {
+      const payload = buildCostGuardPayload(data);
+      const validation = validateCostGuardPayload(payload);
+      if (!validation.ok) {
+        toast(validation.message, "error");
+        return;
+      }
+      await api("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      toast("成本护栏已保存", "success");
+      render();
+      break;
+    }
+    case "settings-reminder": {
+      const payload = buildReminderPayload(data);
+      const validation = validateReminderPayload(payload);
+      if (!validation.ok) {
+        toast(validation.message, "error");
+        return;
+      }
+      await api("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      toast("提醒配置已保存", "success");
       render();
       break;
     }

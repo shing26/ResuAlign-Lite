@@ -223,7 +223,7 @@ def test_analyze_no_api_key():
             headers=_auth_headers(),
         )
     assert r.status_code == 503
-    assert "API key not configured" in r.json()["detail"]
+    assert "LLM" in r.json()["detail"]
 
 
 def test_create_job_returns_202_and_queued_snapshot():

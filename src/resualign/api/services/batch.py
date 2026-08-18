@@ -103,12 +103,11 @@ def queue_batch_align(
             jobs.append(job)
 
     config = api_module.build_config()
-    if not config.api_key:
+    if not config.is_llm_configured:
         raise HTTPException(
             status_code=503,
             detail=(
-                'API key not configured. Set via .env file or environment '
-                'variables.'
+                'LLM 未配置。请设置 API Key（远程供应商）或激活 Ollama 本地节点。'
             ),
         )
 

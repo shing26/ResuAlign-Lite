@@ -2,12 +2,19 @@ from .llm import _structured_or_json
 from .models import EvalScore
 from .schema_registry import EvalScoreSchema
 from .tailor import parse_diff_with_provenance
+EVALUATOR_PROMPT_VERSION = "v1"
+
 
 EVAL_PROMPT = (
     "You are a resume quality judge. "
     "Return JSON with jd_match_score (0-100), improvement (0-100), "
     "hallucination_detected (bool), hallucination_details (list), "
     "gap_coverage (0.0-1.0). Output ONLY JSON."
+    "## Output Constraints\\n"
+    "- Max tokens: 300\\n"
+    "- Temperature: 0.0\\n"
+    "- If uncertain: return 0 for numeric fields\\n"
+    "- Output ONLY valid JSON, no markdown fences\\n"
 )
 
 def evaluate(client, original_resume, tailored_text, jd_text, diffs=None):

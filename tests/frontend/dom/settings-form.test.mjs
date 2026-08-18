@@ -4,11 +4,13 @@ import { Window } from "happy-dom";
 
 import {
   apiKeyFieldHint,
+  buildCostGuardPayload,
   buildSettingsLlmPayload,
   buildTestConnectionPayload,
   evalDefaultFromForm,
   maskApiKey,
   testConnectionResultHtml,
+  validateCostGuardPayload,
 } from "../../../src/resualign/static/app/settings-form.js";
 import { formFromHtml } from "../dom-helpers.mjs";
 
@@ -154,4 +156,29 @@ test("evalDefaultFromForm maps checked to true and unchecked to false", () => {
   assert.equal(evalDefaultFromForm({}), false);
   assert.equal(evalDefaultFromForm({ eval_default: "off" }), false);
   assert.equal(evalDefaultFromForm(null), false);
+});
+
+test("cost guard form fields map to a numeric/null settings payload", () => {
+  const form = formFromHtml(`
+    <form data-form="settings-cost-guard">
+      <input type="number" name="daily_llm_cap" value="10">
+      <input type="number" name="llm_cost_per_1k_in" value="0.5">
+      <input type="number" name="llm_cost_per_1k_out" value="">
+    </form>`);
+  const data = {};
+  for (const name of [
+    "daily_llm_cap",
+    "llm_cost_per_1k_in",
+    "llm_cost_per_1k_out",
+  ]) {
+    const node = form.querySelector(`[name="${name}"]`);
+    data[name] = node ? node.value : "";
+  }
+  const payload = buildCostGuardPayload(data);
+  assert.deepEqual(payload, {
+    daily_llm_cap: 10,
+    llm_cost_per_1k_in: 0.5,
+    llm_cost_per_1k_out: null,
+  });
+  assert.equal(validateCostGuardPayload(payload).ok, true);
 });

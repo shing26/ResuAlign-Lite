@@ -87,6 +87,9 @@ class Report:
     tailored_resume: Optional[TailoredResume] = None
     eval_score: Optional[EvalScore] = None
     elapsed_seconds: float = 0.0
+    provenance_ratio: float = 0.0
+    graph_status: str = ""
+    trace_id: str = ""
 
 
 @dataclass
@@ -95,3 +98,12 @@ class ResuAlignConfig:
     api_key: str = ""
     model: str = "deepseek-chat"
     base_url: str = ""
+
+    @property
+    def is_llm_configured(self) -> bool:
+        """Return True when the config can power LLM calls.
+
+        Ollama is a local server that needs no API key; all other providers
+        require a non-empty api_key.
+        """
+        return bool(self.api_key) or self.provider == "ollama"

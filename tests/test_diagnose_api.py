@@ -418,7 +418,7 @@ def test_diagnose_requires_api_key():
             headers=_auth_headers(),
         )
     assert r.status_code == 503
-    assert "API key not configured" in r.json()["detail"]
+    assert "LLM" in r.json()["detail"]
 
 
 def test_diagnose_personal_mode_has_no_login_wall():

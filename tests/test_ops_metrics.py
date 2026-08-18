@@ -6,16 +6,26 @@ from fastapi.testclient import TestClient
 import resualign.api as api_module
 from resualign.api import app
 from resualign.jobs import JobRegistry
+from resualign.llm_usage import LLMUsageStore
+from resualign.settings_store import SettingsStore
 
 client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
 def temp_registry(tmp_path):
-    saved = api_module._registry
+    saved = {
+        "registry": api_module._registry,
+        "settings": api_module._settings_store,
+        "llm_usage": api_module._llm_usage,
+    }
     api_module._registry = JobRegistry(db_path=tmp_path / "ops.db")
+    api_module._settings_store = SettingsStore(db_path=tmp_path / "ops.db")
+    api_module._llm_usage = LLMUsageStore(db_path=tmp_path / "ops.db")
     yield
-    api_module._registry = saved
+    api_module._registry = saved["registry"]
+    api_module._settings_store = saved["settings"]
+    api_module._llm_usage = saved["llm_usage"]
 
 
 def test_metrics_endpoint_shape():
@@ -30,11 +40,16 @@ def test_metrics_endpoint_shape():
     assert body["jobs"]["by_status"] == {}
     assert body["jobs"]["failure_rate"] is None
     assert set(body["llm"]) == {
-        "total", "successes", "failures", "success_rate", "duration",
+        "total", "successes", "failures", "success_rate", "duration", "daily",
     }
     assert set(body["llm"]["duration"]) == {
         "count", "min_ms", "p50_ms", "p95_ms", "max_ms",
     }
+    assert set(body["llm"]["daily"]) == {
+        "date", "calls", "cap", "estimated_cost", "blocked", "remaining",
+    }
+    assert body["llm"]["daily"]["calls"] == 0
+    assert body["llm"]["daily"]["blocked"] is False
     assert isinstance(body["uptime_seconds"], (int, float))
 
 
@@ -79,4 +94,11 @@ def test_metrics_llm_aggregates_current_snapshot():
     from resualign.llm import llm_metrics_snapshot
 
     body = client.get("/api/ops/metrics").json()
-    assert body["llm"] == llm_metrics_snapshot()
+    snapshot = llm_metrics_snapshot()
+    assert body["llm"]["total"] == snapshot["total"]
+    assert body["llm"]["successes"] == snapshot["successes"]
+    assert body["llm"]["failures"] == snapshot["failures"]
+    assert body["llm"]["duration"] == snapshot["duration"]
+    assert set(body["llm"]["daily"]) == {
+        "date", "calls", "cap", "estimated_cost", "blocked", "remaining",
+    }

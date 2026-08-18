@@ -317,48 +317,30 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
             "final-draft panel should expose record-application",
         )
 
-        # --- 6. 下载 Markdown → 导出内容含采纳后的文本 ---------------------
-        # The workbench dock's "下载 Markdown" (export-align-markdown) carries
-        # the accepted suggestion and its provenance in 修改建议. (Its 对齐内容
-        # section reads session.alignment.draft, which the split-canvas SSE
-        # job.result replay sets from result.draft — the analysis result has
-        # no draft field, so the section renders the "尚未生成定稿" placeholder
-        # in the current product. The accepted draft itself is exported from
-        # the final-draft panel below.)
-        if not page.locator(
-            "[data-action='export-align-markdown']"
-        ).first.is_visible():
-            page.click("[data-export-dock] summary")
+        # --- 6. canonical 定稿 Markdown 导出含采纳后的文本 ----------------
+        # MVP-09：导出只走 /api/jobs/{job_id}/exports，内容来自持久化的
+        # final_draft + accepted_diff_ids，不再导出会话内临时 Markdown。
         with page.expect_download(timeout=15000) as download_info:
-            page.click("[data-action='export-align-markdown']")
-        dock_content = _read_download(download_info.value)
-        expect(
-            dock_content.startswith("# "),
-            "workbench markdown export should start with a title heading",
-        )
-        expect(
-            "## 修改建议" in dock_content,
-            "workbench markdown export should carry a 修改建议 section",
-        )
-        expect(
-            "Matches JD high-concurrency scenario" in dock_content,
-            "markdown should list the accepted diff's reason",
-        )
-        expect(
-            "来源已验证" in dock_content,
-            "markdown should carry the verified provenance label",
-        )
-
-        # The final-draft panel's "导出 Markdown" (export-final-draft-md)
-        # exports state.wbFinalDraft.draft — the accepted text, via a real
-        # Playwright download event.
-        with page.expect_download(timeout=15000) as download_info:
-            page.click("[data-action='export-final-draft-md']")
+            final_panel.locator(
+                '[data-action="export-final-draft-md"]'
+            ).click()
         content = _read_download(download_info.value)
+        expect(
+            content.startswith("# "),
+            "canonical markdown export should start with a title heading",
+        )
+        expect(
+            "## 定稿内容" in content,
+            "canonical markdown export should carry the 定稿内容 section",
+        )
         expect(
             ACCEPTED_TEXT in content,
             f"accepted-draft markdown should contain the accepted text, "
             f"got:\n{content[:400]}",
+        )
+        expect(
+            "## 采纳项" in content,
+            "canonical markdown export should carry the 采纳项 section",
         )
 
         # #23: 详情补填 source_url → 卡片/工作台显示去投递 → 记录投递。

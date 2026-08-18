@@ -255,9 +255,13 @@ def test_preanalyze_endpoint_idempotent_and_persists():
     gap = GapReport(missing_keywords=["Redis"], strength_matches=["Python"])
     calls = {"count": 0}
 
-    def fake_profile_and_gaps(client, resume_text, jd_text, **kwargs):
+    def fake_profile_jd(client, jd_text, **kwargs):
         calls["count"] += 1
-        return profile, gap
+        return profile
+
+    def fake_analyze_gaps(client, resume_text, jd_profile_text):
+        calls["count"] += 1
+        return gap
 
     with patch("resualign.api.build_config", return_value=_config()), patch(
         "resualign.api._classify_job",
@@ -267,7 +271,9 @@ def test_preanalyze_endpoint_idempotent_and_persists():
             "tech_tags": ["Python"],
         },
     ), patch(
-        "resualign.api.profile_and_gaps", side_effect=fake_profile_and_gaps
+        "resualign.api.profile_jd", side_effect=fake_profile_jd
+    ), patch(
+        "resualign.api.analyze_gaps", side_effect=fake_analyze_gaps
     ):
         first = client.post(
             f"/api/jobs/{job['job_id']}/preanalyze",
@@ -282,7 +288,7 @@ def test_preanalyze_endpoint_idempotent_and_persists():
     assert first.json()["jd_profile"]["required_skills"] == ["Python"]
     assert first.json()["jd_profile"]["must_have_skills"] == ["Python"]
     assert first.json()["gap_report"]["missing_keywords"] == ["Redis"]
-    assert calls["count"] == 1
+    assert calls["count"] == 2
     assert second.json()["cache_hit"] is True
     assert second.json()["jd_profile"] == first.json()["jd_profile"]
 
@@ -291,7 +297,9 @@ def test_preanalyze_endpoint_idempotent_and_persists():
     ).json()
     assert persisted["jd_profile"]["business_scene"] == ["high concurrency"]
     assert persisted["classification_pending"] == 0
-    assert persisted["match_score"] == 85.0
+    assert persisted["match_score"] == 94.8
+    assert persisted["match_score_detail"]["total"] == 94.8
+    assert persisted["match_reason"].startswith("基于规则评分：")
 
 
 def test_preanalyze_no_resume_profiles_only():

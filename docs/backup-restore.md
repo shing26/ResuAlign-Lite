@@ -1,13 +1,16 @@
 # 备份与恢复手册
 
 ResuAlign 的全部业务数据都在 SQLite 里（`data/` 目录，可用
-`RESUALIGN_DATA_DIR` 覆盖）。备份与恢复围绕三个库：
+`RESUALIGN_DATA_DIR` 覆盖），另有上传简历原始文件目录
+`data/uploads/`（可用 `RESUALIGN_UPLOAD_DIR` 覆盖）。备份与恢复围绕
+三个库和上传目录：
 
 | 文件 | 内容 |
 | --- | --- |
 | `data/jobs.db` | 主库：用户/会话、主简历与版本、岗位库、投递记录、分析任务、设置 |
 | `data/content.db` | 内容库（按需创建，可能不存在） |
 | `data/content-cache.db` | 确定性 LLM 阶段的内容哈希缓存 |
+| `data/uploads/` | 上传简历原始文件（解析接口持久化） |
 
 > 三个库都处于 **WAL 模式**（`PRAGMA journal_mode=WAL`）。
 > **绝不要**在服务运行时直接 `Copy-Item` / `cp` 复制 `.db` 文件——WAL 模式下
@@ -17,6 +20,9 @@ ResuAlign 的全部业务数据都在 SQLite 里（`data/` 目录，可用
 ## 1. 创建备份
 
 服务**无需停止**：`.backup()` 是 SQLite 官方在线备份 API，会处理 WAL 快照一致性。
+备份同时把 `<DataDir>/uploads/` 打包进同一快照（`uploads.zip-*.zip`），并
+在 `backups/` 下写一份 `manifest-*.json`，记录数据目录、上传目录、各库
+完整性结果与上传文件数；恢复按同一 manifest 还原，避免跨时间点混搭。
 
 ```powershell
 # Windows（默认 data/ 目录）
@@ -39,18 +45,22 @@ powershell -File scripts/backup.ps1 -DataDir "D:\resualign-data"
 [backup] ok: jobs.db -> jobs.db-20260806-153000.db (1998848 bytes, integrity=ok)
 [backup] skip: content.db not found
 [backup] ok: content-cache.db -> content-cache.db-20260806-153000.db (12288 bytes, integrity=ok)
-[backup] retention: removed 0 expired backup(s) (daily >7d, weekly >30d)
-[backup] done: 2 database(s) backed up to D:\ResuAlign-Lite\data\backups
+[backup] ok: uploads -> uploads.zip-20260806-153000.zip (3 file(s))
+[backup] manifest: manifest-20260806-153000.json
+[backup] done: 2 database(s) + uploads
 ```
 
 每个备份都会在目标文件上执行 `PRAGMA integrity_check`，只有 `ok` 才算成功；
-失败的备份文件会被删除并返回非零退出码。
+失败的备份文件会被删除并返回非零退出码。PowerShell / bash 备份脚本是
+`scripts/backup_restore.py` 的包装，跨平台语义一致。
 
 ### 1.1 备份产物与保留策略
 
 - 目录：`<DataDir>/backups/`
 - 文件名：`{dbname}-{yyyyMMdd-HHmmss}.db`；**每月 1 号**生成的备份命名为
-  `{dbname}-weekly-{yyyyMMdd-HHmmss}.db`
+  `{dbname}-weekly-{yyyyMMdd-HHmmss}.db`；上传目录为
+  `uploads.zip-{yyyyMMdd-HHmmss}.zip`；快照清单为
+  `manifest-{yyyyMMdd-HHmmss}.json`
 - 保留（按文件修改时间）：
   - 日备份（文件名不含 `weekly`）：超过 **7 天**删除（约 7 份日备份）
   - `weekly` 备份：超过 **30 天**删除（简化策略：以每月 1 号的备份充当
@@ -95,6 +105,43 @@ pkill -f "uvicorn resualign.api:app"
 Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
 ```
 
+### 2.1.1 一键恢复
+
+仓库提供与备份脚本对称的一键恢复入口。恢复前**必须停止服务**；脚本默认
+检查 8000 端口是否仍有监听，有监听时拒绝执行（确实已停服但端口被其他
+进程占用时，PowerShell 用 `-Force`、bash 用 `--force` 显式跳过）。
+
+```powershell
+# Windows：自动选择 backups/ 下最新 manifest
+powershell -File scripts/restore.ps1
+
+# 指定数据目录或 manifest
+powershell -File scripts/restore.ps1 -DataDir "D:\resualign-data"
+powershell -File scripts/restore.ps1 -Manifest "D:\resualign-data\backups\manifest-20260817-120000.json"
+```
+
+```bash
+# macOS / Linux
+./scripts/restore.sh
+./scripts/restore.sh /path/to/data
+./scripts/restore.sh /path/to/data /path/to/manifest.json
+```
+
+恢复会把当前 `jobs.db` / `content.db` / `content-cache.db` 与 `uploads/`
+先移动成 `*.pre-restore-<时间戳>` 现场（便于回退），再还原同一快照；
+同时删除陈旧的 `-wal` / `-shm` 文件，防止旧 WAL 重放覆盖刚还原的数据。
+确认业务数据正常后再删除 `*.pre-restore-*` 现场。
+
+只验证快照而不落库：
+
+```powershell
+python scripts/backup_restore.py verify --data-dir "D:\resualign-data"
+```
+
+```bash
+python scripts/backup_restore.py verify --data-dir /path/to/data
+```
+
 ### 2.2 选择备份文件
 
 ```powershell
@@ -115,7 +162,8 @@ python -c "import sqlite3; c=sqlite3.connect('data/jobs.db'); print(c.execute('S
 
 先移走现有文件（保留现场，勿直接覆盖，便于回退），再复制备份到位，
 并**删除陈旧的 `-wal` / `-shm` 文件**——若残留旧 WAL，SQLite 会在下次打开时
-重放它，覆盖刚恢复的数据，导致“恢复无效”。
+重放它，覆盖刚恢复的数据，导致“恢复无效”。日常恢复请直接用 §2.1.1 的
+一键脚本；以下手动命令仅在演练或排查时使用。
 
 ```powershell
 # 以 jobs.db 为例；content.db / content-cache.db 同理（不存在则跳过）

@@ -84,6 +84,8 @@ class EnvSettings(BaseSettings):
     # App-level runtime settings (also accepted from .env / environment).
     resualign_personal_mode: str = "1"
     resualign_job_db: str = ""
+    resualign_data_dir: str = ""
+    resualign_upload_dir: str = ""
     # String type on purpose: invalid values are clamped by the worker
     # concurrency resolver instead of failing EnvSettings validation.
     resualign_worker_concurrency: str = "1"
@@ -91,6 +93,19 @@ class EnvSettings(BaseSettings):
     resualign_crawl_ua_pool: str = ""
     resualign_crawl_proxy: str = ""
     resualign_crawl_playwright: str = "0"
+
+    # Reminder delivery (non-secret fields may be mirrored in settings store;
+    # webhook URL/secret and SMTP password always stay environment-only).
+    resualign_reminder_interval_seconds: str = ""
+    resualign_reminder_webhook_url: str = ""
+    resualign_reminder_webhook_provider: str = "generic"
+    resualign_reminder_webhook_secret: str = ""
+    resualign_smtp_host: str = ""
+    resualign_smtp_port: int = 587
+    resualign_smtp_user: str = ""
+    resualign_smtp_password: str = ""
+    resualign_smtp_from: str = ""
+    resualign_reminder_email_to: str = ""
 
 
 def _stored_values(stored: dict[str, Any] | None) -> dict[str, Any]:

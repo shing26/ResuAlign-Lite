@@ -1,3 +1,4 @@
+import bisect
 import re
 import uuid
 
@@ -5,7 +6,8 @@ from .llm import LLMClient, _structured_or_json
 from .models import DiffItem, TailoredResume
 from .schema_registry import DiffItemSchema, TailoredResumeSchema
 
-BULLET_REWRITE_PROMPT_VERSION = "bullet-rewrite-v1"
+BULLET_REWRITE_PROMPT_VERSION = "v1"
+TAILOR_PROMPT_VERSION = "v1"
 
 
 TAILOR_PROMPT = (
@@ -72,10 +74,18 @@ TAILOR_PROMPT = (
     "diffs (list of objects with type in ['modify','add','remove'], section, \n"
     "original, proposed, reason, confidence in ['high','medium','low'], \n"
     "provenance).\n"
+    "Return at most 15 diffs, prioritizing the highest-impact gaps, and \n"
+    "keep each reason under 80 characters.\n"
     "For each diff, section is the name of the resume section the diff \n"
     "belongs to (e.g. '项目经历', '工作经历', '教育经历'); use the exact \n"
     "section name as it appears in the resume.\n"
     "Output ONLY JSON."
+    "## Output Constraints\\n"
+    "- Max tokens: 1500\\n"
+    "- Temperature: 0.0\\n"
+    "- Never invent facts: every entity must be traceable to the original resume\\n"
+    "- If uncertain: leave section unchanged\\n"
+    "- Output ONLY valid JSON, no markdown fences\\n"
 )
 
 GRANULARITY_GUIDES = {
@@ -156,16 +166,19 @@ def _normalized_char_map(text: str) -> tuple[str, list[int]]:
     return "".join(norm_chars), map_to_original
 
 
-def _resolve_span(quote: str, resume_text: str) -> tuple[int, int] | None:
+def _resolve_span(
+    quote: str, resume_text: str, start_index: int = 0
+) -> tuple[int, int] | None:
     """Locate a provenance quote with exact or whitespace-normalized matching."""
     if not quote:
         return None
-    exact = resume_text.find(quote)
+    exact = resume_text.find(quote, start_index)
     if exact >= 0:
         return (exact, exact + len(quote))
     normalized_text, char_map = _normalized_char_map(resume_text)
     normalized_quote = _normalize_whitespace(quote)
-    position = normalized_text.find(normalized_quote)
+    normalized_start = bisect.bisect_left(char_map, start_index) if start_index else 0
+    position = normalized_text.find(normalized_quote, normalized_start)
     if position < 0 or position >= len(char_map):
         return None
     start = char_map[position]
@@ -191,6 +204,21 @@ def parse_diff_with_provenance(
     valid = False
     provenance_state = "pending_review"
     source_span = _resolve_span(quote, resume_text)
+    if source_span is None and quote and (":" in quote or "：" in quote):
+        # Section-prefixed quote ("工作经历: 使用 Python ...") fails exact
+        # match when the resume uses "工作经历\n- 使用 Python ...". Strip the
+        # prefix (ASCII or full-width colon) and retry against the bullet text.
+        prefix, stripped = (part.strip() for part in re.split(r"[:：]", quote, maxsplit=1))
+        if stripped:
+            heading = str(item.get("section") or "").strip() or prefix
+            heading_index = resume_text.find(heading) if heading else -1
+            candidates = [(stripped, 0)]
+            if heading_index >= 0:
+                candidates.insert(0, (stripped, heading_index))
+            for candidate, start_index in candidates:
+                source_span = _resolve_span(candidate, resume_text, start_index)
+                if source_span is not None:
+                    break
     if quote and source_span is not None:
         valid = True
         provenance_state = "verified"

@@ -36,6 +36,51 @@ from resualign.agent.mcp_server import fetch_and_evaluate_job
 result = fetch_and_evaluate_job(url="https://example.com/jobs/1")
 ```
 
+## JD intake orchestrator (`agent/orchestrator.py`)
+
+Phase A of ADR-0029 adds a minimal agent loop on top of the MCP tools. It
+never touches stores/API internals directly; every side effect goes through
+`JdIntakeTools.default()` (the three MCP functions).
+
+```python
+from resualign.agent.orchestrator import (
+    JdIntakePolicy,
+    run_jd_intake,
+    process_pending_blockers,
+)
+
+result = run_jd_intake(
+    url="https://example.com/jobs/1",
+    resolve_text="",  # paste JD text here to auto-resolve a transient fetch
+    policy=JdIntakePolicy(),
+)
+```
+
+Per URL the orchestrator performs one fetch plus at most one agent decision
+round. The default policy keeps login/CAPTCHA/rule blockers pending and only
+resolves transient network failures when pasted JD text is supplied. Tool
+failures and budget exhaustion degrade to the existing blocker path; decisions
+are logged as `agent.decision`, failures as `agent.failure`, and budget skips
+as `agent.budget_exceeded`. Queue-driven mode:
+
+```python
+stats = process_pending_blockers(
+    tenant_id="local",
+    resolve_texts={"<blocker_id>": "JD text"},
+)
+```
+
+The default `JdIntakePolicy` is deterministic and conservative.
+`LLMJdIntakePolicy` (`agent/policy_llm.py`) asks the configured LLM for the
+same decision with a fixed prompt and `JdIntakeDecisionSchema`; when the LLM
+is unavailable or returns an invalid action, the orchestrator keeps the
+blocker pending.
+
+The headless daemon runs `process_pending_blockers` on every poll round.
+`RESUALIGN_AGENT_POLICY` selects the policy: `auto` (default) uses the LLM
+when an API key is configured, `llm` forces it, and `deterministic` keeps
+the conservative local policy.
+
 ## HITL webhook (`agent/hitl.py`)
 
 `emit_hitl_event(event, payload)` fans events out to

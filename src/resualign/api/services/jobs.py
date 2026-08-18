@@ -1,5 +1,6 @@
 
 import csv
+import html
 import io
 import logging
 import re
@@ -12,6 +13,7 @@ from fastapi import HTTPException
 import resualign.api as api_module
 
 from ...job_library import _normalize_source_url, _text_dedupe_key
+from ...llm_usage import reset_llm_tenant, set_llm_tenant
 from ..schemas import JobImportRequest
 
 logger = logging.getLogger(__name__)
@@ -34,8 +36,23 @@ def _job_failure_detail(stage: str, exc: BaseException) -> str:
     stage_label = _STAGE_LABELS.get(stage, stage or "未知阶段")
     message = str(exc) or exc.__class__.__name__
     if isinstance(exc, api_module.LLMResponseError):
-        if "timeout" in message.lower() or "timed out" in message.lower():
+        lowered = message.lower()
+        if "429" in message or "rate limit" in lowered:
+            reason = "模型服务繁忙（限流），请稍后重试"
+        elif (
+            "timeout" in lowered
+            or "timed out" in lowered
+            or "time-out" in lowered
+        ):
             reason = "模型响应超时，请检查 API Key 与网络连接后重试"
+        elif (
+            "expecting value" in lowered
+            or "no json object found" in lowered
+            or "schema validation" in lowered
+            or "empty response" in lowered
+            or "empty content" in lowered
+        ):
+            reason = "模型返回了空内容或无法解析的 JSON，请重新运行；若仍失败可尝试更换模型"
         else:
             reason = "模型服务暂时不可用或返回异常，请检查 API Key 与网络连接后重试"
     else:
@@ -334,6 +351,7 @@ def _run_import(import_id: str) -> None:
     if batch is None:
         return
     user = {'user_id': batch['user_id']}
+    _llm_tenant_token = set_llm_tenant(batch['user_id'])
     try:
         for row in batch['rows']:
             if not (row.get('jd_text') or '').strip() and (not (row.get('jd_url') or '').strip()):
@@ -350,6 +368,7 @@ def _run_import(import_id: str) -> None:
         logger.exception('Import batch %s failed', import_id)
         batch['errors'].append(f'Import batch failed: {exc}')
     finally:
+        reset_llm_tenant(_llm_tenant_token)
         batch['done'] = True
         api_module._prune_import_batches()
 
@@ -384,6 +403,7 @@ def _run_job(job_id: str) -> None:
                 return
             payload, tenant_id, application_id = stored
             config = api_module.build_config()
+        _llm_tenant_token = set_llm_tenant(tenant_id)
         try:
             job = api_module._registry.get(job_id)
             if job is None or job.status != 'queued':
@@ -430,6 +450,8 @@ def _run_job(job_id: str) -> None:
                 on_stage=on_stage,
                 cache=api_module._cache,
                 tenant=tenant_id,
+                node_store=api_module._llm_nodes,
+                tenant_id=tenant_id,
             )
             report.elapsed_seconds = round(time.monotonic() - t0, 1)
             result = api_module._report_to_dict(report)
@@ -472,6 +494,42 @@ def _run_job(job_id: str) -> None:
                 )
                 if match_score is None:
                     match_score = api_module._gap_match_score(result)
+                match_detail = None
+                match_reason = None
+                match_updated_at = None
+                library_job = api_module._jobs.get_job(
+                    tenant_id, library_job_id
+                )
+                if library_job and library_job.get("workbench_resume_id"):
+                    resume = api_module._resumes.get_master_resume(
+                        tenant_id,
+                        library_job["workbench_resume_id"],
+                    )
+                    resume_text = payload.get("resume_text") or (
+                        resume["content"] if resume else ""
+                    )
+                    if (
+                        resume_text
+                        and result.get("jd_profile")
+                        and result.get("gap_report")
+                    ):
+                        match_detail = api_module.compute_match_score(
+                            library_job.get("jd_text"),
+                            result.get("jd_profile"),
+                            result.get("gap_report"),
+                            eval_score,
+                            resume_text,
+                            library_job["workbench_resume_id"],
+                        )
+                        match_reason = api_module.fallback_match_reason(
+                            match_detail,
+                            (result.get("gap_report") or {}).get(
+                                "missing_keywords"
+                            )
+                            or [],
+                        )
+                        match_updated_at = time.time()
+                        match_score = match_detail["total"]
                 session = api_module._session_store.find_by_job(
                     library_job_id, tenant_id
                 )
@@ -494,6 +552,9 @@ def _run_job(job_id: str) -> None:
                         jd_profile=result.get('jd_profile'),
                         gap_report=result.get('gap_report'),
                         match_score=match_score,
+                        match_score_detail=match_detail,
+                        match_reason=match_reason,
+                        match_updated_at=match_updated_at,
                         diffs=result.get('diffs') or [],
                         invalid_diffs=tailored.get('invalid_diffs') or [],
                         draft=draft,
@@ -581,6 +642,163 @@ def _run_job(job_id: str) -> None:
                         job_id,
                     )
         finally:
+            reset_llm_tenant(_llm_tenant_token)
             api_module._registry.delete_payload(job_id)
             api_module._payloads.pop(job_id, None)
+
+
+def _export_filename(job: dict[str, Any], ext: str) -> str:
+    """Build a filesystem-friendly suggested export filename."""
+    title = re.sub(r'[\\/:*?"<>|]+', "-", (job.get("title") or "job").strip())
+    title = re.sub(r"\s+", "-", title).strip("-") or "job"
+    version = int(job.get("final_draft_version") or 1)
+    return f"resualign-{title}-v{version}.{ext}"
+
+
+def _accepted_diffs(job: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return diffs marked accepted by a persisted final-draft save."""
+    return [
+        diff
+        for diff in (job.get("diffs") or [])
+        if isinstance(diff, dict)
+        and diff.get("provenance_state") == "accepted"
+    ]
+
+
+def build_job_export(
+    job: dict[str, Any],
+    fmt: str,
+) -> dict[str, Any]:
+    """Build the canonical export payload from persisted library fields."""
+    draft = (job.get("final_draft") or "").strip()
+    accepted = _accepted_diffs(job)
+    meta = {
+        "model": job.get("model"),
+        "prompt_version": job.get("prompt_version"),
+        "generated_at": job.get("generated_at"),
+        "final_draft_updated_at": job.get("final_draft_updated_at"),
+        "match_score": job.get("match_score"),
+        "workbench_resume_id": job.get("workbench_resume_id"),
+    }
+    version = int(job.get("final_draft_version") or 0)
+    base = {
+        "job_id": job.get("job_id"),
+        "job_title": job.get("title") or "未命名岗位",
+        "format": fmt,
+        "final_draft_version": version,
+        "meta": meta,
+        "accepted_diff_ids": [
+            diff.get("diff_id")
+            for diff in accepted
+            if diff.get("diff_id")
+        ],
+        "accepted_diffs": accepted,
+    }
+    if fmt == "json":
+        return {
+            **base,
+            "content": draft,
+            "filename": _export_filename(job, "json"),
+        }
+    if fmt == "pdf":
+        return {
+            **base,
+            "content": _export_print_html(job, draft, accepted, meta),
+            "filename": _export_filename(job, "pdf"),
+            "render": "print-html",
+            "print_target": "#print-root",
+        }
+    return {
+        **base,
+        "content": _export_markdown(job, draft, accepted, meta),
+        "filename": _export_filename(job, "md"),
+    }
+
+
+def _export_meta_lines(meta: dict[str, Any], version: int) -> list[str]:
+    """Render human-readable export metadata as Markdown list items."""
+    def iso(value: float | None) -> str:
+        if value is None:
+            return "-"
+        try:
+            return time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime(float(value))
+            )
+        except (TypeError, ValueError, OSError):
+            return "-"
+
+    return [
+        f"- 定稿版本：v{version}",
+        f"- 模型：{meta.get('model') or '-'}",
+        f"- Prompt 版本：{meta.get('prompt_version') or '-'}",
+        f"- 生成时间：{iso(meta.get('generated_at'))}",
+        f"- 保存时间：{iso(meta.get('final_draft_updated_at'))}",
+        f"- 匹配分：{meta.get('match_score') if meta.get('match_score') is not None else '-'}",
+    ]
+
+
+def _export_markdown(
+    job: dict[str, Any],
+    draft: str,
+    accepted: list[dict[str, Any]],
+    meta: dict[str, Any],
+) -> str:
+    lines = [f"# {job.get('title') or '未命名岗位'}", ""]
+    lines.extend(_export_meta_lines(meta, int(job.get("final_draft_version") or 0)))
+    lines.extend(["", "## 定稿内容", "", draft, ""])
+    if accepted:
+        lines.append("## 采纳项")
+        lines.append("")
+        for diff in accepted:
+            lines.append(
+                f"- **{diff.get('diff_id') or '未知'}** "
+                f"[{diff.get('section') or '未分区'}] "
+                f"({diff.get('type') or 'modify'}): "
+                f"{diff.get('proposed') or diff.get('original') or ''}"
+            )
+    else:
+        lines.append("## 采纳项")
+        lines.append("")
+        lines.append("- 无已采纳 diff")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _export_print_html(
+    job: dict[str, Any],
+    draft: str,
+    accepted: list[dict[str, Any]],
+    meta: dict[str, Any],
+) -> str:
+    title = html.escape(job.get("title") or "未命名岗位")
+    meta_rows = "".join(
+        f"<tr><th>{key}</th><td>{html.escape(str(value))}</td></tr>"
+        for key, value in {
+            "定稿版本": f"v{job.get('final_draft_version') or 0}",
+            "模型": meta.get("model") or "-",
+            "Prompt 版本": meta.get("prompt_version") or "-",
+            "匹配分": (
+                str(meta.get("match_score"))
+                if meta.get("match_score") is not None
+                else "-"
+            ),
+        }.items()
+    )
+    accepted_html = ""
+    if accepted:
+        accepted_html = "".join(
+            f"<li>{html.escape(str(diff.get('diff_id') or '未知'))} · "
+            f"{html.escape(str(diff.get('section') or '未分区'))} · "
+            f"{html.escape(str(diff.get('type') or 'modify'))}</li>"
+            for diff in accepted
+        )
+        accepted_html = f"<h2>采纳项</h2><ul>{accepted_html}</ul>"
+    return (
+        "<article class=\"export-article\">"
+        f"<h1>{title}</h1>"
+        f"<table>{meta_rows}</table>"
+        "<h2>定稿内容</h2>"
+        f"<pre>{html.escape(draft)}</pre>"
+        f"{accepted_html}"
+        "</article>"
+    )
 

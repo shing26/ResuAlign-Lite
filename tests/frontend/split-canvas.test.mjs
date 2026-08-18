@@ -233,6 +233,26 @@ test("diffCard flags add diffs without provenance as invalid gate", () => {
   assert.match(html, /diff-id="diff-1"/);
 });
 
+test("diffCard flags modify diffs with missing provenance as invalid gate", () => {
+  const html = diffCard(
+    {
+      type: "modify",
+      original: "Invented line",
+      proposed: "Rewritten line",
+      reason: "JD match",
+      provenance: "",
+      provenance_state: "missing",
+    },
+    2,
+    "job-1",
+  );
+  assert.match(html, /diff-card--invalid/);
+  assert.match(html, /缺少来源/);
+  assert.doesNotMatch(html, /data-action="accept-bullet"/);
+  assert.match(html, /data-diff-original/);
+  assert.match(html, /data-diff-proposed/);
+});
+
 test("diffList renders cards or the empty state", () => {
   const html = diffList({ alignment: { diffs: [SAMPLE_DIFF] } }, "job-1");
   assert.match(html, /data-diff-list/);
@@ -497,15 +517,39 @@ test("alignmentControls offers rerun on failure and keeps run button enabled", (
 /* exportDock                                                          */
 /* ------------------------------------------------------------------ */
 
-test("exportDock renders all export actions and draft badge", () => {
-  const html = exportDock("job-1", { alignment: { draft: "内容" } });
+test("exportDock disables final actions without a persisted final draft", () => {
+  const html = exportDock("job-1", {});
   assert.match(html, /data-export-dock/);
-  assert.match(html, /copy-align-markdown/);
-  assert.match(html, /export-align-markdown/);
-  assert.match(html, /export-align-pdf/);
-  assert.match(html, /export-align-json/);
-  assert.match(html, /badge-green">草稿已生成/);
-  assert.doesNotMatch(exportDock("job-1", {}), /已生成/);
+  assert.doesNotMatch(html, /已定稿/);
+  assert.doesNotMatch(html, /草稿/);
+  assert.equal(html.match(/disabled/g)?.length, 3);
+});
+
+test("exportDock shows the draft badge and keeps final actions disabled", () => {
+  const html = exportDock("job-1", { draft: "草稿内容" });
+  assert.match(html, /data-export-draft-badge/);
+  assert.match(html, /请先保存定稿/);
+  assert.match(html, /data-action="export-final-draft"/);
+  assert.match(html, /data-action="export-final-draft-md"/);
+  assert.match(html, /data-action="export-final-draft-json"/);
+  assert.equal(html.match(/disabled/g)?.length, 3);
+});
+
+test("exportDock enables the three final actions for a saved final draft", () => {
+  const html = exportDock("job-1", {
+    final_draft: "# 定稿",
+    final_draft_version: 2,
+  });
+  assert.match(html, /data-export-final-badge/);
+  assert.match(html, /已定稿 v2/);
+  assert.equal(html.match(/disabled/g)?.length ?? 0, 0);
+  for (const action of [
+    "export-final-draft",
+    "export-final-draft-md",
+    "export-final-draft-json",
+  ]) {
+    assert.match(html, new RegExp(`data-action="${action}"`));
+  }
 });
 
 /* ------------------------------------------------------------------ */
@@ -590,7 +634,7 @@ test("boardCard match badge title discloses the score source", () => {
     status: "applied",
     match_score: 80,
   });
-  assert.match(html, /class="match-badge match--high" title="匹配度 · 来自对齐评估">80<\/span>/);
+  assert.match(html, /class="match-badge match--high" data-match-total title="匹配度 · 来自对齐评估">80<\/span>/);
   assert.match(
     boardCard({ job_id: "j2", title: "T", status: "draft" }),
     /class="match-badge match-badge--empty" title="尚未分析">待分析<\/span>/,
@@ -604,7 +648,7 @@ test("renderBoardCard match badge carries the source title", () => {
     status: "applied",
     match_score: 66,
   });
-  assert.match(html, /class="match-badge match--mid" title="匹配度 · 来自对齐评估">66<\/span>/);
+  assert.match(html, /class="match-badge match--mid" data-match-total title="匹配度 · 来自对齐评估">66<\/span>/);
   const empty = renderBoardCard({ job_id: "j2", title: "T", status: "draft" });
   assert.match(empty, /class="match-badge match-badge--empty" title="尚未分析">待分析<\/span>/);
 });

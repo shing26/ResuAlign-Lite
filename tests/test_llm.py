@@ -96,3 +96,63 @@ def test_chat_json_retries_with_bigger_budget_on_reasoning_length(httpx_mock, cl
     bodies = [json.loads(r.read()) for r in httpx_mock.get_requests()]
     assert bodies[0]["max_tokens"] == 16384
     assert bodies[1]["max_tokens"] == 32768
+
+
+def test_deepseek_chat_json_requests_direct_output(httpx_mock, client):
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {"message": {"content": '{"score": 88, "skills": ["Java"]}'}}
+            ]
+        }
+    )
+    client.chat_json("system", "user")
+    body = json.loads(httpx_mock.get_requests()[0].read())
+    assert body["thinking"] == {"type": "disabled"}
+
+
+def test_openai_client_omits_thinking(httpx_mock):
+    openai_client = OpenAIClient(
+        ResuAlignConfig(provider="openai", api_key="sk-test", model="m1")
+    )
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {"message": {"content": '{"score": 88, "skills": ["Java"]}'}}
+            ]
+        }
+    )
+    openai_client.chat_json("system", "user")
+    body = json.loads(httpx_mock.get_requests()[0].read())
+    assert "thinking" not in body
+
+
+def test_structured_json_mode_expands_budget_on_reasoning_length(httpx_mock, client):
+    from resualign.schema_registry import AnalysisSchema
+
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "thinking...",
+                    },
+                    "finish_reason": "length",
+                }
+            ]
+        }
+    )
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {"message": {"content": '{"score": 90, "skills": ["Go"]}'}}
+            ]
+        }
+    )
+    result = client.chat_structured("system", "user", AnalysisSchema)
+    assert result["score"] == 90
+    bodies = [json.loads(r.read()) for r in httpx_mock.get_requests()]
+    assert bodies[0]["max_tokens"] == 16384
+    assert bodies[1]["max_tokens"] == 32768
+    assert bodies[0]["thinking"] == {"type": "disabled"}

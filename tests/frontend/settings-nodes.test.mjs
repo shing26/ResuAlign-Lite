@@ -4,18 +4,25 @@ import { Window } from "happy-dom";
 
 import {
   automationRuleTypeLabel,
+  costGuardPanelHtml,
   llmNodeCardHtml,
   llmNodeFormHtml,
   nodeTestResultHtml,
+  reminderSettingsPanelHtml,
   ruleFormHtml,
   ruleListHtml,
   settingsBentoHtml,
+  todayViewHtml,
 } from "../../src/resualign/static/app/format.js";
 import {
   buildAutomationRulePayload,
+  buildCostGuardPayload,
   buildLlmNodePayload,
+  buildReminderPayload,
   validateAutomationRule,
+  validateCostGuardPayload,
   validateLlmNodePayload,
+  validateReminderPayload,
 } from "../../src/resualign/static/app/settings-form.js";
 
 /* Parse a rendered HTML string and return its body element, so the DOM
@@ -72,6 +79,219 @@ test("settingsBentoHtml escapes model/provider values", () => {
   assert.equal(body.querySelectorAll("img, b").length, 0);
   const value = body.querySelector("[data-bento-model] .settings-bento__value");
   assert.equal(value.textContent, '<img src=x onerror=1> · <b>x</b>');
+});
+
+/* ------------------------------------------------------------------ */
+/* costGuardPanelHtml: MVP-10 成本护栏面板                              */
+/* ------------------------------------------------------------------ */
+
+test("costGuardPanelHtml renders live usage and blocked state", () => {
+  const settings = {
+    daily_llm_cap: 5,
+    llm_cost_per_1k_in: 0.5,
+    llm_cost_per_1k_out: 1.5,
+  };
+  const daily = {
+    calls: 6,
+    cap: 5,
+    estimated_cost: 12.34,
+    blocked: true,
+    remaining: 0,
+  };
+  const body = bodyFrom(costGuardPanelHtml(settings, daily));
+  assert.equal(body.querySelector("[data-daily-calls]").textContent, "6");
+  assert.equal(body.querySelector("[data-daily-cap]").textContent, "5");
+  assert.equal(body.querySelector("[data-daily-remaining]").textContent, "0");
+  assert.match(body.querySelector("[data-daily-cost]").textContent, /12\.3400/);
+  assert.ok(body.querySelector("[data-cost-blocked]"));
+  assert.equal(body.querySelector("[data-cost-status]").dataset.costBlocked, "true");
+});
+
+test("costGuardPanelHtml shows unlimited when cap is null", () => {
+  const body = bodyFrom(costGuardPanelHtml({}, { calls: 0, cap: null }));
+  assert.equal(body.querySelector("[data-daily-cap]").textContent, "不限制");
+  assert.equal(body.querySelector("[data-daily-remaining]").textContent, "—");
+  assert.equal(body.querySelector("[data-cost-status]").dataset.costBlocked, "false");
+});
+
+test("costGuardPanelHtml escapes hostile values", () => {
+  const body = bodyFrom(
+    costGuardPanelHtml(
+      { daily_llm_cap: "<script>1</script>" },
+      { cap: "<b>9</b>", estimated_cost: "<i>x</i>" },
+    ),
+  );
+  assert.equal(body.querySelector("script, b, i"), null);
+  assert.equal(body.querySelector("[data-daily-cap]").textContent, "<b>9</b>");
+});
+
+test("buildCostGuardPayload maps blank fields to null and numbers otherwise", () => {
+  assert.deepEqual(
+    buildCostGuardPayload({
+      daily_llm_cap: " 12 ",
+      llm_cost_per_1k_in: "0.5",
+      llm_cost_per_1k_out: "",
+    }),
+    { daily_llm_cap: 12, llm_cost_per_1k_in: 0.5, llm_cost_per_1k_out: null },
+  );
+  assert.deepEqual(buildCostGuardPayload({}), {
+    daily_llm_cap: null,
+    llm_cost_per_1k_in: null,
+    llm_cost_per_1k_out: null,
+  });
+});
+
+test("validateCostGuardPayload rejects negative and non-finite values", () => {
+  assert.deepEqual(
+    validateCostGuardPayload({ daily_llm_cap: 1, llm_cost_per_1k_in: 0.2 }),
+    { ok: true, message: "" },
+  );
+  assert.equal(validateCostGuardPayload({ daily_llm_cap: -1 }).ok, false);
+  assert.equal(validateCostGuardPayload({ llm_cost_per_1k_out: Number.NaN }).ok, false);
+});
+
+/* ------------------------------------------------------------------ */
+/* MVP-08: 今日待办视图 + 提醒设置面板                                  */
+/* ------------------------------------------------------------------ */
+
+test("todayViewHtml renders reminders with workspace links and follow-up actions", () => {
+  const body = bodyFrom(
+    todayViewHtml([
+      {
+        job_id: "j1",
+        title: "后端工程师",
+        company: "Acme",
+        status_canonical: "interview",
+        interview_stage: "二面",
+        next_step: "准备系统设计题",
+        next_step_due_at: "2026-08-10 18:00",
+        overdue: true,
+      },
+      {
+        job_id: "j2",
+        title: "前端工程师",
+        company: "Beta",
+        status_canonical: "applied",
+        next_step_due_at: "2026-08-10 20:00",
+        overdue: false,
+      },
+    ]),
+  );
+  assert.equal(body.querySelector("[data-today-count]").textContent, "2 条");
+  const rows = [...body.querySelectorAll("[data-today-item]")];
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].querySelector("a").getAttribute("href"), "#/workspace/j1");
+  assert.match(rows[0].textContent, /二面/);
+  assert.match(rows[0].querySelector("[data-today-due]").textContent, /已过期/);
+  assert.deepEqual(
+    [...body.querySelectorAll('[data-action="open-job-followup"]')].map(
+      (node) => node.dataset.id,
+    ),
+    ["j1", "j2"],
+  );
+});
+
+test("todayViewHtml renders an empty state without reminders", () => {
+  const body = bodyFrom(todayViewHtml([]));
+  assert.ok(body.querySelector("[data-today-empty]"));
+  assert.equal(body.querySelector("[data-today-count]").textContent, "0 条");
+  assert.equal(body.querySelectorAll("[data-today-item]").length, 0);
+});
+
+test("todayViewHtml escapes user content", () => {
+  const body = bodyFrom(
+    todayViewHtml([
+      {
+        job_id: "<img src=x>",
+        title: "<script>alert(1)</script>",
+        company: "<b>Acme</b>",
+        next_step: "onerror=1",
+      },
+    ]),
+  );
+  assert.equal(body.querySelectorAll("script, img, b").length, 0);
+  assert.match(body.textContent, /alert\(1\)/);
+});
+
+test("reminderSettingsPanelHtml shows masked channel status and editable SMTP fields", () => {
+  const settings = {
+    reminder: {
+      enabled: true,
+      provider: "feishu",
+      smtp_host: "smtp.example.com",
+      smtp_port: 465,
+      smtp_user: "user",
+      smtp_from: "from@example.com",
+      smtp_to: "to@example.com",
+    },
+  };
+  const status = {
+    webhook_url_configured: false,
+    webhook_secret_configured: true,
+    smtp_configured: true,
+    smtp_password_configured: true,
+  };
+  const body = bodyFrom(reminderSettingsPanelHtml(settings, status));
+  assert.equal(body.querySelector("[data-reminder-enabled]").textContent.trim(), "已开启");
+  assert.equal(body.querySelector("[data-reminder-webhook-status]").textContent, "未配置（环境变量）");
+  assert.equal(body.querySelector("[data-reminder-smtp-status]").textContent, "已配置");
+  assert.equal(
+    body.querySelector('[data-form="settings-reminder"] select[name="provider"] option[value="feishu"]').selected,
+    true,
+  );
+  assert.equal(body.querySelector('input[name="smtp_host"]').value, "smtp.example.com");
+  assert.equal(body.querySelector('input[name="smtp_port"]').value, "465");
+  assert.equal(body.querySelector('input[name="smtp_user"]').value, "user");
+  assert.equal(body.querySelector('input[name="smtp_to"]').value, "to@example.com");
+  assert.equal(
+    body.querySelector('[data-form="settings-reminder"] input[name="auto_followup_reminder"]').checked,
+    true,
+  );
+  assert.equal(body.querySelectorAll('input[type="password"]').length, 0);
+});
+
+test("reminderSettingsPanelHtml defaults to generic and closed", () => {
+  const body = bodyFrom(reminderSettingsPanelHtml({ reminder: {} }, {}));
+  assert.equal(body.querySelector("[data-reminder-enabled]").textContent.trim(), "已关闭");
+  assert.equal(body.querySelector('[data-form="settings-reminder"] select[name="provider"]').value, "generic");
+});
+
+test("buildReminderPayload maps form fields and never includes secrets", () => {
+  const payload = buildReminderPayload({
+    enabled: "on",
+    auto_followup_reminder: "on",
+    provider: "wecom",
+    smtp_host: " smtp.example.com ",
+    smtp_port: "587",
+    smtp_user: "user",
+    smtp_from: "from@example.com",
+    smtp_to: "to@example.com",
+  });
+  assert.deepEqual(payload, {
+    reminder: {
+      enabled: true,
+      auto_followup_reminder: true,
+      provider: "wecom",
+      smtp_host: "smtp.example.com",
+      smtp_port: 587,
+      smtp_user: "user",
+      smtp_from: "from@example.com",
+      smtp_to: "to@example.com",
+    },
+  });
+  assert.equal("webhook_url" in payload.reminder, false);
+  assert.equal("smtp_password" in payload.reminder, false);
+});
+
+test("buildReminderPayload clears blank SMTP fields and validates port", () => {
+  const payload = buildReminderPayload({ enabled: "", provider: "", smtp_port: "" });
+  assert.equal(payload.reminder.enabled, false);
+  assert.equal(payload.reminder.provider, "generic");
+  assert.equal(payload.reminder.smtp_host, null);
+  assert.equal(payload.reminder.smtp_port, null);
+  assert.equal(validateReminderPayload(payload).ok, true);
+  const bad = buildReminderPayload({ provider: "generic", smtp_port: "70000" });
+  assert.equal(validateReminderPayload(bad).ok, false);
 });
 
 /* ------------------------------------------------------------------ */

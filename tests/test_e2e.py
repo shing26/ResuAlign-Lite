@@ -5,6 +5,10 @@ from pathlib import Path
 import pytest
 
 from resualign.cli import main
+from resualign.config import (
+    _STORED_LLM_PROVIDER,
+    register_stored_llm_provider,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -38,7 +42,8 @@ def test_e2e_with_alignment(httpx_mock, capsys):
     cleanup_reports()
     rs = [
         '{"score":85,"skills":["Java","Spring"],"issues":[]}',
-        '{"jd_profile":{"must_have_skills":["Java"],"nice_to_have_skills":[],"soft_skills":[],"business_scenarios":["Backend"],"min_years_experience":null,"education_requirements":[]},"gap_report":{"missing_keywords":[],"misaligned_emphasis":[],"strength_matches":[]}}',
+        '{"must_have_skills":["Java"],"nice_to_have_skills":[],"soft_skills":[],"business_scenarios":["Backend"],"min_years_experience":null,"education_requirements":[]}',
+        '{"missing_keywords":[],"misaligned_emphasis":[],"strength_matches":[]}',
         '{"sections":{"exp":"Built services" },"diffs":[{"type":"modify","original":"Java, Spring Boot","proposed":"Java, Spring Boot, and backend services", "reason":"JD match","confidence":"high","provenance_quote":"Java, Spring Boot"}]}',
     ]
     for r in rs:
@@ -54,6 +59,8 @@ def test_e2e_with_alignment(httpx_mock, capsys):
 
 def test_e2e_missing_api_key(capsys):
     saved_env = os.environ.pop("DEEPSEEK_API_KEY", "")
+    saved_provider = _STORED_LLM_PROVIDER
+    register_stored_llm_provider(None)
     env_file = Path("D:/ResuAlign-Lite/.env")
     renamed = None
     if env_file.exists():
@@ -62,9 +69,10 @@ def test_e2e_missing_api_key(capsys):
     try:
         with pytest.raises(SystemExit):
             main([str(FIXTURES / "sample.txt")])
-        assert "API key not set" in capsys.readouterr().err
+        assert "LLM not configured" in capsys.readouterr().err
     finally:
         if renamed is not None:
             renamed.rename(env_file)
+        register_stored_llm_provider(saved_provider)
         if saved_env:
             os.environ["DEEPSEEK_API_KEY"] = saved_env

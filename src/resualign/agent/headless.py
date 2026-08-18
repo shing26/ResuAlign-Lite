@@ -4,12 +4,13 @@
 (optional, ``start_server``) and then loops forever (or for ``max_rounds``),
 polling two workloads per round:
 
-1. **Pending blockers** - classify each pending blocker and log the policy
-   disposition. Rule-rejected blockers are expected outcomes (logged,
-   kept pending for human review); login/CAPTCHA blockers need a browser or
-   human; transient network blockers stay pending for a manual/HITL retry.
-   The daemon never auto-resolves a blocker (that requires human pasted JD
-   text via ``resolve_blocker``).
+1. **Pending blockers** - run one JD intake agent decision per blocker
+   through ``process_pending_blockers``. The policy (deterministic by
+   default, LLM when ``RESUALIGN_AGENT_POLICY=llm`` or an API key is
+   configured) keeps human-only blockers pending and may only auto-resolve
+   a transient fetch failure when pasted JD text is supplied. The daemon
+   itself never supplies pasted text, so blockers stay pending for a human
+   unless an external agent resolves them through the same tool.
 
 2. **Alignment candidates** - library jobs whose alignment is not terminal
    and not already in flight (``idle``/``failed``) get queued through the
@@ -31,6 +32,8 @@ from typing import Any
 import resualign.api as api_module
 
 from .mcp_server import DEFAULT_TENANT, auto_align_resume
+from .orchestrator import JdIntakePolicy, process_pending_blockers
+from .policy_llm import LLMJdIntakePolicy
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +60,38 @@ _RETRYABLE_BLOCKER_CATEGORIES = {
 # ``running`` are in-flight (the registry owns them), ``succeeded`` is
 # terminal, so only ``idle`` and ``failed`` are candidates.
 _ALIGN_CANDIDATE_STATES = ("idle", "failed")
+
+_AGENT_POLICY_ENV = "RESUALIGN_AGENT_POLICY"
+_AGENT_POLICY_MODES = frozenset({"llm", "deterministic", "auto"})
+
+
+def _intake_policy_mode() -> str:
+    """Return the configured intake policy mode (defaults to ``auto``)."""
+    raw = (os.environ.get(_AGENT_POLICY_ENV) or "auto").strip().lower()
+    return raw if raw in _AGENT_POLICY_MODES else "auto"
+
+
+def _build_intake_policy(tenant_id: str) -> JdIntakePolicy:
+    """Build the per-round intake policy, preferring the LLM when enabled.
+
+    ``auto`` uses the LLM policy only when an API key is configured;
+    ``llm`` forces it and ``deterministic`` keeps the conservative default.
+    Any LLM policy construction failure logs and falls back to the
+    deterministic policy so the daemon never dies on policy setup.
+    """
+    mode = _intake_policy_mode()
+    config = api_module.build_config()
+    has_key = config.is_llm_configured
+    if has_key and mode in ("llm", "auto"):
+        try:
+            return LLMJdIntakePolicy()
+        except Exception:  # noqa: BLE001 - policy setup must not kill the round
+            logger.exception(
+                "Headless: LLM intake policy unavailable; falling back to "
+                "deterministic policy for tenant %s",
+                tenant_id,
+            )
+    return JdIntakePolicy()
 
 
 def _resolve_host_port() -> tuple[str, int]:
@@ -195,19 +230,44 @@ def run_headless_round(tenant_id: str = DEFAULT_TENANT) -> dict[str, Any]:
     """
     stats: dict[str, Any] = {
         "blockers_seen": 0,
+        "blocker_decisions": 0,
+        "blocked": 0,
+        "resolved": 0,
+        "degraded": 0,
         "align_candidates": 0,
         "align_queued": 0,
     }
-    blockers = api_module._jobs.list_blockers(tenant_id, status="pending")
-    stats["blockers_seen"] = len(blockers)
-    for blocker in blockers:
-        try:
-            _handle_blocker(tenant_id, blocker)
-        except Exception:  # noqa: BLE001 - one bad blocker never kills the round
-            logger.exception(
-                "Headless: failed to classify blocker %s",
-                blocker.get("blocker_id"),
-            )
+    try:
+        intake_stats = process_pending_blockers(
+            tenant_id, policy=_build_intake_policy(tenant_id)
+        )
+        stats.update(intake_stats)
+    except Exception:  # noqa: BLE001 - one bad agent round never kills the daemon
+        logger.exception(
+            "Headless: JD intake agent round failed for tenant %s; "
+            "using deterministic blocker classification",
+            tenant_id,
+        )
+        pending = api_module._jobs.list_blockers(
+            tenant_id, status="pending"
+        )
+        stats.update(
+            {
+                "blockers_seen": len(pending),
+                "blocker_decisions": 0,
+                "blocked": len(pending),
+                "resolved": 0,
+                "degraded": 0,
+            }
+        )
+        for blocker in pending:
+            try:
+                _handle_blocker(tenant_id, blocker)
+            except Exception:  # noqa: BLE001 - one bad blocker never kills the round
+                logger.exception(
+                    "Headless: failed to classify blocker %s",
+                    blocker.get("blocker_id"),
+                )
 
     candidates = _alignment_auto_candidates(tenant_id)
     stats["align_candidates"] = len(candidates)

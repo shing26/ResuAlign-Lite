@@ -828,3 +828,63 @@ def test_analysis_status_reports_expired_without_404():
     assert r.status_code == 200
     assert r.json()["job_id"] == analysis.job_id
     assert r.json()["status"] == "queued"
+
+
+def _create_personal_job() -> dict:
+    with patch("resualign.api._classify_job", side_effect=_classify):
+        r = client.post(
+            "/api/jobs",
+            json={
+                "title": "Followup Engineer",
+                "jd_text": "Python backend engineer. 20-30K",
+            },
+        )
+    assert r.status_code == 201
+    return r.json()
+
+
+def test_mark_applied_creates_auto_followup_reminder():
+    job = _create_personal_job()
+    r = client.patch(
+        f"/api/jobs/{job['job_id']}",
+        json={"status": "applied", "applied_at": "2026-08-10"},
+    )
+    assert r.status_code == 200
+    updated = r.json()
+    assert updated["status_canonical"] == "applied"
+    assert updated["next_step"] == "投递后跟进"
+    assert updated["next_step_due_at"] == "2026-08-13T09:00:00"
+
+
+def test_auto_followup_keeps_explicit_followup_schedule():
+    job = _create_personal_job()
+    r = client.patch(
+        f"/api/jobs/{job['job_id']}",
+        json={
+            "status": "applied",
+            "next_step": "准备面试",
+            "next_step_due_at": "2026-08-20T10:00:00",
+        },
+    )
+    assert r.status_code == 200
+    updated = r.json()
+    assert updated["next_step"] == "准备面试"
+    assert updated["next_step_due_at"] == "2026-08-20T10:00:00"
+
+
+def test_auto_followup_can_be_disabled_in_settings():
+    user_id = api_module._users.get_or_create_personal_user()["user_id"]
+    api_module._settings_store.update_settings(
+        user_id,
+        {"reminder": {"auto_followup_reminder": False}},
+    )
+    job = _create_personal_job()
+    r = client.patch(
+        f"/api/jobs/{job['job_id']}",
+        json={"status": "applied", "applied_at": "2026-08-10"},
+    )
+    assert r.status_code == 200
+    updated = r.json()
+    assert updated["status_canonical"] == "applied"
+    assert updated["next_step"] is None
+    assert updated["next_step_due_at"] is None

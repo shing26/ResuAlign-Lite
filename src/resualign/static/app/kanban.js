@@ -25,6 +25,7 @@ import {
 import {
   boardCard,
   computeJobStats,
+  jobsEmptyGuideHtml,
   options,
 } from "./format.js";
 
@@ -68,7 +69,7 @@ export async function renderKanban(app) {
     limit: "500",
     offset: "0",
   });
-  for (const key of ["job_function", "seniority", "status", "search"]) {
+  for (const key of ["job_function", "seniority", "status", "search", "sort"]) {
     if (!state.filters[key]) query.delete(key);
   }
   state.jobs = await api(`/api/jobs?${query}`);
@@ -95,6 +96,7 @@ export async function renderKanban(app) {
   const stats = computeJobStats(state.jobs);
   const funnel = stats.funnel || {};
   const percent = (value) => (value == null ? "—" : `${value}%`);
+  const emptyGuide = state.jobs.length === 0 ? jobsEmptyGuideHtml() : "";
   app.innerHTML = `
     <div class="view view-fit jobs-view">
       <div class="jobs-command jobs-topbar" data-jobs-topbar>
@@ -123,6 +125,14 @@ export async function renderKanban(app) {
               </div>
             </form>
           </details>
+          <label class="board-sort">
+            <span>排序</span>
+            <select data-job-sort aria-label="排序岗位">
+              <option value="updated_at_desc" ${state.filters.sort === "updated_at_desc" ? "selected" : ""}>最近更新</option>
+              <option value="match_score_desc" ${state.filters.sort === "match_score_desc" ? "selected" : ""}>匹配分从高到低</option>
+              <option value="match_score_asc" ${state.filters.sort === "match_score_asc" ? "selected" : ""}>匹配分从低到高</option>
+            </select>
+          </label>
           <div class="jobs-tools" data-jobs-tools>
             <button type="button" class="btn btn-primary btn-sm" data-action="show-add-job">添加岗位</button>
             <details class="toolbar-more" data-jobs-data-menu>
@@ -138,6 +148,7 @@ export async function renderKanban(app) {
       </div>
     <div class="jobs-forms-mount" data-jobs-forms-mount></div>
     <div class="board-toolbar" data-jobs-batch-mount></div>
+    ${emptyGuide}
     <div id="job-board" class="board pipeline-board" data-pipeline-board>${columns}</div>
     </div>`;
   const fetchInput = app.querySelector("[data-fetch-url]");
@@ -148,6 +159,21 @@ export async function renderKanban(app) {
         const button = app.querySelector('[data-action="fetch-job-url"]');
         if (button) button.click();
       }
+    });
+  }
+  const sortSelect = app.querySelector("[data-job-sort]");
+  if (sortSelect) {
+    sortSelect.addEventListener("change", () => {
+      state.filters.sort = sortSelect.value || "updated_at_desc";
+      const query = new URLSearchParams({ sort: state.filters.sort });
+      window.history.pushState(
+        null,
+        "",
+        state.filters.sort === "updated_at_desc"
+          ? "#/jobs"
+          : `#/jobs?sort=${encodeURIComponent(state.filters.sort)}`,
+      );
+      renderKanban(app);
     });
   }
   bindBoardDrag(app);

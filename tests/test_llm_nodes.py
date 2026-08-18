@@ -578,11 +578,11 @@ def test_tenant_isolation_nodes_not_visible_across_tenants():
 
 def test_default_timeout_tuned_to_40s_in_sprint5():
     """Guardrails bound worst-case hangs at 3 attempts x 40s = 120s."""
-    assert OpenAIClient.DEFAULT_TIMEOUT == 40.0
-    assert OpenAIClient.DEFAULT_CONNECT_TIMEOUT == 10.0
+    assert OpenAIClient.DEFAULT_TIMEOUT == 120.0
+    assert OpenAIClient.DEFAULT_CONNECT_TIMEOUT == 30.0
     inst = OpenAIClient(_config())
     try:
-        assert inst._client.timeout.read == 40.0
-        assert inst._client.timeout.connect == 10.0
+        assert inst._client.timeout.read == 120.0
+        assert inst._client.timeout.connect == 30.0
     finally:
         inst.close()

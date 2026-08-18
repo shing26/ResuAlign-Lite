@@ -9,6 +9,10 @@ application:
   with structured-log fallback, used by the fetcher pipeline and MCP tools.
 - ``headless``: a daemon loop that polls blockers and auto-queues alignment
   runs without a web frontend.
+- ``orchestrator``: the JD intake agent loop (ADR-0029 Phase A) that drives
+  the MCP tools with a bounded decision round per blocker.
+- ``policy_llm``: optional LLM-backed keep/resolve policy used by the
+  orchestrator and the headless daemon.
 
 Importing this package is side-effect free: ``hitl`` only depends on the
 stdlib + httpx, while ``mcp_server``/``headless`` pull in the FastMCP SDK

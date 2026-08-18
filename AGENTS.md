@@ -13,3 +13,10 @@ Five canonical triage roles use default labels (`needs-triage`, `needs-info`, `r
 ### Domain docs
 
 Single-context: root `CONTEXT.md` glossary + `docs/adr/` decisions. See `docs/agents/domain.md`.
+
+### QA agent
+
+Generic QA methodology lives in `docs/agents/qa-agent.md`; ResuAlign's concrete
+instance is `docs/agents/qa-dogfooder.md`. It is registered as Codex custom
+agent `qa_agent` (`.codex/agents/qa-agent.toml`) - ask Codex to spawn it for
+product/UX QA runs.

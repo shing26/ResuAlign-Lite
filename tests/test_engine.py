@@ -3,7 +3,14 @@ import pytest
 from resualign.engine import run, truncate_text
 from resualign.models import ResuAlignConfig
 
-from .conftest import MockLLMClient, _diag, _eval, _jd_analysis, _tailor
+from .conftest import (
+    MockLLMClient,
+    _diag,
+    _eval,
+    _gap_only,
+    _jd_profile_only,
+    _tailor,
+)
 
 
 def test_engine_diagnosis_only():
@@ -14,23 +21,25 @@ def test_engine_diagnosis_only():
 
 
 def test_engine_full_pipeline():
-    mock = MockLLMClient([_diag(), _jd_analysis(), _tailor()])
+    mock = MockLLMClient([_diag(), _jd_profile_only(), _gap_only(), _tailor()])
     report = run(ResuAlignConfig(model="m"), "Python dev resume",
                  jd_text="Java backend", llm_client=mock)
     assert report.jd_profile is not None
     assert report.gap_report is not None
     assert report.tailored_resume is not None
-    assert len(report.diffs) == 1  # diffs now come from tailor_resume
-    assert mock.call_count == 3
+    assert len(report.diffs) == 1
+    assert mock.call_count == 4
 
 
 def test_engine_jd_and_tailoring_use_extended_timeouts(monkeypatch):
     seen_timeouts = []
-    shared = MockLLMClient([_diag(), _jd_analysis(), _tailor()])
+    seen_retries = []
+    shared = MockLLMClient([_diag(), _jd_profile_only(), _gap_only(), _tailor()])
 
     class Factory:
-        def __init__(self, config, timeout=None):
+        def __init__(self, config, timeout=None, max_retries=None):
             seen_timeouts.append(timeout)
+            seen_retries.append(max_retries)
 
         def __enter__(self):
             return shared
@@ -55,7 +64,8 @@ def test_engine_jd_and_tailoring_use_extended_timeouts(monkeypatch):
         "Python dev resume",
         jd_text="Java backend",
     )
-    assert seen_timeouts == [None, 90.0, 120.0]
+    assert seen_timeouts == [20.0, 15.0, 40.0]
+    assert seen_retries == [None, None, 1]
 
 
 def test_engine_no_jd_no_extra_stages():
@@ -68,26 +78,26 @@ def test_engine_no_jd_no_extra_stages():
 
 
 def test_engine_with_eval():
-    mock = MockLLMClient([_diag(), _jd_analysis(), _tailor(), _eval()])
+    mock = MockLLMClient([_diag(), _jd_profile_only(), _gap_only(), _tailor(), _eval()])
     report = run(ResuAlignConfig(model="m"), "Python dev resume",
                  jd_text="Java backend", llm_client=mock, run_eval=True)
     assert report.eval_score is not None
     assert report.eval_score.jd_match_score == 82
-    assert mock.call_count == 4
+    assert mock.call_count == 5
 
 
 def test_engine_eval_defaults_to_false():
-    mock = MockLLMClient([_diag(), _jd_analysis(), _tailor()])
+    mock = MockLLMClient([_diag(), _jd_profile_only(), _gap_only(), _tailor()])
     report = run(ResuAlignConfig(model="m"), "Python dev resume",
                  jd_text="Java backend", llm_client=mock)
     assert report.eval_score is None
-    assert mock.call_count == 3
+    assert mock.call_count == 4
 
 
 def test_engine_passes_business_scenarios_to_tailor():
     class CaptureClient(MockLLMClient):
         def __init__(self):
-            super().__init__([_diag(), _jd_analysis(), _tailor()])
+            super().__init__([_diag(), _jd_profile_only(), _gap_only(), _tailor()])
             self.tailor_user = ""
 
         def chat_json(self, system, user, model=None):
@@ -102,14 +112,14 @@ def test_engine_passes_business_scenarios_to_tailor():
         jd_text="Java backend",
         llm_client=mock,
     )
-    assert "Microservices" in mock.tailor_user
+    assert "Java" in mock.tailor_user
     assert "Java backend" in mock.tailor_user
 
 
 def test_engine_passes_custom_prompt_to_tailor():
     class CaptureClient(MockLLMClient):
         def __init__(self):
-            super().__init__([_diag(), _jd_analysis(), _tailor()])
+            super().__init__([_diag(), _jd_profile_only(), _gap_only(), _tailor()])
             self.tailor_system = ""
 
         def chat_json(self, system, user, model=None):
@@ -130,7 +140,7 @@ def test_engine_passes_custom_prompt_to_tailor():
 
 
 def test_engine_stage_progress_full_pipeline():
-    mock = MockLLMClient([_diag(), _jd_analysis(), _tailor()])
+    mock = MockLLMClient([_diag(), _jd_profile_only(), _gap_only(), _tailor()])
     stages = []
 
     def on_stage(stage, message):
@@ -145,7 +155,7 @@ def test_engine_stage_progress_full_pipeline():
         on_stage=on_stage,
     )
 
-    assert stages == ["diagnose", "jd_analysis", "tailoring"]
+    assert stages == ["diagnose", "jd_analysis", "jd_analysis", "tailoring"]
 
 
 def test_engine_stage_progress_diagnosis_only():
@@ -163,7 +173,7 @@ def test_engine_stage_progress_diagnosis_only():
 
 
 def test_engine_stage_progress_with_eval():
-    mock = MockLLMClient([_diag(), _jd_analysis(), _tailor(), _eval()])
+    mock = MockLLMClient([_diag(), _jd_profile_only(), _gap_only(), _tailor(), _eval()])
     stages = []
 
     run(
@@ -178,6 +188,7 @@ def test_engine_stage_progress_with_eval():
     assert stages == [
         "diagnose",
         "jd_analysis",
+        "jd_analysis",
         "tailoring",
         "evaluation",
     ]
@@ -186,7 +197,7 @@ def test_engine_stage_progress_with_eval():
 def test_engine_passes_granularity_to_tailor():
     class CaptureClient(MockLLMClient):
         def __init__(self):
-            super().__init__([_diag(), _jd_analysis(), _tailor()])
+            super().__init__([_diag(), _jd_profile_only(), _gap_only(), _tailor()])
             self.tailor_system = ""
 
         def chat_json(self, system, user, model=None):
@@ -207,7 +218,7 @@ def test_engine_passes_granularity_to_tailor():
 
 
 def test_engine_rejects_invalid_granularity():
-    mock = MockLLMClient([_diag(), _jd_analysis(), _tailor()])
+    mock = MockLLMClient([_diag(), _jd_profile_only(), _gap_only(), _tailor()])
     with pytest.raises(ValueError, match="granularity"):
         run(
             ResuAlignConfig(model="m"),
@@ -221,7 +232,7 @@ def test_engine_rejects_invalid_granularity():
 def test_engine_passes_prompt_focus_to_tailor():
     class CaptureClient(MockLLMClient):
         def __init__(self):
-            super().__init__([_diag(), _jd_analysis(), _tailor()])
+            super().__init__([_diag(), _jd_profile_only(), _gap_only(), _tailor()])
             self.tailor_system = ""
 
         def chat_json(self, system, user, model=None):
@@ -242,7 +253,7 @@ def test_engine_passes_prompt_focus_to_tailor():
 
 
 def test_engine_reuses_provided_diagnosis():
-    mock = MockLLMClient([_jd_analysis(), _tailor()])
+    mock = MockLLMClient([_jd_profile_only(), _gap_only(), _tailor()])
     report = run(
         ResuAlignConfig(model="m"),
         "Python dev resume",
@@ -253,7 +264,7 @@ def test_engine_reuses_provided_diagnosis():
     assert report.score == 91
     assert report.jd_profile is not None
     assert report.tailored_resume is not None
-    assert mock.call_count == 2
+    assert mock.call_count == 3
 
 
 def test_truncate_text_keeps_prefix_and_line_boundary():

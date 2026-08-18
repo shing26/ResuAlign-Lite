@@ -71,8 +71,8 @@ def run_application(application_id: str, request: Request, user: dict[str, Any]=
     application = api_module._applications.get_application(user['user_id'], application_id)
     if application is None:
         raise HTTPException(status_code=404, detail='Application not found')
-    if not api_module.build_config().api_key:
-        raise HTTPException(status_code=503, detail='API key not configured. Set via .env file or environment variables.')
+    if not api_module.build_config().is_llm_configured:
+        raise HTTPException(status_code=503, detail='LLM 未配置。请设置 API Key（远程供应商）或激活 Ollama 本地节点。')
     payload = {'resume_text': application['resume_snapshot'], 'jd_text': application['jd_text'], 'jd_url': application['jd_url'], 'run_eval': False}
     job_id = api_module._queue_job(user, payload, application_id=application_id)
     return {'job_id': job_id, 'status': 'queued'}

@@ -277,7 +277,7 @@ def test_auto_align_resume_errors_without_api_key(monkeypatch):
     )
     result = mcp_server.auto_align_resume(job_id=job_id, tenant_id=tenant)
     assert result["status"] == "error"
-    assert "API key" in result["error"]
+    assert "LLM" in result["error"]
 
 
 # -- Blockers -----------------------------------------------------------------

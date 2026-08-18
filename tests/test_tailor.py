@@ -94,6 +94,13 @@ def test_tailor_prompt_instructs_section_per_diff():
     assert "项目经历" in mock.last_system
 
 
+def test_tailor_prompt_caps_diff_output():
+    mock = MockLLM()
+    tailor_resume(mock, "Resume", "Gap")
+    assert "at most 15 diffs" in mock.last_system
+    assert "80 characters" in mock.last_system
+
+
 def test_tailor_granularity_fine_prompt():
     mock = MockLLM()
     tailor_resume(mock, "Resume", "Gap", granularity="fine")

@@ -13,6 +13,7 @@
 | `data/jobs.db` | 主库：用户/会话、主简历、岗位库、投递、分析任务、设置 | 必须备份 |
 | `data/content.db` | 内容库 | 按需创建，可能不存在 |
 | `data/content-cache.db` | LLM 内容哈希缓存（`content_cache` 表） | 可安全清理 |
+| `data/uploads/` | 上传简历原始文件 | 可用 `RESUALIGN_UPLOAD_DIR` 覆盖，随备份快照一起还原 |
 | `data/backups/` | 备份输出目录（`scripts/backup.*` 创建） | 见 backup-restore.md |
 
 所有库为 WAL 模式（`src/resualign/store_base.py` 的 `_apply_sqlite_pragmas`
@@ -136,4 +137,5 @@ sqlite3 data/content-cache.db "PRAGMA wal_checkpoint(TRUNCATE);"
 ## 6. 备份与恢复
 
 见 [docs/backup-restore.md](backup-restore.md)（在线备份脚本
-`scripts/backup.ps1` / `scripts/backup.sh`、保留策略与恢复演练）。
+`scripts/backup.ps1` / `scripts/backup.sh`、一键恢复
+`scripts/restore.ps1` / `scripts/restore.sh`、保留策略与恢复演练）。

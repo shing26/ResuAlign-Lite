@@ -4,7 +4,6 @@ import {
   $,
   STAGE_LABELS,
   api,
-  download,
   esc,
   formatDate,
   formatSalary,
@@ -75,6 +74,9 @@ let activeAuxPane = "inspector";
 
 
 export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
+  /* A workspace render started before a route change may resolve after the
+     new view is mounted; never let a stale workbench repaint another route. */
+  if (!state.route || state.route.name !== "workspace") return;
   const job = (session && session.job) || {};
   const jd = (session && session.jd) || {};
   const gap = (session && session.gap) || {};
@@ -189,7 +191,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
               <p>逐条采纳 AI 精修建议，保留 Provenance 溯源标记</p>
             </div>
             <div class="toolbar-group">
-              ${exportDock(jobId, session)}
+              ${exportDock(jobId, job)}
               ${alignment.diffs && alignment.diffs.length ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-live-compare">并排对比</button>` : ""}
             </div>
           </div>
@@ -531,13 +533,23 @@ function renderFinalDraftPanel(app) {
     return;
   }
   panel.hidden = false;
+  const acceptedDiffCount = (Array.isArray(job.diffs) ? job.diffs : []).filter(
+    (diff) => diff && diff.provenance_state === "accepted",
+  ).length;
+  const metaRows = [
+    job.model ? `模型 ${esc(job.model)}` : "",
+    job.prompt_version ? `Prompt ${esc(job.prompt_version)}` : "",
+    draft.updated_at ? `保存 ${formatDate(draft.updated_at)}` : "",
+    acceptedDiffCount ? `采纳 ${acceptedDiffCount} 条` : "",
+  ].filter(Boolean).map((item) => `<span>${item}</span>`).join("");
   panel.innerHTML = `
     <div class="final-draft-head">
       <div>
         <h3>定稿简历</h3>
         <div class="draft-meta">
-          <span class="badge badge-green">已保存</span>
-          <span class="small muted">${formatDate(draft.updated_at)} · 第 ${draft.version} 版</span>
+          <span class="badge badge-green" data-final-version>已定稿 v${draft.version}</span>
+          <span class="small muted">第 ${draft.version} 版</span>
+          <span class="final-draft-meta" data-final-draft-meta>${metaRows}</span>
         </div>
       </div>
     </div>
@@ -547,6 +559,7 @@ function renderFinalDraftPanel(app) {
       <button class="btn btn-primary btn-sm" data-action="record-application" data-id="${esc(job.job_id || "")}">记录投递</button>
       <button class="btn btn-secondary btn-sm" data-action="export-final-draft">导出 PDF</button>
       <button class="btn btn-secondary btn-sm" data-action="export-final-draft-md">导出 Markdown</button>
+      <button class="btn btn-secondary btn-sm" data-action="export-final-draft-json">导出 JSON</button>
       <button class="btn btn-secondary btn-sm" data-action="save-as-new-resume">另存为新主简历</button>
     </div>`;
 }
@@ -630,6 +643,7 @@ export async function renderOptimizerCanvas(app, jobId) {
           ? `#/workspace/${encodeURIComponent(targetId)}?resume=${encodeURIComponent(resumeId)}`
           : `#/workspace/${encodeURIComponent(targetId)}`,
       );
+      toast("已自动打开最近岗位，可在顶部切换", "info");
       return renderOptimizerCanvas(app, targetId);
     }
     const resumes = await api("/api/master-resumes");
@@ -650,20 +664,21 @@ export async function renderOptimizerCanvas(app, jobId) {
     `;
     return;
   }
+  const existing = workbenchJobs.find((item) => item.job_id === jobId);
+  if (!existing) {
+    /* A genuinely stale/removed job id: go back to the Dashboard instead of
+       probing session routes that can only 404 for a missing job. */
+    toast("岗位不存在，已返回驾驶舱", "info");
+    window.location.hash = "#/dashboard";
+    return;
+  }
   let session = await loadSession(jobId);
   if (!session) {
-    const existing = workbenchJobs.find((item) => item.job_id === jobId);
-    if (existing) {
-      /* The job exists but has no workbench session (e.g. created via the
-       * API / import). Rehydrate the three-pane canvas from the persisted
-       * analysis product (jd_profile / gap_report / diffs) instead of
-       * bouncing the user back to the Dashboard. */
-      session = buildSessionFromJob(existing);
-    } else {
-      /* A genuinely stale/removed job id: quietly return to Dashboard. */
-      window.location.hash = "#/dashboard";
-      return;
-    }
+    /* The job exists but has no workbench session (e.g. created via the
+     * API / import). Rehydrate the three-pane canvas from the persisted
+     * analysis product (jd_profile / gap_report / diffs) instead of
+     * bouncing the user back to the Dashboard. */
+    session = buildSessionFromJob(existing);
   }
   /* #B5: the session job snapshot can be stale (created before the last
      final-draft save); refresh the draft fields from the fresh job list
@@ -752,13 +767,7 @@ async function autoAnalyzeJd(session) {
 
 async function loadSession(jobId) {
   try {
-    const session = await api(`/api/workspace/session/${encodeURIComponent(jobId)}`);
-    if (session && session.session_id) return session;
-  } catch {
-    /* fall through to a direct workbench session id */
-  }
-  try {
-    return await api(`/api/workbench/session/${encodeURIComponent(jobId)}`);
+    return await api(`/api/workspace/session/${encodeURIComponent(jobId)}`);
   } catch {
     return null;
   }
@@ -856,9 +865,13 @@ async function pollSessionFallback(sessionId) {
       `/api/workbench/session/${encodeURIComponent(sessionId)}`,
       { headers },
     );
+    /* Route changes stop the poller while a request is in flight; a stale
+       response must not repaint the new route with the workbench canvas. */
+    if (!fallbackPollTimer || !activeSession) return;
     if (response.status === 304) return;
     if (!response.ok) return;
     const updated = await response.json();
+    if (!fallbackPollTimer || !activeSession) return;
     const nextEtag = updated.meta && updated.meta.etag;
     if (nextEtag === fallbackEtag) return;
     fallbackEtag = nextEtag || "";
@@ -880,7 +893,7 @@ async function pollSessionFallback(sessionId) {
     }
     activeSession = updated;
     const app = $("#app-router-view");
-    if (app) {
+    if (app && activeSession.session_id === sessionId) {
       const resumes = await api("/api/master-resumes");
       renderSplitCanvas(app, activeSession, resumes, workbenchJobs);
     }
@@ -1160,6 +1173,9 @@ export async function cancelActiveAlignment() {
 }
 
 export async function startAlignmentRun(jobId, resumeId, granularity, focus, runEval) {
+  if (!jobId) {
+    throw new Error("岗位上下文尚未就绪，请刷新后重试");
+  }
   /* A fresh run must not compare against the previous run's original text,
      accepted indices, or accumulated draft. */
   state.wbOriginalContent = null;
@@ -1389,37 +1405,6 @@ export function copyAlignMarkdown(jobId, session) {
   }
 }
 
-export function exportAlignMarkdown(jobId, session) {
-  const alignment = (session && session.alignment) || {};
-  const job = (session && session.job) || {};
-  const diffs = alignment.diffs || [];
-  const match =
-    (alignment.eval_score && alignment.eval_score.jd_match_score) ||
-    (session && session.gap && session.gap.score) ||
-    "-";
-  const content = [
-    `# ${job.title || "对齐简历"}`,
-    "",
-    `> 匹配度：${match}/100`,
-    "",
-    "## 对齐内容",
-    "",
-    alignment.draft || "（尚未生成定稿）",
-    "",
-    "## 修改建议",
-    "",
-    ...diffs.map(
-      (diff, index) =>
-        `${index + 1}. [${diff.type || "modify"}] ${diff.reason || ""}${diff.provenance_state ? `（${PROVENANCE_LABELS[diff.provenance_state] || diff.provenance_state}）` : ""}`,
-    ),
-  ].join("\n");
-  download(
-    `resualign-${job.title || "job"}.md`,
-    content,
-    "text/markdown;charset=utf-8",
-  );
-}
-
 function fallbackCopy(text) {
   const node = document.createElement("textarea");
   node.value = text;
@@ -1434,13 +1419,4 @@ function fallbackCopy(text) {
     toast("复制失败，请手动选择", "error");
   }
   node.remove();
-}
-
-export function exportAlignJson(jobId, session) {
-  const job = (session && session.job) || {};
-  download(
-    `resualign-${job.title || "job"}.json`,
-    JSON.stringify(session, null, 2),
-    "application/json",
-  );
 }

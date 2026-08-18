@@ -29,6 +29,8 @@ from mcp.server.fastmcp import FastMCP
 
 import resualign.api as api_module
 
+from ..reminders import AUTO_FOLLOWUP_MESSAGE, auto_followup_due_at
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_TENANT = "local"
@@ -133,8 +135,8 @@ def auto_align_resume(
             "job_id": job_id,
         }
     config = api_module.build_config()
-    if not config.api_key:
-        return {"status": "error", "error": "API key not configured"}
+    if not config.is_llm_configured:
+        return {"status": "error", "error": "LLM 未配置"}
 
     user = _user(tenant_id)
     payload: dict[str, Any] = {
@@ -216,6 +218,214 @@ def resolve_blocker(
         "blocker_id": blocker_id,
         "job_id": result["job"]["job_id"],
     }
+
+
+def _job_profile_snapshot(job: dict[str, Any]) -> dict[str, Any]:
+    """Return the structured JD profile, hard gates, and classification."""
+    profile = job.get("jd_profile") or {}
+    if not isinstance(profile, dict):
+        profile = {}
+    return {
+        "jd_profile": profile,
+        "hard_gates": {
+            "min_years_experience": profile.get("min_years_experience"),
+            "education_requirements": profile.get(
+                "education_requirements"
+            )
+            or [],
+        },
+        "classification": {
+            "job_function": job.get("job_function"),
+            "seniority": job.get("seniority"),
+            "tech_tags": job.get("tech_tags") or [],
+        },
+    }
+
+
+@mcp.tool()
+def job_ingest_and_profile(
+    source: str,
+    source_type: str = "url",
+    tenant_id: str = DEFAULT_TENANT,
+) -> dict[str, Any]:
+    """Ingest a JD URL or raw text and return its structured profile.
+
+    ``source_type`` accepts ``url`` or ``text``. URL ingestion runs the
+    existing fetch pipeline (including automation rules and blocker
+    creation); text ingestion creates a paste-sourced library job directly.
+    """
+    kind = (source_type or "url").strip().lower()
+    if kind not in {"url", "text"}:
+        return {"status": "error", "error": "source_type must be url or text"}
+    if not (source or "").strip():
+        return {"status": "error", "error": "source is required"}
+    if kind == "url":
+        result = api_module._fetcher.submit_url(tenant_id, source)
+    else:
+        try:
+            job = api_module._create_job_from_source(
+                {"user_id": tenant_id},
+                {"jd_text": source, "source_type": "text"},
+            )
+        except api_module.UserStoreError as exc:
+            return {"status": "error", "error": str(exc)}
+        result = {"status": "created", "job_id": job["job_id"]}
+    if result.get("status") != "created":
+        return {
+            **result,
+            "jd_profile": None,
+            "hard_gates": None,
+            "classification": None,
+        }
+    job = api_module._jobs.get_job(tenant_id, result["job_id"]) or {}
+    return {**result, **_job_profile_snapshot(job)}
+
+
+@mcp.tool()
+def resume_align_and_tailor(
+    job_id: str,
+    resume_id: str | None = None,
+    style: str | None = None,
+    tenant_id: str = DEFAULT_TENANT,
+) -> dict[str, Any]:
+    """Queue a full alignment-and-tailoring run for one library job.
+
+    The run goes through the same workbench queue as the web UI and executes
+    the Graph pipeline (JD profiling, gap analysis, style routing, STAR
+    tailoring, provenance/anti-hallucination gates, ATS scoring). Poll the
+    returned ``analysis_job_id`` through ``/api/jobs/{analysis_job_id}`` or
+    the aligned library job for the diff report.
+    """
+    result = auto_align_resume(
+        job_id=job_id,
+        master_resume_id=resume_id,
+        tenant_id=tenant_id,
+    )
+    if result.get("status") == "queued":
+        result["style"] = style
+    return result
+
+
+@mcp.tool()
+def job_tracker_manage(
+    job_id: str,
+    action: str,
+    stage: str | None = None,
+    note: str | None = None,
+    due_at: str | None = None,
+    tenant_id: str = DEFAULT_TENANT,
+) -> dict[str, Any]:
+    """Manage the job-board lifecycle for one library job.
+
+    Actions: ``apply`` marks the job applied and creates the automatic
+    3-day follow-up reminder; ``update_stage`` advances the interview stage;
+    ``log_note`` appends a communication note; ``set_reminder`` sets the next
+    follow-up step and due time.
+    """
+    job = api_module._jobs.get_job(tenant_id, job_id)
+    if job is None:
+        return {"status": "error", "error": "job not found", "job_id": job_id}
+    action = (action or "").strip().lower()
+    updates: dict[str, Any] = {}
+    if action == "apply":
+        updates["status"] = "applied"
+        updates["applied_at"] = job.get("applied_at")
+        updates["next_step"] = AUTO_FOLLOWUP_MESSAGE
+        updates["next_step_due_at"] = auto_followup_due_at(
+            job.get("applied_at")
+        )
+    elif action == "update_stage":
+        if not (stage or "").strip():
+            return {
+                "status": "error",
+                "error": "stage is required for update_stage",
+                "job_id": job_id,
+            }
+        updates["interview_stage"] = stage
+    elif action == "log_note":
+        if not (note or "").strip():
+            return {
+                "status": "error",
+                "error": "note is required for log_note",
+                "job_id": job_id,
+            }
+        current_note = (job.get("notes") or "").strip()
+        updates["notes"] = (
+            f"{current_note}\n{note}" if current_note else note
+        )
+    elif action == "set_reminder":
+        if not (due_at or "").strip():
+            return {
+                "status": "error",
+                "error": "due_at is required for set_reminder",
+                "job_id": job_id,
+            }
+        updates["next_step"] = (note or "").strip() or "跟进"
+        updates["next_step_due_at"] = due_at
+    else:
+        return {
+            "status": "error",
+            "error": "action must be apply, update_stage, log_note, or set_reminder",
+            "job_id": job_id,
+        }
+    updated = api_module._jobs.update_job(tenant_id, job_id, **updates)
+    if updated is None:
+        return {"status": "error", "error": "job update failed", "job_id": job_id}
+    return {
+        "status": "updated",
+        "job_id": job_id,
+        "action": action,
+        "job": updated,
+    }
+
+
+@mcp.tool()
+def master_resume_query(
+    resume_id: str,
+    query: str,
+    top_k: int = 5,
+    tenant_id: str = DEFAULT_TENANT,
+) -> list[dict[str, Any]]:
+    """Keyword-search a master resume for atomic STAR experience fragments.
+
+    Returns up to ``top_k`` matching lines/chunks with their provenance
+    (resume id + line number) so callers can anchor generated claims to the
+    source resume.
+    """
+    resume = api_module._resumes.get_master_resume(tenant_id, resume_id)
+    if resume is None:
+        return []
+    content = (resume.get("content") or "").splitlines()
+    keys = [k.strip().lower() for k in (query or "").split() if k.strip()]
+    if not keys:
+        keys = []
+    scored: list[tuple[float, int, str]] = []
+    for index, line in enumerate(content):
+        text = line.strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        score = sum(1 for key in keys if key in lowered)
+        if score:
+            scored.append((score, index, text))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [
+        {
+            "fragment": text,
+            "line_number": index + 1,
+            "score": score,
+            "provenance": {
+                "resume_id": resume_id,
+                "title": resume.get("title"),
+                "line": index + 1,
+            },
+            "situation": None,
+            "task": None,
+            "action": None,
+            "result": None,
+        }
+        for score, index, text in scored[: max(0, int(top_k))]
+    ]
 
 
 def run(transport: str = "stdio") -> None:

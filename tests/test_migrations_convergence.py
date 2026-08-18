@@ -139,7 +139,109 @@ def test_job_library_migrates_legacy_db_and_keeps_data(tmp_path):
     assert job["interview_stage"] is None
     # Every historical ALTER recorded exactly once (27 column upgrades plus
     # the Sprint 3 automation_rules / blocker_queue table migrations).
-    assert _migrated_versions(store) == set(range(1, 31))
+    assert _migrated_versions(store) == set(range(1, 42))
+
+
+def test_upgrade_keeps_historical_alignment_artifacts(tmp_path):
+    """MVP-11: upgrading an old schema preserves diffs, drafts, final drafts,
+    match scores and application snapshots through the versioned migrations."""
+    db = tmp_path / "upgrade-artifacts.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        """
+        CREATE TABLE library_jobs (
+            job_id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            jd_text TEXT NOT NULL,
+            company TEXT,
+            location TEXT,
+            salary_min REAL,
+            salary_max REAL,
+            salary_currency TEXT NOT NULL DEFAULT 'CNY',
+            source_type TEXT NOT NULL DEFAULT 'paste',
+            source_url TEXT,
+            job_function TEXT,
+            seniority TEXT,
+            tech_tags TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT '未投递',
+            posting_date TEXT,
+            dedupe_key TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            diffs_json TEXT NOT NULL DEFAULT '[]',
+            invalid_diffs_json TEXT NOT NULL DEFAULT '[]',
+            draft TEXT,
+            final_draft TEXT,
+            final_draft_updated_at REAL,
+            final_draft_version INTEGER NOT NULL DEFAULT 0,
+            match_score REAL,
+            prompt_version TEXT,
+            generated_at REAL
+        );
+        CREATE TABLE application_snapshots (
+            snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            version_index INTEGER NOT NULL,
+            final_draft TEXT NOT NULL,
+            match_score REAL,
+            master_resume_id TEXT,
+            applied_at TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            UNIQUE(tenant_id, job_id, version_index)
+        );
+        INSERT INTO library_jobs (
+            job_id, tenant_id, title, jd_text, dedupe_key, created_at,
+            updated_at, diffs_json, invalid_diffs_json, draft, final_draft,
+            final_draft_updated_at, final_draft_version, match_score,
+            prompt_version, generated_at
+        ) VALUES (
+            'j1', 't1', 'Backend', 'Python backend', 'text:legacy', 1.0, 2.0,
+            '[{"diff_id":"d1","provenance_state":"accepted"}]',
+            '[{"diff_id":"bad"}]',
+            '# Draft content',
+            '# Final content',
+            3.0, 2, 81.5,
+            'engine.v1', 4.0
+        );
+        INSERT INTO application_snapshots (
+            tenant_id, job_id, version_index, final_draft, match_score,
+            applied_at, created_at
+        ) VALUES (
+            't1', 'j1', 1, '# Snapshot content', 80.0, '2026-08-10', 5.0
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = JobLibraryStore(db_path=db)
+    job = store.get_job("t1", "j1")
+    assert job["title"] == "Backend"
+    assert job["draft"] == "# Draft content"
+    assert job["final_draft"] == "# Final content"
+    assert job["final_draft_version"] == 2
+    assert job["match_score"] == 81.5
+    assert job["prompt_version"] == "engine.v1"
+    assert job["diffs"][0]["diff_id"] == "d1"
+    assert job["invalid_diffs"][0]["diff_id"] == "bad"
+
+    with store._connect() as conn:
+        snapshot = conn.execute(
+            "SELECT final_draft, match_score, version_index "
+            "FROM application_snapshots WHERE job_id = 'j1'"
+        ).fetchone()
+        rows = {
+            (row["store"], row["version"])
+            for row in conn.execute(
+                "SELECT store, version FROM schema_migrations"
+            )
+        }
+    assert snapshot["final_draft"] == "# Snapshot content"
+    assert snapshot["match_score"] == 80.0
+    assert ("JobLibraryStore", 41) in rows
+    assert ("JobLibraryStore", 1) in rows
 
 
 def test_fresh_job_library_db_records_migrations_as_applied(tmp_path):
@@ -148,7 +250,7 @@ def test_fresh_job_library_db_records_migrations_as_applied(tmp_path):
         tenant_id="t1", title="Fresh", jd_text="Python backend."
     )
     assert job["alignment_status"] == "idle"
-    assert _migrated_versions(store) == set(range(1, 31))
+    assert _migrated_versions(store) == set(range(1, 42))
 
 
 def test_migrated_legacy_db_supports_workbench_columns(tmp_path):
@@ -215,7 +317,7 @@ def test_settings_store_migrates_legacy_db(tmp_path):
     assert updated["llm_model"] == "deepseek-chat"
     assert updated["llm"]["provider"] == "deepseek"
     assert updated["llm"]["model"] == "deepseek-chat"
-    assert _migrated_versions(store) == {1, 2, 3, 4, 5, 6}
+    assert _migrated_versions(store) == {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
 
 def test_settings_store_backfills_llm_from_legacy_columns(tmp_path):

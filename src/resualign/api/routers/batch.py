@@ -20,6 +20,7 @@ def create_batch_align(
 ):
     """Queue one workbench alignment per library job in a tenant batch."""
     api_module._enforce_rate_limit(request, api_module._analyze_rate_limiter)
+    api_module.enforce_daily_llm_cap(user['user_id'])
     return api_module._queue_batch_align(user, req)
 
 

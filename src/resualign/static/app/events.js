@@ -23,6 +23,7 @@ import {
   normalizeVocabularyList,
   renderBatchMatrixHtml,
 } from "./format.js";
+import { API_CACHE_TTL, apiCache } from "./cache-manager.js";
 
 /* Pure formatting / vocabulary / status helpers now live in format.js.
  * They are re-exported here so every existing import path keeps working. */
@@ -69,7 +70,13 @@ export const state = {
   route: { name: "resume", jobId: null },
   resumes: [],
   jobs: [],
-  filters: { job_function: "", seniority: "", status: "", search: "" },
+  filters: {
+    job_function: "",
+    seniority: "",
+    status: "",
+    search: "",
+    sort: "updated_at_desc",
+  },
   offset: 0,
   limit: 20,
   wbJob: null,
@@ -177,6 +184,11 @@ export function download(filename, content, mime) {
 }
 
 export async function api(path, options = {}) {
+  const method = (options.method || "GET").toUpperCase();
+  if (method === "GET" && options.cacheKey) {
+    const cached = apiCache.get(options.cacheKey);
+    if (cached !== undefined) return cached;
+  }
   const headers = { ...(options.headers || {}) };
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
   if (
@@ -211,7 +223,11 @@ export async function api(path, options = {}) {
     throw error;
   }
   if (response.status === 204) return null;
-  return response.json();
+  const data = await response.json();
+  if (method === "GET" && options.cacheKey) {
+    apiCache.set(options.cacheKey, data, options.ttl || API_CACHE_TTL);
+  }
+  return data;
 }
 
 let modalReturnFocus = null;

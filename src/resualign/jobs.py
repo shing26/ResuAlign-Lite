@@ -478,9 +478,9 @@ class JobRegistry(_SqliteStore):
                 )
                 conn.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
                 return None
-            return self._row_to_job(row)
+            return self._row_to_analysis_job(row)
 
-    def _row_to_job(self, row: sqlite3.Row) -> AnalysisJob:
+    def _row_to_analysis_job(self, row: sqlite3.Row) -> AnalysisJob:
         result = (
             json.loads(row["result_json"])
             if row["result_json"] is not None

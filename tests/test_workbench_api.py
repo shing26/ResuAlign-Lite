@@ -584,6 +584,8 @@ def test_workbench_run_emits_job_stage_into_open_session():
         on_stage=None,
         cache=None,
         tenant="default",
+        node_store=None,
+        tenant_id="default",
     ):
         if on_stage is not None:
             on_stage("jd_analysis", "Extracting JD profile")
