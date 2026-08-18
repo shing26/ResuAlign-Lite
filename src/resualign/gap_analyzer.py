@@ -1,5 +1,7 @@
 from .llm import LLMClient
 from .models import GapReport
+GAP_ANALYZER_PROMPT_VERSION = "v1"
+
 
 GAP_ANALYSIS_PROMPT = (
     "You are a resume gap analyst. Given a resume and a structured JD profile, \n"
@@ -19,6 +21,11 @@ GAP_ANALYSIS_PROMPT = (
     "misaligned_emphasis (list of strings), \n"
     "strength_matches (list of strings). \n"
     "Output ONLY JSON."
+    "## Output Constraints\\n"
+    "- Max tokens: 400\\n"
+    "- Temperature: 0.0\\n"
+    "- If uncertain: return empty list\\n"
+    "- Output ONLY valid JSON, no markdown fences\\n"
 )
 
 

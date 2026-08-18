@@ -310,10 +310,10 @@ def _print_row(label: str, row: dict, out: TextIO) -> None:
 
 _PLAN_SLO_SECONDS = {
     "legacy (4 calls)": 7.0,
-    "current cold (3 calls)": 5.5,
-    "current cached (2 calls)": 4.0,
-    "schema retry (4 calls)": 7.0,
-    "eval on (4 calls)": 7.0,
+    "current cold (4 calls)": 7.0,
+    "current cached (3 calls)": 5.5,
+    "schema retry (5 calls)": 8.5,
+    "eval on (5 calls)": 8.5,
 }
 
 
@@ -363,7 +363,7 @@ def main(argv=None, out: Optional[TextIO] = None) -> dict:
         cached["call_count"],
         schema_retry["call_count"],
         eval_on["call_count"],
-    ) != (4, 3, 2, 4, 4):
+    ) != (4, 4, 3, 5, 5):
         raise AssertionError(
             "unexpected call counts: "
             f"legacy={legacy['call_count']}, "
@@ -381,10 +381,10 @@ def main(argv=None, out: Optional[TextIO] = None) -> dict:
 
     for label, row in (
         ("legacy (4 calls)", legacy),
-        ("current cold (3 calls)", cold),
-        ("current cached (2 calls)", cached),
-        ("schema retry (4 calls)", schema_retry),
-        ("eval on (4 calls)", eval_on),
+        ("current cold (4 calls)", cold),
+        ("current cached (3 calls)", cached),
+        ("schema retry (5 calls)", schema_retry),
+        ("eval on (5 calls)", eval_on),
     ):
         _assert_within_bounds(label, row, args.latency)
 
@@ -426,9 +426,9 @@ def main(argv=None, out: Optional[TextIO] = None) -> dict:
 
     print(f"Latency benchmark (simulated {args.latency}s per LLM call):", file=output)
     _print_row("legacy (4 calls)", legacy, output)
-    _print_row("current cold (3 calls)", cold, output)
-    _print_row("current cached (2 calls)", cached, output)
-    _print_row("schema retry (4 calls)", schema_retry, output)
+    _print_row("current cold (4 calls)", cold, output)
+    _print_row("current cached (3 calls)", cached, output)
+    _print_row("schema retry (5 calls)", schema_retry, output)
     summary = payload["summary"]
     print("", file=output)
     print(

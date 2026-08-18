@@ -50,6 +50,7 @@ const MOCK_JOBS = [
     status: "draft",
     jd_text: "React / TypeScript",
     source_url: "",
+    final_draft: "# 定稿",
     salary_min: 18000,
     salary_max: 28000,
   },
@@ -284,6 +285,29 @@ test("followup modal: schedule next step through lifecycle PATCH", async () => {
   await waitFor(
     () => document.body.textContent.includes("准备二面"),
     "board card shows the saved next step",
+  );
+});
+
+test("record-application without a final draft is blocked", async () => {
+  state.wbJob = {
+    job_id: "no-draft",
+    title: "No draft",
+    status: "draft",
+    jd_text: "placeholder",
+  };
+  state.wbFinalDraft = null;
+  const before = calls.patches.filter(
+    (call) => call.url === "/api/jobs/no-draft",
+  ).length;
+  const button = document.createElement("button");
+  button.dataset.action = "record-application";
+  document.body.append(button);
+  button.click();
+  button.remove();
+  assert.equal(
+    calls.patches.filter((call) => call.url === "/api/jobs/no-draft").length,
+    before,
+    "record-application must not PATCH without a final draft",
   );
 });
 

@@ -17,6 +17,7 @@ from ..config import EnvSettings
 from ..job_library import CrawlTaskStore
 from ..jobs import JobRegistry, resolve_data_dir
 from ..llm_nodes import LLMNodeStore
+from ..llm_usage import LLMUsageStore
 from ..settings_store import SettingsStore
 from ..workspace import (
     ApplicationStore,
@@ -47,8 +48,10 @@ __all__ = [
     "_import_rate_limiter",
     "_jobs",
     "_llm_nodes",
+    "_llm_usage",
     "_payloads",
     "_registry",
+    "_refresh_service",
     "_session_store",
     "_settings_store",
     "_users",
@@ -108,6 +111,10 @@ _jobs = JobLibraryStore(db_path=_env_settings.resualign_job_db or None)
 _crawl_tasks = CrawlTaskStore(db_path=_env_settings.resualign_job_db or None)
 _settings_store = SettingsStore(db_path=_env_settings.resualign_job_db or None)
 _llm_nodes = LLMNodeStore(db_path=_env_settings.resualign_job_db or None)
+_llm_usage = LLMUsageStore(db_path=_env_settings.resualign_job_db or None)
+from .services.job_refresh import JobRefreshService  # noqa: E402
+
+_refresh_service = JobRefreshService()
 _cache_db = resolve_data_dir() / "content-cache.db"
 _cache = ContentCache(db_path=_cache_db)
 

@@ -92,6 +92,57 @@ def _read_download(download) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
+def test_command_palette_preserves_multiline_jd(page, base_url, api_call):
+    """Pasting a multi-line JD keeps line breaks for deterministic parsing."""
+    tag = f"e2e-multiline-{time.time_ns()}"
+    jd_text = (
+        f"资深后端工程师（{tag}）\n"
+        "公司：星辰科技\n"
+        "地点：上海\n"
+        "薪资：25-35K\n"
+        "岗位职责：负责 FastAPI 服务设计与开发\n"
+        "任职要求：Python、PostgreSQL、Redis"
+    )
+    job_id = None
+    try:
+        page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")
+        page.wait_for_selector("[data-action='open-command-panel']", timeout=15000)
+        page.click("[data-action='open-command-panel']")
+        page.fill("[data-command-input]", jd_text)
+        page.press("[data-command-input]", "Enter")
+        wait_for_function(
+            page,
+            "() => location.hash.startsWith('#/workspace/')",
+            timeout=15000,
+        )
+
+        deadline = time.monotonic() + 10.0
+        job = None
+        while time.monotonic() < deadline:
+            jobs = api_call("GET", "/api/jobs?limit=100")
+            job = next(
+                (item for item in jobs if tag in (item.get("jd_text") or "")),
+                None,
+            )
+            if job is not None:
+                break
+            time.sleep(0.25)
+        expect(job is not None, "multi-line JD should create a library job")
+        job_id = job["job_id"]
+        expect(
+            "\n" in (job.get("jd_text") or ""),
+            "command palette must preserve JD line breaks",
+        )
+        expect(job.get("title") == f"资深后端工程师（{tag}）", "title parsed")
+        expect(job.get("company") == "星辰科技", "company parsed")
+        expect(job.get("location") == "上海", "location parsed")
+        expect(job.get("salary_min") == 25000.0, "salary min parsed")
+        expect(job.get("salary_max") == 35000.0, "salary max parsed")
+    finally:
+        if job_id:
+            api_call("DELETE", f"/api/jobs/{job_id}")
+
+
 def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
     errors = capture_errors(page)
     job_id = None
@@ -225,10 +276,13 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
             ACCEPTED_TEXT in panel.locator(".pre.draft-preview").inner_text(),
             "final-draft panel should show the accepted text",
         )
-        after = api_call("GET", f"/api/jobs/{job_id}")
-        expect(
-            ACCEPTED_TEXT in (after.get("final_draft") or ""),
+        poll_until(
+            lambda: ACCEPTED_TEXT
+            in ((api_call("GET", f"/api/jobs/{job_id}") or {}).get(
+                "final_draft"
+            ) or ""),
             "final_draft should persist the accepted text",
+            timeout=15.0,
         )
 
         # #23: 补链接与记录投递入口必须同时出现在上下文条和定稿面板。
@@ -263,48 +317,30 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
             "final-draft panel should expose record-application",
         )
 
-        # --- 6. 下载 Markdown → 导出内容含采纳后的文本 ---------------------
-        # The workbench dock's "下载 Markdown" (export-align-markdown) carries
-        # the accepted suggestion and its provenance in 修改建议. (Its 对齐内容
-        # section reads session.alignment.draft, which the split-canvas SSE
-        # job.result replay sets from result.draft — the analysis result has
-        # no draft field, so the section renders the "尚未生成定稿" placeholder
-        # in the current product. The accepted draft itself is exported from
-        # the final-draft panel below.)
-        if not page.locator(
-            "[data-action='export-align-markdown']"
-        ).first.is_visible():
-            page.click("[data-export-dock] summary")
+        # --- 6. canonical 定稿 Markdown 导出含采纳后的文本 ----------------
+        # MVP-09：导出只走 /api/jobs/{job_id}/exports，内容来自持久化的
+        # final_draft + accepted_diff_ids，不再导出会话内临时 Markdown。
         with page.expect_download(timeout=15000) as download_info:
-            page.click("[data-action='export-align-markdown']")
-        dock_content = _read_download(download_info.value)
-        expect(
-            dock_content.startswith("# "),
-            "workbench markdown export should start with a title heading",
-        )
-        expect(
-            "## 修改建议" in dock_content,
-            "workbench markdown export should carry a 修改建议 section",
-        )
-        expect(
-            "Matches JD high-concurrency scenario" in dock_content,
-            "markdown should list the accepted diff's reason",
-        )
-        expect(
-            "来源已验证" in dock_content,
-            "markdown should carry the verified provenance label",
-        )
-
-        # The final-draft panel's "导出 Markdown" (export-final-draft-md)
-        # exports state.wbFinalDraft.draft — the accepted text, via a real
-        # Playwright download event.
-        with page.expect_download(timeout=15000) as download_info:
-            page.click("[data-action='export-final-draft-md']")
+            final_panel.locator(
+                '[data-action="export-final-draft-md"]'
+            ).click()
         content = _read_download(download_info.value)
+        expect(
+            content.startswith("# "),
+            "canonical markdown export should start with a title heading",
+        )
+        expect(
+            "## 定稿内容" in content,
+            "canonical markdown export should carry the 定稿内容 section",
+        )
         expect(
             ACCEPTED_TEXT in content,
             f"accepted-draft markdown should contain the accepted text, "
             f"got:\n{content[:400]}",
+        )
+        expect(
+            "## 采纳项" in content,
+            "canonical markdown export should carry the 采纳项 section",
         )
 
         # #23: 详情补填 source_url → 卡片/工作台显示去投递 → 记录投递。

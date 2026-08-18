@@ -4,7 +4,6 @@ import {
   $,
   STAGE_LABELS,
   api,
-  download,
   esc,
   formatDate,
   formatSalary,
@@ -75,6 +74,9 @@ let activeAuxPane = "inspector";
 
 
 export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
+  /* A workspace render started before a route change may resolve after the
+     new view is mounted; never let a stale workbench repaint another route. */
+  if (!state.route || state.route.name !== "workspace") return;
   const job = (session && session.job) || {};
   const jd = (session && session.jd) || {};
   const gap = (session && session.gap) || {};
@@ -83,13 +85,20 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const jobId = job.job_id || "";
   /* Mirror the legacy workbench contract so renderFinalDraftPanel /
      record-application work identically on the live canvas. */
+  const sessionDraft = (session && session.alignment && session.alignment.draft) || null;
   state.wbFinalDraft = job.final_draft
     ? {
         draft: job.final_draft,
         version: job.final_draft_version || 1,
         updated_at: job.final_draft_updated_at,
       }
-    : null;
+    : sessionDraft
+      ? {
+          draft: sessionDraft,
+          version: job.final_draft_version || 1,
+          updated_at: job.final_draft_updated_at,
+        }
+      : null;
   const previous = {
     resumeId: $("[data-form='split-align'] [name='master_resume_id']")?.value,
     granularity: $("[data-form='split-align'] [name='granularity']")?.value,
@@ -103,6 +112,20 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const alignmentRunning =
     alignment.status === "running" || alignment.status === "queued";
   const diffs = Array.isArray(alignment.diffs) ? alignment.diffs : [];
+  if (jobId) {
+    const persistedAccepted = (Array.isArray(job.diffs) ? job.diffs : [])
+      .filter((diff) => diff && diff.provenance_state === "accepted")
+      .map((diff) => diff.diff_id)
+      .filter(Boolean);
+    if (persistedAccepted.length) {
+      const merged = new Set((state.wbAcceptedBullets || {})[jobId] || []);
+      persistedAccepted.forEach((id) => merged.add(id));
+      state.wbAcceptedBullets = {
+        ...(state.wbAcceptedBullets || {}),
+        [jobId]: [...merged],
+      };
+    }
+  }
   const acceptedIds = new Set((state.wbAcceptedBullets || {})[jobId] || []);
   const acceptedCount = diffs.filter(
     (diff) =>
@@ -123,6 +146,10 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const tagItems = [...requiredSkills.slice(0, 6), ...niceSkills.slice(0, 3)];
   const inspectorActive = activeAuxPane === "inspector" || state.wbMobilePane !== "diff";
   const livesheetActive = activeAuxPane === "livesheet" || state.wbMobilePane === "diff";
+  const hasGuideDraft = Boolean(
+    job.final_draft ||
+      (session && session.alignment && session.alignment.draft),
+  );
   const dutyText = String(
     (summary && summary.summary) || job.jd_text || "",
   ).trim().slice(0, 240);
@@ -155,7 +182,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           </div>
         </div>
       </div>
-      ${workbenchGuideHtml(job)}
+      ${workbenchGuideHtml(job, hasGuideDraft)}
       <div class="wb-grid" data-split-layout>
         <section class="wb-main ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>
           <div class="wb-main-head">
@@ -164,7 +191,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
               <p>逐条采纳 AI 精修建议，保留 Provenance 溯源标记</p>
             </div>
             <div class="toolbar-group">
-              ${exportDock(jobId, session)}
+              ${exportDock(jobId, job)}
               ${alignment.diffs && alignment.diffs.length ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-live-compare">并排对比</button>` : ""}
             </div>
           </div>
@@ -506,13 +533,23 @@ function renderFinalDraftPanel(app) {
     return;
   }
   panel.hidden = false;
+  const acceptedDiffCount = (Array.isArray(job.diffs) ? job.diffs : []).filter(
+    (diff) => diff && diff.provenance_state === "accepted",
+  ).length;
+  const metaRows = [
+    job.model ? `模型 ${esc(job.model)}` : "",
+    job.prompt_version ? `Prompt ${esc(job.prompt_version)}` : "",
+    draft.updated_at ? `保存 ${formatDate(draft.updated_at)}` : "",
+    acceptedDiffCount ? `采纳 ${acceptedDiffCount} 条` : "",
+  ].filter(Boolean).map((item) => `<span>${item}</span>`).join("");
   panel.innerHTML = `
     <div class="final-draft-head">
       <div>
         <h3>定稿简历</h3>
         <div class="draft-meta">
-          <span class="badge badge-green">已保存</span>
-          <span class="small muted">${formatDate(draft.updated_at)} · 第 ${draft.version} 版</span>
+          <span class="badge badge-green" data-final-version>已定稿 v${draft.version}</span>
+          <span class="small muted">第 ${draft.version} 版</span>
+          <span class="final-draft-meta" data-final-draft-meta>${metaRows}</span>
         </div>
       </div>
     </div>
@@ -522,6 +559,7 @@ function renderFinalDraftPanel(app) {
       <button class="btn btn-primary btn-sm" data-action="record-application" data-id="${esc(job.job_id || "")}">记录投递</button>
       <button class="btn btn-secondary btn-sm" data-action="export-final-draft">导出 PDF</button>
       <button class="btn btn-secondary btn-sm" data-action="export-final-draft-md">导出 Markdown</button>
+      <button class="btn btn-secondary btn-sm" data-action="export-final-draft-json">导出 JSON</button>
       <button class="btn btn-secondary btn-sm" data-action="save-as-new-resume">另存为新主简历</button>
     </div>`;
 }
@@ -546,11 +584,45 @@ function buildSessionFromJob(job) {
       error: null,
       diffs: job.diffs || [],
       invalid_diffs: job.invalid_diffs || [],
-      draft: job.final_draft || null,
+      draft: job.draft || job.final_draft || null,
       eval_score: job.eval_score || null,
     },
     meta: {},
   };
+}
+
+async function reconcileAlignmentFailure(session) {
+  const job = (session && session.job) || {};
+  if (!job || job.alignment_status === "succeeded") return session;
+  const workbenchJobId = job.workbench_job_id;
+  if (!workbenchJobId) return session;
+  try {
+    const snapshot = await api(
+      `/api/jobs/${encodeURIComponent(workbenchJobId)}/analysis-status`,
+    );
+    const terminalStatus =
+      snapshot.status === "expired" ? "failed" : snapshot.status;
+    if (terminalStatus === "failed" || terminalStatus === "canceled") {
+      session.alignment = {
+        ...(session.alignment || {}),
+        status: terminalStatus,
+        stage: snapshot.status === "expired" ? "" : snapshot.stage || "",
+        error:
+          snapshot.error ||
+          (snapshot.status === "expired"
+            ? "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成"
+            : "对齐任务失败，请重试"),
+      };
+    }
+  } catch {
+    session.alignment = {
+      ...(session.alignment || {}),
+      status: "failed",
+      stage: "",
+      error: "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成",
+    };
+  }
+  return session;
 }
 
 export async function renderOptimizerCanvas(app, jobId) {
@@ -571,6 +643,7 @@ export async function renderOptimizerCanvas(app, jobId) {
           ? `#/workspace/${encodeURIComponent(targetId)}?resume=${encodeURIComponent(resumeId)}`
           : `#/workspace/${encodeURIComponent(targetId)}`,
       );
+      toast("已自动打开最近岗位，可在顶部切换", "info");
       return renderOptimizerCanvas(app, targetId);
     }
     const resumes = await api("/api/master-resumes");
@@ -591,20 +664,21 @@ export async function renderOptimizerCanvas(app, jobId) {
     `;
     return;
   }
+  const existing = workbenchJobs.find((item) => item.job_id === jobId);
+  if (!existing) {
+    /* A genuinely stale/removed job id: go back to the Dashboard instead of
+       probing session routes that can only 404 for a missing job. */
+    toast("岗位不存在，已返回驾驶舱", "info");
+    window.location.hash = "#/dashboard";
+    return;
+  }
   let session = await loadSession(jobId);
   if (!session) {
-    const existing = workbenchJobs.find((item) => item.job_id === jobId);
-    if (existing) {
-      /* The job exists but has no workbench session (e.g. created via the
-       * API / import). Rehydrate the three-pane canvas from the persisted
-       * analysis product (jd_profile / gap_report / diffs) instead of
-       * bouncing the user back to the Dashboard. */
-      session = buildSessionFromJob(existing);
-    } else {
-      /* A genuinely stale/removed job id: quietly return to Dashboard. */
-      window.location.hash = "#/dashboard";
-      return;
-    }
+    /* The job exists but has no workbench session (e.g. created via the
+     * API / import). Rehydrate the three-pane canvas from the persisted
+     * analysis product (jd_profile / gap_report / diffs) instead of
+     * bouncing the user back to the Dashboard. */
+    session = buildSessionFromJob(existing);
   }
   /* #B5: the session job snapshot can be stale (created before the last
      final-draft save); refresh the draft fields from the fresh job list
@@ -625,8 +699,13 @@ export async function renderOptimizerCanvas(app, jobId) {
       final_draft: freshJob.final_draft,
       final_draft_version: freshJob.final_draft_version,
       final_draft_updated_at: freshJob.final_draft_updated_at,
+      workbench_job_id: freshJob.workbench_job_id,
+      diffs: freshJob.diffs,
+      invalid_diffs: freshJob.invalid_diffs,
+      draft: freshJob.draft,
     };
   }
+  session = await reconcileAlignmentFailure(session);
   activeSession = session;
   activeSessionUrl = session.meta && session.meta.event_url;
   activeJobId = (session.job && session.job.job_id) || jobId;
@@ -634,10 +713,15 @@ export async function renderOptimizerCanvas(app, jobId) {
   const resumes = await api("/api/master-resumes");
   state.wbResumes = resumes;
   renderSplitCanvas(app, session, resumes, workbenchJobs);
-  startPollingFallback(session);
-  startEventStream(session);
-  resumeAlignmentProgress();
-  autoAnalyzeJd(session);
+  const terminalAlignment = isTerminalAlignment(session);
+  if (terminalAlignment) {
+    stopWorkbenchLiveChannels();
+  } else {
+    startPollingFallback(session);
+    startEventStream(session);
+    resumeAlignmentProgress();
+    autoAnalyzeJd(session);
+  }
 }
 
 async function autoAnalyzeJd(session) {
@@ -683,13 +767,7 @@ async function autoAnalyzeJd(session) {
 
 async function loadSession(jobId) {
   try {
-    const session = await api(`/api/workspace/session/${encodeURIComponent(jobId)}`);
-    if (session && session.session_id) return session;
-  } catch {
-    /* fall through to a direct workbench session id */
-  }
-  try {
-    return await api(`/api/workbench/session/${encodeURIComponent(jobId)}`);
+    return await api(`/api/workspace/session/${encodeURIComponent(jobId)}`);
   } catch {
     return null;
   }
@@ -697,6 +775,10 @@ async function loadSession(jobId) {
 
 function startEventStream(session) {
   if (!session || !session.meta || !session.meta.event_url) return;
+  if (isTerminalAlignment(session)) {
+    stopEventStream();
+    return;
+  }
   stopEventStream();
   const controller = new AbortController();
   activeEventAbort = controller;
@@ -744,6 +826,9 @@ function startEventStream(session) {
 function startPollingFallback(session) {
   stopPollingFallback();
   if (!session || !session.session_id) return;
+  if (isTerminalAlignment(session)) {
+    return;
+  }
   fallbackEtag = (session.meta && session.meta.etag) || "";
   fallbackPollTimer = window.setInterval(() => pollSessionFallback(session.session_id), 2500);
   pollSessionFallback(session.session_id);
@@ -757,6 +842,18 @@ function stopPollingFallback() {
   fallbackEtag = "";
 }
 
+function isTerminalAlignment(session) {
+  return ["failed", "canceled", "succeeded"].includes(
+    session && session.alignment && session.alignment.status,
+  );
+}
+
+function stopWorkbenchLiveChannels() {
+  stopAlignmentPoll();
+  stopPollingFallback();
+  stopEventStream();
+}
+
 async function pollSessionFallback(sessionId) {
   if (!fallbackPollTimer || !activeSession) return;
   try {
@@ -768,9 +865,13 @@ async function pollSessionFallback(sessionId) {
       `/api/workbench/session/${encodeURIComponent(sessionId)}`,
       { headers },
     );
+    /* Route changes stop the poller while a request is in flight; a stale
+       response must not repaint the new route with the workbench canvas. */
+    if (!fallbackPollTimer || !activeSession) return;
     if (response.status === 304) return;
     if (!response.ok) return;
     const updated = await response.json();
+    if (!fallbackPollTimer || !activeSession) return;
     const nextEtag = updated.meta && updated.meta.etag;
     if (nextEtag === fallbackEtag) return;
     fallbackEtag = nextEtag || "";
@@ -792,7 +893,7 @@ async function pollSessionFallback(sessionId) {
     }
     activeSession = updated;
     const app = $("#app-router-view");
-    if (app) {
+    if (app && activeSession.session_id === sessionId) {
       const resumes = await api("/api/master-resumes");
       renderSplitCanvas(app, activeSession, resumes, workbenchJobs);
     }
@@ -940,12 +1041,21 @@ async function resumeAlignmentProgress() {
   }
   let snapshot;
   try {
-    snapshot = await api(`/api/jobs/${encodeURIComponent(analysisId)}`);
+    snapshot = await api(
+      `/api/jobs/${encodeURIComponent(analysisId)}/analysis-status`,
+    );
   } catch {
     /* The pinned analysis job was cleaned up (TTL). Keep the canvas open
      * with the persisted data and let the user rerun alignment; never
      * bounce a valid job's workspace back to the Dashboard. */
     stopAlignmentPoll();
+    return;
+  }
+  if (snapshot.status === "expired") {
+    setAlignmentTerminal({
+      status: "failed",
+      error: "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成",
+    });
     return;
   }
   if (snapshot.status === "failed" || snapshot.status === "canceled") {
@@ -965,7 +1075,7 @@ async function resumeAlignmentProgress() {
 /* Reset the alignment state to a terminal status (failed/canceled) and
  * repaint, so the run button becomes usable again ("重新运行对齐"). */
 function setAlignmentTerminal(snapshot) {
-  stopAlignmentPoll();
+  stopWorkbenchLiveChannels();
   alignmentReconciled = true;
   if (!activeSession) return;
   const status = snapshot.status === "canceled" ? "canceled" : "failed";
@@ -1014,10 +1124,19 @@ export async function cancelActiveAlignment() {
   }
   let snapshot;
   try {
-    snapshot = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+    snapshot = await api(
+      `/api/jobs/${encodeURIComponent(jobId)}/analysis-status`,
+    );
   } catch {
     stopAlignmentPoll();
     window.location.hash = "#/dashboard";
+    return;
+  }
+  if (snapshot.status === "expired") {
+    setAlignmentTerminal({
+      status: "failed",
+      error: "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成",
+    });
     return;
   }
   if (!["queued", "running"].includes(snapshot.status)) {
@@ -1037,7 +1156,8 @@ export async function cancelActiveAlignment() {
     return;
   }
   /* running: cancel is a no-op server-side; stop local waiting and reset
-     to idle so the workspace is not stuck with a disabled run button. */
+     to idle so the workspace is not stuck with a disabled run button. The
+     task still finishes in the background and its result is persisted. */
   stopAlignmentPoll();
   alignmentReconciled = false;
   if (activeSession) {
@@ -1049,10 +1169,13 @@ export async function cancelActiveAlignment() {
     };
     rerenderActiveCanvas();
   }
-  toast("任务运行中无法中断，已停止本地等待", "info");
+  toast("任务将继续在后台完成，结果仍会保存；已停止本地等待", "info");
 }
 
 export async function startAlignmentRun(jobId, resumeId, granularity, focus, runEval) {
+  if (!jobId) {
+    throw new Error("岗位上下文尚未就绪，请刷新后重试");
+  }
   /* A fresh run must not compare against the previous run's original text,
      accepted indices, or accumulated draft. */
   state.wbOriginalContent = null;
@@ -1124,22 +1247,34 @@ async function pollAlignmentJob() {
   const jobId = activePollJobId;
   if (!jobId) return;
   try {
-    const snapshot = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+    const snapshot = await api(
+      `/api/jobs/${encodeURIComponent(jobId)}/analysis-status`,
+    );
     const app = $("#app-router-view");
     if (activeSession && app) {
+      const resolvedStatus =
+        snapshot.status === "expired" ? "failed" : snapshot.status;
       activeSession.alignment = {
-        status: snapshot.status === "succeeded" ? "succeeded" : snapshot.status === "failed" ? "failed" : "running",
+        status: resolvedStatus === "succeeded" ? "succeeded" : resolvedStatus === "failed" ? "failed" : "running",
         stage: snapshot.stage || snapshot.status || "",
-        error: snapshot.error || null,
+        error:
+          snapshot.error ||
+          (snapshot.status === "expired"
+            ? "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成"
+            : null),
         diffs: (snapshot.result && snapshot.result.diffs) || [],
         invalid_diffs: (snapshot.result && snapshot.result.invalid_diffs) || [],
         draft: (snapshot.result && snapshot.result.draft) || activeSession.alignment?.draft || null,
         eval_score: (snapshot.result && snapshot.result.eval_score) || null,
       };
-      if (["succeeded", "failed", "canceled"].includes(snapshot.status)) {
-        stopAlignmentPoll();
+      if (
+        ["succeeded", "failed", "canceled", "expired"].includes(
+          snapshot.status,
+        )
+      ) {
+        stopWorkbenchLiveChannels();
         alignmentReconciled = true;
-        if (snapshot.status === "succeeded") {
+        if (resolvedStatus === "succeeded") {
           const reloadTarget =
             activeJobId ||
             activeSession.session_id ||
@@ -1158,8 +1293,9 @@ async function pollAlignmentJob() {
             workbenchJobs,
           );
           toast(
-            snapshot.error || `对齐任务：${snapshot.status}`,
-            snapshot.status === "failed" ? "error" : "info",
+            activeSession.alignment.error ||
+              `对齐任务：${resolvedStatus}`,
+            resolvedStatus === "failed" ? "error" : "info",
           );
         }
         return;
@@ -1269,37 +1405,6 @@ export function copyAlignMarkdown(jobId, session) {
   }
 }
 
-export function exportAlignMarkdown(jobId, session) {
-  const alignment = (session && session.alignment) || {};
-  const job = (session && session.job) || {};
-  const diffs = alignment.diffs || [];
-  const match =
-    (alignment.eval_score && alignment.eval_score.jd_match_score) ||
-    (session && session.gap && session.gap.score) ||
-    "-";
-  const content = [
-    `# ${job.title || "对齐简历"}`,
-    "",
-    `> 匹配度：${match}/100`,
-    "",
-    "## 对齐内容",
-    "",
-    alignment.draft || "（尚未生成定稿）",
-    "",
-    "## 修改建议",
-    "",
-    ...diffs.map(
-      (diff, index) =>
-        `${index + 1}. [${diff.type || "modify"}] ${diff.reason || ""}${diff.provenance_state ? `（${PROVENANCE_LABELS[diff.provenance_state] || diff.provenance_state}）` : ""}`,
-    ),
-  ].join("\n");
-  download(
-    `resualign-${job.title || "job"}.md`,
-    content,
-    "text/markdown;charset=utf-8",
-  );
-}
-
 function fallbackCopy(text) {
   const node = document.createElement("textarea");
   node.value = text;
@@ -1314,13 +1419,4 @@ function fallbackCopy(text) {
     toast("复制失败，请手动选择", "error");
   }
   node.remove();
-}
-
-export function exportAlignJson(jobId, session) {
-  const job = (session && session.job) || {};
-  download(
-    `resualign-${job.title || "job"}.json`,
-    JSON.stringify(session, null, 2),
-    "application/json",
-  );
 }

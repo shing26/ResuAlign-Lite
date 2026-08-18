@@ -193,7 +193,7 @@ def test_init_idempotency_key_reuses_session():
 def test_get_workspace_session_is_read_only():
     job = _create_job()
     with patch("resualign.api.profile_jd") as profile_mock, patch(
-        "resualign.api.profile_and_gaps"
+        "resualign.api.analyze_gaps"
     ) as gaps_mock:
         r = client.get(
             f"/api/workspace/session/{job['job_id']}",
@@ -373,7 +373,9 @@ def test_session_pipeline_emits_gap_ready():
             "tech_tags": ["Python"],
         },
     ), patch(
-        "resualign.api.profile_and_gaps", return_value=(profile, gap)
+        "resualign.api.profile_jd", return_value=profile
+    ), patch(
+        "resualign.api.analyze_gaps", return_value=gap
     ):
         state = client.post(
             "/api/workbench/session/init",

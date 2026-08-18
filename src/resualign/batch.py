@@ -23,6 +23,7 @@ class BatchAlignRequest(BaseModel):
     granularity: Literal['fine', 'medium', 'coarse'] = 'fine'
     prompt_focus: Literal['balanced', 'quantified', 'skills'] = 'balanced'
     custom_prompt: str | None = None
+    run_eval: bool | None = None
 
     @model_validator(mode='after')
     def _validate_job_ids(self) -> 'BatchAlignRequest':

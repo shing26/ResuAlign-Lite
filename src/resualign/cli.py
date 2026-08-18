@@ -89,10 +89,11 @@ def main(argv=None):
         model=args.model,
     )
 
-    if not config.api_key:
+    if not config.is_llm_configured:
         print(
-            "Error: API key not set. Set via --api-key, .env file, "
-            f"or {config.provider.upper()}_API_KEY environment variable.",
+            "Error: LLM not configured. Set via --api-key, .env file, "
+            f"or {config.provider.upper()}_API_KEY environment variable, "
+            "or switch to Ollama local node.",
             file=sys.stderr,
         )
         sys.exit(1)

@@ -23,6 +23,7 @@ import pytest
 import resualign.api as api_module
 import resualign.cli as cli_module
 from resualign.agent.headless import run_headless, run_headless_round
+from resualign.agent.policy_llm import LLMJdIntakePolicy
 from resualign.jobs import JobRegistry
 from resualign.models import DiffItem, Report, ResuAlignConfig
 from resualign.settings_store import SettingsStore
@@ -71,6 +72,13 @@ def temp_stores(tmp_path):
         api_module._import_rate_limiter,
     ):
         limiter.reset()
+
+
+@pytest.fixture(autouse=True)
+def deterministic_agent_policy(monkeypatch):
+    """Keep headless rounds deterministic unless a test opts into the LLM."""
+    monkeypatch.setenv("RESUALIGN_AGENT_POLICY", "deterministic")
+    yield
 
 
 def _config() -> ResuAlignConfig:
@@ -184,6 +192,10 @@ def test_round_with_no_blockers_and_no_candidates():
     stats = run_headless_round(tenant_id="daemon-empty")
     assert stats == {
         "blockers_seen": 0,
+        "blocker_decisions": 0,
+        "blocked": 0,
+        "resolved": 0,
+        "degraded": 0,
         "align_candidates": 0,
         "align_queued": 0,
     }
@@ -199,6 +211,9 @@ def test_round_sees_blocker_and_keeps_it_pending():
     )
     stats = run_headless_round(tenant_id=tenant)
     assert stats["blockers_seen"] == 1
+    assert stats["blocker_decisions"] == 1
+    assert stats["blocked"] == 1
+    assert stats["resolved"] == 0
     assert stats["align_candidates"] == 0
 
     # The daemon never auto-resolves a blocker: it stays pending for a human.
@@ -266,6 +281,10 @@ def test_run_headless_once_runs_single_round_without_server():
     )
     assert stats == {
         "blockers_seen": 0,
+        "blocker_decisions": 0,
+        "blocked": 0,
+        "resolved": 0,
+        "degraded": 0,
         "align_candidates": 0,
         "align_queued": 0,
     }
@@ -311,6 +330,50 @@ def test_handle_blocker_policies():
         assert api_module._jobs.get_blocker(
             tenant, blocker["blocker_id"]
         )["status"] == "pending"
+
+
+def test_build_intake_policy_uses_llm_when_api_key_configured(monkeypatch):
+    from resualign.agent.headless import _build_intake_policy
+
+    monkeypatch.delenv("RESUALIGN_AGENT_POLICY", raising=False)
+    monkeypatch.setattr(api_module, "build_config", lambda: _config())
+    policy = _build_intake_policy("daemon-llm")
+    assert isinstance(policy, LLMJdIntakePolicy)
+
+
+def test_build_intake_policy_env_override_keeps_deterministic(monkeypatch):
+    from resualign.agent.headless import _build_intake_policy
+
+    monkeypatch.setenv("RESUALIGN_AGENT_POLICY", "deterministic")
+    monkeypatch.setattr(api_module, "build_config", lambda: _config())
+    policy = _build_intake_policy("daemon-det")
+    assert not isinstance(policy, LLMJdIntakePolicy)
+
+
+def test_round_falls_back_to_legacy_classification_when_agent_fails(
+    monkeypatch,
+):
+    tenant = "daemon-fallback"
+    blocker = api_module._jobs.create_blocker(
+        tenant,
+        url="https://example.com/jobs/1",
+        reason="boom",
+        category="network_error",
+    )
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("agent down")
+
+    monkeypatch.setattr(
+        "resualign.agent.headless.process_pending_blockers", _boom
+    )
+    stats = run_headless_round(tenant_id=tenant)
+    assert stats["blockers_seen"] == 1
+    assert stats["blocker_decisions"] == 0
+    assert stats["blocked"] == 1
+    assert stats["degraded"] == 0
+    stored = api_module._jobs.get_blocker(tenant, blocker["blocker_id"])
+    assert stored["status"] == "pending"
 
 
 def test_alignment_candidates_exclude_in_flight_pinned_jobs():

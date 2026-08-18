@@ -217,7 +217,7 @@ export function buildDiagnosisMarkdownFrom(diagnosis, title, originalContent = "
 /* Hash routing                                                        */
 /* ------------------------------------------------------------------ */
 
-const ROUTE_NAMES = ["resume", "resumes", "jobs", "workspace", "settings", "dashboard"];
+const ROUTE_NAMES = ["resume", "resumes", "jobs", "workspace", "settings", "dashboard", "today"];
 
 export function parseHashValue(hash) {
   const value = String(hash || "").replace(/^#\/?/, "");
@@ -544,7 +544,15 @@ export function diffCard(diff, index, jobId) {
   const provenance = diff.provenance || diff.provenance_quote || "";
   const stateKey = diff.provenance_state || "pending_review";
   const label = PROVENANCE_LABELS[stateKey] || "来源待核对";
-  const invalid = type === "add" && !String(provenance || "").trim();
+  const noProvenance = !String(provenance || "").trim();
+  const invalid =
+    stateKey === "missing" ||
+    (type === "add" && noProvenance && stateKey !== "verified");
+  const invalidWarning = invalid
+    ? type === "add" && noProvenance
+      ? "该条为无来源新增，已作为硬门禁拦截，待人工复核。"
+      : "缺少来源，已作为硬门禁拦截，待人工复核。"
+    : "";
   const typeLabel = { modify: "改写", add: "新增", remove: "删除" }[type] || "改写";
   const originalText = diff.original || "";
   const proposedText = diff.proposed || "";
@@ -582,7 +590,7 @@ export function diffCard(diff, index, jobId) {
       </div>
       ${diff.reason ? `<div class="diff-card__reason" data-diff-reason>${esc(diff.reason)}</div>` : ""}
       ${provenance ? `<div class="provenance-quote">${esc(provenance)}</div>` : ""}
-      ${invalid ? `<div class="diff-card__warning" role="alert">该条为无来源新增，已作为硬门禁拦截，不可直接采纳。</div>` : ""}
+      ${invalidWarning ? `<div class="diff-card__warning" role="alert">${esc(invalidWarning)}</div>` : ""}
       <div class="diff-card__actions" data-diff-actions>
         ${invalid ? "" : `<button class="btn btn-primary btn-sm" data-action="accept-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">采纳</button>`}
         <button class="btn btn-ghost btn-sm" data-action="reject-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">忽略</button>
@@ -654,7 +662,7 @@ export function alignmentControls(session, resumes, jobId) {
       </div>
       <div class="align-form__row">
         <button class="btn btn-primary" type="submit" data-align-run ${running ? "disabled" : ""}>${running ? "对齐运行中..." : failed ? "重新运行对齐" : "一键生成对齐简历"}</button>
-        <button class="btn btn-outline btn-sm" type="button" data-action="cancel-align-job" ${running ? "" : "hidden"}>取消任务</button>
+        <button class="btn btn-outline btn-sm" type="button" data-action="cancel-align-job" ${running ? "" : "hidden"}>${alignment.status === "queued" ? "取消任务" : "停止等待"}</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="apply-accepted-bullets" data-id="${esc(jobId)}" ${!alignment.draft ? "disabled" : ""}>应用已采纳</button>
         <span class="small muted" data-align-status>${alignment.status === "succeeded" ? "已生成对齐版本" : alignment.status === "failed" ? `任务失败：${esc(alignment.error || "请重试")}` : alignment.status === "running" || alignment.status === "queued" ? "正在生成..." : ""}</span>
       </div>
@@ -674,17 +682,26 @@ export function alignmentControls(session, resumes, jobId) {
     </form>`;
 }
 
-export function exportDock(jobId, session) {
-  const alignment = (session && session.alignment) || {};
+export function exportDock(jobId, job = {}) {
+  const hasFinal = Boolean(job && job.final_draft);
+  const hasDraft = Boolean(
+    job && (job.final_draft || job.draft || (job.alignment && job.alignment.draft)),
+  );
+  const finalDisabled = hasFinal ? "" : " disabled title=\"请先保存定稿\"";
+  const statusBadge = hasFinal
+    ? `<span class="badge badge-green" data-export-final-badge>已定稿 v${Number(job.final_draft_version) || 1}</span>`
+    : hasDraft
+      ? '<span class="badge badge-amber" data-export-draft-badge>草稿</span>'
+      : "";
   return `
     <details class="export-dock" data-export-dock>
       <summary class="btn btn-secondary btn-sm export-dock__trigger">导出 ▾</summary>
       <div class="export-dock__menu">
-        <button class="btn btn-secondary btn-sm" type="button" data-action="copy-align-markdown" data-id="${esc(jobId)}">复制 Markdown</button>
-        <button class="btn btn-secondary btn-sm" type="button" data-action="export-align-markdown" data-id="${esc(jobId)}">下载 Markdown</button>
-        <button class="btn btn-secondary btn-sm" type="button" data-action="export-align-pdf" data-id="${esc(jobId)}">导出 PDF</button>
-        <button class="btn btn-outline btn-sm" type="button" data-action="export-align-json" data-id="${esc(jobId)}">导出 JSON</button>
-        ${alignment.draft ? `<span class="badge badge-green">已生成</span>` : ""}
+        <button class="btn btn-secondary btn-sm" type="button" data-action="export-final-draft" data-id="${esc(jobId)}"${finalDisabled}>导出 PDF</button>
+        <button class="btn btn-secondary btn-sm" type="button" data-action="export-final-draft-md" data-id="${esc(jobId)}"${finalDisabled}>导出 Markdown</button>
+        <button class="btn btn-outline btn-sm" type="button" data-action="export-final-draft-json" data-id="${esc(jobId)}"${finalDisabled}>导出 JSON</button>
+        ${statusBadge}
+        ${hasDraft && !hasFinal ? '<span class="small muted" data-export-final-hint>请先保存定稿</span>' : ""}
       </div>
     </details>`;
 }
@@ -703,6 +720,57 @@ function boardMoreMenu(job) {
     </details>`;
 }
 
+const MATCH_DIMENSIONS = [
+  { key: "hard_skills", label: "硬技能" },
+  { key: "scenario", label: "场景" },
+  { key: "expression", label: "表达" },
+  { key: "experience", label: "经验" },
+];
+
+function matchDimensionHtml(detail) {
+  return MATCH_DIMENSIONS.map(({ key, label }) => {
+    const raw = detail[key];
+    const num = raw == null || raw === "" ? Number.NaN : Number(raw);
+    const value = Number.isFinite(num) ? Math.round(Math.max(0, Math.min(100, num))) : null;
+    const width = value == null ? 0 : value;
+    return `
+      <div class="match-dim" data-match-dimension="${key}">
+        <span>${label}</span>
+        <div class="match-dim__track"><i style="width:${width}%"></i></div>
+        <b>${value == null ? "—" : value}</b>
+      </div>`;
+  }).join("");
+}
+
+function boardMatchBlock(job) {
+  const detail = job.match_score_detail;
+  const match = job.match_score != null ? Math.round(job.match_score) : null;
+  const reason = String(job.match_reason || "").trim();
+  const source = job.match_reason_source;
+  const stale = job.match_stale === true;
+  const hasDetail = detail && typeof detail === "object";
+  if (!hasDetail && match == null && !reason && !stale) return "";
+  const parts = [];
+  if (hasDetail) {
+    parts.push(`<div class="board-match__dims">${matchDimensionHtml(detail)}</div>`);
+  } else if (match != null) {
+    parts.push('<div class="board-match__legacy" data-match-legacy>旧版匹配分</div>');
+  }
+  parts.push(`
+    <div class="board-match__reason" data-match-reason>
+      <span>${esc(reason || "暂无推荐理由")}</span>
+      ${source === "fallback" ? '<span class="badge badge-gray" data-match-source="fallback">规则理由</span>' : source === "llm" ? '<span class="badge badge-blue" data-match-source="llm">AI 理由</span>' : ""}
+    </div>`);
+  if (stale) {
+    parts.push(`
+      <div class="board-match__stale">
+        <span class="badge badge-amber" data-match-stale title="岗位或主简历已变化，需重新评分">匹配已过期</span>
+        <button type="button" class="btn btn-outline btn-sm" data-action="recompute-match" data-id="${esc(job.job_id)}">重新评分</button>
+      </div>`);
+  }
+  return `<div class="board-match" data-match-block>${parts.join("")}</div>`;
+}
+
 export function boardCard(job) {
   const canonical = canonicalJobStatus(job.status);
   const optionsHtml = JOB_STATUS_CANONICAL.map(
@@ -717,11 +785,12 @@ export function boardCard(job) {
     <article class="board-card copilot-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}" draggable="true" data-board-drag>
       <div class="board-card__top">
         <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
-        ${match != null ? `<span class="match-badge ${matchTone(match)}" title="${matchTitle}">${match}</span>` : `<span class="match-badge match-badge--empty" title="${matchTitle}">待分析</span>`}
+        ${match != null ? `<span class="match-badge ${matchTone(match)}" data-match-total title="${matchTitle}">${match}</span>` : `<span class="match-badge match-badge--empty" title="${matchTitle}">待分析</span>`}
         <button type="button" class="board-card__title" data-action="open-optimizer" data-id="${job.job_id}">${esc(job.title)}</button>
         ${boardMoreMenu(job)}
       </div>
       <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
+      ${boardMatchBlock(job)}
       <div class="board-card__tags">
         <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
         <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
@@ -758,11 +827,12 @@ export function renderBoardCard(job) {
     <article class="board-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}">
       <div class="board-card__top">
         <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
-        ${match != null ? `<span class="match-badge ${matchTone(match)}" title="${matchTitle}">${match}</span>` : `<span class="match-badge match-badge--empty" title="${matchTitle}">待分析</span>`}
+        ${match != null ? `<span class="match-badge ${matchTone(match)}" data-match-total title="${matchTitle}">${match}</span>` : `<span class="match-badge match-badge--empty" title="${matchTitle}">待分析</span>`}
         <button type="button" class="board-card__title" data-action="open-job-timeline" data-id="${job.job_id}">${esc(job.title)}</button>
         ${boardMoreMenu(job)}
       </div>
       <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
+      ${boardMatchBlock(job)}
       <div class="board-card__tags">
         <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
         <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
@@ -1564,9 +1634,157 @@ export function renderReminderBanner(reminder) {
     </div>`;
 }
 
+/* 今日待办视图：消费 GET /api/reminders?scope=today 的 ReminderItem 契约。
+ * 每项展示岗位、状态、阶段、下一步与到期时间，提供工作台跳转和安排跟进
+ * 入口；没有待办时渲染空状态，不影响其他模块。 */
+export function todayViewHtml(items = []) {
+  const list = Array.isArray(items) ? items : [];
+  const statusLabels = {
+    applied: "已投递",
+    interview: "面试中",
+    offer: "已拿 Offer",
+    withdrawn: "已放弃",
+  };
+  const rows = list.map((item) => {
+    const dueDate = parseNextStepDate(item.next_step_due_at);
+    const due = dueDate
+      ? `${dueDate.getMonth() + 1}/${dueDate.getDate()} ${String(dueDate.getHours()).padStart(2, "0")}:${String(dueDate.getMinutes()).padStart(2, "0")}`
+      : item.next_step_due_at
+        ? String(item.next_step_due_at)
+        : "";
+    const status = statusLabels[item.status_canonical]
+      || item.status_canonical
+      || "";
+    const stage = String(item.interview_stage || "").trim();
+    const nextStep = String(item.next_step || "").trim();
+    return `
+      <li class="today-row" data-today-item data-job-id="${esc(item.job_id || "")}">
+        <a class="today-row__main" href="#/workspace/${encodeURIComponent(item.job_id || "")}">
+          <strong>${esc(item.title || item.job_id || "未命名岗位")}</strong>
+          <span class="today-row__meta">
+            ${item.company ? `<span>${esc(item.company)}</span>` : ""}
+            ${status ? `<span class="pill">${esc(status)}</span>` : ""}
+            ${stage ? `<span class="pill pill-warn">${esc(stage)}</span>` : ""}
+          </span>
+          <span class="today-row__step">${esc(nextStep || "待安排下一步")}</span>
+        </a>
+        <span class="today-row__due ${item.overdue ? "is-overdue" : ""}" data-today-due>
+          ${item.overdue ? "已过期" : "今日"}${due ? ` · ${esc(due)}` : ""}
+        </span>
+        <button class="btn btn-ghost btn-sm" type="button"
+          data-action="open-job-followup" data-id="${esc(item.job_id || "")}">安排跟进</button>
+      </li>`;
+  }).join("");
+  return `
+    <div class="view view-scroll today-view">
+      <div class="today-head">
+        <div>
+          <h2>今日待办</h2>
+          <p>今天到期与已逾期的跟进，按到期时间升序</p>
+        </div>
+        <span class="badge badge-amber" data-today-count>${list.length} 条</span>
+      </div>
+      ${list.length
+        ? `<ul class="today-list" data-today-list>${rows}</ul>`
+        : `<div class="panel empty-state" data-today-empty>
+            <div class="big">今天没有到期的跟进</div>
+            <div>在岗位详情或工作台里安排下一步，这里会自动汇总。</div>
+            <a class="btn btn-primary" href="#/jobs">去岗位库</a>
+          </div>`}
+    </div>`;
+}
+
+/** 提醒与通知设置面板。status 来自 GET /api/settings/status.reminder，
+ *  只展示脱敏的已配置状态；webhook URL/secret 与 SMTP 密码永不回显。 */
+export function reminderSettingsPanelHtml(settings, reminderStatus = {}) {
+  const s = settings && typeof settings === "object" ? settings : {};
+  const reminder = (s.reminder && typeof s.reminder === "object" ? s.reminder : {});
+  const status = reminderStatus && typeof reminderStatus === "object"
+    ? reminderStatus
+    : {};
+  const enabled = Boolean(reminder.enabled);
+  const autoFollowup = reminder.auto_followup_reminder !== false;
+  const provider = String(reminder.provider || "generic");
+  const webhookReady = Boolean(status.webhook_url_configured);
+  const smtpReady = Boolean(status.smtp_configured);
+  const providerLabels = {
+    generic: "通用 Webhook",
+    feishu: "飞书",
+    wecom: "企业微信",
+    telegram: "Telegram",
+  };
+  const providerOptions = Object.entries(providerLabels)
+    .map(
+      ([value, label]) =>
+        `<option value="${esc(value)}"${value === provider ? " selected" : ""}>${esc(label)}</option>`,
+    )
+    .join("");
+  return `
+    <section class="panel reminder-settings-panel" data-reminder-settings-panel>
+      <div class="panel-head">
+        <div>
+          <h2>提醒与通知</h2>
+          <p>今日待办、Webhook 与邮件发送配置</p>
+        </div>
+        <span class="badge ${enabled ? "badge-teal" : "badge-gray"}" data-reminder-enabled>
+          ${enabled ? "已开启" : "已关闭"}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="reminder-channel-status" data-reminder-channel-status>
+          <div>
+            <span>Webhook</span>
+            <strong data-reminder-webhook-status>${webhookReady ? "已配置" : "未配置（环境变量）"}</strong>
+            <span class="small muted">Secret 仅通过环境变量配置</span>
+          </div>
+          <div>
+            <span>SMTP</span>
+            <strong data-reminder-smtp-status>${smtpReady ? "已配置" : "未配置"}</strong>
+            <span class="small muted">${status.smtp_password_configured ? "密码已配置" : "密码仅通过环境变量配置"}</span>
+          </div>
+        </div>
+        <form data-form="settings-reminder" class="reminder-settings-form">
+          <label class="check-row">
+            <input type="checkbox" name="enabled" ${enabled ? "checked" : ""}>
+            <span>开启到期提醒（每 ${status.interval_seconds || "60"} 秒扫描一次）</span>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" name="auto_followup_reminder" ${autoFollowup ? "checked" : ""}>
+            <span>投递后自动创建 3 天跟进提醒</span>
+          </label>
+          <div class="form-grid">
+            <div class="field"><label>Webhook 类型</label>
+              <select name="provider" class="field-input">${providerOptions}</select>
+              <span class="small muted">Webhook URL 由 RESUALIGN_REMINDER_WEBHOOK_URL 配置</span>
+            </div>
+            <div class="field"><label>SMTP 主机</label>
+              <input type="text" name="smtp_host" value="${esc(reminder.smtp_host || "")}" placeholder="smtp.example.com">
+            </div>
+            <div class="field"><label>SMTP 端口</label>
+              <input type="number" name="smtp_port" min="1" max="65535" value="${esc(reminder.smtp_port == null ? "" : reminder.smtp_port)}" placeholder="587">
+            </div>
+            <div class="field"><label>SMTP 用户名</label>
+              <input type="text" name="smtp_user" value="${esc(reminder.smtp_user || "")}" autocomplete="off">
+            </div>
+            <div class="field"><label>发件人</label>
+              <input type="text" name="smtp_from" value="${esc(reminder.smtp_from || "")}" placeholder="name@example.com">
+            </div>
+            <div class="field"><label>收件人</label>
+              <input type="text" name="smtp_to" value="${esc(reminder.smtp_to || "")}" placeholder="me@example.com">
+              <span class="small muted">SMTP 密码由 RESUALIGN_SMTP_PASSWORD 配置，不会在此回显</span>
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn btn-outline btn-sm" type="submit">保存提醒配置</button>
+          </div>
+        </form>
+      </div>
+    </section>`;
+}
+
 /* #26: 工作台定稿后的投递闭环引导。final_draft 生成后显示三步，
  * 记录投递完成前进到安排跟进；终态或已安排跟进视为全部完成。 */
-export function workbenchGuideSteps(job) {
+export function workbenchGuideSteps(job, hasDraft = false) {
   const status = canonicalJobStatus(job && job.status);
   const applied = ["applied", "interview", "offer", "withdrawn"].includes(
     status,
@@ -1576,20 +1794,21 @@ export function workbenchGuideSteps(job) {
       (job.next_step_due_at || job.next_step || job.interview_stage),
   );
   const terminal = status === "offer" || status === "withdrawn";
+  const savedDraft = Boolean(job && job.final_draft);
   return [
     {
       key: "draft",
-      label: "已生成定稿",
-      done: Boolean(job && job.final_draft),
+      label: savedDraft ? "已生成定稿" : "已生成草稿",
+      done: savedDraft,
     },
     { key: "record", label: "记录投递", done: applied },
     { key: "followup", label: "安排跟进", done: followedUp || terminal },
   ];
 }
 
-export function workbenchGuideHtml(job) {
-  if (!job || !job.final_draft) return "";
-  const steps = workbenchGuideSteps(job);
+export function workbenchGuideHtml(job, hasDraft = false) {
+  if (!job || !(job.final_draft || hasDraft)) return "";
+  const steps = workbenchGuideSteps(job, hasDraft);
   const current = steps.find((step) => !step.done);
   const currentKey = current ? current.key : "";
   const action =
@@ -1621,6 +1840,29 @@ export function workbenchPrimaryButtonHtml(resumes, alignmentRunning = false) {
       : "重新生成对齐"
     : "先创建主简历";
   return `<button class="btn btn-primary" type="button" data-action="${hasResumes ? "run-alignment" : "go-resumes"}" ${hasResumes && alignmentRunning ? "disabled" : ""}>${esc(label)}</button>`;
+}
+
+export function offerCelebrationHtml(job) {
+  const status = canonicalJobStatus(job && job.status);
+  if (status !== "offer") return "";
+  const title = esc((job && job.title) || "你拿到了 Offer");
+  const company = job && job.company ? ` · ${esc(job.company)}` : "";
+  const colors = ["#f43f5e", "#f59e0b", "#10b981", "#3b82f6", "#a855f7"];
+  const pieces = Array.from(
+    { length: 28 },
+    (_, i) =>
+      `<span class="confetti confetti--${i % 6}" ` +
+      `style="--d:${(i * 97) % 1200}ms;--x:${(i * 13) % 100}%;` +
+      `--delay:${(i % 7) * 80}ms;--c:${colors[i % colors.length]}"` +
+      `></span>`,
+  ).join("");
+  return (
+    `<div class="offer-celebration" data-offer-celebration>` +
+    `<div class="offer-celebration__confetti">${pieces}</div>` +
+    `<div class="offer-celebration__card">` +
+    `<strong>OFFER</strong><span>${title}${company}</span>` +
+    `</div></div>`
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -1710,9 +1952,64 @@ export function jobApplyLinkHtml(job) {
   return `<button type="button" class="btn btn-ghost btn-sm" data-action="open-job-detail" data-id="${esc(job && job.job_id ? job.job_id : "")}">补链接</button>`;
 }
 
+const SUBMITTED_JOB_STATUSES = new Set([
+  "applied",
+  "interview",
+  "offer",
+  "withdrawn",
+]);
+
+/* 岗位详情抽屉的投递定稿快照区。created_at DESC 由后端排序；无快照的存量
+ * 已投递岗位降级展示当前 final_draft，并明确标注“早期投递版本”。 */
+export function applicationSnapshotsHtml(job, snapshots = []) {
+  const items = (Array.isArray(snapshots) ? snapshots : [])
+    .map((snapshot) => {
+      const score =
+        snapshot.match_score != null ? Math.round(snapshot.match_score) : "—";
+      const appliedAt =
+        snapshot.applied_at || formatDate(snapshot.created_at);
+      return `<div class="snapshot-item" data-snapshot-item data-snapshot-id="${esc(snapshot.snapshot_id)}">
+        <div class="snapshot-item__head">
+          <strong>第 ${esc(snapshot.version_index)} 版投递定稿</strong>
+          <span class="small muted">${esc(appliedAt)}</span>
+        </div>
+        <div class="snapshot-item__meta">匹配度 ${esc(score)}${snapshot.master_resume_id ? ` · 主简历 ${esc(snapshot.master_resume_id)}` : ""}</div>
+        <div class="row">
+          <button type="button" class="btn btn-secondary btn-sm" data-action="open-snapshot" data-id="${esc(snapshot.snapshot_id)}">查看 Markdown</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="export-snapshot-md" data-id="${esc(snapshot.snapshot_id)}">下载 Markdown</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="export-snapshot-pdf" data-id="${esc(snapshot.snapshot_id)}">导出 PDF</button>
+        </div>
+      </div>`;
+    })
+    .join("");
+  if (items) {
+    return `<div class="snapshot-section"><h4>投递定稿快照</h4><div class="snapshot-list">${items}</div></div>`;
+  }
+  const canonical = canonicalJobStatus(job && job.status);
+  if (
+    SUBMITTED_JOB_STATUSES.has(canonical) &&
+    job &&
+    (job.final_draft || "").trim()
+  ) {
+    return `<div class="snapshot-section snapshot-section--legacy" data-legacy-snapshot>
+      <h4>投递定稿快照</h4>
+      <div class="snapshot-item snapshot-item--legacy">
+        <p class="legacy-warning">⚠️ 早期投递版本（未生成不可篡改快照）</p>
+        <p class="small muted">岗位已投递但尚无不可篡改快照，以下为当前 final_draft。</p>
+        <div class="row">
+          <button type="button" class="btn btn-secondary btn-sm" data-action="view-legacy-draft" data-id="${esc(job.job_id)}">查看当前定稿 Markdown</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="export-legacy-draft-md" data-id="${esc(job.job_id)}">下载 Markdown</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="export-legacy-draft-pdf" data-id="${esc(job.job_id)}">导出 PDF</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  return "";
+}
+
 /* 岗位详情/时间线弹窗表单。next_step_due_at 为 datetime-local（本地时间，
  * 无时区，与 parseNextStepDate 语义一致）；interview_stage 值域含“无”。 */
-export function jobTimelineFormHtml(job) {
+export function jobTimelineFormHtml(job, snapshots = []) {
   const statusOptions = JOB_STATUS_CANONICAL.map(
     (value) =>
       `<option value="${value}" ${canonicalJobStatus(job.status) === value ? "selected" : ""}>${esc(JOB_STATUS_LABELS[value])}</option>`,
@@ -1739,6 +2036,7 @@ export function jobTimelineFormHtml(job) {
         <div class="field"><label>放弃日期</label><input type="datetime-local" name="rejected_at" value="${esc(job.rejected_at || "")}"></div>
         <div class="field wide"><label>备注</label><textarea name="notes" rows="3">${esc(job.notes || "")}</textarea></div>
       </div>
+      ${applicationSnapshotsHtml(job, snapshots)}
       <div class="actions">
         <button class="btn btn-primary btn-sm" type="button" data-action="record-application" data-id="${esc(job.job_id)}">记录投递</button>
         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
@@ -1769,6 +2067,7 @@ export function jobFollowupFormHtml(job) {
         <div class="field wide"><label>下一步</label><input type="text" name="next_step" value="${esc(job.next_step || "")}"></div>
         <div class="field wide"><label>到期时间</label><input type="datetime-local" name="next_step_due_at" value="${esc(job.next_step_due_at || "")}"></div>
       </div>
+      <p class="small muted" style="margin:6px 0 0;color:var(--danger,#c0392b)">提示：保存后岗位状态将更新为「面试中」并记录投递日期。</p>
       <div class="actions">
         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
         <button class="btn btn-primary" type="submit">保存跟进</button>
@@ -1961,14 +2260,14 @@ export function dashboardKpiHtml(kpi = {}) {
     { key: "resumes", label: "主简历", value: resumes, tone: "info", hint: "可用的主简历底稿" },
     { key: "jobs", label: "岗位", value: jobs, tone: "teal", hint: "岗位库总数" },
     { key: "applied", label: "已投递", value: applied, tone: "success", hint: applyRate != null ? `占岗位 ${applyRate}%` : "暂无岗位可计算转化" },
-    { key: "followups", label: "待跟进", value: followups, tone: "warning", hint: "需要安排下一步" },
+    { key: "followups", label: "待跟进", value: followups, tone: "warning", hint: "今日到期与逾期" },
   ];
   return `
     <div class="dashboard-kpi-grid" data-dashboard-kpis>
       ${cards
         .map(
           (card) => `
-        <div class="dashboard-kpi dashboard-kpi--${card.tone}" data-kpi="${card.key}">
+        <div class="dashboard-kpi dashboard-kpi--${card.tone}" data-kpi="${card.key}"${card.key === "followups" ? ` data-action="goto-today" role="button" tabindex="0" title="查看今日待办"` : ""}>
           <div class="dashboard-kpi__label">${esc(card.label)}</div>
           <div class="dashboard-kpi__value">${esc(card.value)}</div>
           <div class="dashboard-kpi__hint">${esc(card.hint)}</div>
@@ -1976,6 +2275,37 @@ export function dashboardKpiHtml(kpi = {}) {
         )
         .join("")}
     </div>`;
+}
+
+/* 空工作台引导：两个核心数据源都没有时给出第一步操作。 */
+export function dashboardEmptyGuideHtml({
+  hasJobs = false,
+  hasResume = false,
+  hasFollowups = false,
+} = {}) {
+  if (hasJobs || hasResume || hasFollowups) return "";
+  return `
+    <section class="panel panel-card empty-state dashboard-empty-guide" data-dashboard-empty>
+      <div class="big">欢迎使用 ResuAlign</div>
+      <p class="muted">先导入一份主简历和一个岗位，工作台即可开始对齐。</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="#/resume">上传简历</a>
+        <a class="btn btn-secondary" href="#/jobs">导入 JD</a>
+      </div>
+    </section>`;
+}
+
+/* 岗位库空状态引导：直达添加岗位，而不是只看到空看板列。 */
+export function jobsEmptyGuideHtml() {
+  return `
+    <section class="panel panel-card empty-state jobs-empty-guide" data-jobs-empty>
+      <div class="big">还没有岗位</div>
+      <p class="muted">粘贴一份 JD 或导入收藏链接开始。</p>
+      <div class="actions">
+        <button class="btn btn-primary" type="button" data-action="show-add-job">粘贴 JD</button>
+        <a class="btn btn-secondary" href="#/workspace">打开工作台</a>
+      </div>
+    </section>`;
 }
 
 /* 技能缺口热力图：横向热力条，宽度按 count / max 比例，颜色按相对强度
@@ -2020,14 +2350,19 @@ const ALIGNMENT_STATUS_LABELS = {
   running: "分析中",
   queued: "排队中",
   failed: "分析失败",
+  canceled: "已取消",
   idle: "待分析",
   pending: "待分析",
 };
 
+export function alignmentStatusLabel(status) {
+  return ALIGNMENT_STATUS_LABELS[status]
+    || (status ? String(status) : "待分析");
+}
+
 export function quickContinueHtml(qc) {
   if (!qc || typeof qc !== "object" || !qc.job_id) return "";
-  const status = ALIGNMENT_STATUS_LABELS[qc.alignment_status]
-    || (qc.alignment_status ? String(qc.alignment_status) : "待分析");
+  const status = alignmentStatusLabel(qc.alignment_status);
   return `
     <section class="panel panel-card quick-continue" data-quick-continue>
       <div class="quick-continue__head">
@@ -2500,6 +2835,63 @@ export function settingsBentoHtml(activeNode, latency) {
         <span class="settings-bento__label">API 延迟</span>
         <strong class="settings-bento__value">${esc(latencyText)}</strong>
         <span class="settings-bento__hint">${hasLatency ? "最近一次节点连通测试" : "尚未测试，可点节点卡「测试连通性」"}</span>
+      </div>
+    </section>`;
+}
+
+/** Cost-guard panel: today's usage plus the daily cap / price form.
+ *
+ * settings comes from GET /api/settings; daily comes from the status
+ * endpoint so the page can show the live block state.
+ */
+export function costGuardPanelHtml(settings, daily = {}) {
+  const s = settings && typeof settings === "object" ? settings : {};
+  const capValue = s.daily_llm_cap == null ? "" : String(s.daily_llm_cap);
+  const inValue =
+    s.llm_cost_per_1k_in == null ? "" : String(s.llm_cost_per_1k_in);
+  const outValue =
+    s.llm_cost_per_1k_out == null ? "" : String(s.llm_cost_per_1k_out);
+  const callsNum = Number(daily.calls);
+  const calls = Number.isFinite(callsNum) ? callsNum : 0;
+  const costNum = Number(daily.estimated_cost);
+  const cost = Number.isFinite(costNum) ? costNum : 0;
+  const hasCap = daily.cap != null && daily.cap !== "";
+  const capLabel = hasCap ? String(daily.cap) : "不限制";
+  const remainingLabel =
+    hasCap && daily.remaining != null ? String(daily.remaining) : "—";
+  const blocked = Boolean(daily.blocked);
+  return `
+    <section class="panel cost-guard-panel" data-cost-guard-panel>
+      <div class="panel-head">
+        <div>
+          <h2>成本护栏</h2>
+          <p>每日 LLM 调用上限、估算成本与拦截状态</p>
+        </div>
+        ${blocked ? '<span class="badge badge-red" data-cost-blocked>今日已阻止新 LLM 任务</span>' : ""}
+      </div>
+      <div class="panel-body">
+        <div class="cost-guard-status" data-cost-status data-cost-blocked="${blocked ? "true" : "false"}">
+          <div><span>今日调用</span><strong data-daily-calls>${esc(calls)}</strong></div>
+          <div><span>估算成本</span><strong data-daily-cost>¥${esc(cost.toFixed(4))}</strong></div>
+          <div><span>今日上限</span><strong data-daily-cap>${esc(capLabel)}</strong></div>
+          <div><span>剩余额度</span><strong data-daily-remaining>${esc(remainingLabel)}</strong></div>
+        </div>
+        <form data-form="settings-cost-guard" class="cost-guard-form">
+          <div class="form-grid">
+            <div class="field"><label>每日调用上限</label>
+              <input type="number" name="daily_llm_cap" min="0" step="1" value="${esc(capValue)}" placeholder="留空表示不限制">
+              <span class="small muted">达到上限后新任务返回 429，缓存命中不受影响</span></div>
+            <div class="field"><label>每 1k 输入 token（元）</label>
+              <input type="number" name="llm_cost_per_1k_in" min="0" step="0.001" value="${esc(inValue)}" placeholder="例如 0.5">
+              <span class="small muted">仅用于成本估算</span></div>
+            <div class="field"><label>每 1k 输出 token（元）</label>
+              <input type="number" name="llm_cost_per_1k_out" min="0" step="0.001" value="${esc(outValue)}" placeholder="例如 1.5">
+              <span class="small muted">仅用于成本估算</span></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn btn-outline btn-sm" type="submit">保存成本护栏</button>
+          </div>
+        </form>
       </div>
     </section>`;
 }

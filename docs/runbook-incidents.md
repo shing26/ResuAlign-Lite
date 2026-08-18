@@ -201,10 +201,12 @@ Invoke-RestMethod http://127.0.0.1:8000/health
 此处只列演练要点：
 
 1. **备份**（服务可不停）：`powershell -File scripts/backup.ps1` → 产物
-   `data/backups/jobs.db-<yyyyMMdd-HHmmss>.db`，每个备份都做过 `PRAGMA integrity_check`。
+   `data/backups/jobs.db-<yyyyMMdd-HHmmss>.db` 与 `manifest-*.json`，
+   每个备份都做过 `PRAGMA integrity_check`，上传目录同时进快照。
 2. **还原前置**：停止服务；记录还原前基线行数。
-3. **还原**：移走现有 `jobs.db`（保留现场）→ 删除陈旧的 `-wal`/`-shm` → 复制备份文件到位
-   （**不要**直接复制运行中的 `.db`，必须用备份产物）。
+3. **一键还原**：`powershell -File scripts/restore.ps1`（自动选最新 manifest；
+   也可用 `scripts/restore.sh`）。脚本保留 `*.pre-restore-*` 现场、清理
+   陈旧 `-wal`/`-shm`，DB 与上传目录一起还原，避免跨时间点混搭。
 4. **验证**：`/health` 正常；各表行数与备份一致（`docs/backup-restore.md` §2.4 有一键对比命令）。
 5. **收尾**：确认业务数据正常后删除 `*.pre-restore-*` 现场文件。
 

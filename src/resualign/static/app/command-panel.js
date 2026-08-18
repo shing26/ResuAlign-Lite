@@ -169,6 +169,23 @@ export function initializeCommandPanel() {
         if (suggestion) {
           event.preventDefault();
           goToSuggestion(suggestion);
+        } else if (!event.shiftKey) {
+          /* textarea keeps Enter for newlines unless this is the submit
+           * gesture; preserve the old single-line Enter behavior. */
+          event.preventDefault();
+          const form = $("[data-form='command-panel']");
+          if (form) {
+            if (typeof form.requestSubmit === "function") {
+              form.requestSubmit();
+            } else {
+              form.dispatchEvent(
+                new window.Event("submit", {
+                  bubbles: true,
+                  cancelable: true,
+                }),
+              );
+            }
+          }
         }
       }
     });

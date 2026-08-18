@@ -320,7 +320,7 @@ def run_key_path(
 
     session_id = page.evaluate("location.hash.split('/').pop()")
     session = api_call(
-        base, "GET", f"/api/workbench/session/{session_id}"
+        base, "GET", f"/api/workspace/session/{session_id}"
     )
     job_id = session["job"]["job_id"]
     created["job_ids"].append(job_id)

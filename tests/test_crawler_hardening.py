@@ -11,7 +11,9 @@ from resualign.crawler import (
     _clean_company_name,
     _generic_job_text,
     _HostRateLimiter,
+    _job_text_score,
     _json_script_text,
+    _looks_like_portal_config,
     _meta_from_soup,
     crawl_jd,
 )
@@ -472,6 +474,82 @@ def test_normal_text_no_fallback(monkeypatch):
 
     text = crawl_jd("https://campus-talent.alibaba.com/campus/position/x")
     assert "AI应用研发工程师" in text
+
+
+def test_portal_config_detection_and_score():
+    raw = (
+        '{"pageConfig":{"domainModuleConfig":'
+        '{"moduleTitle":"八大领域前沿课题等你挑战"}}}'
+    )
+    real = "岗位职责：负责后端系统设计。\n任职要求：熟悉 Python 与 FastAPI。"
+    assert _looks_like_portal_config(raw)
+    assert not _looks_like_portal_config(real)
+    assert _job_text_score(real) > _job_text_score(raw)
+
+
+def test_portal_config_static_triggers_rendered_fallback(monkeypatch):
+    portal_html = (
+        "<html><body><main><pre>"
+        '{"pageConfig":{"domainModuleConfig":{"moduleTitle":"八大领域前沿课题"}}}'
+        "</pre></main></body></html>"
+    )
+    rendered_html = (
+        "<html><body><main><h1>后端开发实习生</h1>"
+        "<p>岗位职责：负责后端系统设计与开发。</p>"
+        "<p>任职要求：熟悉 Python 与 FastAPI。</p></main></body></html>"
+    )
+
+    monkeypatch.setattr(
+        "resualign.crawler._fetch_stream",
+        lambda *args, **kwargs: _FakeStream(_response(portal_html)),
+    )
+    monkeypatch.setattr(
+        "resualign.crawler._playwright_fetch_html",
+        lambda url, timeout=30, request_id=None: rendered_html,
+    )
+
+    text = crawl_jd("https://careers.example.com/job/123")
+
+    assert "岗位职责" in text
+    assert "任职要求" in text
+    assert "八大领域" not in text
+
+
+def test_unknown_ssr_json_triggers_rendered_fallback(monkeypatch):
+    payload = {
+        "data": {
+            "position": {
+                "sections": [
+                    {"name": f"section-{i}", "content": "招聘页面配置内容"}
+                    for i in range(12)
+                ]
+            }
+        }
+    }
+    raw = json.dumps(payload, ensure_ascii=False)
+    portal_html = (
+        "<html><body><main><pre>" + raw + "</pre></main></body></html>"
+    )
+    rendered_html = (
+        "<html><body><main><h1>算法工程师</h1>"
+        "<p>岗位职责：负责推荐模型研发。</p>"
+        "<p>任职要求：熟悉 Python 与深度学习。</p></main></body></html>"
+    )
+
+    monkeypatch.setattr(
+        "resualign.crawler._fetch_stream",
+        lambda *args, **kwargs: _FakeStream(_response(portal_html)),
+    )
+    monkeypatch.setattr(
+        "resualign.crawler._playwright_fetch_html",
+        lambda url, timeout=30, request_id=None: rendered_html,
+    )
+
+    text = crawl_jd("https://recruit.example.net/job/42")
+
+    assert "岗位职责" in text
+    assert "任职要求" in text
+    assert "招聘页面配置内容" not in text
 
 
 def test_playwright_fallback_force_bypasses_enabled_gate(monkeypatch):

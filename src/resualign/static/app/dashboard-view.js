@@ -1,6 +1,7 @@
 /* ResuAlign v3 Dashboard: metric strip + quick continue + skill gaps.
    All values are derived from the live API, never hard-coded. */
-import { esc, formatDate, jobStatusLabel, state } from "./events.js";
+import { alignmentStatusLabel, esc, formatDate, jobStatusLabel, state } from "./events.js";
+import { dashboardEmptyGuideHtml } from "./format.js";
 
 function escAttr(value) {
   return esc(String(value ?? ""));
@@ -56,6 +57,7 @@ export async function renderDashboard(container) {
   const offer = toNumber(kpi.offer);
   const declined = toNumber(kpi.declined);
   const followups = toNumber(kpi.active_followups);
+  const resumeList = Array.isArray(resumes) ? resumes : [];
 
   const alignedCount = jobs.filter(
     (job) => job && job.alignment_status === "succeeded",
@@ -65,17 +67,21 @@ export async function renderDashboard(container) {
 
   const currentResume = Array.isArray(resumes) ? resumes[0] : null;
   const diagnosis =
-    state.diagnosis &&
-    currentResume &&
-    currentResume.latest_diagnosis_job_id &&
-    state.diagnosis.job_id === currentResume.latest_diagnosis_job_id
+    (currentResume && currentResume.latest_diagnosis) ||
+    (state.diagnosis &&
+      currentResume &&
+      currentResume.latest_diagnosis_job_id &&
+      state.diagnosis.job_id === currentResume.latest_diagnosis_job_id
       ? diagnosisFromSnapshot(state.diagnosis)
-      : null;
+      : null);
   const rawScore = diagnosis && Number(diagnosis.score);
   const atsScore =
     Number.isFinite(rawScore) && rawScore >= 0
       ? Math.round(Math.min(100, rawScore))
       : null;
+  const emptyGuide = jobsTotal === 0 && resumeList.length === 0 && followups === 0
+    ? dashboardEmptyGuideHtml()
+    : "";
 
   const kpiCards = `
     <div class="metric-cell" data-kpi="jobs">
@@ -105,10 +111,10 @@ export async function renderDashboard(container) {
       <div class="quick-row" data-quick-continue>
         <div class="quick-main">
           <div class="quick-title">${escAttr(quick.title || "未命名岗位")}</div>
-          <div class="quick-meta">${escAttr(quick.company || "未知公司")} · ${escAttr(quick.alignment_status || "待分析")}</div>
+          <div class="quick-meta">${escAttr(quick.company || "未识别公司")} · ${escAttr(alignmentStatusLabel(quick.alignment_status))}</div>
         </div>
         <div class="quick-right">
-          <span class="pill ${quick.alignment_status === "succeeded" ? "pill-success" : "pill-warn"}">${escAttr(quick.alignment_status || "待分析")}</span>
+          <span class="pill ${quick.alignment_status === "succeeded" ? "pill-success" : "pill-warn"}">${escAttr(alignmentStatusLabel(quick.alignment_status))}</span>
           <a class="btn btn-primary btn-sm" href="#/workspace/${encodeURIComponent(quick.job_id)}">继续对齐</a>
         </div>
       </div>`
@@ -161,6 +167,7 @@ export async function renderDashboard(container) {
 
   container.innerHTML = `
     <div class="view view-scroll dashboard-view">
+      ${emptyGuide}
       <div class="metric-strip dashboard-strip" data-dashboard-kpis>${kpiCards}</div>
       <div class="dash-grid">
         <section class="panel main-pane">

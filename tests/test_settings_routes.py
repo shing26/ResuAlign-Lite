@@ -13,6 +13,7 @@ from resualign.api import app
 from resualign.api.routers.settings import mask_api_key
 from resualign.jobs import JobRegistry
 from resualign.llm_nodes import LLMNodeStore
+from resualign.llm_usage import LLMUsageStore
 from resualign.models import ResuAlignConfig
 from resualign.settings_store import SettingsStore, default_settings
 from resualign.workspace import (
@@ -48,6 +49,7 @@ def temp_settings_stores(tmp_path):
         "import_batches": getattr(api_module, "_import_batches", {}),
         "settings": getattr(api_module, "_settings_store", None),
         "llm_nodes": getattr(api_module, "_llm_nodes", None),
+        "llm_usage": getattr(api_module, "_llm_usage", None),
         "runtime_llm": dict(config_module.RUNTIME_LLM_OVERRIDE),
     }
     db_path = tmp_path / "settings.db"
@@ -58,6 +60,7 @@ def temp_settings_stores(tmp_path):
     api_module._jobs = JobLibraryStore(db_path=db_path)
     api_module._settings_store = SettingsStore(db_path=db_path)
     api_module._llm_nodes = LLMNodeStore(db_path=db_path)
+    api_module._llm_usage = LLMUsageStore(db_path=db_path)
     api_module._PERSONAL_MODE = False
     api_module._payloads = {}
     api_module._import_batches = {}
@@ -80,6 +83,7 @@ def temp_settings_stores(tmp_path):
     api_module._import_batches = saved["import_batches"]
     api_module._settings_store = saved["settings"]
     api_module._llm_nodes = saved["llm_nodes"]
+    api_module._llm_usage = saved["llm_usage"]
     config_module.RUNTIME_LLM_OVERRIDE.update(saved["runtime_llm"])
     for limiter in (
         api_module._auth_rate_limiter,
@@ -603,3 +607,88 @@ def test_test_connection_uses_stored_config_without_body():
             mock_post.call_args.kwargs["headers"]["Authorization"]
             == "Bearer sk-stored-key"
         )
+
+
+def test_reminder_settings_roundtrip_and_never_echoes_secrets():
+    headers = _auth_headers()
+    r = client.put(
+        "/api/settings",
+        json={
+            "reminder": {
+                "enabled": True,
+                "provider": "feishu",
+                "smtp_host": "smtp.example.com",
+                "smtp_port": 587,
+                "smtp_user": "notify",
+                "smtp_from": "from@example.com",
+                "smtp_to": "to@example.com",
+            }
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200
+    reminder = r.json()["reminder"]
+    assert reminder["enabled"] is True
+    assert reminder["provider"] == "feishu"
+    assert reminder["auto_followup_reminder"] is True
+    assert reminder["smtp_host"] == "smtp.example.com"
+    assert reminder["smtp_port"] == 587
+    assert "webhook_url" not in reminder
+    assert "webhook_secret" not in reminder
+    assert "smtp_password" not in reminder
+
+    r = client.get("/api/settings", headers=headers)
+    assert r.status_code == 200
+    assert r.json()["reminder"]["provider"] == "feishu"
+    assert "smtp_password" not in r.json()["reminder"]
+
+    r = client.put(
+        "/api/settings",
+        json={"reminder": {"auto_followup_reminder": False}},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["reminder"]["auto_followup_reminder"] is False
+
+    r = client.put(
+        "/api/settings",
+        json={"reminder": {"auto_followup_reminder": "no"}},
+        headers=headers,
+    )
+    assert r.status_code == 422
+
+
+def test_reminder_settings_reject_invalid_provider_and_port():
+    headers = _auth_headers()
+    r = client.put(
+        "/api/settings",
+        json={"reminder": {"provider": "slack"}},
+        headers=headers,
+    )
+    assert r.status_code == 422
+    r = client.put(
+        "/api/settings",
+        json={"reminder": {"smtp_port": 70000}},
+        headers=headers,
+    )
+    assert r.status_code == 422
+
+
+def test_settings_status_reports_reminder_configured_state(monkeypatch):
+    headers = _auth_headers()
+    monkeypatch.setenv("RESUALIGN_REMINDER_WEBHOOK_URL", "https://hook.test/x")
+    monkeypatch.setenv("RESUALIGN_REMINDER_WEBHOOK_SECRET", "webhook-secret")
+    monkeypatch.setenv("RESUALIGN_SMTP_PASSWORD", "smtp-password")
+    client.put(
+        "/api/settings",
+        json={"reminder": {"enabled": True, "provider": "telegram"}},
+        headers=headers,
+    )
+    r = client.get("/api/settings/status", headers=headers)
+    assert r.status_code == 200
+    reminder = r.json()["reminder"]
+    assert reminder["enabled"] is True
+    assert reminder["provider"] == "telegram"
+    assert reminder["webhook_url_configured"] is True
+    assert reminder["webhook_secret_configured"] is True
+    assert reminder["smtp_password_configured"] is True

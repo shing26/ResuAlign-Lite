@@ -1,5 +1,6 @@
 
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 import resualign.api as api_module
 
+from ...store_base import resolve_upload_dir
 from ..deps import get_current_user
 from ..schemas import (
     MasterResumeCreateRequest,
@@ -36,6 +38,13 @@ async def parse_resume_upload(file: UploadFile=File(...), user: dict[str, Any]=D
         raise HTTPException(status_code=422, detail='Uploaded file is empty')
     if len(raw) > api_module._MAX_RESUME_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=f'File exceeds {api_module._MAX_RESUME_UPLOAD_BYTES // (1024 * 1024)}MB')
+    # Keep the original upload under <DataDir>/uploads/ so backups and
+    # restores can cover it; parsing still happens on a temp copy.
+    upload_dir = resolve_upload_dir()
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(filename).name or f'resume{suffix}'
+    stored_path = upload_dir / f'{int(time.time())}-{safe_name}'
+    stored_path.write_bytes(raw)
     try:
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / f'resume{suffix}'
@@ -52,6 +61,7 @@ async def parse_resume_upload(file: UploadFile=File(...), user: dict[str, Any]=D
         'content': text,
         'sections': api_module.structured_resume_sections(text),
         'size': len(raw),
+        'stored_upload': str(stored_path),
     }
 
 @router.get('/api/master-resumes')
@@ -78,13 +88,14 @@ def get_master_resume(resume_id: str, user: dict[str, Any]=Depends(get_current_u
 def diagnose_master_resume(resume_id: str, request: Request, user: dict[str, Any]=Depends(get_current_user)):
     """Queue an independent no-JD diagnosis for one master resume."""
     api_module._enforce_rate_limit(request, api_module._analyze_rate_limiter)
+    api_module.enforce_daily_llm_cap(user['user_id'])
     resume = api_module._resumes.get_master_resume(user['user_id'], resume_id)
     if resume is None:
         raise HTTPException(status_code=404, detail='Master resume not found')
     if not (resume.get('content') or '').strip():
         raise HTTPException(status_code=422, detail='Resume content is empty; edit it before diagnosing')
-    if not api_module.build_config().api_key:
-        raise HTTPException(status_code=503, detail='API key not configured. Set via .env file or environment variables.')
+    if not api_module.build_config().is_llm_configured:
+        raise HTTPException(status_code=503, detail='LLM 未配置。请设置 API Key（远程供应商）或激活 Ollama 本地节点。')
     payload = {'resume_text': resume['content'], 'jd_text': None, 'run_eval': False, 'diagnosis': True, 'master_resume_id': resume_id}
     job_id = api_module._queue_job(user, payload)
     api_module._resumes.set_latest_diagnosis_job(user['user_id'], resume_id, job_id)

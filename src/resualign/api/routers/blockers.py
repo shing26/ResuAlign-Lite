@@ -19,7 +19,10 @@ def list_blockers(
     status: str | None = None,
     user: dict[str, Any] = Depends(get_current_user),
 ):
-    """List the tenant's blocker queue, optionally filtered by status."""
+    """List the tenant's blocker queue, optionally filtered by status.
+
+    status 参数缺省时返回全部状态（含 pending/ignored/resolved）；统计与展示请显式传 status=pending。
+    """
     try:
         return api_module._fetcher.list_blockers(
             user["user_id"], status=status

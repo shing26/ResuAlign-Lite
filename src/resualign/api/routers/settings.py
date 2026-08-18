@@ -7,9 +7,15 @@ from fastapi import APIRouter, Depends, HTTPException
 
 import resualign.api as api_module
 
-from ...config import clear_runtime_llm, register_stored_llm_provider, set_runtime_llm
+from ...config import (
+    EnvSettings,
+    clear_runtime_llm,
+    register_stored_llm_provider,
+    set_runtime_llm,
+)
 from ...job_library import JOB_STATUSES
 from ...llm import _DEFAULT_PROVIDER_URLS
+from ...reminders import reminder_configuration
 from ...settings_store import default_settings
 from ..deps import get_current_user
 from ..schemas import SettingsTestConnectionRequest, SettingsUpdateRequest
@@ -139,27 +145,141 @@ def _validate_vocabulary_update(req: SettingsUpdateRequest) -> None:
             )
 
 
+
+@router.get('/api/settings/role-bindings')
+def get_role_bindings(user: dict[str, Any] = Depends(get_current_user)):
+    """Return the current role-to-node bindings, available roles, and nodes."""
+    nodes = getattr(api_module, "_llm_nodes", None)
+    if nodes is None:
+        return {"roles": [], "nodes": [], "bindings": {}}
+    bindings = nodes.get_role_bindings(user["user_id"])
+    node_list = [
+        {
+            "node_id": n["node_id"],
+            "name": n["name"],
+            "provider": n["provider"],
+            "model": n["model"],
+        }
+        for n in nodes.list_nodes(user["user_id"])
+    ]
+    return {
+        "roles": list(nodes.list_roles()),
+        "nodes": node_list,
+        "bindings": bindings,
+    }
+
+
+@router.put('/api/settings/role-bindings')
+def update_role_bindings(
+    body: dict[str, str | None],
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Update role bindings. Accepts a dict of {role: node_id_or_null}."""
+    nodes = getattr(api_module, "_llm_nodes", None)
+    if nodes is None:
+        raise HTTPException(status_code=503, detail="LLM node store not available")
+    for role, node_id in body.items():
+        if node_id is None:
+            nodes.delete_role_binding(user["user_id"], role)
+        else:
+            ok = nodes.set_role_binding(user["user_id"], role, str(node_id))
+            if not ok:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Node {node_id} not found for role {role}",
+                )
+    return {"status": "ok", "bindings": nodes.get_role_bindings(user["user_id"])}
+
+
+@router.post('/api/settings/role-bindings/presets')
+def apply_role_preset(
+    body: dict[str, str],
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Apply a one-click preset: unified, hybrid, or local."""
+    nodes = getattr(api_module, "_llm_nodes", None)
+    if nodes is None:
+        raise HTTPException(status_code=503, detail="LLM node store not available")
+    preset = (body.get("preset") or "").strip().lower()
+    all_nodes = nodes.list_nodes(user["user_id"])
+    if not all_nodes:
+        return {"status": "ok", "message": "No nodes configured", "bindings": {}}
+
+    # Find active / ollama / cloud nodes
+    active = next((n for n in all_nodes if n["is_active"]), all_nodes[0])
+    ollama_nodes = [n for n in all_nodes if n["provider"] == "ollama"]
+    cloud_nodes = [n for n in all_nodes if n["provider"] != "ollama"]
+
+    if preset == "unified":
+        nodes.clear_role_bindings(user["user_id"])
+    elif preset == "hybrid":
+        # Extractives -> ollama; generative -> cloud
+        if not ollama_nodes or not cloud_nodes:
+            message = "Hybrid preset requires both an Ollama and a cloud node"
+            return {"status": "skipped", "message": message, "bindings": nodes.get_role_bindings(user["user_id"])}
+        ollama_node = ollama_nodes[0]
+        cloud_node = cloud_nodes[0]
+        nodes.set_role_binding(user["user_id"], "diagnose", ollama_node["node_id"])
+        nodes.set_role_binding(user["user_id"], "profiler", ollama_node["node_id"])
+        nodes.set_role_binding(user["user_id"], "gap_analyzer", ollama_node["node_id"])
+        nodes.set_role_binding(user["user_id"], "editor", cloud_node["node_id"])
+        nodes.set_role_binding(user["user_id"], "evaluator", cloud_node["node_id"])
+    elif preset == "local":
+        if not ollama_nodes:
+            message = "Local preset requires an Ollama node"
+            return {"status": "skipped", "message": message, "bindings": nodes.get_role_bindings(user["user_id"])}
+        ollama_node = ollama_nodes[0]
+        for role in nodes.list_roles():
+            nodes.set_role_binding(user["user_id"], role, ollama_node["node_id"])
+    else:
+        raise HTTPException(status_code=422, detail=f"Unknown preset: {preset}")
+
+    return {"status": "ok", "bindings": nodes.get_role_bindings(user["user_id"])}
 @router.get('/api/settings')
 def get_settings(user: dict[str, Any]=Depends(get_current_user)):
     """Return the current user's editable workbench settings."""
-    return _public_settings(
-        api_module._settings_store.get_settings(user['user_id'])
+    settings = api_module._settings_store.get_settings(user['user_id'])
+    if not settings.get('local_ingest_token'):
+        api_module._settings_store.get_or_create_local_ingest_token(
+            user['user_id']
+        )
+        settings = api_module._settings_store.get_settings(user['user_id'])
+    return _public_settings(settings)
+
+
+@router.post('/api/settings/local-ingest-token/reset')
+def reset_local_ingest_token(
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Generate a fresh local-ingest token, invalidating the old one."""
+    token = api_module._settings_store.reset_local_ingest_token(
+        user['user_id']
     )
+    return {'local_ingest_token': token}
 
 @router.put('/api/settings')
 def update_settings(req: SettingsUpdateRequest, user: dict[str, Any]=Depends(get_current_user)):
     """Persist validated settings updates for the current user."""
     _validate_vocabulary_update(req)
     payload = req.model_dump()
+    nullable_keys = (
+        "llm_provider",
+        "llm_model",
+        "daily_llm_cap",
+        "llm_cost_per_1k_in",
+        "llm_cost_per_1k_out",
+    )
     updates = {
         key: value
         for key, value in payload.items()
-        if value is not None or key in ("llm_provider", "llm_model")
+        if value is not None or key in nullable_keys
     }
     if req.llm is not None:
         # Keep only explicitly-set fields so omitted keys leave the stored
         # value untouched, while explicit nulls clear them.
         updates["llm"] = req.llm.model_dump(exclude_unset=True)
+    if req.reminder is not None:
+        updates["reminder"] = req.reminder.model_dump(exclude_unset=True)
     try:
         saved = api_module._settings_store.update_settings(
             user['user_id'], updates
@@ -178,8 +298,14 @@ def update_settings(req: SettingsUpdateRequest, user: dict[str, Any]=Depends(get
 def settings_status(user: dict[str, Any] = Depends(get_current_user)):
     """Return runtime status so the settings page is not just raw forms."""
     config = api_module.build_config()
+    reminder = api_module._settings_store.get_settings(
+        user["user_id"]
+    ).get("reminder") or {}
+    reminder_config = reminder_configuration(api_module._settings_store)
+    env = EnvSettings()
+    daily = api_module.llm_daily_status(user["user_id"])
     return {
-        "api_key_configured": bool(config.api_key),
+        "api_key_configured": config.is_llm_configured,
         "provider": config.provider,
         "model": config.model,
         "personal_mode": api_module._PERSONAL_MODE,
@@ -192,6 +318,19 @@ def settings_status(user: dict[str, Any] = Depends(get_current_user)):
         "application_count": len(
             api_module._applications.list_applications(user["user_id"])
         ),
+        "reminder": {
+            "enabled": bool(reminder.get("enabled")),
+            "provider": reminder.get("provider") or "generic",
+            "webhook_url_configured": bool(
+                reminder_config.get("webhook_url")
+            ),
+            "webhook_secret_configured": bool(
+                reminder_config.get("webhook_secret")
+            ),
+            "smtp_configured": bool(reminder_config.get("smtp_host")),
+            "smtp_password_configured": bool(env.resualign_smtp_password),
+        },
+        "daily": daily,
     }
 
 
@@ -312,5 +451,11 @@ def test_llm_connection(
 def reset_settings(user: dict[str, Any] = Depends(get_current_user)):
     """Restore the built-in vocabulary and default settings."""
     api_module._settings_store.update_settings(user["user_id"], default_settings())
+    # The local-ingest token is a security credential, not a preference:
+    # restoring defaults keeps the current token so the userscript keeps
+    # working until the user explicitly resets it.
+    api_module._settings_store.get_or_create_local_ingest_token(
+        user["user_id"]
+    )
     clear_runtime_llm()
     return _public_settings(api_module._settings_store.get_settings(user["user_id"]))

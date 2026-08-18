@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ResuAlign - Career Studio</title>
-  <link rel="stylesheet" href="/static/styles.css?v=25">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css?v=28">
 </head>
 <body class="app-body app-shell bg-appbg text-white/90 h-screen flex overflow-hidden select-none text-[13px]">
   <aside class="app-rail rail" aria-label="主导航栏">
@@ -29,12 +30,16 @@
         <span class="rail-label">岗位库</span>
         <span class="rail-count" data-jobs-rail-count hidden></span>
       </button>
-      <button type="button" class="nav-btn" data-route="resume" data-tab="resume" aria-selected="true" title="简历中心" aria-label="简历中心">
+      <button type="button" class="nav-btn" data-route="today" data-tab="today" aria-selected="false" title="今日待办" aria-label="今日待办">
         <span class="nav-index" aria-hidden="true">04</span>
+        <span class="rail-label">今日待办</span>
+      </button>
+      <button type="button" class="nav-btn" data-route="resume" data-tab="resume" aria-selected="true" title="简历中心" aria-label="简历中心">
+        <span class="nav-index" aria-hidden="true">05</span>
         <span class="rail-label">简历中心</span>
       </button>
       <button type="button" class="nav-btn" data-route="settings" data-tab="settings" aria-selected="false" title="系统设置" aria-label="系统设置">
-        <span class="nav-index" aria-hidden="true">05</span>
+        <span class="nav-index" aria-hidden="true">06</span>
         <span class="rail-label">系统设置</span>
       </button>
     </nav>
@@ -86,14 +91,14 @@
       <form class="command-palette__form" data-form="command-panel">
         <div class="command-palette__input-row command-search">
           <span class="command-palette__glyph" aria-hidden="true">/</span>
-          <input
-            type="text"
+          <textarea
             name="command"
             data-command-input
+            rows="2"
             autocomplete="off"
             spellcheck="false"
             placeholder="搜索岗位或命令"
-          >
+          ></textarea>
           <kbd>Esc</kbd>
         </div>
         <div class="command-palette__suggestions command-groups" data-command-suggestions hidden></div>
@@ -105,6 +110,6 @@
       </form>
     </div>
   </div>
-  <script type="module" src="/static/app/main.js?v=25"></script>
+  <script type="module" src="/static/app/main.js?v=28"></script>
 </body>
 </html>

@@ -2,7 +2,7 @@ from .llm import LLMClient, _structured_or_json
 from .models import JDProfile
 from .schema_registry import JDProfileSchema
 
-JD_PROFILER_PROMPT_VERSION = "1"
+JD_PROFILER_PROMPT_VERSION = "v1"
 
 # Fields the current JDProfile model accepts. Cached payloads are filtered
 # against this whitelist on read so legacy/extra keys never reach the
@@ -35,6 +35,12 @@ JD_PROFILER_PROMPT = (
     "opening paragraph verbatim as well (e.g., 'high-concurrency platform', "
     "'millions of requests per day'); do not paraphrase them. "
     "Output ONLY JSON."
+    "## Output Constraints\\n"
+    "- Max tokens: 500\\n"
+    "- Temperature: 0.0\\n"
+    "- If uncertain: return empty list instead of guessing\\n"
+    "- If input is empty: return {\"error\": \"empty_input\"}\\n"
+    "- Output ONLY valid JSON, no markdown fences\\n"
 )
 
 

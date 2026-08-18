@@ -13,6 +13,10 @@ from fastapi import Request
 
 import resualign.api as api_module
 from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
+from resualign.llm_usage import reset_llm_tenant, set_llm_tenant
+from resualign.role_router import call_with_role
+
+from .progress_sink import CrawlProgressSink
 
 logger = logging.getLogger(__name__)
 SESSION_TTL_SECONDS = 30 * 60
@@ -399,6 +403,14 @@ def _create_library_job_without_llm(
     if not jd_text:
         raise api_module.UserStoreError("Job description text is required")
     title = (payload.get("title") or "").strip() or api_module._derive_title(jd_text)
+    company = (payload.get("company") or "").strip() or None
+    location = (payload.get("location") or "").strip() or None
+    if not company or not location:
+        extracted_company, extracted_location = (
+            api_module._extract_company_location(jd_text)
+        )
+        company = company or extracted_company
+        location = location or extracted_location
     salary_min = payload.get("salary_min")
     salary_max = payload.get("salary_max")
     if salary_min is None or salary_max is None:
@@ -410,8 +422,8 @@ def _create_library_job_without_llm(
         tenant_id=user["user_id"],
         title=title,
         jd_text=jd_text,
-        company=payload.get("company"),
-        location=payload.get("location"),
+        company=company,
+        location=location,
         salary_min=salary_min,
         salary_max=salary_max,
         salary_currency=payload.get("salary_currency") or "CNY",
@@ -510,6 +522,7 @@ def _run_session_pipeline(session_id: str) -> None:
     if session is None:
         return
     tenant_id = session["tenant_id"]
+    _llm_tenant_token = set_llm_tenant(tenant_id)
     job = session.get("job")
     jd_url = (session.get("jd_url") or "").strip()
     crawl_id = session.get("crawl", {}).get("crawl_id") or uuid.uuid4().hex
@@ -540,17 +553,15 @@ def _run_session_pipeline(session_id: str) -> None:
                 {"crawl_id": crawl_id, "status": "fetching", "stage": "fetching_jd"},
             )
 
-            def on_crawl_stage(stage: str, message: str) -> None:
-                try:
-                    api_module._crawl_tasks.update_state(
-                        crawl_id, stage, stage=message
-                    )
-                except Exception:
-                    pass
+            progress = CrawlProgressSink(
+                api_module._crawl_tasks,
+                crawl_id,
+                tenant_id=tenant_id,
+            )
 
             meta: dict[str, Any] = {}
             jd_text = api_module.crawl_jd(
-                jd_url, meta=meta, on_stage=on_crawl_stage
+                jd_url, meta=meta, on_stage=progress.on_stage
             )
             api_module._session_store.emit(
                 session_id,
@@ -667,27 +678,71 @@ def _run_session_pipeline(session_id: str) -> None:
         profile_dict: Optional[dict[str, Any]] = None
         gap_dict: Optional[dict[str, Any]] = None
         gap_score: Optional[float] = None
-        with api_module.OpenAIClient(config, timeout=60.0) as client:
+        with api_module.OpenAIClient(config, timeout=90.0) as client:
             if resume_text.strip():
-                profile, gap = api_module.profile_and_gaps(
-                    client,
-                    resume_text,
-                    job["jd_text"],
-                    cache=api_module._cache,
-                    tenant=tenant_id,
-                )
-                profile_dict = api_module.jd_profile_to_dict(profile)
-                gap_dict = asdict(gap)
+                # Role-based: JD profiler + gap analyst
+                # Use same client for both (simpler than parallel for SSE)
+                try:
+                    profile, meta_profile = call_with_role(
+                        "profiler", api_module.profile_jd,
+                        api_module._llm_nodes, tenant_id,
+                        fn_kwargs={
+                            "jd_text": job["jd_text"],
+                            "cache": api_module._cache,
+                            "tenant": tenant_id,
+                        },
+                    )
+                    profile_dict = api_module.jd_profile_to_dict(profile)
+                except Exception:
+                    # Fallback to single client
+                    profile = api_module.profile_jd(
+                        client,
+                        job["jd_text"],
+                        cache=api_module._cache,
+                        tenant=tenant_id,
+                    )
+                    profile_dict = api_module.jd_profile_to_dict(profile)
+                import json as _json
+                _profile_str = _json.dumps(profile_dict, ensure_ascii=False)
+                try:
+                    gap, meta_gap = call_with_role(
+                        "gap_analyzer", api_module.analyze_gaps,
+                        api_module._llm_nodes, tenant_id,
+                        fn_kwargs={
+                            "resume_text": resume_text,
+                            "jd_profile_text": _profile_str,
+                        },
+                    )
+                    gap_dict = asdict(gap)
+                except Exception:
+                    gap = api_module.analyze_gaps(
+                        client,
+                        resume_text,
+                        _profile_str,
+                    )
+                    gap_dict = asdict(gap)
                 gap_status = "ready"
                 gap_score = _gap_score(gap)
             else:
-                profile = api_module.profile_jd(
-                    client,
-                    job["jd_text"],
-                    cache=api_module._cache,
-                    tenant=tenant_id,
-                )
-                profile_dict = api_module.jd_profile_to_dict(profile)
+                try:
+                    profile, meta_profile = call_with_role(
+                        "profiler", api_module.profile_jd,
+                        api_module._llm_nodes, tenant_id,
+                        fn_kwargs={
+                            "jd_text": job["jd_text"],
+                            "cache": api_module._cache,
+                            "tenant": tenant_id,
+                        },
+                    )
+                    profile_dict = api_module.jd_profile_to_dict(profile)
+                except Exception:
+                    profile = api_module.profile_jd(
+                        client,
+                        job["jd_text"],
+                        cache=api_module._cache,
+                        tenant=tenant_id,
+                    )
+                    profile_dict = api_module.jd_profile_to_dict(profile)
                 gap_status = "blocked"
 
         try:
@@ -800,4 +855,6 @@ def _run_session_pipeline(session_id: str) -> None:
             "job.error",
             {"error": f"Session pipeline failed: {exc}", "stage": "pipeline"},
         )
+    finally:
+        reset_llm_tenant(_llm_tenant_token)
 

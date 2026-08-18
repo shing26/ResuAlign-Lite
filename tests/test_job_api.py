@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
-from resualign.api.services.jobs import _derive_title
+from resualign.api.services.jobs import _derive_title, _extract_company_location
 from resualign.crawler import CrawlError
 from resualign.jobs import JobRegistry
 from resualign.settings_store import SettingsStore
@@ -705,6 +705,58 @@ def test_derive_title_keeps_english_first_line():
     assert _derive_title(text) == "Senior Backend Engineer"
 
 
+def test_derive_title_strips_generic_bracket_prefix():
+    text = "【测试岗位】高级数据分析师\n岗位职责：负责数据建模"
+    assert _derive_title(text) == "高级数据分析师"
+
+
+def test_derive_title_keeps_recruit_line_with_role_keyword():
+    text = "【招聘】高级数据分析师，岗位职责：负责数据建模，任职要求：..."
+    assert _derive_title(text) == "高级数据分析师"
+
+
+def test_derive_title_strips_company_recruit_prefix():
+    text = "公司招聘高级数据分析师 岗位职责：负责数据建模"
+    assert _derive_title(text) == "高级数据分析师"
+
+
+def test_derive_title_truncates_single_line_jd():
+    text = "公司：XX科技，地点：上海，高级数据分析师，负责数据建模，任职要求：..."
+    assert _derive_title(text) == "高级数据分析师"
+
+
+def test_derive_title_truncates_single_line_jd_without_separator():
+    text = "高级数据分析师岗位职责：负责数据建模任职要求：本科"
+    assert _derive_title(text) == "高级数据分析师"
+
+
+def test_extract_company_location_from_labeled_jd():
+    company, location = _extract_company_location(
+        "公司：XX科技，地点：上海\n高级数据分析师\n岗位职责：..."
+    )
+    assert company == "XX科技"
+    assert location == "上海"
+
+
+def test_create_job_extracts_company_location_from_jd():
+    with patch("resualign.api._classify_job", return_value={}):
+        r = client.post(
+            "/api/jobs",
+            json={
+                "jd_text": (
+                    "公司：XX科技，地点：上海\n"
+                    "高级数据分析师\n"
+                    "岗位职责：负责数据建模"
+                )
+            },
+        )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["title"] == "高级数据分析师"
+    assert body["company"] == "XX科技"
+    assert body["location"] == "上海"
+
+
 def test_derive_title_fallback_when_all_noise():
     assert _derive_title("【招聘】\n薪资面议\nhttps://example.com") == "未命名岗位"
 
@@ -759,3 +811,80 @@ def test_delete_job_keeps_other_tenants_analysis_job():
     r = client.delete(f"/api/jobs/{job['job_id']}")
     assert r.status_code == 204
     assert api_module._registry.get(analysis.job_id) is not None
+
+
+def test_analysis_status_reports_expired_without_404():
+    r = client.get("/api/jobs/missing-analysis/analysis-status")
+    assert r.status_code == 200
+    assert r.json() == {
+        "job_id": "missing-analysis",
+        "status": "expired",
+    }
+
+    analysis = api_module._registry.create(
+        {"jd_text": "Python backend engineer."}, None, tenant_id="local"
+    )
+    r = client.get(f"/api/jobs/{analysis.job_id}/analysis-status")
+    assert r.status_code == 200
+    assert r.json()["job_id"] == analysis.job_id
+    assert r.json()["status"] == "queued"
+
+
+def _create_personal_job() -> dict:
+    with patch("resualign.api._classify_job", side_effect=_classify):
+        r = client.post(
+            "/api/jobs",
+            json={
+                "title": "Followup Engineer",
+                "jd_text": "Python backend engineer. 20-30K",
+            },
+        )
+    assert r.status_code == 201
+    return r.json()
+
+
+def test_mark_applied_creates_auto_followup_reminder():
+    job = _create_personal_job()
+    r = client.patch(
+        f"/api/jobs/{job['job_id']}",
+        json={"status": "applied", "applied_at": "2026-08-10"},
+    )
+    assert r.status_code == 200
+    updated = r.json()
+    assert updated["status_canonical"] == "applied"
+    assert updated["next_step"] == "投递后跟进"
+    assert updated["next_step_due_at"] == "2026-08-13T09:00:00"
+
+
+def test_auto_followup_keeps_explicit_followup_schedule():
+    job = _create_personal_job()
+    r = client.patch(
+        f"/api/jobs/{job['job_id']}",
+        json={
+            "status": "applied",
+            "next_step": "准备面试",
+            "next_step_due_at": "2026-08-20T10:00:00",
+        },
+    )
+    assert r.status_code == 200
+    updated = r.json()
+    assert updated["next_step"] == "准备面试"
+    assert updated["next_step_due_at"] == "2026-08-20T10:00:00"
+
+
+def test_auto_followup_can_be_disabled_in_settings():
+    user_id = api_module._users.get_or_create_personal_user()["user_id"]
+    api_module._settings_store.update_settings(
+        user_id,
+        {"reminder": {"auto_followup_reminder": False}},
+    )
+    job = _create_personal_job()
+    r = client.patch(
+        f"/api/jobs/{job['job_id']}",
+        json={"status": "applied", "applied_at": "2026-08-10"},
+    )
+    assert r.status_code == 200
+    updated = r.json()
+    assert updated["status_canonical"] == "applied"
+    assert updated["next_step"] is None
+    assert updated["next_step_due_at"] is None

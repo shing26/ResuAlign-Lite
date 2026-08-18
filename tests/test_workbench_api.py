@@ -584,6 +584,8 @@ def test_workbench_run_emits_job_stage_into_open_session():
         on_stage=None,
         cache=None,
         tenant="default",
+        node_store=None,
+        tenant_id="default",
     ):
         if on_stage is not None:
             on_stage("jd_analysis", "Extracting JD profile")
@@ -962,5 +964,43 @@ def test_cached_diagnosis_rejects_changed_content_or_model():
     )
     assert (
         api_module._cached_diagnosis(resume, other_model, tenant_id="tenant")
+        is None
+    )
+
+
+def test_cached_diagnosis_falls_back_to_master_resume_snapshot():
+    resume = _create_resume(content="Python developer.")
+    token = _auth_headers()["Authorization"].split(" ", 1)[1]
+    user = api_module._users.user_for_token(token)
+    assert user is not None
+    source_hash = api_module._content_sha256("Python developer.")
+    api_module._resumes.set_latest_diagnosis_snapshot(
+        user["user_id"],
+        resume["resume_id"],
+        {
+            "score": 91,
+            "skills": ["Python"],
+            "issues": [],
+            "model": "test-model",
+        },
+        source_hash,
+    )
+    detail = api_module._resumes.get_master_resume(
+        user["user_id"], resume["resume_id"]
+    )
+    assert detail["latest_diagnosis"] is not None
+    assert api_module._cached_diagnosis(
+        detail, _config(), tenant_id=user["user_id"]
+    ) == {"score": 91, "skills": ["Python"], "issues": []}
+
+    changed = api_module._resumes.update_master_resume(
+        user["user_id"],
+        resume["resume_id"],
+        "Python developer. Docker.",
+    )
+    assert (
+        api_module._cached_diagnosis(
+            changed, _config(), tenant_id=user["user_id"]
+        )
         is None
     )

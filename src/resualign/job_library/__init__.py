@@ -9,185 +9,46 @@ import sqlite3
 import statistics
 import time
 import uuid
+from datetime import date, datetime
 from typing import Any, Optional, Sequence
 
-from .store_base import UserStoreError, _SqliteStore
-
-JOB_FUNCTIONS = (
-    "后端",
-    "前端",
-    "算法",
-    "数据",
-    "测试",
-    "运维",
-    "产品",
-    "设计",
-    "运营",
-    "销售",
-    "其他",
+from ..store_base import UserStoreError, _SqliteStore
+from .models import (
+    BLOCKER_CATEGORIES,
+    BLOCKER_STATUSES,
+    JOB_FUNCTIONS,
+    JOB_STATUSES,
+    JOB_STATUSES_CANONICAL,
+    RULE_TYPES,
+    SENIORITIES,
+    TAILOR_FOCUSES,
+    TAILOR_GRANULARITIES,
+    _effective_choices,
+)
+from .status_lifecycle import (
+    _status_filter_values,
+    _validate_status,
+    canonical_status,
+    status_label,
+    status_lifecycle_fields,
 )
 
-SENIORITIES = (
-    "初级",
-    "中级",
-    "高级",
-    "资深",
-    "未知",
-)
-
-JOB_STATUSES = (
-    "未投递",
-    "已投递",
-    "面试中",
-    "已拿Offer",
-    "放弃",
-)
-
-JOB_STATUSES_CANONICAL = ("draft", "applied", "interview", "offer", "withdrawn")
-
-_JOB_STATUS_ALIASES = {
-    "未投递": "draft",
-    "已投递": "applied",
-    "面试中": "interview",
-    "已拿Offer": "offer",
-    "放弃": "withdrawn",
-}
-
-_STATUS_LABELS = {canonical: legacy for legacy, canonical in _JOB_STATUS_ALIASES.items()}
-
-
-def canonical_status(status: str) -> str:
-    """Return the canonical five-state key for a stored status value."""
-    value = str(status or "").strip()
-    return _JOB_STATUS_ALIASES.get(value, value)
-
-
-def status_label(status: str) -> str:
-    """Return the display label for a canonical or stored status value."""
-    value = str(status or "").strip()
-    canonical = _JOB_STATUS_ALIASES.get(value, value)
-    return _STATUS_LABELS.get(canonical, canonical)
-
-
-def _status_filter_values(status: str) -> tuple[str, ...]:
-    """Expand a canonical or legacy status to all values that map to it."""
-    value = str(status or "").strip()
-    canonical = canonical_status(value)
-    aliases = tuple(
-        legacy
-        for legacy, canon in _JOB_STATUS_ALIASES.items()
-        if canon == canonical
-    )
-    if value not in aliases:
-        aliases = aliases + (value,)
-    return aliases
-
-
-def _validate_status(status: str) -> str:
-    value = str(status or "").strip()
-    if value in JOB_STATUSES or value in JOB_STATUSES_CANONICAL:
-        return value
-    raise UserStoreError(f"Invalid status: {value}")
-
-
-def status_lifecycle_fields(
-    current: dict[str, Any] | None,
-    target_status: str,
-    today: str | None = None,
-    provided: dict[str, Any] | None = None,
-) -> dict[str, str]:
-    """Return timeline field writes for a status transition (ADR-0027).
-
-    Values follow ``update_job``'s clear-on-empty contract: ``""`` clears a
-    field, a string sets it, and omitted keys leave it unchanged. Forward
-    moves fill the stage's missing timestamp with ``today``; terminal states
-    keep historical timestamps while clearing follow-up fields.
-    """
-    target = canonical_status(target_status)
-    if target not in JOB_STATUSES_CANONICAL:
-        return {}
-    today = today or time.strftime("%Y-%m-%d")
-    current = current or {}
-    provided = provided or {}
-    out: dict[str, str] = {}
-
-    def pick(field: str, fallback: str) -> str:
-        value = provided.get(field)
-        return fallback if value is None else value
-
-    if target == "draft":
-        for field in (
-            "applied_at",
-            "offer_at",
-            "rejected_at",
-            "next_step",
-            "next_step_due_at",
-            "interview_stage",
-        ):
-            out[field] = ""
-        return out
-
-    if target == "applied":
-        out["applied_at"] = pick("applied_at", current.get("applied_at") or today)
-        for field in ("offer_at", "rejected_at", "interview_stage"):
-            out[field] = ""
-        return out
-
-    if target == "interview":
-        out["applied_at"] = pick("applied_at", current.get("applied_at") or today)
-        for field in ("offer_at", "rejected_at"):
-            out[field] = ""
-        return out
-
-    if target == "offer":
-        out["offer_at"] = pick("offer_at", today)
-        out["rejected_at"] = ""
-        for field in ("next_step", "next_step_due_at", "interview_stage"):
-            out[field] = ""
-        return out
-
-    if target == "withdrawn":
-        out["rejected_at"] = pick("rejected_at", today)
-        for field in ("next_step", "next_step_due_at", "interview_stage"):
-            out[field] = ""
-        return out
-
-    return out
-
-
-RULE_TYPES = ("blacklist", "city_whitelist", "min_salary")
-
-BLOCKER_CATEGORIES = (
-    "captcha",
-    "login_required",
-    "no_content",
-    "parse_error",
-    "fetch_error",
-    "rule_rejected",
-    "timeout",
-    "network_error",
-    "site_error",
-    "invalid_url",
-)
-
-BLOCKER_STATUSES = ("pending", "resolved", "ignored")
-
-TAILOR_GRANULARITIES = ("fine", "medium", "coarse")
-TAILOR_FOCUSES = ("balanced", "quantified", "skills")
-
-
-def _effective_choices(
-    base: Sequence[str],
-    extra: Sequence[str] | None,
-) -> list[str]:
-    """Merge tenant vocabulary into the built-in controlled choices."""
-    choices = list(base)
-    for choice in extra or []:
-        choice = str(choice).strip()
-        if choice and choice not in choices:
-            choices.append(choice)
-    return choices
-
+__all__ = [
+    "BLOCKER_CATEGORIES",
+    "BLOCKER_STATUSES",
+    "CrawlTaskStore",
+    "JOB_FUNCTIONS",
+    "JOB_STATUSES",
+    "JOB_STATUSES_CANONICAL",
+    "JobLibraryStore",
+    "RULE_TYPES",
+    "SENIORITIES",
+    "TAILOR_FOCUSES",
+    "TAILOR_GRANULARITIES",
+    "canonical_status",
+    "status_label",
+    "status_lifecycle_fields",
+]
 
 _JOB_LIBRARY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS library_jobs (
@@ -218,6 +79,13 @@ CREATE TABLE IF NOT EXISTS library_jobs (
     rejected_at TEXT,
     next_step_due_at TEXT,
     interview_stage TEXT,
+    reminder_sent_at REAL,
+    reminder_attempts INTEGER NOT NULL DEFAULT 0,
+    reminder_next_retry_at REAL,
+    refresh_enabled INTEGER NOT NULL DEFAULT 1,
+    last_refresh_at REAL,
+    refresh_status TEXT,
+    match_stale INTEGER NOT NULL DEFAULT 0,
     workbench_job_id TEXT,
     workbench_resume_id TEXT,
     tailor_granularity TEXT,
@@ -226,6 +94,9 @@ CREATE TABLE IF NOT EXISTS library_jobs (
     jd_profile_json TEXT,
     gap_report_json TEXT,
     match_score REAL,
+    match_score_detail_json TEXT,
+    match_reason TEXT,
+    match_updated_at REAL,
     alignment_status TEXT NOT NULL DEFAULT 'idle',
     diffs_json TEXT NOT NULL DEFAULT '[]',
     invalid_diffs_json TEXT NOT NULL DEFAULT '[]',
@@ -303,6 +174,37 @@ CREATE INDEX IF NOT EXISTS idx_blocker_queue_tenant
     ON blocker_queue(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_blocker_queue_status
     ON blocker_queue(status);
+
+CREATE TABLE IF NOT EXISTS application_snapshots (
+    snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    job_id TEXT NOT NULL,
+    version_index INTEGER NOT NULL,
+    final_draft TEXT NOT NULL,
+    match_score REAL,
+    master_resume_id TEXT,
+    applied_at TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    UNIQUE(tenant_id, job_id, version_index)
+);
+CREATE INDEX IF NOT EXISTS idx_application_snapshots_job
+    ON application_snapshots(tenant_id, job_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS job_refresh_events (
+    refresh_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    job_id TEXT NOT NULL,
+    changed_at REAL NOT NULL,
+    changed_fields TEXT NOT NULL DEFAULT '[]',
+    old_summary TEXT,
+    new_summary TEXT,
+    jd_text_hash TEXT,
+    status TEXT NOT NULL DEFAULT 'succeeded',
+    error TEXT,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_job_refresh_events_job
+    ON job_refresh_events(tenant_id, job_id, changed_at DESC);
 """
 
 
@@ -320,6 +222,39 @@ def _normalize_jd_text(text: str) -> str:
 def _text_dedupe_key(text: str) -> str:
     normalized = _normalize_jd_text(text)
     return "text:" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _parse_due_datetime(value: str | None) -> datetime | None:
+    """Parse a stored follow-up due value into an aware/local datetime."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+    for fmt in (
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    ):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _due_timestamp(value: str | None) -> float | None:
+    parsed = _parse_due_datetime(value)
+    return parsed.timestamp() if parsed is not None else None
+
+
+def _due_date_key(value: str | None) -> str | None:
+    parsed = _parse_due_datetime(value)
+    return parsed.date().isoformat() if parsed is not None else None
 
 
 class JobLibraryStore(_SqliteStore):
@@ -403,6 +338,57 @@ class JobLibraryStore(_SqliteStore):
             "manual_text TEXT, created_at REAL NOT NULL, "
             "updated_at REAL NOT NULL)",
         ),
+        (
+            30,
+            "CREATE TABLE IF NOT EXISTS application_snapshots ("
+            "snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "tenant_id TEXT NOT NULL, job_id TEXT NOT NULL, "
+            "version_index INTEGER NOT NULL, "
+            "final_draft TEXT NOT NULL, match_score REAL, "
+            "master_resume_id TEXT, applied_at TEXT NOT NULL, "
+            "created_at REAL NOT NULL, "
+            "UNIQUE(tenant_id, job_id, version_index)); "
+            "CREATE INDEX IF NOT EXISTS idx_application_snapshots_job "
+            "ON application_snapshots(tenant_id, job_id, created_at DESC)",
+        ),
+        (31, "ALTER TABLE library_jobs ADD COLUMN reminder_sent_at REAL"),
+        (
+            40,
+            "ALTER TABLE library_jobs ADD COLUMN "
+            "reminder_attempts INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            41,
+            "ALTER TABLE library_jobs ADD COLUMN "
+            "reminder_next_retry_at REAL",
+        ),
+        (
+            32,
+            "ALTER TABLE library_jobs ADD COLUMN "
+            "refresh_enabled INTEGER NOT NULL DEFAULT 1",
+        ),
+        (33, "ALTER TABLE library_jobs ADD COLUMN last_refresh_at REAL"),
+        (34, "ALTER TABLE library_jobs ADD COLUMN refresh_status TEXT"),
+        (
+            35,
+            "ALTER TABLE library_jobs ADD COLUMN "
+            "match_stale INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            36,
+            "CREATE TABLE IF NOT EXISTS job_refresh_events ("
+            "refresh_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, "
+            "job_id TEXT NOT NULL, changed_at REAL NOT NULL, "
+            "changed_fields TEXT NOT NULL DEFAULT '[]', "
+            "old_summary TEXT, new_summary TEXT, jd_text_hash TEXT, "
+            "status TEXT NOT NULL DEFAULT 'succeeded', error TEXT, "
+            "created_at REAL NOT NULL); "
+            "CREATE INDEX IF NOT EXISTS idx_job_refresh_events_job "
+            "ON job_refresh_events(tenant_id, job_id, changed_at DESC)",
+        ),
+        (37, "ALTER TABLE library_jobs ADD COLUMN match_score_detail_json TEXT"),
+        (38, "ALTER TABLE library_jobs ADD COLUMN match_reason TEXT"),
+        (39, "ALTER TABLE library_jobs ADD COLUMN match_updated_at REAL"),
     )
 
     def validate_status(self, status: str) -> str:
@@ -448,6 +434,7 @@ class JobLibraryStore(_SqliteStore):
         model: str | None = None,
         prompt_version: str | None = None,
         generated_at: float | None = None,
+        dedupe_key: str | None = None,
         allowed_job_functions: Sequence[str] | None = None,
         allowed_seniorities: Sequence[str] | None = None,
     ) -> dict[str, Any]:
@@ -484,16 +471,19 @@ class JobLibraryStore(_SqliteStore):
         ):
             raise UserStoreError(f"Invalid alignment_status: {alignment_status}")
 
-        normalized_url = (
-            _normalize_source_url(source_url)
-            if source_type == "url" and source_url
-            else ""
-        )
-        dedupe_key = (
-            "url:" + normalized_url
-            if normalized_url
-            else _text_dedupe_key(text)
-        )
+        if dedupe_key is None:
+            normalized_url = (
+                _normalize_source_url(source_url)
+                if source_type == "url" and source_url
+                else ""
+            )
+            dedupe_key = (
+                "url:" + normalized_url
+                if normalized_url
+                else _text_dedupe_key(text)
+            )
+        else:
+            dedupe_key = dedupe_key.strip()
         job_id = uuid.uuid4().hex
         now = time.time()
         tags = self._normalize_tags(tech_tags)
@@ -587,7 +577,7 @@ class JobLibraryStore(_SqliteStore):
                     "WHERE job_id = ? AND tenant_id = ?",
                     (job_id, tenant_id),
                 ).fetchone()
-                return self._row_to_job(row) if row else None
+                return self._row_to_library_job(row) if row else None
 
     def find_by_dedupe_key(
         self, tenant_id: str, dedupe_key: str
@@ -602,7 +592,7 @@ class JobLibraryStore(_SqliteStore):
                     "ORDER BY created_at ASC LIMIT 1",
                     (tenant_id, dedupe_key),
                 ).fetchone()
-                return self._row_to_job(row) if row else None
+                return self._row_to_library_job(row) if row else None
 
     def find_job_by_application_source(
         self,
@@ -643,6 +633,151 @@ class JobLibraryStore(_SqliteStore):
                     return self.get_job(tenant_id, row["job_id"])
         return None
 
+    def append_application_snapshot(
+        self,
+        tenant_id: str,
+        job_id: str,
+        *,
+        final_draft: str | None = None,
+        match_score: float | None = None,
+        master_resume_id: str | None = None,
+        applied_at: str | None = None,
+        created_at: float | None = None,
+    ) -> Optional[dict[str, Any]]:
+        """Append an immutable applied-draft snapshot for one job.
+
+        ``version_index`` continues 1, 2, 3... within a job. Missing jobs
+        and empty drafts return None without creating a row.
+        """
+        if not final_draft or not final_draft.strip():
+            return None
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT final_draft, match_score, workbench_resume_id, "
+                    "applied_at FROM library_jobs "
+                    "WHERE job_id = ? AND tenant_id = ?",
+                    (job_id, tenant_id),
+                ).fetchone()
+                if row is None:
+                    return None
+                if match_score is None:
+                    match_score = row["match_score"]
+                if master_resume_id is None:
+                    master_resume_id = row["workbench_resume_id"]
+                if not applied_at:
+                    applied_at = row["applied_at"] or time.strftime(
+                        "%Y-%m-%d"
+                    )
+                snapshot = self._insert_application_snapshot(
+                    conn,
+                    tenant_id,
+                    job_id,
+                    final_draft=final_draft or row["final_draft"],
+                    match_score=match_score,
+                    master_resume_id=master_resume_id,
+                    applied_at=applied_at,
+                    created_at=created_at,
+                )
+                return snapshot
+
+    def list_application_snapshots(
+        self, tenant_id: str, job_id: str
+    ) -> list[dict[str, Any]]:
+        """Return a job's immutable applied-draft snapshots, newest first."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM application_snapshots "
+                    "WHERE tenant_id = ? AND job_id = ? "
+                    "ORDER BY created_at DESC, version_index DESC",
+                    (tenant_id, job_id),
+                ).fetchall()
+                return [self._row_to_snapshot(row) for row in rows]
+
+    def get_application_snapshot(
+        self, tenant_id: str, snapshot_id: int
+    ) -> Optional[dict[str, Any]]:
+        """Return one immutable applied-draft snapshot."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM application_snapshots "
+                    "WHERE tenant_id = ? AND snapshot_id = ?",
+                    (tenant_id, snapshot_id),
+                ).fetchone()
+                return self._row_to_snapshot(row) if row else None
+
+    @staticmethod
+    def _insert_application_snapshot(
+        conn,
+        tenant_id: str,
+        job_id: str,
+        *,
+        final_draft: str,
+        match_score: float | None,
+        master_resume_id: str | None,
+        applied_at: str,
+        created_at: float | None = None,
+    ) -> Optional[dict[str, Any]]:
+        """Insert the next snapshot version inside an existing transaction."""
+        if not final_draft or not final_draft.strip():
+            return None
+        if not applied_at:
+            applied_at = time.strftime("%Y-%m-%d")
+        created_at = time.time() if created_at is None else created_at
+        version_row = conn.execute(
+            "SELECT COALESCE(MAX(version_index), 0) + 1 AS next_version "
+            "FROM application_snapshots "
+            "WHERE tenant_id = ? AND job_id = ?",
+            (tenant_id, job_id),
+        ).fetchone()
+        version_index = int(version_row["next_version"])
+        cursor = conn.execute(
+            "INSERT INTO application_snapshots ("
+            "tenant_id, job_id, version_index, final_draft, "
+            "match_score, master_resume_id, applied_at, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                tenant_id,
+                job_id,
+                version_index,
+                final_draft,
+                match_score,
+                master_resume_id,
+                applied_at,
+                created_at,
+            ),
+        )
+        return {
+            "snapshot_id": cursor.lastrowid,
+            "tenant_id": tenant_id,
+            "job_id": job_id,
+            "version_index": version_index,
+            "final_draft": final_draft,
+            "match_score": match_score,
+            "master_resume_id": master_resume_id,
+            "applied_at": applied_at,
+            "created_at": created_at,
+        }
+
+    @staticmethod
+    def _row_to_snapshot(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "snapshot_id": row["snapshot_id"],
+            "tenant_id": row["tenant_id"],
+            "job_id": row["job_id"],
+            "version_index": row["version_index"],
+            "final_draft": row["final_draft"],
+            "match_score": row["match_score"],
+            "master_resume_id": row["master_resume_id"],
+            "applied_at": row["applied_at"],
+            "created_at": row["created_at"],
+        }
+
     def list_jobs(
         self,
         tenant_id: str,
@@ -652,7 +787,22 @@ class JobLibraryStore(_SqliteStore):
         search: str | None = None,
         limit: int | None = None,
         offset: int = 0,
+        sort: str = "updated_at_desc",
     ) -> list[dict[str, Any]]:
+        sort = sort or "updated_at_desc"
+        if sort not in {
+            "updated_at_desc",
+            "updated_at_asc",
+            "match_score_desc",
+            "match_score_asc",
+        }:
+            raise UserStoreError(f"Invalid sort: {sort}")
+        order_by = {
+            "updated_at_desc": "updated_at DESC",
+            "updated_at_asc": "updated_at ASC",
+            "match_score_desc": "match_score IS NULL, match_score DESC",
+            "match_score_asc": "match_score ASC",
+        }[sort]
         conditions = ["tenant_id = ?"]
         values: list[Any] = [tenant_id]
         if job_function:
@@ -676,7 +826,7 @@ class JobLibraryStore(_SqliteStore):
         sql = (
             "SELECT * FROM library_jobs WHERE "
             + " AND ".join(conditions)
-            + " ORDER BY updated_at DESC"
+            + f" ORDER BY {order_by}"
         )
         if limit is not None:
             sql += f" LIMIT {int(limit)} OFFSET {int(offset)}"
@@ -684,7 +834,7 @@ class JobLibraryStore(_SqliteStore):
             self._ensure_initialized()
             with self._connect() as conn:
                 rows = conn.execute(sql, values).fetchall()
-                return [self._row_to_job(row) for row in rows]
+                return [self._row_to_library_job(row) for row in rows]
 
     def list_dashboard_jobs(
         self, tenant_id: str
@@ -728,6 +878,376 @@ class JobLibraryStore(_SqliteStore):
             for row in rows
         ]
 
+    def list_reminders(
+        self,
+        tenant_id: str,
+        scope: str = "today",
+        now: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return follow-up reminders for a tenant, oldest due first.
+
+        ``scope="today"`` includes overdue items plus anything due today;
+        future items beyond today are excluded. The returned projection is
+        what the today view and reminder workers need, without loading JD
+        text or alignment payloads.
+        """
+        if scope not in {"today"}:
+            raise UserStoreError(f"Invalid reminder scope: {scope}")
+        now_ts = now if now is not None else time.time()
+        today = date.fromtimestamp(now_ts).isoformat()
+        statuses = ("已投递", "面试中")
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM library_jobs "
+                    "WHERE tenant_id = ? AND status IN (?, ?) "
+                    "AND next_step_due_at IS NOT NULL "
+                    "ORDER BY next_step_due_at ASC",
+                    (tenant_id, *statuses),
+                ).fetchall()
+        reminders: list[dict[str, Any]] = []
+        for row in rows:
+            due_key = _due_date_key(row["next_step_due_at"])
+            if not due_key or due_key > today:
+                continue
+            due_ts = _due_timestamp(row["next_step_due_at"])
+            reminders.append(
+                {
+                    "job_id": row["job_id"],
+                    "title": row["title"],
+                    "company": row["company"],
+                    "status_canonical": canonical_status(row["status"]),
+                    "next_step_due_at": row["next_step_due_at"],
+                    "interview_stage": row["interview_stage"] or None,
+                    "next_step": row["next_step"] or None,
+                    "overdue": due_ts is not None and due_ts < now_ts,
+                    "reminder_sent_at": row["reminder_sent_at"],
+                }
+            )
+        reminders.sort(
+            key=lambda item: (
+                _due_timestamp(item["next_step_due_at"]) or float("inf"),
+                item["job_id"],
+            )
+        )
+        return reminders
+
+    def claim_due_reminders(
+        self,
+        now: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Atomically mark every due reminder as sent and return the rows.
+
+        The update guard ``reminder_sent_at IS NULL`` makes concurrent ticks
+        idempotent: only one caller can claim a row.
+        """
+        now_ts = now if now is not None else time.time()
+        statuses = ("已投递", "面试中")
+        claimed: list[dict[str, Any]] = []
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM library_jobs "
+                    "WHERE status IN (?, ?) "
+                    "AND next_step_due_at IS NOT NULL "
+                    "AND reminder_sent_at IS NULL",
+                    statuses,
+                ).fetchall()
+                for row in rows:
+                    due_ts = _due_timestamp(row["next_step_due_at"])
+                    if due_ts is None or due_ts > now_ts:
+                        continue
+                    updated = conn.execute(
+                        "UPDATE library_jobs "
+                        "SET reminder_sent_at = ?, updated_at = ? "
+                        "WHERE job_id = ? AND tenant_id = ? "
+                        "AND reminder_sent_at IS NULL",
+                        (now_ts, now_ts, row["job_id"], row["tenant_id"]),
+                    ).rowcount
+                    if updated:
+                        claimed.append(
+                            {
+                                "job_id": row["job_id"],
+                                "tenant_id": row["tenant_id"],
+                                "title": row["title"],
+                                "company": row["company"],
+                                "status_canonical": canonical_status(
+                                    row["status"]
+                                ),
+                                "next_step_due_at": row["next_step_due_at"],
+                                "interview_stage": row["interview_stage"] or None,
+                                "next_step": row["next_step"] or None,
+                                "reminder_sent_at": now_ts,
+                            }
+                        )
+        return claimed
+
+    def list_due_reminders(
+        self,
+        now: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return every due reminder across tenants without claiming them.
+
+        The scheduler uses this to emit ``reminder.due`` events; actual
+        delivery claims rows through ``claim_pending_reminders`` so a
+        successful send is the only thing that persists ``reminder_sent_at``.
+        """
+        now_ts = now if now is not None else time.time()
+        statuses = ("已投递", "面试中")
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM library_jobs "
+                    "WHERE status IN (?, ?) "
+                    "AND next_step_due_at IS NOT NULL "
+                    "AND reminder_sent_at IS NULL",
+                    statuses,
+                ).fetchall()
+        due: list[dict[str, Any]] = []
+        for row in rows:
+            due_ts = _due_timestamp(row["next_step_due_at"])
+            if due_ts is None or due_ts > now_ts:
+                continue
+            due.append(
+                {
+                    "job_id": row["job_id"],
+                    "tenant_id": row["tenant_id"],
+                    "title": row["title"],
+                    "company": row["company"],
+                    "status_canonical": canonical_status(row["status"]),
+                    "next_step_due_at": row["next_step_due_at"],
+                    "interview_stage": row["interview_stage"] or None,
+                    "next_step": row["next_step"] or None,
+                    "reminder_attempts": int(row["reminder_attempts"] or 0),
+                }
+            )
+        due.sort(
+            key=lambda item: (
+                _due_timestamp(item["next_step_due_at"]) or float("inf"),
+                item["job_id"],
+            )
+        )
+        return due
+
+    def claim_pending_reminders(
+        self,
+        now: float | None = None,
+        *,
+        lease_seconds: float = 300.0,
+        max_attempts: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Atomically claim due reminders for delivery, one worker at a time.
+
+        ``reminder_next_retry_at`` doubles as a lease: while a claim is in
+        flight it is set to ``now + lease_seconds`` so concurrent workers
+        skip the row. A crashed worker is recovered after the lease expires.
+        The row stays un-sent until ``mark_reminder_sent`` succeeds.
+        """
+        now_ts = now if now is not None else time.time()
+        statuses = ("已投递", "面试中")
+        claimed: list[dict[str, Any]] = []
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM library_jobs "
+                    "WHERE status IN (?, ?) "
+                    "AND next_step_due_at IS NOT NULL "
+                    "AND reminder_sent_at IS NULL "
+                    "AND reminder_attempts < ? "
+                    "AND (reminder_next_retry_at IS NULL "
+                    "OR reminder_next_retry_at <= ?)",
+                    (statuses[0], statuses[1], max_attempts, now_ts),
+                ).fetchall()
+                for row in rows:
+                    due_ts = _due_timestamp(row["next_step_due_at"])
+                    if due_ts is None or due_ts > now_ts:
+                        continue
+                    updated = conn.execute(
+                        "UPDATE library_jobs "
+                        "SET reminder_next_retry_at = ?, "
+                        "reminder_attempts = reminder_attempts + 1, "
+                        "updated_at = ? "
+                        "WHERE job_id = ? AND tenant_id = ? "
+                        "AND reminder_sent_at IS NULL "
+                        "AND reminder_attempts < ? "
+                        "AND (reminder_next_retry_at IS NULL "
+                        "OR reminder_next_retry_at <= ?)",
+                        (
+                            now_ts + lease_seconds,
+                            now_ts,
+                            row["job_id"],
+                            row["tenant_id"],
+                            max_attempts,
+                            now_ts,
+                        ),
+                    ).rowcount
+                    if updated:
+                        claimed.append(
+                            {
+                                "job_id": row["job_id"],
+                                "tenant_id": row["tenant_id"],
+                                "title": row["title"],
+                                "company": row["company"],
+                                "status_canonical": canonical_status(
+                                    row["status"]
+                                ),
+                                "next_step_due_at": row["next_step_due_at"],
+                                "interview_stage": row["interview_stage"] or None,
+                                "next_step": row["next_step"] or None,
+                                "reminder_attempts": int(
+                                    row["reminder_attempts"] or 0
+                                )
+                                + 1,
+                            }
+                        )
+        return claimed
+
+    def mark_reminder_sent(
+        self,
+        tenant_id: str,
+        job_id: str,
+        sent_at: float | None = None,
+    ) -> bool:
+        """Persist a successful reminder delivery exactly once."""
+        sent_ts = sent_at if sent_at is not None else time.time()
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                return bool(
+                    conn.execute(
+                        "UPDATE library_jobs "
+                        "SET reminder_sent_at = ?, "
+                        "reminder_next_retry_at = NULL, "
+                        "updated_at = ? "
+                        "WHERE job_id = ? AND tenant_id = ? "
+                        "AND reminder_sent_at IS NULL",
+                        (sent_ts, sent_ts, job_id, tenant_id),
+                    ).rowcount
+                )
+
+    def mark_reminder_failed(
+        self,
+        tenant_id: str,
+        job_id: str,
+        next_retry_at: float,
+    ) -> bool:
+        """Release a claim and schedule the next retry without sending."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                return bool(
+                    conn.execute(
+                        "UPDATE library_jobs "
+                        "SET reminder_next_retry_at = ?, updated_at = ? "
+                        "WHERE job_id = ? AND tenant_id = ? "
+                        "AND reminder_sent_at IS NULL",
+                        (next_retry_at, time.time(), job_id, tenant_id),
+                    ).rowcount
+                )
+
+    def list_refresh_candidates(self, tenant_id: str) -> list[dict[str, Any]]:
+        """Return URL-sourced jobs eligible for scheduled refresh."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM library_jobs "
+                    "WHERE tenant_id = ? AND source_type = 'url' "
+                    "AND source_url IS NOT NULL AND source_url != '' "
+                    "AND refresh_enabled = 1 "
+                    "ORDER BY updated_at DESC",
+                    (tenant_id,),
+                ).fetchall()
+                return [self._row_to_library_job(row) for row in rows]
+
+    def record_refresh_event(
+        self,
+        tenant_id: str,
+        job_id: str,
+        *,
+        changed_fields: list[str] | None = None,
+        old_summary: str | None = None,
+        new_summary: str | None = None,
+        jd_text_hash: str | None = None,
+        status: str = "succeeded",
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist one structured refresh history row."""
+        refresh_id = uuid.uuid4().hex
+        now = time.time()
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO job_refresh_events ("
+                    "refresh_id, tenant_id, job_id, changed_at, "
+                    "changed_fields, old_summary, new_summary, "
+                    "jd_text_hash, status, error, created_at"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        refresh_id,
+                        tenant_id,
+                        job_id,
+                        now,
+                        json.dumps(changed_fields or [], ensure_ascii=False),
+                        old_summary,
+                        new_summary,
+                        jd_text_hash,
+                        status,
+                        error,
+                        now,
+                    ),
+                )
+        return {
+            "refresh_id": refresh_id,
+            "tenant_id": tenant_id,
+            "job_id": job_id,
+            "changed_at": now,
+            "changed_fields": changed_fields or [],
+            "status": status,
+        }
+
+    def list_refresh_events(
+        self,
+        tenant_id: str,
+        job_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return structured refresh history for a tenant or job."""
+        conditions = ["tenant_id = ?"]
+        values: list[Any] = [tenant_id]
+        if job_id:
+            conditions.append("job_id = ?")
+            values.append(job_id)
+        sql = (
+            "SELECT * FROM job_refresh_events WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY changed_at DESC LIMIT ?"
+        )
+        values.append(max(1, min(int(limit), 200)))
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(sql, values).fetchall()
+        return [
+            {
+                "refresh_id": row["refresh_id"],
+                "job_id": row["job_id"],
+                "changed_at": row["changed_at"],
+                "changed_fields": json.loads(row["changed_fields"] or "[]"),
+                "old_summary": row["old_summary"],
+                "new_summary": row["new_summary"],
+                "jd_text_hash": row["jd_text_hash"],
+                "status": row["status"],
+                "error": row["error"],
+            }
+            for row in rows
+        ]
+
     def update_job(
         self,
         tenant_id: str,
@@ -757,9 +1277,16 @@ class JobLibraryStore(_SqliteStore):
         rejected_at: str | None = None,
         next_step_due_at: str | None = None,
         interview_stage: str | None = None,
+        refresh_enabled: int | None = None,
+        last_refresh_at: float | None = None,
+        refresh_status: str | None = None,
+        match_stale: int | None = None,
         jd_profile: dict[str, Any] | None = None,
         gap_report: dict[str, Any] | None = None,
         match_score: float | None = None,
+        match_score_detail: dict[str, Any] | None = None,
+        match_reason: str | None = None,
+        match_updated_at: float | None = None,
         alignment_status: str | None = None,
         diffs: list[dict[str, Any]] | None = None,
         invalid_diffs: list[dict[str, Any]] | None = None,
@@ -812,39 +1339,76 @@ class JobLibraryStore(_SqliteStore):
             raise UserStoreError(f"Invalid tailor_focus: {tailor_focus}")
         if custom_prompt is not None:
             custom_prompt = custom_prompt.strip()
+        if refresh_enabled is not None and refresh_enabled not in (0, 1):
+            raise UserStoreError("refresh_enabled must be 0 or 1")
+        if match_stale is not None and match_stale not in (0, 1):
+            raise UserStoreError("match_stale must be 0 or 1")
+        if refresh_status is not None and refresh_status not in {
+            "queued",
+            "succeeded",
+            "failed",
+            "closed",
+        }:
+            raise UserStoreError(f"Invalid refresh_status: {refresh_status}")
         if jd_text is not None and not jd_text.strip():
             raise UserStoreError("Job description text cannot be empty")
 
         lifecycle: dict[str, str] = {}
+        append_only_snapshot = False
+        snapshot_applied_at: str | None = None
         if status is not None:
             current = self.get_job(tenant_id, job_id)
             if current is None:
                 return None
-            lifecycle = status_lifecycle_fields(
-                current,
-                status,
-                provided={
-                    "applied_at": applied_at,
-                    "offer_at": offer_at,
-                    "rejected_at": rejected_at,
-                    "next_step": next_step,
-                    "next_step_due_at": next_step_due_at,
-                    "interview_stage": interview_stage,
-                },
-            )
-            for field, value in lifecycle.items():
-                if field == "applied_at":
-                    applied_at = value
-                elif field == "offer_at":
-                    offer_at = value
-                elif field == "rejected_at":
-                    rejected_at = value
-                elif field == "next_step":
-                    next_step = value
-                elif field == "next_step_due_at":
-                    next_step_due_at = value
-                elif field == "interview_stage":
-                    interview_stage = value
+            if (
+                canonical_status(status) == "applied"
+                and canonical_status(current["status"]) != "draft"
+            ):
+                # Re-recording an already-submitted job appends a new
+                # immutable snapshot without downgrading status or rewriting
+                # the existing timeline history (ADR-0028).
+                append_only_snapshot = True
+                snapshot_applied_at = (
+                    applied_at
+                    or current.get("applied_at")
+                    or time.strftime("%Y-%m-%d")
+                )
+            else:
+                lifecycle = status_lifecycle_fields(
+                    current,
+                    status,
+                    provided={
+                        "applied_at": applied_at,
+                        "offer_at": offer_at,
+                        "rejected_at": rejected_at,
+                        "next_step": next_step,
+                        "next_step_due_at": next_step_due_at,
+                        "interview_stage": interview_stage,
+                    },
+                )
+                for field, value in lifecycle.items():
+                    if field == "applied_at":
+                        applied_at = value
+                    elif field == "offer_at":
+                        offer_at = value
+                    elif field == "rejected_at":
+                        rejected_at = value
+                    elif field == "next_step":
+                        next_step = value
+                    elif field == "next_step_due_at":
+                        next_step_due_at = value
+                    elif field == "interview_stage":
+                        interview_stage = value
+
+        if append_only_snapshot:
+            # The status and every timeline field stay untouched on append.
+            applied_at = None
+            next_step = None
+            notes = None
+            offer_at = None
+            rejected_at = None
+            next_step_due_at = None
+            interview_stage = None
 
         sets = ["updated_at = ?"]
         values: list[Any] = [time.time()]
@@ -886,7 +1450,7 @@ class JobLibraryStore(_SqliteStore):
             values.append(
                 json.dumps(self._normalize_tags(tech_tags), ensure_ascii=False)
             )
-        if status is not None:
+        if status is not None and not append_only_snapshot:
             sets.append("status = ?")
             values.append(status)
         if classification_pending is not None:
@@ -947,6 +1511,26 @@ class JobLibraryStore(_SqliteStore):
             else:
                 sets.append("interview_stage = ?")
                 values.append(interview_stage)
+        if (
+            (status is not None and not append_only_snapshot)
+            or next_step_due_at is not None
+            or interview_stage is not None
+        ):
+            sets.append("reminder_sent_at = NULL")
+            sets.append("reminder_attempts = 0")
+            sets.append("reminder_next_retry_at = NULL")
+        if refresh_enabled is not None:
+            sets.append("refresh_enabled = ?")
+            values.append(refresh_enabled)
+        if last_refresh_at is not None:
+            sets.append("last_refresh_at = ?")
+            values.append(last_refresh_at)
+        if refresh_status is not None:
+            sets.append("refresh_status = ?")
+            values.append(refresh_status)
+        if match_stale is not None:
+            sets.append("match_stale = ?")
+            values.append(match_stale)
         if jd_profile is not None:
             sets.append("jd_profile_json = ?")
             values.append(
@@ -960,6 +1544,17 @@ class JobLibraryStore(_SqliteStore):
         if match_score is not None:
             sets.append("match_score = ?")
             values.append(match_score)
+        if match_score_detail is not None:
+            sets.append("match_score_detail_json = ?")
+            values.append(
+                json.dumps(match_score_detail, ensure_ascii=False)
+            )
+        if match_reason is not None:
+            sets.append("match_reason = ?")
+            values.append(match_reason)
+        if match_updated_at is not None:
+            sets.append("match_updated_at = ?")
+            values.append(match_updated_at)
         if alignment_status is not None:
             if alignment_status not in (
                 "idle",
@@ -1067,6 +1662,39 @@ class JobLibraryStore(_SqliteStore):
                     ) from exc
                 if cursor.rowcount == 0:
                     return None
+                should_snapshot = append_only_snapshot or (
+                    status is not None
+                    and canonical_status(status) == "applied"
+                )
+                if should_snapshot:
+                    snapshot_row = conn.execute(
+                        "SELECT final_draft, match_score, "
+                        "workbench_resume_id, applied_at "
+                        "FROM library_jobs "
+                        "WHERE job_id = ? AND tenant_id = ?",
+                        (job_id, tenant_id),
+                    ).fetchone()
+                    if snapshot_row is not None and (
+                        snapshot_row["final_draft"] or ""
+                    ).strip():
+                        self._insert_application_snapshot(
+                            conn,
+                            tenant_id,
+                            job_id,
+                            final_draft=snapshot_row["final_draft"],
+                            match_score=snapshot_row["match_score"],
+                            master_resume_id=snapshot_row[
+                                "workbench_resume_id"
+                            ],
+                            applied_at=(
+                                snapshot_applied_at
+                                if append_only_snapshot
+                                else (
+                                    snapshot_row["applied_at"]
+                                    or time.strftime("%Y-%m-%d")
+                                )
+                            ),
+                        )
         return self.get_job(tenant_id, job_id)
 
     def save_final_draft(
@@ -1074,6 +1702,7 @@ class JobLibraryStore(_SqliteStore):
         tenant_id: str,
         job_id: str,
         draft: str,
+        accepted_diff_ids: list[str] | None = None,
     ) -> Optional[dict[str, Any]]:
         """Persist a job's final draft and increment its saved version."""
         if not draft or not draft.strip():
@@ -1082,13 +1711,33 @@ class JobLibraryStore(_SqliteStore):
             self._ensure_initialized()
             with self._connect() as conn:
                 current = conn.execute(
-                    "SELECT final_draft_version FROM library_jobs "
+                    "SELECT final_draft_version, diffs_json FROM library_jobs "
                     "WHERE job_id = ? AND tenant_id = ?",
                     (job_id, tenant_id),
                 ).fetchone()
                 if current is None:
                     return None
                 version = int(current["final_draft_version"] or 0) + 1
+                accepted_ids = set(accepted_diff_ids or [])
+                diffs = json.loads(current["diffs_json"] or "[]")
+                changed = False
+                for diff in diffs:
+                    if (
+                        diff.get("diff_id") in accepted_ids
+                        and diff.get("provenance_state") != "accepted"
+                    ):
+                        diff["provenance_state"] = "accepted"
+                        changed = True
+                if changed:
+                    conn.execute(
+                        "UPDATE library_jobs SET diffs_json = ? "
+                        "WHERE job_id = ? AND tenant_id = ?",
+                        (
+                            json.dumps(diffs, ensure_ascii=False),
+                            job_id,
+                            tenant_id,
+                        ),
+                    )
                 now = time.time()
                 conn.execute(
                     "UPDATE library_jobs SET final_draft = ?, "
@@ -1110,6 +1759,9 @@ class JobLibraryStore(_SqliteStore):
         jd_profile: dict[str, Any] | None = None,
         gap_report: dict[str, Any] | None = None,
         match_score: float | None = None,
+        match_score_detail: dict[str, Any] | None = None,
+        match_reason: str | None = None,
+        match_updated_at: float | None = None,
         diffs: list[dict[str, Any]] | None = None,
         invalid_diffs: list[dict[str, Any]] | None = None,
         draft: str | None = None,
@@ -1141,7 +1793,9 @@ class JobLibraryStore(_SqliteStore):
                 conn.execute(
                     "UPDATE library_jobs SET "
                     "jd_profile_json = ?, gap_report_json = ?, "
-                    "match_score = ?, alignment_status = ?, "
+                    "match_score = ?, match_score_detail_json = ?, "
+                    "match_reason = ?, match_updated_at = ?, "
+                    "alignment_status = ?, "
                     "diffs_json = ?, invalid_diffs_json = ?, draft = ?, "
                     "eval_score_json = ?, model = ?, prompt_version = ?, "
                     "generated_at = ?, updated_at = ? "
@@ -1158,6 +1812,13 @@ class JobLibraryStore(_SqliteStore):
                             else None
                         ),
                         match_score,
+                        (
+                            json.dumps(match_score_detail, ensure_ascii=False)
+                            if match_score_detail is not None
+                            else None
+                        ),
+                        match_reason,
+                        match_updated_at,
                         alignment_status,
                         json.dumps(diffs or [], ensure_ascii=False),
                         json.dumps(invalid_diffs or [], ensure_ascii=False),
@@ -1204,7 +1865,7 @@ class JobLibraryStore(_SqliteStore):
                         "ORDER BY created_at ASC",
                         (tenant_id,),
                     ).fetchall()
-                return [self._row_to_job(row) for row in rows]
+                return [self._row_to_library_job(row) for row in rows]
 
     def bulk_update_status(
         self,
@@ -1257,7 +1918,34 @@ class JobLibraryStore(_SqliteStore):
                                 "job_id": job_id,
                                 "updated": False,
                                 "status": "conflict",
-                                "job": self._row_to_job(row),
+                                "job": self._row_to_library_job(row),
+                            }
+                        )
+                        continue
+                    if (
+                        canonical_status(status) == "applied"
+                        and canonical_status(row["status"]) != "draft"
+                    ):
+                        # Append-only re-record: keep the existing status and
+                        # timeline, and only freeze a new snapshot version.
+                        self._insert_application_snapshot(
+                            conn,
+                            tenant_id,
+                            job_id,
+                            final_draft=row["final_draft"],
+                            match_score=row["match_score"],
+                            master_resume_id=row["workbench_resume_id"],
+                            applied_at=(
+                                row["applied_at"]
+                                or time.strftime("%Y-%m-%d")
+                            ),
+                        )
+                        results.append(
+                            {
+                                "job_id": job_id,
+                                "updated": True,
+                                "status": "updated",
+                                "job": self._row_to_library_job(row),
                             }
                         )
                         continue
@@ -1286,7 +1974,7 @@ class JobLibraryStore(_SqliteStore):
                                 "job_id": job_id,
                                 "updated": False,
                                 "status": "conflict",
-                                "job": self._row_to_job(row),
+                                "job": self._row_to_library_job(row),
                             }
                         )
                         continue
@@ -1295,12 +1983,27 @@ class JobLibraryStore(_SqliteStore):
                         "WHERE job_id = ? AND tenant_id = ?",
                         (job_id, tenant_id),
                     ).fetchone()
+                    if canonical_status(status) == "applied":
+                        self._insert_application_snapshot(
+                            conn,
+                            tenant_id,
+                            job_id,
+                            final_draft=updated_row["final_draft"],
+                            match_score=updated_row["match_score"],
+                            master_resume_id=updated_row[
+                                "workbench_resume_id"
+                            ],
+                            applied_at=(
+                                updated_row["applied_at"]
+                                or time.strftime("%Y-%m-%d")
+                            ),
+                        )
                     results.append(
                         {
                             "job_id": job_id,
                             "updated": True,
                             "status": "updated",
-                            "job": self._row_to_job(updated_row),
+                            "job": self._row_to_library_job(updated_row),
                         }
                     )
         return results
@@ -1385,6 +2088,11 @@ class JobLibraryStore(_SqliteStore):
                     "WHERE job_id = ? AND tenant_id = ?",
                     (job_id, tenant_id),
                 )
+                conn.execute(
+                    "DELETE FROM application_snapshots "
+                    "WHERE job_id = ? AND tenant_id = ?",
+                    (job_id, tenant_id),
+                )
                 return True, workbench_job_id
 
     def salary_median(
@@ -1450,9 +2158,17 @@ class JobLibraryStore(_SqliteStore):
         return seen
 
     @staticmethod
-    def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
+    def _row_to_library_job(row: sqlite3.Row) -> dict[str, Any]:
         tags = json.loads(row["tech_tags"] or "[]")
         alignment_status = row["alignment_status"] or "idle"
+        try:
+            match_score_detail = (
+                json.loads(row["match_score_detail_json"])
+                if row["match_score_detail_json"]
+                else None
+            )
+        except (TypeError, ValueError):
+            match_score_detail = None
         return {
             "job_id": row["job_id"],
             "tenant_id": row["tenant_id"],
@@ -1481,6 +2197,13 @@ class JobLibraryStore(_SqliteStore):
             "rejected_at": row["rejected_at"] or None,
             "next_step_due_at": row["next_step_due_at"] or None,
             "interview_stage": row["interview_stage"] or None,
+            "reminder_sent_at": row["reminder_sent_at"],
+            "reminder_attempts": int(row["reminder_attempts"] or 0),
+            "reminder_next_retry_at": row["reminder_next_retry_at"],
+            "refresh_enabled": bool(row["refresh_enabled"]),
+            "last_refresh_at": row["last_refresh_at"],
+            "refresh_status": row["refresh_status"] or None,
+            "match_stale": bool(row["match_stale"]),
             "workbench_job_id": row["workbench_job_id"],
             "workbench_resume_id": row["workbench_resume_id"],
             "tailor_granularity": row["tailor_granularity"],
@@ -1497,6 +2220,9 @@ class JobLibraryStore(_SqliteStore):
                 else None
             ),
             "match_score": row["match_score"],
+            "match_score_detail": match_score_detail,
+            "match_reason": row["match_reason"] or None,
+            "match_updated_at": row["match_updated_at"],
             "alignment_status": alignment_status,
             "diffs": json.loads(row["diffs_json"] or "[]"),
             "invalid_diffs": json.loads(row["invalid_diffs_json"] or "[]"),
@@ -1715,7 +2441,10 @@ class JobLibraryStore(_SqliteStore):
         status: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, Any]]:
-        """Return a tenant's blocker queue, newest first."""
+        """Return a tenant's blocker queue, newest first.
+
+        status 参数缺省时返回全部状态（含 pending/ignored/resolved）；统计与展示请显式传 status=pending。
+        """
         if status is not None and status not in BLOCKER_STATUSES:
             raise UserStoreError(f"Invalid blocker status: {status}")
         sql = "SELECT * FROM blocker_queue WHERE tenant_id = ?"
@@ -2026,6 +2755,25 @@ class CrawlTaskStore(_SqliteStore):
                         (tenant_id,),
                     ).fetchall()
                 return [row["crawl_id"] for row in rows]
+
+    def pending_by_job(
+        self,
+        tenant_id: str,
+        job_id: str,
+    ) -> Optional[dict[str, Any]]:
+        """Return the oldest in-flight crawl task for a library job."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM crawl_tasks "
+                    "WHERE tenant_id = ? AND job_id = ? "
+                    "AND status IN "
+                    "('queued','fetching','parsing','classifying') "
+                    "ORDER BY created_at ASC, rowid ASC LIMIT 1",
+                    (tenant_id, job_id),
+                ).fetchone()
+                return self._row_to_task(row) if row else None
 
     def recover_interrupted(self) -> int:
         """Requeue interrupted crawl tasks after a restart."""

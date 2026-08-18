@@ -57,6 +57,17 @@ _EDITABLE_FIELDS = ("name", "provider", "base_url", "api_key", "model", "is_acti
 
 _ALLOWED_PROVIDERS = ("deepseek", "openrouter", "ollama")
 
+_LLM_ROLES = ("diagnose", "profiler", "gap_analyzer", "editor", "evaluator")
+_LLM_ROLE_ASSIGNMENTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS llm_role_assignments (
+    tenant_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (tenant_id, role)
+);
+"""
+
 
 class LLMNodeStore(_SqliteStore):
     """Store and validate per-tenant LLM provider nodes."""
@@ -76,11 +87,117 @@ class LLMNodeStore(_SqliteStore):
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_nodes_one_active "
             "ON llm_nodes(tenant_id) WHERE is_active = 1;",
         ),
+        (
+            2,
+            "CREATE TABLE IF NOT EXISTS llm_role_assignments ("
+            "tenant_id TEXT NOT NULL, role TEXT NOT NULL, "
+            "node_id TEXT NOT NULL, updated_at REAL NOT NULL, "
+            "PRIMARY KEY (tenant_id, role));",
+        ),
     )
 
     # ------------------------------------------------------------------
     # Reads
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Role bindings
+    # ------------------------------------------------------------------
+
+    def set_role_binding(
+        self, tenant_id: str, role: str, node_id: str
+    ) -> bool:
+        if role not in _LLM_ROLES:
+            raise UserStoreError(
+                f"role must be one of {_LLM_ROLES}, got {role!r}"
+            )
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                node = conn.execute(
+                    "SELECT 1 FROM llm_nodes "
+                    "WHERE tenant_id = ? AND node_id = ?",
+                    (tenant_id, node_id),
+                ).fetchone()
+                if node is None:
+                    return False
+                conn.execute(
+                    "INSERT INTO llm_role_assignments "
+                    "(tenant_id, role, node_id, updated_at) "
+                    "VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(tenant_id, role) DO UPDATE SET "
+                    "node_id = excluded.node_id, updated_at = excluded.updated_at",
+                    (tenant_id, role, node_id, time.time()),
+                )
+        return True
+
+    def get_role_binding(self, tenant_id: str, role: str) -> str | None:
+        if role not in _LLM_ROLES:
+            return None
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT node_id FROM llm_role_assignments "
+                    "WHERE tenant_id = ? AND role = ?",
+                    (tenant_id, role),
+                ).fetchone()
+        return row["node_id"] if row is not None else None
+
+    def get_role_bindings(self, tenant_id: str) -> dict[str, str]:
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT role, node_id FROM llm_role_assignments "
+                    "WHERE tenant_id = ?",
+                    (tenant_id,),
+                ).fetchall()
+        return {row["role"]: row["node_id"] for row in rows}
+
+    def delete_role_binding(self, tenant_id: str, role: str) -> bool:
+        if role not in _LLM_ROLES:
+            return False
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM llm_role_assignments "
+                    "WHERE tenant_id = ? AND role = ?",
+                    (tenant_id, role),
+                )
+        return cursor.rowcount > 0
+
+    def resolve_node_for_role(self, tenant_id: str, role: str) -> dict[str, Any] | None:
+        bound_id = self.get_role_binding(tenant_id, role)
+        if bound_id is not None:
+            node = self.get_node(tenant_id, bound_id)
+            if node is not None:
+                return node
+            self.delete_role_binding(tenant_id, role)
+        return self.get_active_node(tenant_id)
+
+    def clear_role_bindings(self, tenant_id: str) -> None:
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                conn.execute(
+                    "DELETE FROM llm_role_assignments WHERE tenant_id = ?",
+                    (tenant_id,),
+                )
+
+    @staticmethod
+    def _is_local_node(node: dict[str, Any] | None) -> bool:
+        if node is None:
+            return False
+        if node.get("provider") == "ollama":
+            return True
+        base_url = (node.get("base_url") or "").lower()
+        return "localhost" in base_url or "127.0.0.1" in base_url
+
+    @staticmethod
+    def list_roles() -> tuple[str, ...]:
+        return _LLM_ROLES
 
     def list_nodes(self, tenant_id: str) -> list[dict[str, Any]]:
         """Return the tenant's nodes in creation order."""

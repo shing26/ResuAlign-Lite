@@ -160,10 +160,73 @@ def _playwright_enabled() -> bool:
 # fallback for known dynamic sites.
 _MIN_JD_TEXT = 50
 
+_PORTAL_CONFIG_MARKERS = (
+    '"pageconfig"',
+    '"ssrcontent"',
+    '"moduletitle"',
+    '"domainmoduleconfig"',
+    '"tenant_info"',
+    '"website_info"',
+    '"__initial_state__"',
+)
+
+_JD_CONTENT_SIGNALS = (
+    "岗位职责",
+    "职位要求",
+    "任职要求",
+    "工作内容",
+    "岗位描述",
+    "responsibilit",
+    "requirement",
+    "qualification",
+    "job description",
+)
+
 
 def _is_dynamic_site(url: str) -> bool:
     host = urlparse(url).netloc.lower()
     return any(token in host for token in _DYNAMIC_SITE_TOKENS)
+
+
+def _looks_like_portal_config(text: str) -> bool:
+    """Detect site-wide SPA payloads masquerading as a single JD."""
+    sample = (text or "")[:8000].lower()
+    return any(marker in sample for marker in _PORTAL_CONFIG_MARKERS)
+
+
+def _looks_like_ssr_json(text: str) -> bool:
+    """Detect long JSON payloads even when the site uses unknown keys."""
+    sample = (text or "").strip()[:8000]
+    if not sample or not sample.startswith("{"):
+        return False
+    braces = sample.count("{") + sample.count("}")
+    quotes = sample.count('"')
+    return braces > 20 and quotes > 30
+
+
+def _job_text_score(text: str) -> int:
+    """Prefer rendered JD text over raw portal JSON / empty shells."""
+    sample = (text or "").strip()
+    if not sample:
+        return -10
+    lowered = sample[:20000].lower()
+    score = 0
+    for signal in _JD_CONTENT_SIGNALS:
+        if signal in lowered:
+            score += 2
+    if 200 <= len(sample) <= 100_000:
+        score += 2
+    elif len(sample) > 200_000:
+        score -= 3
+    elif len(sample) < 20:
+        score -= 3
+    elif len(sample) < 80:
+        score -= 1
+    if _looks_like_portal_config(sample):
+        score -= 4
+    if sample.count("{") > 20 and sample.count("}") > 20:
+        score -= 3
+    return score
 
 
 def _throttle(url: str) -> None:
@@ -279,22 +342,28 @@ def crawl_jd(
         duration_ms=(time.monotonic() - started) * 1000,
         extra={"url": url},
     )
-    # SPA shells (e.g. Alibaba campus-talent) return 200 with near-empty
-    # static HTML; the JD text only exists after JS renders. When a known
-    # dynamic site yields too little text, retry with a rendered browser.
-    if len(text.strip()) < _MIN_JD_TEXT and _is_dynamic_site(url):
+    # SPA shells and portal-style SSR payloads need a real browser: the
+    # static HTML is either empty, site-wide config, or loads JD text via JS.
+    # Re-render whenever the static text is suspicious, then keep whichever
+    # extraction actually looks like a JD.
+    should_render = (
+        len(text.strip()) < _MIN_JD_TEXT and _is_dynamic_site(url)
+    ) or _looks_like_portal_config(text) or _looks_like_ssr_json(text)
+    if should_render:
         fallback_text = _playwright_fallback(
             url, timeout=timeout, selector=selector, meta=meta,
             request_id=request_id, force=True,
         )
-        if fallback_text and len(fallback_text.strip()) > len(text.strip()):
+        if fallback_text and _job_text_score(
+            fallback_text
+        ) > _job_text_score(text):
             text = fallback_text
             log_event(
                 logger,
                 "crawler.playwright_success",
                 request_id=request_id,
                 duration_ms=(time.monotonic() - started) * 1000,
-                extra={"url": url, "reason": "short_static_text"},
+                extra={"url": url, "reason": "rendered_preferred"},
             )
     return text
 
@@ -554,8 +623,15 @@ def _playwright_fetch_html(
                     timeout=max(1000, timeout * 1000),
                 )
                 # SPA pages load the JD body after initial render via XHR;
-                # give async data a moment before reading the DOM.
-                page.wait_for_timeout(1500)
+                # wait for quiet network or a bounded timeout before reading.
+                try:
+                    page.wait_for_load_state(
+                        "networkidle",
+                        timeout=max(2000, min(5000, timeout * 1000)),
+                    )
+                except Exception:
+                    pass
+                page.wait_for_timeout(1000)
                 return page.content()
             finally:
                 browser.close()
@@ -871,6 +947,11 @@ def _extract_site_text(
         or host.endswith(".jobs.feishu.cn")
     ) and re.search(r"/position/\d+", path):
         return _feishu_job_text(url, soup, ip, timeout, meta)
+    if (
+        host == "jobs.bytedance.com"
+        or host.endswith(".jobs.bytedance.com")
+    ) and re.search(r"/position/\d+", path):
+        return _bytedance_job_text(url, soup, ip, timeout, meta)
     for matcher, handler in SITE_HANDLERS:
         if matcher(host, path):
             text = handler(soup)
@@ -1085,6 +1166,65 @@ def _feishu_job_text(
     ]
     if not parts:
         return _generic_job_text(soup)
+    return "\n\n".join(str(part) for part in parts)
+
+
+def _bytedance_job_text(
+    url: str,
+    soup: BeautifulSoup,
+    ip: str | None,
+    timeout: int,
+    meta: dict | None = None,
+) -> str:
+    """Extract a ByteDance campus JD from its JSON detail API."""
+    parsed = urlparse(url)
+    match = re.search(r"/position/(\d+)", parsed.path)
+    if match is None:
+        return _generic_job_text(soup)
+    post_id = match.group(1)
+    portal_type = 3 if "/campus/" in parsed.path.lower() else 2
+    api_url = (
+        f"https://{parsed.netloc}/api/v1/job/posts/{post_id}"
+        f"?portal_type={portal_type}&with_recommend=false"
+    )
+    headers = dict(HEADERS)
+    headers["Referer"] = url
+    headers["Accept"] = "application/json, text/plain, */*"
+    try:
+        response = _fetch_with_retry(
+            api_url, timeout=timeout, ip=ip, headers=headers
+        )
+        if response.status_code != 200:
+            return _generic_job_text(soup)
+        content = response.content
+    except (httpx.HTTPError, CrawlError):
+        return _generic_job_text(soup)
+    try:
+        payload = json.loads(content.decode("utf-8", errors="replace"))
+    except (UnicodeDecodeError, ValueError):
+        return _generic_job_text(soup)
+    detail = ((payload.get("data") or {}).get("job_post_detail") or {})
+    parts = [
+        part
+        for part in (
+            detail.get("title"),
+            _strip_html(str(detail.get("description") or "")),
+            _strip_html(str(detail.get("requirement") or "")),
+        )
+        if part
+    ]
+    if not parts:
+        return _generic_job_text(soup)
+    if meta is not None:
+        meta["title"] = detail.get("title")
+        fallback = _meta_from_soup(soup)
+        meta.setdefault("company", fallback.get("company"))
+        meta.setdefault("company", "字节跳动")
+        cities = detail.get("city_list") or detail.get(
+            "city_info_list_for_delivery"
+        ) or []
+        if cities:
+            meta["city"] = cities[0].get("name")
     return "\n\n".join(str(part) for part in parts)
 
 

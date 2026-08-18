@@ -29,11 +29,13 @@ from ..classifier import classify_job
 from ..config import EnvSettings, build_config
 from ..crawler import CrawlError, crawl_jd
 from ..engine import run
-from ..jd_analysis import jd_profile_to_dict, proactive_jd_profile, profile_and_gaps
+from ..gap_analyzer import analyze_gaps
+from ..jd_analysis import jd_profile_to_dict, proactive_jd_profile
 from ..jd_profiler import profile_jd
 from ..job_library import CrawlTaskStore
 from ..jobs import JobRegistry, resolve_data_dir
-from ..llm import LLMResponseError, OpenAIClient
+from ..llm import LLMResponseError, OpenAIClient, register_daily_usage_recorder
+from ..match_scorer import compute_match_score, fallback_match_reason, snapshot_matches
 from ..models import Report
 from ..observability import (
     RedactingFilter,
@@ -49,7 +51,9 @@ from ..parser import (
     extract_text,
     structured_resume_sections,
 )
+from ..reminders import ReminderDeliveryWorker
 from ..salary import extract_salary_range
+from ..scheduler import ReminderScheduler
 from ..settings_store import SettingsStore
 from ..tailor import rewrite_bullet
 from ..workspace import (
@@ -78,6 +82,7 @@ from .schemas import (
     JobCreateRequest,
     JobImportRequest,
     JobUpdateRequest,
+    LocalIngestRequest,
     LoginRequest,
     MasterResumeCreateRequest,
     MasterResumeRollbackRequest,
@@ -114,7 +119,10 @@ __all__ = [
     "JobLibraryStore",
     "JobRegistry",
     "JobUpdateRequest",
+    "LocalIngestRequest",
     "LLMResponseError",
+    "compute_match_score",
+    "fallback_match_reason",
     "LoginRequest",
     "MasterResumeCreateRequest",
     "MasterResumeRollbackRequest",
@@ -128,6 +136,7 @@ __all__ = [
     "SettingsStore",
     "SettingsUpdateRequest",
     "SignupRequest",
+    "snapshot_matches",
     "UserStore",
     "UserStoreError",
     "WorkbenchAcceptRequest",
@@ -141,16 +150,18 @@ __all__ = [
     "build_config",
     "classify_job",
     "crawl_jd",
+    "enforce_daily_llm_cap",
     "extract_salary_range",
     "extract_text",
     "get_current_user",
     "jd_profile_to_dict",
+    "llm_daily_status",
     "log_event",
     "log_slow_call",
     "new_request_id",
     "proactive_jd_profile",
-    "profile_and_gaps",
     "profile_jd",
+    "analyze_gaps",
     "rewrite_bullet",
     "run",
     "structured_resume_sections",
@@ -237,6 +248,7 @@ _configure_logging()
 # resolve ``resualign.api`` during import.
 from .state import *  # noqa: E402, F401, F403, I001
 from .state import (  # noqa: F401, I001  (explicit bindings used below)
+    _PERSONAL_MODE,
     _MAX_BODY_BYTES,
     _WORKER_CONCURRENCY,
     _WORKER_SEMAPHORE,
@@ -245,6 +257,7 @@ from .state import (  # noqa: F401, I001  (explicit bindings used below)
     _fetcher,
     _jobs,
     _registry,
+    _settings_store,
 )
 
 
@@ -252,6 +265,11 @@ from .services import batch as _batch_service
 from .services import jobs as _jobs_service
 from .services import resumes as _resumes_service
 from .services import workbench as _workbench_service
+from .services.cost_guard import (
+    enforce_daily_llm_cap,
+    llm_daily_status,
+    record_daily_llm_usage,
+)
 
 from .services.fetcher import JobFetcherService  # noqa: E402
 from ..rules import RuleFilterEngine, RuleVerdict  # noqa: E402
@@ -259,9 +277,12 @@ from ..rules import RuleFilterEngine, RuleVerdict  # noqa: E402
 _settings_vocabulary = _jobs_service._settings_vocabulary
 _classify_job = _jobs_service._classify_job
 _derive_title = _jobs_service._derive_title
+_extract_company_location = _jobs_service._extract_company_location
 _crawl_jd_or_502 = _jobs_service._crawl_jd_or_502
 _jd_parse_error_detail = _jobs_service._jd_parse_error_detail
 _create_job_from_source = _jobs_service._create_job_from_source
+_deterministic_job_fields = _jobs_service._deterministic_job_fields
+_local_ingest_job = _jobs_service._local_ingest_job
 _collect_import_rows = _jobs_service._collect_import_rows
 _run_import = _jobs_service._run_import
 _prune_import_batches = _jobs_service._prune_import_batches
@@ -278,6 +299,7 @@ _library_dedupe_key = _workbench_service._library_dedupe_key
 
 _content_sha256 = _resumes_service._content_sha256
 _cached_diagnosis = _resumes_service._cached_diagnosis
+_backfill_diagnosis_snapshots = _resumes_service.backfill_diagnosis_snapshots
 
 _queue_batch_align = _batch_service.queue_batch_align
 _get_batch_align = _batch_service.get_batch_align
@@ -340,8 +362,20 @@ async def lifespan(_: FastAPI):
         "Analysis worker concurrency: %s (RESUALIGN_WORKER_CONCURRENCY=1 means serial)",
         _WORKER_CONCURRENCY,
     )
+    if _PERSONAL_MODE:
+        _settings_store.get_or_create_local_ingest_token("local")
+    register_daily_usage_recorder(record_daily_llm_usage)
+    _backfill_diagnosis_snapshots()
     _recover_pending_jobs()
-    yield
+    reminder_scheduler = ReminderScheduler(_jobs)
+    reminder_scheduler.start()
+    reminder_delivery = ReminderDeliveryWorker(_jobs, _settings_store)
+    reminder_delivery.start()
+    try:
+        yield
+    finally:
+        reminder_scheduler.stop()
+        reminder_delivery.stop()
 
 
 app = FastAPI(title="ResuAlign API", version="0.3.0", lifespan=lifespan)
@@ -477,6 +511,12 @@ from .routers import (
     nodes as _nodes_router,
 )
 from .routers import (
+    refresh as _refresh_router,
+)
+from .routers import (
+    reminders as _reminders_router,
+)
+from .routers import (
     resumes as _resumes_router,
 )
 from .routers import (
@@ -542,6 +582,9 @@ list_automation_rules = _rules_router.list_automation_rules
 create_automation_rule = _rules_router.create_automation_rule
 update_automation_rule = _rules_router.update_automation_rule
 delete_automation_rule = _rules_router.delete_automation_rule
+list_reminders = _reminders_router.list_reminders
+refresh_library_job = _refresh_router.refresh_library_job
+refresh_all_library_jobs = _refresh_router.refresh_all_library_jobs
 list_llm_nodes = _nodes_router.list_llm_nodes
 create_llm_node = _nodes_router.create_llm_node
 update_llm_node = _nodes_router.update_llm_node

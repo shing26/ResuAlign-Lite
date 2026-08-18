@@ -10,6 +10,7 @@ _CUSTOM_PROMPT_MAX = 4_000
 _TITLE_MAX = 200
 _COMPANY_MAX = 200
 _LOCATION_MAX = 100
+_SALARY_TEXT_MAX = 500
 _URL_MAX = 2_000
 _RULE_VALUE_MAX = 2_000
 _LABEL_MAX = 200
@@ -102,6 +103,18 @@ class JobImportRequest(BaseModel):
     jobs: list[dict[str, Any]] | None = None
     csv_text: str | None = Field(default=None, max_length=_CSV_TEXT_MAX)
 
+
+class LocalIngestRequest(BaseModel):
+    """Structured page fields or raw selection text from the collector script."""
+
+    title: str | None = Field(default=None, max_length=_TITLE_MAX)
+    company: str | None = Field(default=None, max_length=_COMPANY_MAX)
+    location: str | None = Field(default=None, max_length=_LOCATION_MAX)
+    salary_text: str | None = Field(default=None, max_length=_SALARY_TEXT_MAX)
+    job_page_url: str | None = Field(default=None, max_length=_URL_MAX)
+    jd_text: str = Field(max_length=_JD_TEXT_MAX)
+    site: Literal["shixiseng", "universal"] = "universal"
+
 _LLM_KEY_MAX = 2_000
 
 
@@ -116,6 +129,19 @@ class LLMSettingsUpdate(BaseModel):
     model: str | None = Field(default=None, max_length=_TITLE_MAX)
     api_key: str | None = Field(default=None, max_length=_LLM_KEY_MAX)
     base_url: str | None = Field(default=None, max_length=_URL_MAX)
+
+
+class ReminderSettingsUpdate(BaseModel):
+    """Editable reminder delivery settings (secrets stay environment-only)."""
+
+    enabled: bool | None = None
+    auto_followup_reminder: StrictBool | None = None
+    provider: Literal["generic", "feishu", "wecom", "telegram"] | None = None
+    smtp_host: str | None = Field(default=None, max_length=255)
+    smtp_port: int | None = Field(default=None, ge=1, le=65535)
+    smtp_user: str | None = Field(default=None, max_length=255)
+    smtp_from: str | None = Field(default=None, max_length=255)
+    smtp_to: str | None = Field(default=None, max_length=255)
 
 
 class SettingsTestConnectionRequest(BaseModel):
@@ -166,6 +192,10 @@ class SettingsUpdateRequest(BaseModel):
     llm_model: str | None = None
     eval_default: StrictBool | None = None
     llm: LLMSettingsUpdate | None = None
+    reminder: ReminderSettingsUpdate | None = None
+    daily_llm_cap: int | None = Field(default=None, ge=0)
+    llm_cost_per_1k_in: float | None = Field(default=None, ge=0)
+    llm_cost_per_1k_out: float | None = Field(default=None, ge=0)
 
 class WorkbenchRunRequest(BaseModel):
     master_resume_id: str
@@ -180,6 +210,7 @@ class WorkbenchAcceptRequest(BaseModel):
 
 class FinalDraftRequest(BaseModel):
     draft: str = Field(max_length=_DRAFT_MAX)
+    accepted_diff_ids: list[str] = Field(default_factory=list)
 
 
 class WorkbenchSessionInitRequest(BaseModel):
@@ -287,9 +318,26 @@ class JobPreanalyzeResponse(BaseModel):
     jd_profile: dict[str, Any] | None = None
     gap_report: dict[str, Any] | None = None
     match_score: float | None = None
+    match_score_detail: dict[str, Any] | None = None
+    match_reason: str | None = None
+    match_reason_source: Literal["llm", "fallback"] | None = None
+    match_updated_at: float | None = None
+    match_stale: bool = False
     classification: dict[str, Any] | None = None
     cache_hit: bool = False
     error: str | None = None
+
+
+class MatchScoreResponse(BaseModel):
+    job_id: str
+    status: Literal["ready", "blocked", "fallback"] = "ready"
+    recomputed: bool = False
+    match_score: float | None = None
+    match_score_detail: dict[str, Any] | None = None
+    match_reason: str | None = None
+    match_reason_source: Literal["llm", "fallback"] | None = None
+    match_updated_at: float | None = None
+    match_stale: bool = False
 
 
 class WorkbenchRewriteRequest(BaseModel):
@@ -344,6 +392,43 @@ class DashboardResponse(BaseModel):
     quick_continue: DashboardQuickContinue | None = None
 
 
+class ReminderItem(BaseModel):
+    """One follow-up due today or overdue for the tenant."""
+
+    job_id: str
+    title: str
+    company: str | None = None
+    status_canonical: str = "applied"
+    next_step_due_at: str | None = None
+    interview_stage: str | None = None
+    next_step: str | None = None
+    overdue: bool = False
+    reminder_sent_at: float | None = None
+
+
+class ReminderListResponse(BaseModel):
+    items: list[ReminderItem] = Field(default_factory=list)
+
+
+class JobRefreshResponse(BaseModel):
+    """Result of queueing or running one URL job refresh."""
+
+    queued: bool = False
+    job_id: str
+    crawl_id: str | None = None
+    reason: str | None = None
+    title: str | None = None
+    status: str | None = None
+    changed: bool | None = None
+    changed_fields: list[str] = Field(default_factory=list)
+    error: str | None = None
+    job: dict[str, Any] | None = None
+
+
+class JobRefreshAllResponse(BaseModel):
+    items: list[JobRefreshResponse] = Field(default_factory=list)
+
+
 class AutomationRuleCreateRequest(BaseModel):
     """Create one automation rule for the fetch pipeline."""
 
@@ -371,4 +456,37 @@ class BlockerResolveRequest(BaseModel):
     """Resolve a blocker by building a library job from pasted JD text."""
 
     manual_text: str = Field(max_length=_JD_TEXT_MAX)
+
+
+class JobExportRequest(BaseModel):
+    """Request one canonical final-draft export for a library job."""
+
+    format: Literal["markdown", "json", "pdf"] = "markdown"
+
+
+class JobExportMeta(BaseModel):
+    """Traceability metadata attached to every final-draft export."""
+
+    model: str | None = None
+    prompt_version: str | None = None
+    generated_at: float | None = None
+    final_draft_updated_at: float | None = None
+    match_score: float | None = None
+    workbench_resume_id: str | None = None
+
+
+class JobExportResponse(BaseModel):
+    """Canonical export payload derived only from persisted job fields."""
+
+    job_id: str
+    job_title: str
+    format: Literal["markdown", "json", "pdf"]
+    final_draft_version: int = 0
+    content: str = ""
+    filename: str = ""
+    meta: JobExportMeta = Field(default_factory=JobExportMeta)
+    accepted_diff_ids: list[str] = Field(default_factory=list)
+    accepted_diffs: list[dict[str, Any]] = Field(default_factory=list)
+    render: str | None = None
+    print_target: str | None = None
 

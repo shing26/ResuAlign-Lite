@@ -42,6 +42,11 @@ class ClassifierResult(BaseModel):
     tech_tags: list[str] = Field(default_factory=list)
 
 
+class JdIntakeDecision(BaseModel):
+    action: Literal["keep_pending", "resolve"] = "keep_pending"
+    reason: str = ""
+
+
 class DiffItem(BaseModel):
     diff_id: str = ""
     # Resume section this diff belongs to (e.g. "项目经历"); the LLM fills it
@@ -83,6 +88,7 @@ JDProfileModel = JDProfile
 GapReportModel = GapReport
 JDAnalysisModel = JDAnalysis
 ClassifierResultModel = ClassifierResult
+JdIntakeDecisionModel = JdIntakeDecision
 DiffItemModel = DiffItem
 TailoredResumeModel = TailoredResume
 EvalScoreModel = EvalScore
@@ -92,6 +98,7 @@ JDProfileSchema = JDProfile
 GapReportSchema = GapReport
 JDAnalysisSchema = JDAnalysis
 ClassifierResultSchema = ClassifierResult
+JdIntakeDecisionSchema = JdIntakeDecision
 DiffItemSchema = DiffItem
 TailoredResumeSchema = TailoredResume
 EvalScoreSchema = EvalScore

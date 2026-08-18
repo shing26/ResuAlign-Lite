@@ -1,13 +1,25 @@
 {
   "id": "batch-5-jd-data-platform",
   "scenario": "batch",
-  "tags": ["batch", "data-engineer", "5-jd"],
+  "tags": [
+    "batch",
+    "data-engineer",
+    "5-jd"
+  ],
   "batch": true,
-  "expected_llm_calls": 10,
+  "expected_llm_calls": 15,
   "cached_diagnosis": {
     "score": 81,
-    "skills": ["Python", "SQL", "Airflow", "Spark", "Docker"],
-    "issues": ["Add data quality validation evidence."]
+    "skills": [
+      "Python",
+      "SQL",
+      "Airflow",
+      "Spark",
+      "Docker"
+    ],
+    "issues": [
+      "Add data quality validation evidence."
+    ]
   },
   "resume_text": "SYNTHETIC RESUME - Data Platform Engineer\n\nSummary\nData platform engineer with Python, SQL, Airflow, and Spark experience.\n\nSkills\nPython, SQL, Airflow, Spark, Docker, PostgreSQL\n\nExperience\nData Engineer, Example Corp (2020-present)\n- Built Python ETL pipelines for analytics datasets.\n- Scheduled jobs with Airflow.\n- Added data quality validation workflows.\n- Developed Spark batch jobs and tuned PostgreSQL queries.",
   "jd_text": "Data Engineer\nPython and SQL, Airflow scheduling, Spark ETL pipelines, data quality validation.",

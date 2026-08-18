@@ -120,6 +120,18 @@ test("styles.css: 240px rail + 64px topbar override layer", () => {
   assert.match(css, /\.jobs-tools\s*\{/, "secondary jobs tools row styles");
 });
 
+test("styles.css: mobile rail hides the brand so nav buttons stay tappable", () => {
+  const css = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src/resualign/static/styles.css"),
+    "utf8",
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 900px\)[\s\S]*?\.app-rail \.rail-brand\s*\{\s*display:\s*none;/,
+    "final mobile override hides the full-width brand block",
+  );
+});
+
 test("kanban.js: single jobs top bar keeps fetch, blocker and export contracts", () => {
   const src = read("kanban.js");
   assert.match(src, /data-jobs-topbar/, "unified jobs top bar");

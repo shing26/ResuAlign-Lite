@@ -173,10 +173,11 @@ def init_workbench_session(
     start_pipeline = bool(jd_url)
     if not start_pipeline:
         try:
-            start_pipeline = bool(api_module.build_config().api_key)
+            start_pipeline = api_module.build_config().is_llm_configured
         except Exception:
             start_pipeline = False
     if start_pipeline:
+        api_module.enforce_daily_llm_cap(user["user_id"])
         threading.Thread(
             target=api_module._workbench_service._run_session_pipeline,
             args=(session["session_id"],),
@@ -288,6 +289,7 @@ def analyze_workbench_session(
             },
         },
     )
+    api_module.enforce_daily_llm_cap(user["user_id"])
     threading.Thread(
         target=api_module._workbench_service._run_session_pipeline,
         args=(session_id,),

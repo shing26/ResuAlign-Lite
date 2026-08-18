@@ -22,7 +22,11 @@ from resualign.agent.mcp_server import (
     fetch_and_evaluate_job,
     get_mcp_app,
     get_pending_blockers,
+    job_ingest_and_profile,
+    job_tracker_manage,
+    master_resume_query,
     resolve_blocker,
+    resume_align_and_tailor,
 )
 from resualign.crawler import CrawlError
 from resualign.job_library import JobLibraryStore
@@ -122,7 +126,7 @@ def _make_master_resume(
 # -- MCP server plumbing -----------------------------------------------------
 
 
-def test_get_mcp_app_registers_four_tools():
+def test_get_mcp_app_registers_eight_tools():
     app = get_mcp_app()
     tools = asyncio.run(app.list_tools())
     names = {tool.name for tool in tools}
@@ -131,6 +135,10 @@ def test_get_mcp_app_registers_four_tools():
         "auto_align_resume",
         "get_pending_blockers",
         "resolve_blocker",
+        "job_ingest_and_profile",
+        "resume_align_and_tailor",
+        "job_tracker_manage",
+        "master_resume_query",
     } <= names
 
 
@@ -347,6 +355,130 @@ def test_resolve_blocker_not_pending_returns_error():
     )
     assert result["status"] == "error"
     assert "pending" in result["error"]
+
+
+# -- compound MCP tools (compound-ai-system-spec-final.md §四) ---------------
+
+
+def test_job_ingest_and_profile_creates_text_job_with_snapshot():
+    result = job_ingest_and_profile(
+        source="负责后端服务开发，要求 Python 与高并发经验，月薪 25-35K。",
+        source_type="text",
+        tenant_id="local",
+    )
+    assert result["status"] == "created"
+    assert result["job_id"]
+    job = api_module._jobs.get_job("local", result["job_id"])
+    assert job is not None
+    assert job["source_type"] == "text"
+    assert "jd_profile" in result
+    assert "hard_gates" in result
+    assert "classification" in result
+
+
+def test_job_ingest_and_profile_url_returns_status_and_snapshot():
+    with patch.object(
+        api_module._fetcher,
+        "submit_url",
+        return_value={"status": "created", "job_id": "job-1"},
+    ):
+        result = job_ingest_and_profile(
+            source="https://example.com/jobs/1",
+            source_type="url",
+            tenant_id="local",
+        )
+    assert result["status"] == "created"
+    assert result["job_id"] == "job-1"
+    assert result["jd_profile"] == {}
+
+
+def test_job_ingest_and_profile_validates_source_type():
+    result = job_ingest_and_profile(
+        source="ops", source_type="ftp", tenant_id="local"
+    )
+    assert result["status"] == "error"
+    assert "source_type" in result["error"]
+
+
+def test_resume_align_and_tailor_queues_with_style():
+    job = _make_library_job()
+    resume = _make_master_resume()
+    with patch.object(
+        api_module, "build_config", return_value=_test_config()
+    ), patch.object(api_module, "_run_job"):
+        result = resume_align_and_tailor(
+            job_id=job["job_id"],
+            resume_id=resume["resume_id"],
+            style="deep",
+            tenant_id="local",
+        )
+    assert result["status"] == "queued"
+    assert result["style"] == "deep"
+    assert result["analysis_job_id"]
+
+
+def test_job_tracker_manage_apply_creates_auto_followup():
+    job = _make_library_job()
+    result = job_tracker_manage(
+        job_id=job["job_id"],
+        action="apply",
+        tenant_id="local",
+    )
+    assert result["status"] == "updated"
+    assert result["action"] == "apply"
+    updated = api_module._jobs.get_job("local", job["job_id"])
+    assert updated["status"] == "applied"
+    assert updated["next_step"] == "投递后跟进"
+    assert updated["next_step_due_at"]
+
+
+def test_job_tracker_manage_updates_stage_and_note():
+    job = _make_library_job()
+    stage_result = job_tracker_manage(
+        job_id=job["job_id"],
+        action="update_stage",
+        stage="一面",
+        tenant_id="local",
+    )
+    assert stage_result["status"] == "updated"
+    updated = api_module._jobs.get_job("local", job["job_id"])
+    assert updated["interview_stage"] == "一面"
+    note_result = job_tracker_manage(
+        job_id=job["job_id"],
+        action="log_note",
+        note="已与 HR 确认时间",
+        tenant_id="local",
+    )
+    assert note_result["status"] == "updated"
+    updated = api_module._jobs.get_job("local", job["job_id"])
+    assert "已与 HR 确认时间" in updated["notes"]
+
+
+def test_job_tracker_manage_rejects_unknown_action():
+    job = _make_library_job()
+    result = job_tracker_manage(
+        job_id=job["job_id"], action="rename", tenant_id="local"
+    )
+    assert result["status"] == "error"
+    assert "action must be" in result["error"]
+
+
+def test_master_resume_query_returns_scored_fragments():
+    resume = _make_master_resume(
+        content="项目 A：负责 Redis 高并发缓存层。\n"
+        "项目 B：负责 Java 微服务接口。\n"
+        "项目 C：负责 Python 数据分析。"
+    )
+    items = master_resume_query(
+        resume_id=resume["resume_id"],
+        query="Redis 高并发",
+        top_k=2,
+        tenant_id="local",
+    )
+    assert len(items) == 1
+    assert items[0]["provenance"]["resume_id"] == resume["resume_id"]
+    assert "Redis" in items[0]["fragment"]
+    assert items[0]["line_number"] == 1
 
 
 # -- HITL events -------------------------------------------------------------

@@ -16,6 +16,11 @@ data/logs/
 
 # Local agent/tool configuration
 .codex/
+.reasonix/
+reasonix.toml
+
+# Local visual scratch previews
+/test.html
 
 # Scratch artifacts: keep only the CI smoke scripts under phase-16/18/20
 .scratch/*

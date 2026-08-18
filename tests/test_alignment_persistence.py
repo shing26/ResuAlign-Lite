@@ -372,7 +372,9 @@ def test_workbench_success_persists_alignment():
     ).json()
     assert persisted["alignment_status"] == "succeeded"
     assert persisted["analysis_ready"] is True
-    assert persisted["match_score"] == 90
+    assert persisted["match_score"] == 94.8
+    assert persisted["match_score_detail"]["total"] == 94.8
+    assert persisted["match_reason"].startswith("基于规则评分：")
     assert persisted["diffs"][0]["proposed"] == (
         "Python developer with Redis caching."
     )
@@ -449,7 +451,7 @@ def test_workspace_session_hydrates_persisted_results_after_restart():
     state = r.json()
     assert state["jd"]["profile"]["must_have_skills"] == ["Python"]
     assert state["gap"]["gap_report"]["missing_keywords"] == ["Redis"]
-    assert state["gap"]["score"] == 90
+    assert state["gap"]["score"] == 94.8
     assert state["alignment"]["status"] == "succeeded"
     assert state["alignment"]["diffs"][0]["proposed"] == (
         "Python developer with Redis caching."

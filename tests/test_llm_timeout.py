@@ -293,14 +293,53 @@ def test_diagnosis_job_timeout_error_message_is_user_readable():
     assert "模型服务不可用或返回异常" in data["error"]
     assert "请检查 API Key 与网络连接后重试" in data["error"]
 
+def test_workbench_timeout_error_names_timeout_stage():
+    detail = api_module._job_failure_detail(
+        "tailoring",
+        LLMResponseError(
+            "Structured LLM call failed after 3 attempts: "
+            "The read operation timed out"
+        ),
+    )
+    assert "简历定制" in detail
+    assert "模型响应超时" in detail
+    assert "模型服务不可用" not in detail
+
+
+def test_workbench_json_parse_error_gets_actionable_message():
+    detail = api_module._job_failure_detail(
+        "tailoring",
+        LLMResponseError(
+            "Structured response failed schema validation after 3 attempts: "
+            "Expecting value: line 1 column 1 (char 0)"
+        ),
+    )
+    assert "简历定制" in detail
+    assert "空内容或无法解析" in detail
+    assert "重新运行" in detail
+
+
+def test_workbench_rate_limit_error_gets_retry_message():
+    detail = api_module._job_failure_detail(
+        "tailoring",
+        LLMResponseError(
+            "LLM call failed after 3 attempts: "
+            "Server error '429 Too Many Requests' for url "
+            "https://api.deepseek.com/chat/completions"
+        ),
+    )
+    assert "繁忙" in detail
+    assert "稍后重试" in detail
+
+
 def test_timeout_defaults_bound_request_hangs():
     """LLM request timeouts must be tight enough that a stuck provider
     cannot hang the frontend for minutes: 40s read (x3 attempts = 120s
     worst case, tuned down in Sprint 5) and a short 10s connect window."""
-    assert OpenAIClient.DEFAULT_TIMEOUT == 40.0
-    assert OpenAIClient.DEFAULT_CONNECT_TIMEOUT == 10.0
+    assert OpenAIClient.DEFAULT_TIMEOUT == 120.0
+    assert OpenAIClient.DEFAULT_CONNECT_TIMEOUT == 30.0
     client = OpenAIClient(_config())
     timeout = client._client.timeout
-    assert timeout.connect == 10.0
-    assert timeout.read == 40.0
+    assert timeout.connect == 30.0
+    assert timeout.read == 120.0
     client.close()

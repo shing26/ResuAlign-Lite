@@ -86,6 +86,17 @@ def _jd_analysis():
     return {"jd_profile": _profile(), "gap_report": _gap()}
 
 
+
+def _jd_profile_only():
+    """Standalone JD profile (no gap_report wrapper)."""
+    return _profile()
+
+
+def _gap_only():
+    """Standalone gap report (no jd_profile wrapper)."""
+    return _gap()
+
+
 def _tailor():
     return {"sections": {"experience": "Built services using Java"},
             "diffs": [{"type": "modify", "original": "Python dev",

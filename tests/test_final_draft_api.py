@@ -255,3 +255,48 @@ def test_workbench_accept_then_save_final_draft():
     assert saved.status_code == 200
     assert saved.json()["version"] == 1
     assert saved.json()["draft"] == draft
+
+
+def test_final_draft_persists_accepted_diff_ids():
+    job = _create_job()
+    api_module._jobs.save_alignment(
+        "local",
+        job["job_id"],
+        diffs=[
+            {
+                "diff_id": "d1",
+                "provenance_state": "verified",
+                "proposed": "Draft one",
+            },
+            {
+                "diff_id": "d2",
+                "provenance_state": "verified",
+                "proposed": "Draft two",
+            },
+        ],
+        alignment_status="succeeded",
+    )
+
+    r = client.post(
+        f"/api/jobs/{job['job_id']}/final-draft",
+        json={"draft": "Draft", "accepted_diff_ids": ["d1"]},
+    )
+    assert r.status_code == 200
+    refreshed = client.get(f"/api/jobs/{job['job_id']}").json()
+    states = {
+        diff["diff_id"]: diff["provenance_state"]
+        for diff in refreshed["diffs"]
+    }
+    assert states == {"d1": "accepted", "d2": "verified"}
+
+    # A later plain save keeps the already-accepted marker.
+    client.post(
+        f"/api/jobs/{job['job_id']}/final-draft",
+        json={"draft": "Draft updated"},
+    )
+    refreshed = client.get(f"/api/jobs/{job['job_id']}").json()
+    states = {
+        diff["diff_id"]: diff["provenance_state"]
+        for diff in refreshed["diffs"]
+    }
+    assert states["d1"] == "accepted"

@@ -39,6 +39,19 @@ def default_job_db_path() -> Path:
     return resolve_data_dir() / "jobs.db"
 
 
+def resolve_upload_dir() -> Path:
+    """Return the runtime upload directory for parsed resume files.
+
+    ``RESUALIGN_UPLOAD_DIR`` wins when set; otherwise uploads live under
+    the resolved data directory as ``<DataDir>/uploads/`` so one backup
+    snapshot covers both SQLite data and uploaded originals.
+    """
+    override = os.environ.get("RESUALIGN_UPLOAD_DIR")
+    if override:
+        return Path(override).expanduser()
+    return resolve_data_dir() / "uploads"
+
+
 def _apply_sqlite_pragmas(
     connection: sqlite3.Connection,
     *,
