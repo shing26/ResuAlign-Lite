@@ -63,9 +63,12 @@ class TestGraphExecutor:
         calls = []
         def runner(st, node):
             calls.append(node.get("role", ""))
-            if node.get("role") == "profiler": st.jd_profile = {}
-            elif node.get("role") == "gap_analyzer": st.gap_report = {}
-            elif node.get("role") == "editor": st.tailored_draft = {"diffs": [{"proposed": "Python"}]}
+            if node.get("role") == "profiler":
+                st.jd_profile = {}
+            elif node.get("role") == "gap_analyzer":
+                st.gap_report = {}
+            elif node.get("role") == "editor":
+                st.tailored_draft = {"diffs": [{"proposed": "Python"}]}
             return {"type": "mock"}
         r = GraphExecutor(llm_runner=runner).run(s)
         assert r.status == AlignmentStatus.COMPLETED
@@ -73,7 +76,8 @@ class TestGraphExecutor:
     def test_failing_llm(self):
         s = AlignmentState(job_id="t", resume_text="h", jd_text="w")
         def runner(st, node):
-            if node.get("role") == "profiler": raise ValueError("fail")
+            if node.get("role") == "profiler":
+                raise ValueError("fail")
             return {}
         r = GraphExecutor(llm_runner=runner).run(s)
         assert r.status == AlignmentStatus.FAILED
@@ -83,8 +87,10 @@ class TestGraphExecutor:
         cnt = [0]
         def runner(st, node):
             cnt[0] += 1
-            if node.get("role") == "profiler": st.jd_profile = {}
-            elif node.get("role") == "gap_analyzer": st.gap_report = {}
+            if node.get("role") == "profiler":
+                st.jd_profile = {}
+            elif node.get("role") == "gap_analyzer":
+                st.gap_report = {}
             elif node.get("role") == "editor":
                 if cnt[0] <= 3:
                     st.tailored_draft = {"diffs": [{"proposed": "Django React"}]}
@@ -96,8 +102,10 @@ class TestGraphExecutor:
     def test_retry_from_provenance(self):
         s = AlignmentState(job_id="t", resume_text="Python", jd_text="w", max_retries=1)
         def runner(st, node):
-            if node.get("role") == "profiler": st.jd_profile = {}
-            elif node.get("role") == "gap_analyzer": st.gap_report = {}
+            if node.get("role") == "profiler":
+                st.jd_profile = {}
+            elif node.get("role") == "gap_analyzer":
+                st.gap_report = {}
             elif node.get("role") == "editor":
                 st.tailored_draft = {"diffs": [{"proposed": "Django React"}]}
             return {"type": "mock"}
