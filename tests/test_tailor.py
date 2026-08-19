@@ -1,7 +1,14 @@
 import pytest
 
 from resualign.models import TailoredResume
-from resualign.tailor import tailor_resume
+from resualign.tailor import (
+    METRIC_PLACEHOLDER,
+    _ensure_metric_placeholder,
+    _has_quantified_metric,
+    parse_diff_with_provenance,
+    rewrite_bullet,
+    tailor_resume,
+)
 
 
 class MockLLM:
@@ -158,3 +165,63 @@ def test_tailor_rejects_invalid_prompt_focus():
     mock = MockLLM()
     with pytest.raises(ValueError, match="prompt_focus"):
         tailor_resume(mock, "Resume", "Gap", prompt_focus="wild")
+
+
+def test_metric_hint_detects_existing_metrics():
+    assert _has_quantified_metric("吞吐量提升 30%") is True
+    assert _has_quantified_metric("支撑 QPS 达 1200") is True
+    assert _has_quantified_metric("负责高并发服务开发") is False
+
+
+def test_metric_hint_ignores_ascii_short_tokens_inside_words():
+    assert _has_quantified_metric("supports") is False
+    assert _has_quantified_metric("art") is False
+    assert _has_quantified_metric("123 skills") is False
+    assert _has_quantified_metric("ROI") is True
+    assert _has_quantified_metric("耗时 3s") is True
+
+
+def test_ensure_metric_placeholder_appends_only_when_missing():
+    assert _ensure_metric_placeholder("") == ""
+    assert METRIC_PLACEHOLDER in _ensure_metric_placeholder("构建高吞吐后端服务")
+    assert _ensure_metric_placeholder("耗时降低 35%") == "耗时降低 35%"
+
+
+def test_parse_diff_with_provenance_appends_placeholder_for_unquantified_proposal():
+    diff, valid = parse_diff_with_provenance(
+        {
+            "type": "modify",
+            "original": "负责后端开发",
+            "proposed": "构建高吞吐后端服务",
+            "provenance": "负责后端开发",
+        },
+        "负责后端开发",
+    )
+    assert valid is True
+    assert METRIC_PLACEHOLDER in diff.proposed
+
+
+def test_parse_diff_with_provenance_keeps_existing_metric():
+    diff, valid = parse_diff_with_provenance(
+        {
+            "type": "modify",
+            "original": "吞吐量提升 30%",
+            "proposed": "吞吐量提升 30%",
+            "provenance": "吞吐量提升 30%",
+        },
+        "吞吐量提升 30%",
+    )
+    assert valid is True
+    assert diff.proposed == "吞吐量提升 30%"
+
+
+def test_rewrite_bullet_appends_placeholder_for_quantified_instruction():
+    mock = MockLLM(result={"proposed": "构建高吞吐后端服务", "reason": "强调指标"})
+    diff = rewrite_bullet(mock, "负责后端开发", "quantified")
+    assert METRIC_PLACEHOLDER in diff.proposed
+
+
+def test_rewrite_bullet_does_not_append_placeholder_for_concise_instruction():
+    mock = MockLLM(result={"proposed": "构建高吞吐后端服务", "reason": "精炼"})
+    diff = rewrite_bullet(mock, "负责后端开发", "concise")
+    assert METRIC_PLACEHOLDER not in diff.proposed

@@ -28,6 +28,7 @@ import {
   renderMatchBadge,
   renderSkills,
   stageStepper,
+  workbenchProgressPipelineHtml,
   workbenchGuideHtml,
   workbenchPrimaryButtonHtml,
 } from "./format.js";
@@ -208,6 +209,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <div class="diff-list">${diffList(session, jobId)}</div>
         </section>
         <aside class="wb-aux">
+          ${workbenchProgressPipelineHtml(session)}
           <div class="wb-tabs" role="tablist" aria-label="工作台辅助信息">
             <button type="button" class="wb-tab ${activeAuxPane === "inspector" ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector" aria-selected="${activeAuxPane === "inspector"}">岗位分析</button>
             <button type="button" class="wb-tab ${activeAuxPane === "livesheet" ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="livesheet" aria-selected="${activeAuxPane === "livesheet"}">Live Sheet</button>

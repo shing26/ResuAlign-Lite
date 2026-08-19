@@ -18,6 +18,7 @@ import {
   renderSkills,
   stageProgress,
   stageStepper,
+  workbenchProgressPipelineHtml,
 } from "../../src/resualign/static/app/format.js";
 
 const EMPTY_SESSION = {};
@@ -127,6 +128,34 @@ test("stageStepper renders step labels with done/active classes", () => {
   assert.match(html, />对齐<\/span>/);
   const emptyHtml = stageStepper(EMPTY_SESSION);
   assert.doesNotMatch(emptyHtml, /is-done/);
+});
+
+/* ------------------------------------------------------------------ */
+/* workbenchProgressPipelineHtml                                       */
+/* ------------------------------------------------------------------ */
+
+test("workbenchProgressPipelineHtml renders a live backend stage message", () => {
+  const html = workbenchProgressPipelineHtml({
+    alignment: { status: "running", stage: "tailoring", message: "正在生成 STAR 精修建议..." },
+  });
+  assert.match(html, /data-workbench-live-progress/);
+  assert.match(html, /data-workbench-live-progress-message/);
+  assert.match(html, /正在生成 STAR 精修建议\.\.\./);
+});
+
+test("workbenchProgressPipelineHtml shows completion text when succeeded", () => {
+  const html = workbenchProgressPipelineHtml({
+    alignment: { status: "succeeded", stage: "done", diffs: [] },
+  });
+  assert.match(html, /简历对齐已完成/);
+});
+
+test("workbenchProgressPipelineHtml escapes the live message", () => {
+  const html = workbenchProgressPipelineHtml({
+    alignment: { status: "queued", message: "检查 <真实性与指标>" },
+  });
+  assert.match(html, /检查 &lt;真实性与指标&gt;/);
+  assert.doesNotMatch(html, /<真实性与指标>/);
 });
 
 /* ------------------------------------------------------------------ */

@@ -8,6 +8,13 @@ from .schema_registry import DiffItemSchema, TailoredResumeSchema
 
 BULLET_REWRITE_PROMPT_VERSION = "v1"
 TAILOR_PROMPT_VERSION = "v1"
+METRIC_PLACEHOLDER = "[待人工确认：耗时降低 X% / 支撑 QPS 达 Y]"
+_METRIC_HINT_RE = re.compile(
+    r"(?:\d+(?:\.\d+)?\s*(?:%|倍|万|亿|ms\b|s\b|qps\b|tps\b))|"
+    r"\b(?:qps|tps|rt|pv|uv|roi)\b|"
+    r"(?:成本降低|耗时降低|性能提升)",
+    re.IGNORECASE,
+)
 
 
 TAILOR_PROMPT = (
@@ -69,6 +76,14 @@ TAILOR_PROMPT = (
     "    scenario words exactly as written. For non-English resumes, include \n"
     "    the English phrase verbatim alongside the translated text (e.g., \n"
     "    write 'FastAPI async endpoints' as well as the Chinese rendering).\n"
+    "13. Every rewritten experience/project bullet MUST open with a strong \n"
+    "    action verb and follow ACTION VERB + TECHNICAL METHOD + BUSINESS \n"
+    "    SCENARIO + QUANTIFIED OUTCOME. Avoid adverbs and hollow \n"
+    "    'responsible for...' filler.\n"
+    "14. If the source bullet has no number/metric, do NOT invent one. Append \n"
+    "    a clearly marked editable placeholder such as '[待人工确认：耗时降低 \n"
+    "    X% / 支撑 QPS 达 Y]' after the factual clause. Never present the \n"
+    "    placeholder as an established fact.\n"
     "Return ONLY a JSON object with exactly two keys:\n"
     "sections (object mapping section_name to rewritten plain text),\n"
     "diffs (list of objects with type in ['modify','add','remove'], section, \n"
@@ -125,15 +140,18 @@ PROMPT_FOCUS_GUIDES = {
 
 BULLET_INSTRUCTIONS = {
     "quantified": (
-        "Re-emphasize measurable outcomes that already exist in the bullet "
-        "(numbers, percentages, counts, or reductions). Never invent or "
-        "inflate metrics that are absent from the original bullet."
+        "Rewrite in STAR order: strong action verb + technical method + "
+        "business scenario + quantified outcome. If the original has no "
+        "number, append a clearly marked editable placeholder such as "
+        "'[待人工确认：耗时降低 X% / 支撑 QPS 达 Y]'. Never invent a concrete "
+        "metric."
     ),
     "high_concurrency": (
         "Tie the existing facts to high-concurrency, low-latency, or "
-        "production platform language when the facts support it. Use the "
-        "JD's exact scenario phrase when available; never add capabilities "
-        "the original bullet does not contain."
+        "production platform language when the facts support it. Follow "
+        "ACTION VERB + TECHNICAL METHOD + BUSINESS SCENARIO + QUANTIFIED "
+        "OUTCOME. Use the JD's exact scenario phrase when available; never "
+        "add capabilities the original bullet does not contain."
     ),
     "concise": (
         "Shorten the bullet to one crisp line while preserving every fact "
@@ -144,6 +162,16 @@ BULLET_INSTRUCTIONS = {
 
 def _normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def _has_quantified_metric(text: str) -> bool:
+    return bool(_METRIC_HINT_RE.search(text or ""))
+
+
+def _ensure_metric_placeholder(text: str) -> str:
+    if not text or _has_quantified_metric(text):
+        return text
+    return f"{text.rstrip()} {METRIC_PLACEHOLDER}"
 
 
 def _normalized_char_map(text: str) -> tuple[str, list[int]]:
@@ -239,6 +267,8 @@ def parse_diff_with_provenance(
         source_span=source_span,
         provenance_state=provenance_state,
     )
+    if diff.type in {"modify", "add"} and diff.proposed:
+        diff.proposed = _ensure_metric_placeholder(diff.proposed)
     return diff, valid
 
 
@@ -345,6 +375,8 @@ def rewrite_bullet(
         "2. NEVER invent skills, experience, tools, or numbers.\n"
         "3. Apply the requested instruction to the existing facts.\n"
         "4. Keep the same language as the original bullet.\n"
+        "5. Start with a strong action verb and keep the sentence business-\n"
+        "   outcome focused: ACTION VERB + METHOD + SCENARIO + RESULT.\n"
         "Return ONLY JSON: {\"proposed\": \"...\", \"reason\": \"...\"}."
     )
     user = (
@@ -359,11 +391,16 @@ def rewrite_bullet(
         DiffItemSchema,
         model=resolved_model,
     )
+    proposed = _ensure_metric_placeholder(
+        str(result.get("proposed") or "").strip()
+    ) if instruction in {"quantified", "high_concurrency"} else str(
+        result.get("proposed") or ""
+    ).strip()
     diff = DiffItem(
         diff_id=uuid.uuid4().hex,
         type="modify",
         original=original,
-        proposed=str(result.get("proposed") or "").strip(),
+        proposed=proposed,
         reason=str(result.get("reason") or "").strip(),
         confidence="high",
         provenance=original,

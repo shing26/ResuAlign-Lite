@@ -441,6 +441,93 @@ export function stageProgress(session) {
   }));
 }
 
+/* Compact, live micro-pipeline for the workbench aux drawer. It reads the
+ * same SSE-updated session state as the main canvas, so no second polling
+ * channel or backend schema change is required. */
+export function workbenchProgressPipelineHtml(session) {
+  const crawl = (session && session.crawl) || {};
+  const jd = (session && session.jd) || {};
+  const gap = (session && session.gap) || {};
+  const alignment = (session && session.alignment) || {};
+
+  const profile = jd.profile || {};
+  const requiredSkills = Array.isArray(profile.must_have_skills)
+    ? profile.must_have_skills
+    : Array.isArray(profile.required_skills)
+      ? profile.required_skills
+      : [];
+  const niceSkills = Array.isArray(profile.nice_to_have_skills)
+    ? profile.nice_to_have_skills
+    : [];
+  const scenarios = Array.isArray(profile.business_scenarios)
+    ? profile.business_scenarios
+    : [];
+  const missingGaps = (gap.gap_report && gap.gap_report.missing_keywords) || [];
+  const diffs = alignment.diffs || [];
+
+  const alignmentRunning = ["queued", "running"].includes(alignment.status);
+  const liveMessage = alignmentRunning
+    ? alignment.message || ""
+    : alignment.status === "succeeded"
+      ? "简历对齐已完成"
+      : "";
+
+  const steps = [
+    {
+      key: "crawl",
+      label: "岗位抓取",
+      detail: crawl.stage === "fetching_jd" ? "正在读取 JD 页面" : "",
+      done: ["succeeded", "idle"].includes(crawl.status),
+      active: ["queued", "fetching", "parsing", "classifying"].includes(
+        crawl.status,
+      ),
+    },
+    {
+      key: "profile",
+      label: "JD 画像",
+      detail:
+        requiredSkills.length || niceSkills.length || scenarios.length
+          ? `已萃取 ${requiredSkills.length + niceSkills.length} 项技能 · ${scenarios.length} 类场景`
+          : "",
+      done: jd.status === "ready" && Boolean(jd.profile),
+      active: ["queued", "running"].includes(jd.status),
+    },
+    {
+      key: "gap",
+      label: "差距分析",
+      detail: missingGaps.length
+        ? `已定位 ${missingGaps.length} 处能力缺口`
+        : "",
+      done: ["ready", "blocked"].includes(gap.status),
+      active: gap.status === "queued" || gap.status === "running",
+    },
+    {
+      key: "tailor",
+      label: "STAR 精修",
+      detail: diffs.length ? `已生成 ${diffs.length} 条精修建议` : "",
+      done: alignment.status === "succeeded",
+      active: ["queued", "running"].includes(alignment.status),
+    },
+  ];
+
+  return `
+    <div class="workbench-live-progress" data-workbench-live-progress aria-live="polite">
+      ${liveMessage ? `<div class="workbench-live-progress__message" data-workbench-live-progress-message>${esc(liveMessage)}</div>` : ""}
+      ${steps
+        .map(
+          (step) => `
+        <div class="workbench-live-progress__step ${step.done ? "is-done" : ""} ${step.active ? "is-active" : ""}" data-progress-step="${esc(step.key)}">
+          <span class="workbench-live-progress__dot" aria-hidden="true">${step.done ? "✓" : step.active ? "…" : "·"}</span>
+          <div class="workbench-live-progress__copy">
+            <span class="workbench-live-progress__label">${esc(step.label)}</span>
+            ${step.detail ? `<span class="workbench-live-progress__detail">${esc(step.detail)}</span>` : ""}
+          </div>
+        </div>`,
+        )
+        .join("")}
+    </div>`;
+}
+
 export function renderSkills(profile) {
   const required = profile.required_skills || profile.must_have_skills || [];
   const nice = profile.nice_to_have || profile.nice_to_have_skills || [];
@@ -2162,7 +2249,7 @@ export function applicationSnapshotsHtml(job, snapshots = []) {
     })
     .join("");
   if (items) {
-    return `<div class="snapshot-section"><h4>投递定稿快照</h4><div class="snapshot-list">${items}</div></div>`;
+    return `${interviewCheatSheetHtml(job)}<div class="snapshot-section"><h4>投递定稿快照</h4><div class="snapshot-list">${items}</div></div>`;
   }
   const canonical = canonicalJobStatus(job && job.status);
   if (
@@ -2170,7 +2257,7 @@ export function applicationSnapshotsHtml(job, snapshots = []) {
     job &&
     (job.final_draft || "").trim()
   ) {
-    return `<div class="snapshot-section snapshot-section--legacy" data-legacy-snapshot>
+    return `${interviewCheatSheetHtml(job)}<div class="snapshot-section snapshot-section--legacy" data-legacy-snapshot>
       <h4>投递定稿快照</h4>
       <div class="snapshot-item snapshot-item--legacy">
         <p class="legacy-warning">⚠️ 早期投递版本（未生成不可篡改快照）</p>
@@ -2184,6 +2271,91 @@ export function applicationSnapshotsHtml(job, snapshots = []) {
     </div>`;
   }
   return "";
+}
+
+/* 面试防深挖清单：从已保存的 JD 画像、差距报告和高置信 diff 中确定性提炼。
+ * 不构造新的经历事实，只把“高频追问”和“两句话应答 SOP”交给用户。 */
+export function interviewCheatSheetHtml(job = {}) {
+  const jdProfile = job.jd_profile || {};
+  const gap = job.gap_report || {};
+  const diffs = Array.isArray(job.diffs) ? job.diffs : [];
+  const evalScore = job.eval_score || {};
+  const questions = [];
+
+  const strongDiffs = diffs
+    .filter((diff) => diff && (diff.type === "modify" || diff.type === "add"))
+    .filter((diff) => String(diff.confidence) === "high" || String(diff.reason || "").includes("指标"))
+    .slice(0, 3);
+  strongDiffs.forEach((diff) => {
+    const topic =
+      String(diff.proposed || diff.reason || diff.original || "这段经历")
+        .replace(/\[待人工确认[^\]]*\]/g, "")
+        .trim() || "这段经历";
+    questions.push({
+      type: "改写",
+      question: `关于「${topic}」，你的具体分工、数据口径和业务收益是什么？`,
+      sop: "先给结论，再说“我用了什么方法、承担哪段、最终对哪项业务指标带来什么变化”。数字没有就讲量级，不要编。",
+    });
+  });
+
+  const missingKeywords = Array.isArray(gap.missing_keywords)
+    ? gap.missing_keywords.slice(0, 2)
+    : [];
+  missingKeywords.forEach((keyword) => {
+    questions.push({
+      type: "JD 匹配",
+      question: `JD 明确要求 ${String(keyword || "这项能力")}，你在真实项目里是如何落地的？`,
+      sop: "用一句话点明技术/业务背景，再用一句话补上结果和风险控制；没做过的部分要先承认边界，不要把听说写成亲自做过。",
+    });
+  });
+
+  const scenarios = Array.isArray(jdProfile.business_scenarios)
+    ? jdProfile.business_scenarios.slice(0, 2)
+    : [];
+  scenarios.forEach((scenario) => {
+    questions.push({
+      type: "业务场景",
+      question: `这个岗位很关注 ${String(scenario || "业务场景")}，你的方案如何支撑它？`,
+      sop: "先用一个可感知的结果证明针对性，再说清你做了什么取舍；避免只堆技术名词而不说收益。",
+    });
+  });
+
+  if (
+    !questions.length &&
+    !diffs.length &&
+    !((gap.missing_keywords || []).length) &&
+    !((jdProfile.business_scenarios || []).length)
+  ) {
+    return "";
+  }
+
+  const hallucinationWarning =
+    evalScore && evalScore.hallucination_detected
+      ? `<div class="cheatsheet__warning">⚠️ 检测到待复核内容，面试前请先回到工作台核对数字与来源。</div>`
+      : "";
+
+  return `
+    <section class="cheatsheet" data-interview-cheatsheet>
+      <div class="cheatsheet__head">
+        <div>
+          <h4>面试防深挖清单</h4>
+          <p>每条都先点结论，再用事实接住追问。</p>
+        </div>
+      </div>
+      ${hallucinationWarning}
+      <div class="cheatsheet__list">
+        ${questions
+          .map(
+            (item) => `
+          <div class="cheatsheet__item">
+            <span class="badge badge-gray">${esc(item.type)}</span>
+            <strong>${esc(item.question)}</strong>
+            <div class="cheatsheet__sop">${esc(item.sop)}</div>
+          </div>`,
+          )
+          .join("")}
+      </div>
+    </section>`;
 }
 
 /* 岗位详情/时间线弹窗表单。next_step_due_at 为 datetime-local（本地时间，

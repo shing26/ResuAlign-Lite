@@ -155,7 +155,14 @@ def test_engine_stage_progress_full_pipeline():
         on_stage=on_stage,
     )
 
-    assert stages == ["diagnose", "jd_analysis", "jd_analysis", "tailoring"]
+    assert stages == [
+        "diagnose",
+        "jd_analysis",
+        "jd_profiled",
+        "jd_analysis",
+        "gap_analyzed",
+        "tailoring",
+    ]
 
 
 def test_engine_stage_progress_diagnosis_only():
@@ -188,7 +195,9 @@ def test_engine_stage_progress_with_eval():
     assert stages == [
         "diagnose",
         "jd_analysis",
+        "jd_profiled",
         "jd_analysis",
+        "gap_analyzed",
         "tailoring",
         "evaluation",
     ]

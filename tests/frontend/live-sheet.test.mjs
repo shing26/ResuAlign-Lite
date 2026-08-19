@@ -176,3 +176,11 @@ test("styles.css exposes pane hooks, mobile collapse and live-sheet styles", () 
   assert.match(css, /\.diff-char-del/);
   assert.match(css, /\.diff-char-ins/);
 });
+
+test("styles.css applies A4 print margins and pagination guards", () => {
+  assert.match(css, /@page\s*\{[\s\S]*?margin:\s*12mm/);
+  assert.match(css, /@media print/);
+  assert.match(css, /break-inside:\s*avoid/);
+  assert.match(css, /page-break-inside:\s*avoid/);
+  assert.match(css, /break-after:\s*avoid/);
+});
