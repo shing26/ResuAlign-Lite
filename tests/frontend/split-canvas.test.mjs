@@ -220,7 +220,7 @@ test("diffCard renders actionable modify card with provenance", () => {
   const html = diffCard(SAMPLE_DIFF, 0, "job-1");
   assert.match(html, /data-diff-id="d1"/);
   assert.match(html, /data-action="accept-bullet"/);
-  assert.match(html, /来源已验证/);
+  assert.match(html, /🛡️ 高可信/);
   assert.match(html, /置信度 high/);
   assert.doesNotMatch(html, /diff-card--invalid/);
 });
@@ -321,7 +321,7 @@ test("diffList carries section badges through diffCard and escapes them", () => 
 });
 
 /* ------------------------------------------------------------------ */
-/* #17: live 工作台字符级高亮（卡片行内标记 + 并排对比视图）              */
+/* #17: live 工作台字符级高亮（卡片行内标记 + 对比视图视图）              */
 /* ------------------------------------------------------------------ */
 
 test("diffCard marks inserted characters on the proposed side", () => {
@@ -401,7 +401,7 @@ test("diffList unchanged modify diffs produce no marks", () => {
   assert.doesNotMatch(html, /diff-char-/);
 });
 
-/* buildCmpSideHtml —— legacy result 视图与 live 并排对比共用的渲染核心 */
+/* buildCmpSideHtml —— legacy result 视图与 live 对比视图共用的渲染核心 */
 
 test("buildCmpSideHtml renders addressable lines with char-level marks", () => {
   const html = buildCmpSideHtml(
@@ -433,14 +433,15 @@ test("buildLiveCompareHtml builds compare from a live session", () => {
     },
   };
   const html = buildLiveCompareHtml(session, "负责系统开发");
-  assert.match(html, /cmp-grid/);
+  assert.match(html, /inline-suggestion/);
+  assert.match(html, /inline-suggestion__line--modify/);
   assert.match(html, /<span class="diff-char-ins">高并发<\/span>/);
 });
 
 test("buildLiveCompareHtml tolerates missing draft and diffs", () => {
   const html = buildLiveCompareHtml({}, "");
-  assert.match(html, /cmp-grid/);
-  assert.match(html, /cmp-line/);
+  assert.match(html, /data-inline-suggestion/);
+  assert.match(html, /暂无文档内容/);
 });
 
 /* ------------------------------------------------------------------ */
@@ -634,7 +635,7 @@ test("boardCard match badge title discloses the score source", () => {
     status: "applied",
     match_score: 80,
   });
-  assert.match(html, /class="match-badge match--high" data-match-total title="匹配度 · 来自对齐评估">80<\/span>/);
+  assert.match(html, /class="match-badge match--high" data-match-total title="匹配度 · 来自 AI 评估">80<\/span>/);
   assert.match(
     boardCard({ job_id: "j2", title: "T", status: "draft" }),
     /class="match-badge match-badge--empty" title="尚未分析">待分析<\/span>/,
@@ -648,7 +649,7 @@ test("renderBoardCard match badge carries the source title", () => {
     status: "applied",
     match_score: 66,
   });
-  assert.match(html, /class="match-badge match--mid" data-match-total title="匹配度 · 来自对齐评估">66<\/span>/);
+  assert.match(html, /class="match-badge match--mid" data-match-total title="匹配度 · 来自 AI 评估">66<\/span>/);
   const empty = renderBoardCard({ job_id: "j2", title: "T", status: "draft" });
   assert.match(empty, /class="match-badge match-badge--empty" title="尚未分析">待分析<\/span>/);
 });

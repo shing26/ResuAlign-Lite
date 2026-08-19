@@ -187,12 +187,12 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
         <section class="wb-main ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>
           <div class="wb-main-head">
             <div>
-              <h2>简历对齐画布</h2>
-              <p>逐条采纳 AI 精修建议，保留 Provenance 溯源标记</p>
+              <h2>简历精修</h2>
+              <p>逐条采纳 AI 精修建议，每条建议都可追溯来源</p>
             </div>
             <div class="toolbar-group">
               ${exportDock(jobId, job)}
-              ${alignment.diffs && alignment.diffs.length ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-live-compare">并排对比</button>` : ""}
+              ${alignment.diffs && alignment.diffs.length ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-live-compare">对比视图</button>` : ""}
             </div>
           </div>
           <div class="align-summary">
@@ -209,7 +209,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
         </section>
         <aside class="wb-aux">
           <div class="wb-tabs" role="tablist" aria-label="工作台辅助信息">
-            <button type="button" class="wb-tab ${activeAuxPane === "inspector" ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector" aria-selected="${activeAuxPane === "inspector"}">JD Inspector</button>
+            <button type="button" class="wb-tab ${activeAuxPane === "inspector" ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector" aria-selected="${activeAuxPane === "inspector"}">岗位分析</button>
             <button type="button" class="wb-tab ${activeAuxPane === "livesheet" ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="livesheet" aria-selected="${activeAuxPane === "livesheet"}">Live Sheet</button>
           </div>
           <div class="wb-pane ${inspectorActive ? "active" : ""}" data-wb-pane="controls" data-inspector-pane data-jd-canvas>
@@ -230,7 +230,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
               <pre>${esc(job.jd_text || "")}</pre>
             </details>
             <details class="inspector-controls" data-inspector-controls ${state.wbControlsOpen ? "open" : ""}>
-              <summary>对齐调优</summary>
+              <summary>优化设置</summary>
               ${alignmentControls(session, resumes, jobId)}
             </details>
           </div>

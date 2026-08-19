@@ -152,10 +152,16 @@ const CSS_PATH = fileURLToPath(
 );
 const css = readFileSync(CSS_PATH, "utf8");
 
-test("styles.css locks the three-column workbench grid at 22/48/30", () => {
+test("styles.css uses the single-column document-polishing layout", () => {
   const layoutBlock = css.match(/\.split-layout\s*\{[\s\S]*?\}/);
   assert.ok(layoutBlock, "expected a .split-layout rule in styles.css");
-  assert.match(layoutBlock[0], /grid-template-columns:\s*22%\s+48%\s+30%/);
+  assert.match(layoutBlock[0], /grid-template-columns:\s*1fr/);
+});
+
+test("styles.css keeps the legacy three-column hook for mobile collapse", () => {
+  const layoutBlock = css.match(/\.split-layout\s*\{[\s\S]*?\}/);
+  assert.ok(layoutBlock, "expected a .split-layout rule in styles.css");
+  assert.doesNotMatch(layoutBlock[0], /grid-template-columns:\s*22%\s+48%\s+30%/);
 });
 
 test("styles.css exposes pane hooks, mobile collapse and live-sheet styles", () => {

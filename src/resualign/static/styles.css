@@ -1131,22 +1131,62 @@ select {
   font-weight: 600;
 }
 
-/* 红删绿增对比度微调：del 保持删除线，ins 加下划线强调插入；
- * 均使用现有语义 token，明暗主题自动适配。 */
-/* Sprint 2: 字符级红删绿增 —— 12% 低饱和 tint 强化
-   （保留加粗/删除线/下划线，现有 token + color-mix 明暗主题自适应） */
+/* 文档润色范式：删除灰化，插入用品牌淡蓝底 + 深蓝字，
+ * 弱化“代码审查 diff”的代码感，提升求职者可读性。 */
 .diff-char-del {
-  background: color-mix(in srgb, var(--error) 12%, transparent);
-  color: var(--error-deep);
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
+  color: var(--muted);
   text-decoration: line-through;
 }
 
 .diff-char-ins {
-  background: color-mix(in srgb, var(--success) 12%, transparent);
-  color: var(--success-deep);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-deep, var(--accent));
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
+}
+
+/* 文档润色单栏视图：去掉代码审查式行号，让建议像一份正在被批注的简历。 */
+.inline-suggestion {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  padding: 2px;
+}
+
+.inline-suggestion__paper {
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 8px;
+  padding: 18px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+  line-height: 1.75;
+}
+
+.inline-suggestion__line {
+  margin: 2px 0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.inline-suggestion__line--modify {
+  border-left: 3px solid var(--accent, #3b82f6);
+  background: color-mix(in srgb, var(--accent, #3b82f6) 8%, transparent);
+}
+
+.inline-suggestion__line--add {
+  border-left: 3px solid var(--teal, #14b8a6);
+  background: color-mix(in srgb, var(--teal, #14b8a6) 10%, transparent);
+}
+
+.inline-suggestion__line--remove {
+  border-left: 3px solid var(--muted, #94a3b8);
+  background: color-mix(in srgb, var(--muted, #94a3b8) 10%, transparent);
+  color: var(--muted, #64748b);
+  text-decoration: line-through;
 }
 
 .cmp-check {
@@ -2380,6 +2420,30 @@ select {
   background: var(--surface-tint);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.empty-state__illustration {
+  width: 128px;
+  height: 96px;
+  color: var(--accent, #3b82f6);
+  animation: empty-breathe 3.2s ease-in-out infinite;
+}
+
+@keyframes empty-breathe {
+  0%,
+  100% {
+    opacity: 0.86;
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-3px) scale(1.02);
+  }
 }
 
 .empty-state .big {
@@ -4336,7 +4400,7 @@ body.command-palette-open {
   display: grid;
   /* Sprint 2: 三栏工作台 22% / 48% / 30%，宽屏锁比例（不随内容拉伸）；
      inspector 22% · diff 48% · live-sheet 30%，≤900px 单列堆叠见下方 media。 */
-  grid-template-columns: 22% 48% 30%;
+  grid-template-columns: 1fr;
   gap: 12px;
   align-items: start;
   margin-top: 16px;
@@ -4919,13 +4983,13 @@ body.command-palette-open {
 /* Sprint 2: 红绿对比框 —— 8% 低饱和度 tint
    （color-mix(in srgb, 语义色 8%, transparent) 明暗主题均可自动取色） */
 .diff-card__col--original {
-  background: color-mix(in srgb, var(--error) 8%, transparent);
+  background: color-mix(in srgb, var(--text-muted) 6%, transparent);
   border: 1px solid var(--border-soft);
 }
 
 .diff-card__col--proposed {
-  background: color-mix(in srgb, var(--success) 8%, transparent);
-  border: 1px solid rgba(22, 163, 74, 0.2);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid rgba(37, 99, 235, 0.2);
 }
 
 .diff-card__text {
@@ -6939,8 +7003,8 @@ select option {
 }
 
 /* Low-saturation inline diff already tokenised; keep char marks crisp */
-.diff-char-ins { background: rgba(50,215,75,0.1); border: 1px solid rgba(50,215,75,0.25); color: #93ecaa; border-radius: 4px; }
-.diff-char-del { background: rgba(255,69,58,0.1); border: 1px solid rgba(255,69,58,0.25); color: #ffb0ab; border-radius: 4px; text-decoration: line-through; }
+.diff-char-ins { background: rgba(96,165,250,0.12); border: 1px solid rgba(96,165,250,0.3); color: #93c5fd; border-radius: 4px; }
+.diff-char-del { background: rgba(148,163,184,0.1); border: 1px solid rgba(148,163,184,0.25); color: #94a3b8; border-radius: 4px; text-decoration: line-through; }
 
 
 /* Apple Native utilities (dashboard-view shell) */

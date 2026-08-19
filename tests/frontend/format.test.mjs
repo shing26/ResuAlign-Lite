@@ -531,17 +531,17 @@ test("matchBadgeInfo prefers eval score, then gap, then persisted job score", ()
   };
   assert.deepEqual(matchBadgeInfo(session, { match_score: 50 }), {
     score: 88,
-    source: "来自对齐评估",
+    source: "来自 AI 评估",
   });
 
   assert.deepEqual(
     matchBadgeInfo({ gap: { score: 60 } }, { match_score: 50 }),
-    { score: 60, source: "来自差距分析" },
+    { score: 60, source: "来自能力分析" },
   );
 
   assert.deepEqual(matchBadgeInfo({}, { match_score: 50 }), {
     score: 50,
-    source: "来自对齐评估",
+    source: "来自 AI 评估",
   });
 
   assert.deepEqual(matchBadgeInfo({}, {}), { score: null, source: "" });
@@ -554,9 +554,9 @@ test("renderMatchBadge renders score, source title and muted source label", () =
     {},
   );
   assert.match(html, /class="match-badge match--high" data-match-badge/);
-  assert.match(html, /title="来自对齐评估"/);
-  assert.match(html, />匹配 82</);
-  assert.match(html, /data-match-source>来自对齐评估</);
+  assert.match(html, /title="来自 AI 评估"/);
+  assert.match(html, />🛡️ 匹配 82</);
+  assert.match(html, /data-match-source>来自 AI 评估</);
 
   assert.equal(renderMatchBadge({}, {}), "");
 });
@@ -929,7 +929,7 @@ test("workbenchPrimaryButtonHtml swaps to create resume without resumes", () => 
 
   const ready = workbenchPrimaryButtonHtml([{ resume_id: "r1" }]);
   assert.match(ready, /data-action="run-alignment"/);
-  assert.match(ready, />重新生成对齐<\/button>/);
+  assert.match(ready, />开始优化<\/button>/);
 
   const running = workbenchPrimaryButtonHtml([{ resume_id: "r1" }], true);
   assert.match(running, /disabled/);

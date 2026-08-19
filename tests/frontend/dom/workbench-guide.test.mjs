@@ -79,7 +79,7 @@ test("workbench guide advances to follow-up and restores alignment button", () =
   );
   const primary = app.querySelector('[data-action="run-alignment"]');
   assert.ok(primary, "alignment button returns when resumes exist");
-  assert.match(primary.textContent, /重新生成对齐/);
+  assert.match(primary.textContent, /开始优化/);
 });
 
 test("workbench guide completes after follow-up is arranged", () => {
