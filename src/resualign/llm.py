@@ -57,24 +57,124 @@ def _observe_llm_call(
         duration_ms=duration_ms,
         extra=extra,
     )
-def _parse_json_object(content: str) -> dict[str, Any]:
-    """Parse a provider JSON object without using raw_decode."""
-    text = (content or "").strip()
+def _strip_json_wrapping(text: str) -> str:
+    """Strip BOM, markdown code fences, and surrounding whitespace."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    if text.startswith("\ufeff"):
+        text = text[1:].lstrip()
+    # Small/vendor models sometimes wrap JSON in a ```json fence with prose.
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
-        text = re.sub(r"\s*```$", "", text).strip()
-    try:
-        value = json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            value = json.loads(text[start : end + 1])
+        text = re.sub(r"\s*```\s*$", "", text).strip()
+    return text
+
+
+def _extract_balanced_json(text: str) -> str:
+    """Return the first balanced ``{...}`` object, ignoring braces inside strings.
+
+    When the object is truncated (never balanced), returns from the first ``{``
+    to the end so a later best-effort repair can close the brackets.
+    """
+    start = text.find("{")
+    if start < 0:
+        raise LLMResponseError("No JSON object found in LLM response")
+    depth = 0
+    in_str = False
+    esc = False
+    balanced_end = -1
+    i = start
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
         else:
-            raise
-    if not isinstance(value, dict):
-        raise LLMResponseError("Structured response is not a JSON object")
-    return value
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    balanced_end = i + 1
+        i += 1
+    if balanced_end > start:
+        return text[start:balanced_end]
+    return text[start:]
+
+
+def _repair_json(candidate: str) -> str | None:
+    """Best-effort repair of truncated JSON: close braces and drop trailing commas."""
+    candidate = (candidate or "").strip()
+    if not candidate:
+        return None
+    candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
+    stack: list[str] = []
+    in_str = False
+    esc = False
+    matching = {"}": "{", "]": "["}
+    closers = {"{": "}", "[": "]"}
+    for ch in candidate:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]" and stack and stack[-1] == matching[ch]:
+            stack.pop()
+    if stack:
+        candidate += "".join(closers[o] for o in reversed(stack))
+    return candidate
+
+
+def _parse_json_object(content: str) -> dict[str, Any]:
+    """Parse a provider JSON object with tolerance for real-world model noise.
+
+    Tries, in order: strict parse, balanced ``{...}`` extraction, then a
+    best-effort repair of truncation (unclosed braces, trailing commas). Only
+    when all three fail does it raise ``LLMResponseError``.
+    """
+    text = _strip_json_wrapping(content)
+    if not text:
+        raise LLMResponseError("Empty LLM response")
+
+    candidates: list[str] = [text]
+    try:
+        candidates.append(_extract_balanced_json(text))
+    except LLMResponseError:
+        pass
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+            if isinstance(value, dict):
+                return value
+        except json.JSONDecodeError:
+            pass
+        repaired = _repair_json(candidate)
+        if repaired is not None and repaired != candidate:
+            try:
+                value = json.loads(repaired)
+                if isinstance(value, dict):
+                    return value
+            except json.JSONDecodeError:
+                pass
+    raise LLMResponseError(
+        f"Unable to parse LLM JSON response: {text[:120]!r}"
+    )
 class LLMResponseError(Exception):
     """Raised when the LLM fails to return a parseable response."""
     pass
