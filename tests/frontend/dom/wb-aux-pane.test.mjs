@@ -11,7 +11,7 @@ function mountAuxTabs() {
   document.body.innerHTML = `
     <div id="app-router-view">
       <div class="wb-tabs">
-        <button type="button" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector" aria-selected="true" class="wb-tab active">JD Inspector</button>
+        <button type="button" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector" aria-selected="true" class="wb-tab active">岗位分析</button>
         <button type="button" data-action="set-wb-tab-v3" data-wb-tab-v3="livesheet" aria-selected="false" class="wb-tab">Live Sheet</button>
       </div>
       <div data-inspector-pane class="active"></div>

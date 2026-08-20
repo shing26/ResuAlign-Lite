@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 from .evaluator import evaluate
 from .extractor import extract_structured
@@ -13,8 +13,8 @@ from .jd_profiler import profile_jd
 from .llm import LLMClient, OpenAIClient, diagnose_resume
 from .llm_nodes import LLMNodeStore
 from .models import Report, ResuAlignConfig
-from .role_router import call_with_role, is_parallel_safe, _role_timeout
-from .tailor import tailor_resume
+from .role_router import _role_timeout, call_with_role, is_parallel_safe
+from .tailor import tailor_resume, tailor_resume_map_reduce
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,18 @@ MAX_JD_CONTEXT_CHARS = 6000
 # Tailoring is the longest single stage. Two attempts keep a degraded
 # provider from multiplying a slow response into a six-minute failure.
 TAILOR_MAX_RETRIES = 1
+
+
+def _bullet_editor_enabled(granularity: str) -> bool:
+    """Whether the bullet-level map-reduce editor should be used.
+
+    Enabled for fine/medium granularity by default; override with
+    ``RESUALIGN_BULLET_EDITOR=0``. Coarse restructuring always keeps the
+    whole-document path.
+    """
+    if os.environ.get("RESUALIGN_BULLET_EDITOR", "1") != "1":
+        return False
+    return granularity in {"fine", "medium"}
 
 
 def truncate_text(text: str, limit: int) -> str:
@@ -35,6 +47,29 @@ def truncate_text(text: str, limit: int) -> str:
     if newline >= limit // 2:
         cut = cut[:newline]
     return cut.strip()
+
+
+def _profile_progress_message(profile) -> str:
+    skills = (
+        len(profile.must_have_skills or [])
+        + len(profile.nice_to_have_skills or [])
+    )
+    scenarios = len(profile.business_scenarios or [])
+    education = len(profile.education_requirements or [])
+    return (
+        f"已萃取 {skills} 项核心技能、{scenarios} 类业务场景，"
+        f"并核对 {education} 项学历/出勤要求"
+    )
+
+
+def _gap_progress_message(gap_report) -> str:
+    missing = len(gap_report.missing_keywords or [])
+    misaligned = len(gap_report.misaligned_emphasis or [])
+    strength = len(gap_report.strength_matches or [])
+    return (
+        f"已定位 {missing} 处能力缺口、{misaligned} 处错位强调，"
+        f"确认 {strength} 项既有匹配"
+    )
 
 
 def run(
@@ -69,7 +104,7 @@ def run(
             if on_stage is not None:
                 on_stage(stage, message)
 
-        notify("diagnose", "Analyzing resume...")
+        notify("diagnose", "正在分析简历结构与 ATS 基础信息...")
         if diagnosis is not None:
             diag_result = diagnosis
         else:
@@ -108,7 +143,7 @@ def run(
             jd_input = truncate_text(filtered_jd or jd_text, MAX_JD_INPUT_CHARS)
             notify(
                 "jd_analysis",
-                "Extracting JD profile...",
+                "正在解析岗位描述并提取技能与业务场景...",
             )
 
             if use_roles:
@@ -181,7 +216,8 @@ def run(
                         )
 
                 # Gap analysis
-                notify("jd_analysis", "Analyzing skill gaps...")
+                notify("jd_profiled", _profile_progress_message(report.jd_profile))
+                notify("jd_analysis", "正在比对岗位画像与主简历...")
                 import json as _json
                 _profile_str = _json.dumps(
                     jd_profile_to_dict(report.jd_profile),
@@ -205,7 +241,8 @@ def run(
                     )
 
                 # Tailoring
-                notify("tailoring", "Tailoring resume to JD...")
+                notify("gap_analyzed", _gap_progress_message(report.gap_report))
+                notify("tailoring", "正在生成 STAR 精修建议（约 3-15 条）...")
                 import json as _json
                 gap_report_str = _json.dumps({
                     "missing_keywords": report.gap_report.missing_keywords,
@@ -217,16 +254,27 @@ def run(
                     ),
                 }, ensure_ascii=False)
                 if use_roles:
+                    editor_kwargs = {
+                        "resume_text": resume_text,
+                        "gap_report_text": gap_report_str,
+                        "granularity": granularity,
+                        "prompt_focus": prompt_focus,
+                        "custom_prompt": custom_prompt,
+                    }
+                    if _bullet_editor_enabled(granularity):
+                        editor_fn = tailor_resume_map_reduce
+                        editor_kwargs["jd_context"] = truncate_text(
+                            filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
+                        )
+                        editor_kwargs["parallel"] = is_parallel_safe(
+                            node_store, tenant_id, "editor"
+                        )
+                    else:
+                        editor_fn = tailor_resume
                     tailor_result, _ = call_with_role(
-                        "editor", tailor_resume,
+                        "editor", editor_fn,
                         node_store, tenant_id,
-                        fn_kwargs={
-                            "resume_text": resume_text,
-                            "gap_report_text": gap_report_str,
-                            "granularity": granularity,
-                            "prompt_focus": prompt_focus,
-                            "custom_prompt": custom_prompt,
-                        },
+                        fn_kwargs=editor_kwargs,
                     )
                     report.tailored_resume = tailor_result
                 else:
@@ -251,7 +299,7 @@ def run(
 
                 # Optional evaluation
                 if run_eval and report.tailored_resume:
-                    notify("evaluation", "Evaluating tailored resume...")
+                    notify("evaluation", "正在检查经历真实性、量化占位与 ATS 匹配...")
                     sections_text = "\n".join(
                         report.tailored_resume.sections.values()
                     ) if report.tailored_resume.sections else resume_text
@@ -288,7 +336,8 @@ def run(
                     cache=cache,
                     tenant=tenant,
                 )
-                notify("jd_analysis", "Analyzing skill gaps...")
+                notify("jd_profiled", _profile_progress_message(report.jd_profile))
+                notify("jd_analysis", "正在比对岗位画像与主简历...")
                 import json as _json
                 _profile_str = _json.dumps(
                     jd_profile_to_dict(report.jd_profile),
@@ -300,7 +349,8 @@ def run(
                     _profile_str,
                 )
 
-                notify("tailoring", "Tailoring resume to JD...")
+                notify("gap_analyzed", _gap_progress_message(report.gap_report))
+                notify("tailoring", "正在生成 STAR 精修建议（约 3-15 条）...")
                 import json as _json
                 gap_report_str = _json.dumps({
                     "missing_keywords": report.gap_report.missing_keywords,
@@ -328,7 +378,7 @@ def run(
                 )
                 report.diffs = report.tailored_resume.diffs
                 if run_eval and report.tailored_resume:
-                    notify("evaluation", "Evaluating tailored resume...")
+                    notify("evaluation", "正在检查经历真实性、量化占位与 ATS 匹配...")
                     sections_text = "\n".join(
                         report.tailored_resume.sections.values()
                     ) if report.tailored_resume.sections else resume_text
@@ -366,8 +416,7 @@ def run_with_graph(
     tenant_id="default",
 ):
     """Run the alignment pipeline through the GraphExecutor (Compound AI)."""
-    from .graph import GraphExecutor, AlignmentState, AlignmentStatus
-    from .graph.gates import GateResult
+    from .graph import AlignmentState, GraphExecutor
 
     try:
         state = AlignmentState(
@@ -401,8 +450,9 @@ def run_with_graph(
 
             elif role == "gap_analyzer":
                 import json as _json
-                from .jd_analysis import jd_profile_to_dict
+
                 from .gap_analyzer import analyze_gaps
+                from .jd_analysis import jd_profile_to_dict
                 profile_str = _json.dumps(jd_profile_to_dict(st.jd_profile or {}), ensure_ascii=False)
                 if node_store and node_store.get_active_node(tenant_id):
                     gap_result, _ = call_with_role("gap_analyzer", analyze_gaps, node_store, tenant_id, fn_kwargs={"resume_text": st.resume_text, "jd_profile_text": profile_str})
@@ -416,8 +466,9 @@ def run_with_graph(
                 return {"type": "gap_report", "data": gap_result}
 
             elif role in ("editor", "tailor", "editor_general"):
-                from .tailor import tailor_resume
                 import json as _json
+
+                from .tailor import tailor_resume
                 gap_dict = {}
                 if st.gap_report:
                     gap_dict = {
@@ -429,7 +480,14 @@ def run_with_graph(
                     }
                 gap_report_str = _json.dumps(gap_dict, ensure_ascii=False)
                 if node_store and node_store.get_active_node(tenant_id):
-                    tailor_result, _ = call_with_role("editor", tailor_resume, node_store, tenant_id, fn_kwargs={"resume_text": st.resume_text, "gap_report_text": gap_report_str, "granularity": st.granularity, "prompt_focus": st.prompt_focus, "custom_prompt": st.custom_prompt})
+                    editor_kwargs = {"resume_text": st.resume_text, "gap_report_text": gap_report_str, "granularity": st.granularity, "prompt_focus": st.prompt_focus, "custom_prompt": st.custom_prompt}
+                    if _bullet_editor_enabled(st.granularity):
+                        editor_fn = tailor_resume_map_reduce
+                        editor_kwargs["jd_context"] = truncate_text(st.jd_text, MAX_JD_CONTEXT_CHARS)
+                        editor_kwargs["parallel"] = is_parallel_safe(node_store, tenant_id, "editor")
+                    else:
+                        editor_fn = tailor_resume
+                    tailor_result, _ = call_with_role("editor", editor_fn, node_store, tenant_id, fn_kwargs=editor_kwargs)
                 else:
                     tailor_client = OpenAIClient(config, timeout=node.get("timeout", 40.0), max_retries=1)
                     try:

@@ -24,6 +24,12 @@ export function esc(value) {
   );
 }
 
+/* Attribute-safe alias kept near esc so inline HTML builders can document
+ * that values are going inside double-quoted attributes, not element text. */
+export function escAttr(value) {
+  return esc(value);
+}
+
 /* ------------------------------------------------------------------ */
 /* Job status / classification vocabulary                              */
 /* ------------------------------------------------------------------ */
@@ -305,6 +311,47 @@ export function lineDiff(original, proposed) {
   return rows;
 }
 
+/* Ordered, line-level LCS diff used by the document-polishing inline view.
+ * `lineDiff` above is intentionally kept as the cheaper set-based helper for
+ * backwards-compatible callers; this variant preserves line order so inserted
+ * and removed lines do not get flattened to the end of the document. */
+function lineDiffOrdered(original, proposed) {
+  const originalLines = String(original || "").split("\n");
+  const proposedLines = String(proposed || "").split("\n");
+  const m = originalLines.length;
+  const n = proposedLines.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      dp[i][j] =
+        originalLines[i] === proposedLines[j]
+          ? dp[i + 1][j + 1] + 1
+          : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const rows = [];
+  let i = 0;
+  let j = 0;
+  while (i < m && j < n) {
+    if (originalLines[i] === proposedLines[j]) {
+      rows.push({ type: "same", text: originalLines[i] });
+      i += 1;
+      j += 1;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      rows.push({ type: "remove", text: originalLines[i] });
+      i += 1;
+    } else {
+      rows.push({ type: "add", text: proposedLines[j] });
+      j += 1;
+    }
+  }
+  while (i < m) rows.push({ type: "remove", text: originalLines[i++] });
+  while (j < n) rows.push({ type: "add", text: proposedLines[j++] });
+  return rows;
+}
+
 /* ------------------------------------------------------------------ */
 /* Split canvas: match tone / stage derivation / HTML builders         */
 /* ------------------------------------------------------------------ */
@@ -330,10 +377,10 @@ export const STAGE_STEPS = [
 ];
 
 export const PROVENANCE_LABELS = {
-  verified: "来源已验证",
-  ambiguous: "来源待核对",
-  missing: "缺少来源",
-  pending_review: "待人工复核",
+  verified: "🛡️ 高可信",
+  ambiguous: "⚠️ 建议复核",
+  missing: "❓ 待确认",
+  pending_review: "⚠️ 建议复核",
 };
 
 /* Shared stage labels (also re-exported by events.js for progress bars). */
@@ -392,6 +439,93 @@ export function stageProgress(session) {
         (step.key === "gap" && gap.status === "queued")),
     done: done.has(step.key),
   }));
+}
+
+/* Compact, live micro-pipeline for the workbench aux drawer. It reads the
+ * same SSE-updated session state as the main canvas, so no second polling
+ * channel or backend schema change is required. */
+export function workbenchProgressPipelineHtml(session) {
+  const crawl = (session && session.crawl) || {};
+  const jd = (session && session.jd) || {};
+  const gap = (session && session.gap) || {};
+  const alignment = (session && session.alignment) || {};
+
+  const profile = jd.profile || {};
+  const requiredSkills = Array.isArray(profile.must_have_skills)
+    ? profile.must_have_skills
+    : Array.isArray(profile.required_skills)
+      ? profile.required_skills
+      : [];
+  const niceSkills = Array.isArray(profile.nice_to_have_skills)
+    ? profile.nice_to_have_skills
+    : [];
+  const scenarios = Array.isArray(profile.business_scenarios)
+    ? profile.business_scenarios
+    : [];
+  const missingGaps = (gap.gap_report && gap.gap_report.missing_keywords) || [];
+  const diffs = alignment.diffs || [];
+
+  const alignmentRunning = ["queued", "running"].includes(alignment.status);
+  const liveMessage = alignmentRunning
+    ? alignment.message || ""
+    : alignment.status === "succeeded"
+      ? "简历对齐已完成"
+      : "";
+
+  const steps = [
+    {
+      key: "crawl",
+      label: "岗位抓取",
+      detail: crawl.stage === "fetching_jd" ? "正在读取 JD 页面" : "",
+      done: ["succeeded", "idle"].includes(crawl.status),
+      active: ["queued", "fetching", "parsing", "classifying"].includes(
+        crawl.status,
+      ),
+    },
+    {
+      key: "profile",
+      label: "JD 画像",
+      detail:
+        requiredSkills.length || niceSkills.length || scenarios.length
+          ? `已萃取 ${requiredSkills.length + niceSkills.length} 项技能 · ${scenarios.length} 类场景`
+          : "",
+      done: jd.status === "ready" && Boolean(jd.profile),
+      active: ["queued", "running"].includes(jd.status),
+    },
+    {
+      key: "gap",
+      label: "差距分析",
+      detail: missingGaps.length
+        ? `已定位 ${missingGaps.length} 处能力缺口`
+        : "",
+      done: ["ready", "blocked"].includes(gap.status),
+      active: gap.status === "queued" || gap.status === "running",
+    },
+    {
+      key: "tailor",
+      label: "STAR 精修",
+      detail: diffs.length ? `已生成 ${diffs.length} 条精修建议` : "",
+      done: alignment.status === "succeeded",
+      active: ["queued", "running"].includes(alignment.status),
+    },
+  ];
+
+  return `
+    <div class="workbench-live-progress" data-workbench-live-progress aria-live="polite">
+      ${liveMessage ? `<div class="workbench-live-progress__message" data-workbench-live-progress-message>${esc(liveMessage)}</div>` : ""}
+      ${steps
+        .map(
+          (step) => `
+        <div class="workbench-live-progress__step ${step.done ? "is-done" : ""} ${step.active ? "is-active" : ""}" data-progress-step="${esc(step.key)}">
+          <span class="workbench-live-progress__dot" aria-hidden="true">${step.done ? "✓" : step.active ? "…" : "·"}</span>
+          <div class="workbench-live-progress__copy">
+            <span class="workbench-live-progress__label">${esc(step.label)}</span>
+            ${step.detail ? `<span class="workbench-live-progress__detail">${esc(step.detail)}</span>` : ""}
+          </div>
+        </div>`,
+        )
+        .join("")}
+    </div>`;
 }
 
 export function renderSkills(profile) {
@@ -584,7 +718,7 @@ export function diffCard(diff, index, jobId) {
           <div class="diff-card__text" data-diff-original>${originalHtml}</div>
         </div>
         <div class="diff-card__col diff-card__col--proposed">
-          <div class="split-section-title">优化</div>
+          <div class="split-section-title">建议修改</div>
           <div class="diff-card__text" data-diff-proposed>${proposedHtml}</div>
         </div>
       </div>
@@ -592,9 +726,9 @@ export function diffCard(diff, index, jobId) {
       ${provenance ? `<div class="provenance-quote">${esc(provenance)}</div>` : ""}
       ${invalidWarning ? `<div class="diff-card__warning" role="alert">${esc(invalidWarning)}</div>` : ""}
       <div class="diff-card__actions" data-diff-actions>
-        ${invalid ? "" : `<button class="btn btn-primary btn-sm" data-action="accept-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">采纳</button>`}
-        <button class="btn btn-ghost btn-sm" data-action="reject-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">忽略</button>
-        <button class="btn btn-secondary btn-sm" data-action="polish-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}" data-instruction="quantified">AI 润色</button>
+        ${invalid ? "" : `<button class="btn btn-primary btn-sm" data-action="accept-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">✓ 采纳</button>`}
+        <button class="btn btn-ghost btn-sm" data-action="reject-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">✗ 跳过</button>
+        <button class="btn btn-secondary btn-sm" data-action="polish-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}" data-instruction="quantified">${invalid ? "↻ 重试此条" : "AI 润色"}</button>
       </div>
     </article>`;
 }
@@ -611,8 +745,8 @@ export function diffList(session, jobId) {
       <div class="resume-empty" data-resume-canvas-empty>
         <div class="resume-empty__title">还没有对齐结果</div>
         <ol class="resume-empty__steps">
-          <li>在左侧「对齐调优」选择主简历</li>
-          <li>点击右侧顶部「重新生成对齐」</li>
+          <li>在左侧「优化设置」选择主简历</li>
+          <li>点击右侧顶部「开始优化」</li>
           <li>逐条采纳建议并保存定稿</li>
         </ol>
         <button class="btn btn-primary btn-sm" type="button" data-action="run-alignment">开始对齐</button>
@@ -663,7 +797,7 @@ export function alignmentControls(session, resumes, jobId) {
       <div class="align-form__row">
         <button class="btn btn-primary" type="submit" data-align-run ${running ? "disabled" : ""}>${running ? "对齐运行中..." : failed ? "重新运行对齐" : "一键生成对齐简历"}</button>
         <button class="btn btn-outline btn-sm" type="button" data-action="cancel-align-job" ${running ? "" : "hidden"}>${alignment.status === "queued" ? "取消任务" : "停止等待"}</button>
-        <button class="btn btn-ghost btn-sm" type="button" data-action="apply-accepted-bullets" data-id="${esc(jobId)}" ${!alignment.draft ? "disabled" : ""}>应用已采纳</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="apply-accepted-bullets" data-id="${esc(jobId)}" ${!alignment.draft ? "disabled" : ""}>应用已✓ 采纳</button>
         <span class="small muted" data-align-status>${alignment.status === "succeeded" ? "已生成对齐版本" : alignment.status === "failed" ? `任务失败：${esc(alignment.error || "请重试")}` : alignment.status === "running" || alignment.status === "queued" ? "正在生成..." : ""}</span>
       </div>
       <label class="eval-option">
@@ -780,7 +914,7 @@ export function boardCard(job) {
   const match = job.match_score != null ? Math.round(job.match_score) : null;
   /* #F10: job.match_score persists the last workbench eval result, so the
    * badge title discloses the score origin instead of a bare "匹配度". */
-  const matchTitle = match != null ? "匹配度 · 来自对齐评估" : "尚未分析";
+  const matchTitle = match != null ? "匹配度 · 来自 AI 评估" : "尚未分析";
   return `
     <article class="board-card copilot-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}" draggable="true" data-board-drag>
       <div class="board-card__top">
@@ -822,7 +956,7 @@ export function renderBoardCard(job) {
       `<option value="${value}" ${canonical === value ? "selected" : ""}>${esc(JOB_STATUS_LABELS[value])}</option>`,
   ).join("");
   const match = job.match_score != null ? Math.round(job.match_score) : null;
-  const matchTitle = match != null ? "匹配度 · 来自对齐评估" : "尚未分析";
+  const matchTitle = match != null ? "匹配度 · 来自 AI 评估" : "尚未分析";
   return `
     <article class="board-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}">
       <div class="board-card__top">
@@ -969,7 +1103,7 @@ export function renderBatchMatrixHtml(batch) {
 
 /* Line-level + character-level side-by-side compare grid (原版 | 优化版).
  *
- * Shared by the live canvas 并排对比 modal (#17): line-level semantics are
+ * Shared by the live canvas 对比视图 modal (#17): line-level semantics are
  * kept (diff-remove / diff-add for whole-line changes); modified lines use
  * diff-modify and additionally mark the changed characters inline
  * (diff-char-del / diff-char-ins). Every line is addressable via data-line
@@ -1045,6 +1179,121 @@ export function buildCmpSideHtml(originalText, optimizedText, diffs) {
     <div class="cmp-grid cmp-grid--workbench">
       <section class="cmp-column-wrap"><h4>原版</h4><div class="cmp-column motion-stagger">${originalHtml}</div></section>
       <section class="cmp-column-wrap"><h4>优化版</h4><div class="cmp-column motion-stagger">${optimizedHtml}</div></section>
+    </div>`;
+}
+
+/**
+ * 文档润色范式：把左右分栏对比压成单文档的内联建议流。
+ * 删除内容灰化划掉，新增内容用品牌淡蓝底，修改内容在建议侧标蓝。
+ * 保留 data-line 可寻址语义供测试和辅助面板使用。
+ */
+export function buildInlineSuggestionHtml(originalText, optimizedText, diffs) {
+  const diffItems = Array.isArray(diffs) ? diffs : [];
+  const sourceText = String(originalText || "");
+  const targetText = String(optimizedText || "");
+
+  if (!sourceText.trim() && !targetText.trim() && !diffItems.length) {
+    return `
+      <div class="inline-suggestion" data-inline-suggestion>
+        <div class="muted small">暂无文档内容。请先运行一次优化生成建议。</div>
+      </div>`;
+  }
+
+  const modifyByOriginal = new Map();
+  const modifyByProposed = new Map();
+  const removeByOriginal = new Map();
+  const addByProposed = new Map();
+
+  diffItems.forEach((diff, index) => {
+    const original = String(diff.original || "").trim();
+    const proposed = String(diff.proposed || "").trim();
+    const meta = {
+      diffId: String(diff.diff_id || `inline-diff-${index}`),
+      reason: diff.reason || "",
+      provenance: diff.provenance || diff.provenance_quote || "",
+      confidence: diff.confidence != null ? String(diff.confidence) : "",
+    };
+
+    if (diff.type === "modify" && original && proposed) {
+      if (!modifyByOriginal.has(original)) modifyByOriginal.set(original, []);
+      if (!modifyByProposed.has(proposed)) modifyByProposed.set(proposed, []);
+      modifyByOriginal.get(original).push({ proposed, ...meta });
+      modifyByProposed.get(proposed).push({ original, ...meta });
+    } else if (diff.type === "remove" && original) {
+      removeByOriginal.set(original, meta);
+    } else if (diff.type === "add" && proposed) {
+      addByProposed.set(proposed, meta);
+    }
+  });
+
+  const segments = lineDiffOrdered(sourceText, targetText);
+  const html = [];
+  let index = 0;
+
+  const pushPlain = (text) => {
+    const content = text === "" ? "&nbsp;" : esc(text);
+    html.push(
+      `<div class="inline-suggestion__line" data-inline-line="${index}">${content}</div>`,
+    );
+    index += 1;
+  };
+
+  const pushSuggestion = (type, original, proposed, meta) => {
+    const data = meta
+      ? `${type === "modify"
+          ? `data-diff-original="${escAttr(original)}" data-diff-proposed="${escAttr(proposed)}"`
+          : ""} data-diff-id="${escAttr(meta.diffId)}" data-reason="${escAttr(meta.reason)}" data-provenance="${escAttr(meta.provenance)}" data-confidence="${escAttr(meta.confidence)}"`
+      : "";
+    const content =
+      type === "modify"
+        ? renderInlineCombined(original, proposed)
+        : type === "remove"
+          ? esc(original)
+          : esc(proposed);
+    html.push(
+      `<div class="inline-suggestion__line inline-suggestion__line--${type}" data-inline-line="${index}" data-inline-suggestion type="${type}" ${data}>${content}</div>`,
+    );
+    index += 1;
+  };
+
+  for (let pos = 0; pos < segments.length; pos++) {
+    const row = segments[pos];
+    if (row.type === "same") {
+      pushPlain(row.text);
+      continue;
+    }
+
+    if (row.type === "remove" && segments[pos + 1] && segments[pos + 1].type === "add") {
+      const original = row.text;
+      const proposed = segments[pos + 1].text;
+      const trimmedOriginal = original.trim();
+      const trimmedProposed = proposed.trim();
+      const candidates = modifyByOriginal.get(trimmedOriginal) || [];
+      const match = candidates.find((item) => item.proposed === trimmedProposed);
+      if (match) {
+        pushSuggestion("modify", original, proposed, match);
+        pos += 1;
+        continue;
+      }
+    }
+
+    if (row.type === "remove") {
+      const meta = removeByOriginal.get(row.text.trim());
+      pushSuggestion("remove", row.text, "", meta);
+      continue;
+    }
+
+    const meta = addByProposed.get(row.text.trim());
+    pushSuggestion("add", "", row.text, meta);
+  }
+
+  const body =
+    html.join("") ||
+    `<div class="muted small">暂无文档内容。请先运行一次优化生成建议。</div>`;
+
+  return `
+    <div class="inline-suggestion" data-inline-suggestion>
+      <div class="inline-suggestion__paper motion-stagger">${body}</div>
     </div>`;
 }
 
@@ -1403,6 +1652,23 @@ export function renderInlineDiffSide(original, proposed, side) {
     .filter((segment) =>
       side === "original" ? segment.type !== "ins" : segment.type !== "del",
     )
+    .map((segment) => {
+      if (segment.type === "del") {
+        return `<span class="diff-char-del">${esc(segment.text)}</span>`;
+      }
+      if (segment.type === "ins") {
+        return `<span class="diff-char-ins">${esc(segment.text)}</span>`;
+      }
+      return esc(segment.text);
+    })
+    .join("");
+}
+
+/* Render both sides of an inline diff in one document line. Deleted tokens
+ * stay struck through, inserted tokens get the brand-blue suggestion wash; the
+ * unchanged surrounding text remains plain. */
+export function renderInlineCombined(original, proposed) {
+  return inlineDiff(original, proposed)
     .map((segment) => {
       if (segment.type === "del") {
         return `<span class="diff-char-del">${esc(segment.text)}</span>`;
@@ -1837,7 +2103,7 @@ export function workbenchPrimaryButtonHtml(resumes, alignmentRunning = false) {
   const label = hasResumes
     ? alignmentRunning
       ? "对齐生成中..."
-      : "重新生成对齐"
+      : "开始优化"
     : "先创建主简历";
   return `<button class="btn btn-primary" type="button" data-action="${hasResumes ? "run-alignment" : "go-resumes"}" ${hasResumes && alignmentRunning ? "disabled" : ""}>${esc(label)}</button>`;
 }
@@ -1916,13 +2182,13 @@ export function matchBadgeInfo(session, job) {
   const evalScore = alignment.eval_score || {};
   const gap = (session && session.gap) || {};
   if (evalScore.jd_match_score != null) {
-    return { score: Number(evalScore.jd_match_score), source: "来自对齐评估" };
+    return { score: Number(evalScore.jd_match_score), source: "来自 AI 评估" };
   }
   if (gap.score != null) {
-    return { score: Number(gap.score), source: "来自差距分析" };
+    return { score: Number(gap.score), source: "来自能力分析" };
   }
   if (job && job.match_score != null) {
-    return { score: Number(job.match_score), source: "来自对齐评估" };
+    return { score: Number(job.match_score), source: "来自 AI 评估" };
   }
   return { score: null, source: "" };
 }
@@ -1930,7 +2196,7 @@ export function matchBadgeInfo(session, job) {
 export function renderMatchBadge(session, job) {
   const { score, source } = matchBadgeInfo(session, job);
   if (score == null) return "";
-  return `<span class="match-badge ${matchTone(score)}" data-match-badge title="${esc(source)}">匹配 ${Math.round(score)}</span>${source ? `<span class="small muted" data-match-source>${esc(source)}</span>` : ""}`;
+  return `<span class="match-badge ${matchTone(score)}" data-match-badge title="${esc(source)}">🛡️ 匹配 ${Math.round(score)}</span>${source ? `<span class="small muted" data-match-source>${esc(source)}</span>` : ""}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1983,7 +2249,7 @@ export function applicationSnapshotsHtml(job, snapshots = []) {
     })
     .join("");
   if (items) {
-    return `<div class="snapshot-section"><h4>投递定稿快照</h4><div class="snapshot-list">${items}</div></div>`;
+    return `${interviewCheatSheetHtml(job)}<div class="snapshot-section"><h4>投递定稿快照</h4><div class="snapshot-list">${items}</div></div>`;
   }
   const canonical = canonicalJobStatus(job && job.status);
   if (
@@ -1991,7 +2257,7 @@ export function applicationSnapshotsHtml(job, snapshots = []) {
     job &&
     (job.final_draft || "").trim()
   ) {
-    return `<div class="snapshot-section snapshot-section--legacy" data-legacy-snapshot>
+    return `${interviewCheatSheetHtml(job)}<div class="snapshot-section snapshot-section--legacy" data-legacy-snapshot>
       <h4>投递定稿快照</h4>
       <div class="snapshot-item snapshot-item--legacy">
         <p class="legacy-warning">⚠️ 早期投递版本（未生成不可篡改快照）</p>
@@ -2005,6 +2271,91 @@ export function applicationSnapshotsHtml(job, snapshots = []) {
     </div>`;
   }
   return "";
+}
+
+/* 面试防深挖清单：从已保存的 JD 画像、差距报告和高置信 diff 中确定性提炼。
+ * 不构造新的经历事实，只把“高频追问”和“两句话应答 SOP”交给用户。 */
+export function interviewCheatSheetHtml(job = {}) {
+  const jdProfile = job.jd_profile || {};
+  const gap = job.gap_report || {};
+  const diffs = Array.isArray(job.diffs) ? job.diffs : [];
+  const evalScore = job.eval_score || {};
+  const questions = [];
+
+  const strongDiffs = diffs
+    .filter((diff) => diff && (diff.type === "modify" || diff.type === "add"))
+    .filter((diff) => String(diff.confidence) === "high" || String(diff.reason || "").includes("指标"))
+    .slice(0, 3);
+  strongDiffs.forEach((diff) => {
+    const topic =
+      String(diff.proposed || diff.reason || diff.original || "这段经历")
+        .replace(/\[待人工确认[^\]]*\]/g, "")
+        .trim() || "这段经历";
+    questions.push({
+      type: "改写",
+      question: `关于「${topic}」，你的具体分工、数据口径和业务收益是什么？`,
+      sop: "先给结论，再说“我用了什么方法、承担哪段、最终对哪项业务指标带来什么变化”。数字没有就讲量级，不要编。",
+    });
+  });
+
+  const missingKeywords = Array.isArray(gap.missing_keywords)
+    ? gap.missing_keywords.slice(0, 2)
+    : [];
+  missingKeywords.forEach((keyword) => {
+    questions.push({
+      type: "JD 匹配",
+      question: `JD 明确要求 ${String(keyword || "这项能力")}，你在真实项目里是如何落地的？`,
+      sop: "用一句话点明技术/业务背景，再用一句话补上结果和风险控制；没做过的部分要先承认边界，不要把听说写成亲自做过。",
+    });
+  });
+
+  const scenarios = Array.isArray(jdProfile.business_scenarios)
+    ? jdProfile.business_scenarios.slice(0, 2)
+    : [];
+  scenarios.forEach((scenario) => {
+    questions.push({
+      type: "业务场景",
+      question: `这个岗位很关注 ${String(scenario || "业务场景")}，你的方案如何支撑它？`,
+      sop: "先用一个可感知的结果证明针对性，再说清你做了什么取舍；避免只堆技术名词而不说收益。",
+    });
+  });
+
+  if (
+    !questions.length &&
+    !diffs.length &&
+    !((gap.missing_keywords || []).length) &&
+    !((jdProfile.business_scenarios || []).length)
+  ) {
+    return "";
+  }
+
+  const hallucinationWarning =
+    evalScore && evalScore.hallucination_detected
+      ? `<div class="cheatsheet__warning">⚠️ 检测到待复核内容，面试前请先回到工作台核对数字与来源。</div>`
+      : "";
+
+  return `
+    <section class="cheatsheet" data-interview-cheatsheet>
+      <div class="cheatsheet__head">
+        <div>
+          <h4>面试防深挖清单</h4>
+          <p>每条都先点结论，再用事实接住追问。</p>
+        </div>
+      </div>
+      ${hallucinationWarning}
+      <div class="cheatsheet__list">
+        ${questions
+          .map(
+            (item) => `
+          <div class="cheatsheet__item">
+            <span class="badge badge-gray">${esc(item.type)}</span>
+            <strong>${esc(item.question)}</strong>
+            <div class="cheatsheet__sop">${esc(item.sop)}</div>
+          </div>`,
+          )
+          .join("")}
+      </div>
+    </section>`;
 }
 
 /* 岗位详情/时间线弹窗表单。next_step_due_at 为 datetime-local（本地时间，
@@ -2211,14 +2562,14 @@ export function runEvalFromForm(data) {
 /* #17 Live workbench: side-by-side compare from a live session        */
 /* ------------------------------------------------------------------ */
 /* The live canvas keeps the per-card 采纳/忽略/润色 interactions in
- * diffList(); this builds the read-only 并排对比 view with buildCmpSideHtml
+ * diffList(); this builds the read-only 对比视图 view with buildCmpSideHtml
  * from the session's alignment draft + diffs. */
 
 export function buildLiveCompareHtml(session, originalContent) {
   const alignment = (session && session.alignment) || {};
   const optimizedText = alignment.draft || "";
   const diffs = alignment.diffs || [];
-  return buildCmpSideHtml(originalContent || "", optimizedText, diffs);
+  return buildInlineSuggestionHtml(originalContent || "", optimizedText, diffs);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2277,6 +2628,22 @@ export function dashboardKpiHtml(kpi = {}) {
     </div>`;
 }
 
+/* Lightweight empty-state illustration shared by dashboard and jobs views.
+ * Kept as code-native SVG because this is a static, structural illustration
+ * rather than a button icon or interactive glyph. */
+function emptyStateIllustrationHtml() {
+  return `
+    <svg class="empty-state__illustration" viewBox="0 0 160 120" role="img" aria-hidden="true" focusable="false">
+      <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M60 16h42l18 18v64a6 6 0 0 1-6 6H60a6 6 0 0 1-6-6V22a6 6 0 0 1 6-6Z" stroke-width="4" opacity=".65"/>
+        <path d="M102 16v20h18" stroke-width="4" opacity=".65"/>
+        <path d="M69 48h36M69 64h36M69 80h20" stroke-width="5" opacity=".9"/>
+        <circle cx="42" cy="72" r="24" stroke-width="3" opacity=".35"/>
+        <path d="M42 58v28M26 72h32" stroke-width="3" opacity=".5"/>
+      </g>
+    </svg>`;
+}
+
 /* 空工作台引导：两个核心数据源都没有时给出第一步操作。 */
 export function dashboardEmptyGuideHtml({
   hasJobs = false,
@@ -2286,6 +2653,7 @@ export function dashboardEmptyGuideHtml({
   if (hasJobs || hasResume || hasFollowups) return "";
   return `
     <section class="panel panel-card empty-state dashboard-empty-guide" data-dashboard-empty>
+      ${emptyStateIllustrationHtml()}
       <div class="big">欢迎使用 ResuAlign</div>
       <p class="muted">先导入一份主简历和一个岗位，工作台即可开始对齐。</p>
       <div class="actions">
@@ -2299,6 +2667,7 @@ export function dashboardEmptyGuideHtml({
 export function jobsEmptyGuideHtml() {
   return `
     <section class="panel panel-card empty-state jobs-empty-guide" data-jobs-empty>
+      ${emptyStateIllustrationHtml()}
       <div class="big">还没有岗位</div>
       <p class="muted">粘贴一份 JD 或导入收藏链接开始。</p>
       <div class="actions">
@@ -2605,7 +2974,7 @@ export function blockerListHtml(blockers) {
         <div class="blocker-item__meta">${url}${category ? ` · ${category}` : ""}</div>
         ${reason ? `<div class="blocker-item__reason">${reason}</div>` : ""}
         <div class="blocker-item__actions">
-          <button type="button" class="btn btn-outline btn-sm" data-action="ignore-blocker" data-id="${id}">忽略</button>
+          <button type="button" class="btn btn-outline btn-sm" data-action="ignore-blocker" data-id="${id}">✗ 跳过</button>
           <button type="button" class="btn btn-secondary btn-sm" data-action="toggle-blocker-resolve" data-id="${id}">手动补全</button>
         </div>
         <form class="blocker-resolve" data-form="blocker-resolve" data-id="${id}" hidden>

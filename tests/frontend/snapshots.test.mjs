@@ -3,6 +3,7 @@ import assert from "node:assert";
 
 import {
   applicationSnapshotsHtml,
+  interviewCheatSheetHtml,
   jobTimelineFormHtml,
 } from "../../src/resualign/static/app/format.js";
 
@@ -60,6 +61,39 @@ test("applicationSnapshotsHtml hides section for draft jobs without snapshots", 
     [],
   );
   assert.equal(html, "");
+});
+
+test("interviewCheatSheetHtml derives questions from diffs and gaps", () => {
+  const html = interviewCheatSheetHtml({
+    jd_profile: { business_scenarios: ["高并发"] },
+    gap_report: { missing_keywords: ["Redis"] },
+    diffs: [
+      {
+        type: "modify",
+        proposed: "构建高吞吐后端服务",
+        confidence: "high",
+        reason: "突出指标",
+      },
+    ],
+  });
+  assert.match(html, /data-interview-cheatsheet/);
+  assert.match(html, /面试防深挖清单/);
+  assert.match(html, />改写</);
+  assert.match(html, /关于「构建高吞吐后端服务」/);
+  assert.match(html, /Redis/);
+  assert.match(html, /高并发/);
+  assert.match(html, /cheatsheet__sop/);
+});
+
+test("interviewCheatSheetHtml escapes question topics and returns empty when no signal", () => {
+  const html = interviewCheatSheetHtml({
+    jd_profile: { business_scenarios: ["<危险>"] },
+    gap_report: { missing_keywords: [] },
+    diffs: [],
+  });
+  assert.match(html, /&lt;危险&gt;/);
+  assert.doesNotMatch(html, /<危险>/);
+  assert.equal(interviewCheatSheetHtml({}), "");
 });
 
 test("jobTimelineFormHtml embeds the snapshot section", () => {

@@ -1,6 +1,8 @@
 import bisect
+import json as _json
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 from .llm import LLMClient, _structured_or_json
 from .models import DiffItem, TailoredResume
@@ -8,6 +10,13 @@ from .schema_registry import DiffItemSchema, TailoredResumeSchema
 
 BULLET_REWRITE_PROMPT_VERSION = "v1"
 TAILOR_PROMPT_VERSION = "v1"
+METRIC_PLACEHOLDER = "[待人工确认：耗时降低 X% / 支撑 QPS 达 Y]"
+_METRIC_HINT_RE = re.compile(
+    r"(?:\d+(?:\.\d+)?\s*(?:%|倍|万|亿|ms\b|s\b|qps\b|tps\b))|"
+    r"\b(?:qps|tps|rt|pv|uv|roi)\b|"
+    r"(?:成本降低|耗时降低|性能提升)",
+    re.IGNORECASE,
+)
 
 
 TAILOR_PROMPT = (
@@ -69,6 +78,14 @@ TAILOR_PROMPT = (
     "    scenario words exactly as written. For non-English resumes, include \n"
     "    the English phrase verbatim alongside the translated text (e.g., \n"
     "    write 'FastAPI async endpoints' as well as the Chinese rendering).\n"
+    "13. Every rewritten experience/project bullet MUST open with a strong \n"
+    "    action verb and follow ACTION VERB + TECHNICAL METHOD + BUSINESS \n"
+    "    SCENARIO + QUANTIFIED OUTCOME. Avoid adverbs and hollow \n"
+    "    'responsible for...' filler.\n"
+    "14. If the source bullet has no number/metric, do NOT invent one. Append \n"
+    "    a clearly marked editable placeholder such as '[待人工确认：耗时降低 \n"
+    "    X% / 支撑 QPS 达 Y]' after the factual clause. Never present the \n"
+    "    placeholder as an established fact.\n"
     "Return ONLY a JSON object with exactly two keys:\n"
     "sections (object mapping section_name to rewritten plain text),\n"
     "diffs (list of objects with type in ['modify','add','remove'], section, \n"
@@ -125,15 +142,18 @@ PROMPT_FOCUS_GUIDES = {
 
 BULLET_INSTRUCTIONS = {
     "quantified": (
-        "Re-emphasize measurable outcomes that already exist in the bullet "
-        "(numbers, percentages, counts, or reductions). Never invent or "
-        "inflate metrics that are absent from the original bullet."
+        "Rewrite in STAR order: strong action verb + technical method + "
+        "business scenario + quantified outcome. If the original has no "
+        "number, append a clearly marked editable placeholder such as "
+        "'[待人工确认：耗时降低 X% / 支撑 QPS 达 Y]'. Never invent a concrete "
+        "metric."
     ),
     "high_concurrency": (
         "Tie the existing facts to high-concurrency, low-latency, or "
-        "production platform language when the facts support it. Use the "
-        "JD's exact scenario phrase when available; never add capabilities "
-        "the original bullet does not contain."
+        "production platform language when the facts support it. Follow "
+        "ACTION VERB + TECHNICAL METHOD + BUSINESS SCENARIO + QUANTIFIED "
+        "OUTCOME. Use the JD's exact scenario phrase when available; never "
+        "add capabilities the original bullet does not contain."
     ),
     "concise": (
         "Shorten the bullet to one crisp line while preserving every fact "
@@ -144,6 +164,16 @@ BULLET_INSTRUCTIONS = {
 
 def _normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def _has_quantified_metric(text: str) -> bool:
+    return bool(_METRIC_HINT_RE.search(text or ""))
+
+
+def _ensure_metric_placeholder(text: str) -> str:
+    if not text or _has_quantified_metric(text):
+        return text
+    return f"{text.rstrip()} {METRIC_PLACEHOLDER}"
 
 
 def _normalized_char_map(text: str) -> tuple[str, list[int]]:
@@ -239,6 +269,8 @@ def parse_diff_with_provenance(
         source_span=source_span,
         provenance_state=provenance_state,
     )
+    if diff.type in {"modify", "add"} and diff.proposed:
+        diff.proposed = _ensure_metric_placeholder(diff.proposed)
     return diff, valid
 
 
@@ -345,6 +377,8 @@ def rewrite_bullet(
         "2. NEVER invent skills, experience, tools, or numbers.\n"
         "3. Apply the requested instruction to the existing facts.\n"
         "4. Keep the same language as the original bullet.\n"
+        "5. Start with a strong action verb and keep the sentence business-\n"
+        "   outcome focused: ACTION VERB + METHOD + SCENARIO + RESULT.\n"
         "Return ONLY JSON: {\"proposed\": \"...\", \"reason\": \"...\"}."
     )
     user = (
@@ -359,11 +393,16 @@ def rewrite_bullet(
         DiffItemSchema,
         model=resolved_model,
     )
+    proposed = _ensure_metric_placeholder(
+        str(result.get("proposed") or "").strip()
+    ) if instruction in {"quantified", "high_concurrency"} else str(
+        result.get("proposed") or ""
+    ).strip()
     diff = DiffItem(
         diff_id=uuid.uuid4().hex,
         type="modify",
         original=original,
-        proposed=str(result.get("proposed") or "").strip(),
+        proposed=proposed,
         reason=str(result.get("reason") or "").strip(),
         confidence="high",
         provenance=original,
@@ -380,3 +419,263 @@ def rewrite_bullet(
             {"proposed": diff.proposed, "reason": diff.reason},
         )
     return diff
+
+
+# ---------------------------------------------------------------------------
+# Bullet-level map-reduce editor (Phase 2, ADR-0032)
+# ---------------------------------------------------------------------------
+
+_SECTION_HEADING_MR_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?(?:个人(?:信息|简介)|教育(?:背景|经历)|工作经历|"
+    r"项目(?:经历|经验)|专业技能|技能清单|证书|荣誉|自我评价|"
+    r"summary|education|work\s+experience|projects?|skills|"
+    r"certifications?|awards?)\s*[:：]?\s*$",
+    re.IGNORECASE,
+)
+_BULLET_MR_RE = re.compile(
+    r"^\s*(?:[-•▪●○◦·∙‣]|\d+(?:[.、)])|[*])\s+"
+)
+
+
+def split_resume_units(resume_text: str) -> list[dict]:
+    """Split a resume into ordered atomic lines for per-bullet editing.
+
+    Each entry is ``{"kind": "heading"|"bullet"|"text", "section": str,
+    "text": str}``. Section tracks the nearest preceding heading so bullets
+    can be grouped back into ``sections`` for reassembly.
+    """
+    units: list[dict] = []
+    section = ""
+    for raw in (resume_text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if _SECTION_HEADING_MR_RE.match(line):
+            section = line.lstrip("#").strip()
+            units.append({"kind": "heading", "section": section, "text": line})
+        elif _BULLET_MR_RE.match(raw):
+            bullet_text = _BULLET_MR_RE.sub("", raw).strip()
+            units.append({"kind": "bullet", "section": section, "text": bullet_text})
+        else:
+            units.append({"kind": "text", "section": section, "text": line})
+    return units
+
+
+def _focus_phrases(gap_report: dict) -> list[str]:
+    phrases: list[str] = []
+    for key in ("missing_keywords", "misaligned_emphasis", "business_scenarios"):
+        for item in (gap_report.get(key) or []):
+            if isinstance(item, str) and item.strip():
+                phrases.append(item.strip())
+    return phrases
+
+
+def _pick_bullet_instruction(granularity: str, prompt_focus: str) -> str:
+    if prompt_focus == "quantified":
+        return "quantified"
+    if prompt_focus == "skills":
+        return "high_concurrency"
+    return "concise" if granularity == "fine" else "high_concurrency"
+
+
+def _resolve_bullet_span(original: str, resume_text: str) -> tuple[int, int] | None:
+    if not original:
+        return None
+    start = resume_text.find(original)
+    if start < 0:
+        return None
+    return (start, start + len(original))
+
+
+def _rewrite_bullet_with_span(
+    client: LLMClient,
+    original: str,
+    resume_text: str,
+    section: str,
+    instruction: str,
+    jd_context: str,
+) -> DiffItem:
+    diff = rewrite_bullet(
+        client,
+        original,
+        instruction,
+        jd_context=jd_context,
+    )
+    diff.section = section
+    span = _resolve_bullet_span(original, resume_text)
+    if span is not None:
+        diff.source_span = span
+    return diff
+
+
+def _try_rewrite_bullet(
+    client: LLMClient,
+    original: str,
+    resume_text: str,
+    section: str,
+    instruction: str,
+    jd_context: str,
+) -> DiffItem:
+    """Rewrite one bullet, degrading to a failed DiffItem instead of raising.
+
+    A failed bullet is kept as an ``invalid_diff`` so Phase 4 can offer
+    per-item retry without failing the whole map-reduce run.
+    """
+    try:
+        return _rewrite_bullet_with_span(
+            client, original, resume_text, section, instruction, jd_context
+        )
+    except Exception as exc:  # noqa: BLE001 - degrade per bullet
+        return DiffItem(
+            diff_id=uuid.uuid4().hex,
+            section=section,
+            type="modify",
+            original=original,
+            proposed="",
+            reason=f"生成失败，可单条重试: {str(exc)[:80]}",
+            confidence="low",
+            provenance=original,
+            provenance_quote="",
+            source_span=_resolve_bullet_span(original, resume_text),
+            provenance_state="missing",
+        )
+
+
+def tailor_resume_map_reduce(
+    client: LLMClient,
+    resume_text: str,
+    gap_report_text: str,
+    granularity: str = "medium",
+    prompt_focus: str = "balanced",
+    custom_prompt: str = "",
+    jd_context: str = "",
+    parallel: bool = True,
+) -> TailoredResume:
+    """Rewrite a resume bullet-by-bullet, concurrent where safe (ADR-0032).
+
+    Only bullets that relate to the gap report are sent to the model (small,
+    stable per-bullet calls). Non-targeted bullets pass through verbatim and
+    sections are reassembled deterministically. A single bullet failure is
+    recorded as an ``invalid_diff`` (for Phase 4 per-item retry) instead of
+    failing the whole run; when every targeted bullet fails the map-reduce
+    falls back to whole-document editing so the callers' role fallback still
+    has a stable output.
+    """
+    if granularity not in GRANULARITY_GUIDES:
+        raise ValueError(
+            f"Invalid granularity: {granularity}; expected fine, medium, or coarse"
+        )
+    instruction = _pick_bullet_instruction(granularity, prompt_focus)
+    try:
+        gap_report = _json.loads(gap_report_text or "{}")
+    except (ValueError, TypeError):
+        gap_report = {}
+    focus = _focus_phrases(gap_report)
+    jd_context = (jd_context or str(gap_report.get("jd_context") or "")).strip()
+
+    units = split_resume_units(resume_text)
+    bullets = [u for u in units if u["kind"] == "bullet"]
+    if not bullets:
+        # No atomic bullets to rewrite; fall back to whole-document editing.
+        return tailor_resume(
+            client,
+            resume_text,
+            gap_report_text,
+            granularity=granularity,
+            prompt_focus=prompt_focus,
+            custom_prompt=custom_prompt,
+        )
+
+    focus_lower = [f.lower() for f in focus]
+
+    def _is_target(bullet: dict) -> bool:
+        text_lower = bullet["text"].lower()
+        return any(f and f in text_lower for f in focus_lower)
+
+    targets = [b for b in bullets if _is_target(b)]
+    if not targets:
+        # Fall back to the first bullet of the first experience/project/skill
+        # section so the editor always yields at least one actionable diff.
+        prefer = next(
+            (
+                section
+                for name in ("工作经历", "项目经历", "项目经验", "专业技能",
+                             "work experience", "projects", "skills")
+                for u in units
+                if u["kind"] == "bullet"
+                for section in [u["section"]]
+                if name.lower() == section.lower()
+            ),
+            None,
+        )
+        pool = (
+            [b for b in bullets if b["section"] == prefer]
+            if prefer
+            else bullets
+        )
+        targets = pool[:1]
+
+    if not parallel or len(targets) <= 1:
+        rewrites = [
+            _try_rewrite_bullet(
+                client, b["text"], resume_text, b["section"],
+                instruction, jd_context,
+            )
+            for b in targets
+        ]
+    else:
+        with ThreadPoolExecutor(max_workers=min(4, len(targets))) as pool:
+            rewrites = list(
+                pool.map(
+                    lambda b: _try_rewrite_bullet(
+                        client, b["text"], resume_text, b["section"],
+                        instruction, jd_context,
+                    ),
+                    targets,
+                )
+            )
+
+    diffs: list[DiffItem] = []
+    invalid_diffs: list[DiffItem] = []
+    accepted: set[str] = set()
+    for diff in rewrites:
+        if diff.proposed and diff.proposed.strip():
+            accepted.add(diff.original)
+            diffs.append(diff)
+        else:
+            diff.confidence = "low"
+            diff.provenance_state = "missing"
+            diff.reason = (diff.reason or "") + " [生成失败，可单条重试]"
+            invalid_diffs.append(diff)
+
+    # Reassemble sections: targeted bullets replaced with proposed text,
+    # everything else preserved verbatim; headings/text pass through.
+    sections: dict[str, list[str]] = {}
+    for unit in units:
+        key = unit["section"] or "摘要"
+        if unit["kind"] == "bullet" and unit["text"] in accepted:
+            proposed = next(
+                (d.proposed for d in rewrites if d.original == unit["text"]),
+                unit["text"],
+            )
+            sections.setdefault(key, []).append(proposed)
+        else:
+            sections.setdefault(key, []).append(unit["text"])
+
+    if not diffs:
+        # Every targeted bullet failed: fall back to whole-document editing so
+        # role-level fallback / callers still get a coherent result.
+        return tailor_resume(
+            client,
+            resume_text,
+            gap_report_text,
+            granularity=granularity,
+            prompt_focus=prompt_focus,
+            custom_prompt=custom_prompt,
+        )
+
+    return TailoredResume(
+        sections={k: "\n".join(v) for k, v in sections.items()},
+        diffs=diffs,
+        invalid_diffs=invalid_diffs,
+    )

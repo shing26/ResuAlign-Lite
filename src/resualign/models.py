@@ -90,6 +90,7 @@ class Report:
     provenance_ratio: float = 0.0
     graph_status: str = ""
     trace_id: str = ""
+    fallback: str = ""
 
 
 @dataclass

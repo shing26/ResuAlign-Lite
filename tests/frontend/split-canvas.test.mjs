@@ -18,6 +18,7 @@ import {
   renderSkills,
   stageProgress,
   stageStepper,
+  workbenchProgressPipelineHtml,
 } from "../../src/resualign/static/app/format.js";
 
 const EMPTY_SESSION = {};
@@ -130,6 +131,34 @@ test("stageStepper renders step labels with done/active classes", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* workbenchProgressPipelineHtml                                       */
+/* ------------------------------------------------------------------ */
+
+test("workbenchProgressPipelineHtml renders a live backend stage message", () => {
+  const html = workbenchProgressPipelineHtml({
+    alignment: { status: "running", stage: "tailoring", message: "正在生成 STAR 精修建议..." },
+  });
+  assert.match(html, /data-workbench-live-progress/);
+  assert.match(html, /data-workbench-live-progress-message/);
+  assert.match(html, /正在生成 STAR 精修建议\.\.\./);
+});
+
+test("workbenchProgressPipelineHtml shows completion text when succeeded", () => {
+  const html = workbenchProgressPipelineHtml({
+    alignment: { status: "succeeded", stage: "done", diffs: [] },
+  });
+  assert.match(html, /简历对齐已完成/);
+});
+
+test("workbenchProgressPipelineHtml escapes the live message", () => {
+  const html = workbenchProgressPipelineHtml({
+    alignment: { status: "queued", message: "检查 <真实性与指标>" },
+  });
+  assert.match(html, /检查 &lt;真实性与指标&gt;/);
+  assert.doesNotMatch(html, /<真实性与指标>/);
+});
+
+/* ------------------------------------------------------------------ */
 /* crawlStatusLine                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -220,7 +249,7 @@ test("diffCard renders actionable modify card with provenance", () => {
   const html = diffCard(SAMPLE_DIFF, 0, "job-1");
   assert.match(html, /data-diff-id="d1"/);
   assert.match(html, /data-action="accept-bullet"/);
-  assert.match(html, /来源已验证/);
+  assert.match(html, /🛡️ 高可信/);
   assert.match(html, /置信度 high/);
   assert.doesNotMatch(html, /diff-card--invalid/);
 });
@@ -251,6 +280,26 @@ test("diffCard flags modify diffs with missing provenance as invalid gate", () =
   assert.doesNotMatch(html, /data-action="accept-bullet"/);
   assert.match(html, /data-diff-original/);
   assert.match(html, /data-diff-proposed/);
+});
+
+test("diffCard offers per-item retry on invalid cards", () => {
+  const invalid = diffCard(
+    {
+      type: "modify",
+      original: "Gap line",
+      proposed: "",
+      reason: "生成失败，可单条重试: timeout",
+      provenance_state: "missing",
+    },
+    4,
+    "job-1",
+  );
+  assert.match(invalid, /diff-card--invalid/);
+  assert.match(invalid, /data-action="polish-bullet"/);
+  assert.match(invalid, /↻ 重试此条/);
+  assert.doesNotMatch(invalid, /data-action="accept-bullet"/);
+
+  assert.match(diffCard(SAMPLE_DIFF, 0, "job-1"), /AI 润色/);
 });
 
 test("diffList renders cards or the empty state", () => {
@@ -321,7 +370,7 @@ test("diffList carries section badges through diffCard and escapes them", () => 
 });
 
 /* ------------------------------------------------------------------ */
-/* #17: live 工作台字符级高亮（卡片行内标记 + 并排对比视图）              */
+/* #17: live 工作台字符级高亮（卡片行内标记 + 对比视图视图）              */
 /* ------------------------------------------------------------------ */
 
 test("diffCard marks inserted characters on the proposed side", () => {
@@ -401,7 +450,7 @@ test("diffList unchanged modify diffs produce no marks", () => {
   assert.doesNotMatch(html, /diff-char-/);
 });
 
-/* buildCmpSideHtml —— legacy result 视图与 live 并排对比共用的渲染核心 */
+/* buildCmpSideHtml —— legacy result 视图与 live 对比视图共用的渲染核心 */
 
 test("buildCmpSideHtml renders addressable lines with char-level marks", () => {
   const html = buildCmpSideHtml(
@@ -433,14 +482,15 @@ test("buildLiveCompareHtml builds compare from a live session", () => {
     },
   };
   const html = buildLiveCompareHtml(session, "负责系统开发");
-  assert.match(html, /cmp-grid/);
+  assert.match(html, /inline-suggestion/);
+  assert.match(html, /inline-suggestion__line--modify/);
   assert.match(html, /<span class="diff-char-ins">高并发<\/span>/);
 });
 
 test("buildLiveCompareHtml tolerates missing draft and diffs", () => {
   const html = buildLiveCompareHtml({}, "");
-  assert.match(html, /cmp-grid/);
-  assert.match(html, /cmp-line/);
+  assert.match(html, /data-inline-suggestion/);
+  assert.match(html, /暂无文档内容/);
 });
 
 /* ------------------------------------------------------------------ */
@@ -634,7 +684,7 @@ test("boardCard match badge title discloses the score source", () => {
     status: "applied",
     match_score: 80,
   });
-  assert.match(html, /class="match-badge match--high" data-match-total title="匹配度 · 来自对齐评估">80<\/span>/);
+  assert.match(html, /class="match-badge match--high" data-match-total title="匹配度 · 来自 AI 评估">80<\/span>/);
   assert.match(
     boardCard({ job_id: "j2", title: "T", status: "draft" }),
     /class="match-badge match-badge--empty" title="尚未分析">待分析<\/span>/,
@@ -648,7 +698,7 @@ test("renderBoardCard match badge carries the source title", () => {
     status: "applied",
     match_score: 66,
   });
-  assert.match(html, /class="match-badge match--mid" data-match-total title="匹配度 · 来自对齐评估">66<\/span>/);
+  assert.match(html, /class="match-badge match--mid" data-match-total title="匹配度 · 来自 AI 评估">66<\/span>/);
   const empty = renderBoardCard({ job_id: "j2", title: "T", status: "draft" });
   assert.match(empty, /class="match-badge match-badge--empty" title="尚未分析">待分析<\/span>/);
 });

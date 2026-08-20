@@ -4,6 +4,7 @@ import pytest
 
 from resualign.parser import (
     FileParseError,
+    clean_resume_markdown,
     extract_text,
     normalize_text,
     structured_resume_sections,
@@ -70,6 +71,31 @@ def test_docx_table_extraction(tmp_path):
 
 def test_normalize_text_collapses_blank_lines():
     assert normalize_text("  a \n\n  b \n\n\n c ") == "a\nb\nc"
+
+
+def test_clean_resume_markdown_normalizes_bullets_and_invisible_chars():
+    text = clean_resume_markdown("•\u200b 负责开发\u3000后端服务\n\u2022 使用 Python")
+    assert "\u200b" not in text
+    assert "\u3000" not in text
+    assert "- 负责开发 后端服务" in text
+    assert "- 使用 Python" in text
+
+
+def test_clean_resume_markdown_merges_short_broken_lines_and_keeps_headings():
+    text = clean_resume_markdown(
+        "工作经历\n负责后端开发\n使用 Python\n项目经历\nRedis 缓存"
+    )
+    assert "工作经历\n负责后端开发 使用 Python" in text
+    assert "项目经历\nRedis 缓存" in text
+
+
+def test_clean_resume_markdown_preserves_english_lead_words():
+    text = clean_resume_markdown(
+        "Objective: backend engineer\nOverview of the project\n0 years experience"
+    )
+    assert "Objective: backend engineer" in text
+    assert "Overview of the project" in text
+    assert "0 years experience" in text
 
 
 def test_structured_resume_sections():

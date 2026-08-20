@@ -215,15 +215,19 @@ def test_jobs_are_isolated_between_users():
     assert client.get(f"/api/jobs/{job_id}", headers=_auth_headers()).status_code == 200
 
 
-def test_analyze_no_api_key():
-    with patch("resualign.api.build_config", return_value=_config("")):
+def test_analyze_no_api_key_queues_local_fallback():
+    # Phase 5: with no API key the endpoint still accepts the job; the worker
+    # falls back to the deterministic rules engine instead of 503.
+    with patch("resualign.api._run_job"), patch(
+        "resualign.api.build_config", return_value=_config("")
+    ):
         r = client.post(
             "/api/analyze",
             json={"resume_text": "Python developer resume."},
             headers=_auth_headers(),
         )
-    assert r.status_code == 503
-    assert "LLM" in r.json()["detail"]
+    assert r.status_code == 202
+    assert r.json()["status"] == "queued"
 
 
 def test_create_job_returns_202_and_queued_snapshot():

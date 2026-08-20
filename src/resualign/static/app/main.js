@@ -59,7 +59,6 @@ import {
   renderKanban,
   setCanvasRenderHook,
 } from "./kanban.js";
-import { bindColumnScrollSync } from "./diff-editor.js";
 import {
   applyAcceptedDiffsToDraft,
   applyDiffToDraft,
@@ -1579,7 +1578,7 @@ const actions = {
   "run-alignment": () => {
     const form = $("[data-form='split-align']");
     if (!form) {
-      toast("请先在左侧「对齐调优」中配置主简历", "error");
+      toast("请先在左侧「优化设置」中配置主简历", "error");
       return;
     }
     if (typeof form.requestSubmit === "function") {
@@ -1591,9 +1590,8 @@ const actions = {
     }
   },
   "open-optimizer": (button) => navigate("workspace", button.dataset.id),
-  /* #17: live 工作台「并排对比」——复用 buildLiveCompareHtml ->
-   * buildCmpSideHtml 的字符级并排视图，只读弹窗展示，不动卡片的逐条采纳
-   * 交互。 */
+  /* #17: live 工作台「对比视图」——复用 buildLiveCompareHtml 的文档润色
+   * 内联建议流，只读弹窗展示，不动卡片的逐条采纳交互。 */
   "toggle-live-compare": async () => {
     const session = activeSessionForExport();
     if (!session) {
@@ -1619,13 +1617,11 @@ const actions = {
       }
     }
     showModal(
-      "并排对比 · 原版 vs 优化版",
+      "对比视图 · 原版 vs 优化版",
       `${buildLiveCompareHtml(session, originalContent)}<div class="actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">关闭</button></div>`,
     );
     const modal = $(".modal-backdrop .modal");
     if (modal) modal.classList.add("modal--wide");
-    const columns = $$(".modal .cmp-column");
-    if (columns.length >= 2) bindColumnScrollSync(columns);
   },
   /* F4: 简历诊断结果 → 用这份简历去对齐。跳到最近一个岗位的工作台并带上
    * ?resume= 深链参数（split-canvas 会预选该主简历）；岗位库为空时跳到
