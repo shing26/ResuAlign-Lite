@@ -56,6 +56,11 @@ def _resume_from_user(user: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _original_bullet_from_user(user: str) -> str:
+    match = re.search(r"Original bullet:\n(.*?)\n", user, re.S)
+    return match.group(1).strip() if match else "Original bullet"
+
+
 def fake_llm_response(system: str, user: str) -> dict | None:
     """Return a deterministic OpenAI-compatible response per prompt.
 
@@ -120,6 +125,13 @@ def fake_llm_response(system: str, user: str) -> dict | None:
             ],
             "misaligned_emphasis": [],
             "strength_matches": ["Python"],
+        }
+    if "rewrite exactly one resume bullet" in system:
+        STAGE_HITS["precise resume editor"] += 1
+        original = _original_bullet_from_user(user)
+        return {
+            "proposed": f"{original} (high concurrency)",
+            "reason": "Matches JD high-concurrency scenario",
         }
     if "precise resume editor" in system:
         STAGE_HITS["precise resume editor"] += 1

@@ -49,14 +49,15 @@ JD_TEXT = (
     "岗位要求：5 年以上后端经验；能支撑 millions of requests per day。"
 ).format(tag=UNIQUE_TAG)
 
-# fake_llm.py's tailor branch rewrites the first resume line to
-# "<line> (high concurrency)"; every assertion below keys on that line.
+# fake_llm.py's bullet-level editor rewrites the first targeted bullet to
+# "<bullet> (high concurrency)"; every assertion below keys on that bullet.
 RESUME_TITLE_LINE = "E2E 工作台主简历"
+TARGET_BULLET = "使用 Python 开发后端服务"
 RESUME_CONTENT = (
     RESUME_TITLE_LINE
     + "\n\n工作经历\n- 使用 Python 开发后端服务\n- 使用 Redis 做缓存与会话管理\n"
 )
-ACCEPTED_TEXT = f"{RESUME_TITLE_LINE} (high concurrency)"
+ACCEPTED_TEXT = f"{TARGET_BULLET} (high concurrency)"
 
 WORKSPACE_SELECTOR = "[data-surface-mode='optimizer']"
 SPLIT_FORM = "[data-form='split-align']"
@@ -242,8 +243,8 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
             "diff card should render a provenance quote",
         )
         expect(
-            RESUME_TITLE_LINE in quote.inner_text(),
-            f"provenance quote should cite the source line, "
+            TARGET_BULLET in quote.inner_text(),
+            f"provenance quote should cite the source bullet, "
             f"got {quote.inner_text()!r}",
         )
 

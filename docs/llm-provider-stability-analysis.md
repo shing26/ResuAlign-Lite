@@ -85,11 +85,15 @@ ResuAlign 已经具备角色化 LLM 拆分（ADR-0030）、分级超时、角色
 
 ### Phase 2 — Bullet 级并发改写（Map-Reduce Editor）
 
-- 把 `tailor_resume` 的默认路径改为：切分经历原子点 → 按缺口并发 `rewrite_bullet`
-  → 汇总 `diffs` + 重组 `sections`。并发上限与本地 Ollama 串行化沿用
-  `is_parallel_safe`；失败单条记入该条以支持 Phase 4 的"重试此条"。
-- `coarse` 粒度保留整篇路径。验收：NVIDIA/Llama 8B、Ollama、DeepSeek 三档在
-  fixture 下输出稳定，pytest / 前端 / E2E 全绿。
+- **状态：本轮已落地**。`tailor.py::tailor_resume_map_reduce` 把简历切分为
+  原子经历点 → 按缺口挑选目标 → 并发 `rewrite_bullet` → 确定性重组
+  `sections` + `diffs`。并发上限 `min(4, n)`，本地 Ollama 经
+  `is_parallel_safe("editor")` 关闭并发串行执行。
+- 失败单条降级进 `invalid_diffs`（Phase 4 "重试此条" 的钩子），不会拖垮其余
+  建议；全部目标失败则回退整篇 `tailor_resume`，保留角色级 Fallback。
+- 引擎角色路径对 `fine`/`medium` 默认走 map-reduce，`coarse` 保留整篇；
+  可用 `RESUALIGN_BULLET_EDITOR=0` 关闭。
+- 验收：pytest（1013 passed）、前端 node（460）、7 条 E2E 全绿。
 
 ### Phase 3 — 流式生成 + 零 Token 熔断
 
@@ -117,4 +121,3 @@ ResuAlign 已经具备角色化 LLM 拆分（ADR-0030）、分级超时、角色
 2. editor 单次输出包显著减小，整条对齐链路对慢节点有独立兜底路径。
 3. 后端 pytest、前端 node 测试、7 条 E2E 全程绿。
 4. 未配置 Key 时产品仍可用（零配置本地兜底）。
-
