@@ -23,9 +23,28 @@
 | --- | --- | --- |
 | 1 | 输出清洗器加固（`_parse_json_object` 重写 + 单测） | 本轮落地 |
 | 2 | Bullet 级并发改写（Map-Reduce Editor），失败单条可独立重试 | 本轮落地 |
-| 3 | 流式生成 + 15s 零 Token 熔断 + 备用节点回退 | 后续 |
-| 4 | 局部单条重试（diff 气泡内 `↻ 重试此条`） | 后续 |
-| 5 | 零配置本地兜底（未配 Key 时走确定性规则） | 后续 |
+| 3 | 流式生成 + 15s 零 Token 熔断 + 备用节点回退 | 本轮落地 |
+| 4 | 局部单条重试（diff 气泡内 `↻ 重试此条`） | 本轮落地 |
+| 5 | 零配置本地兜底（未配 Key 时走确定性规则） | 本轮落地 |
+
+## 本轮补齐（Phase 3/4/5）
+
+- **Phase 3**：`llm.py` 新增 `StreamConnectionError` 与
+  `OpenAIClient.stream_chat_json(...)`（`stream=True` 消费 SSE，增量聚合 JSON，
+  复用 `_parse_json_object` 与 `_observe_llm_call`）；`role_router.py` 新增
+  `call_with_role_streaming(...)`，角色节点 `StreamConnectionError`/
+  `LLMResponseError` 时自动切默认节点重试一次。测试：
+  `tests/test_llm_streaming.py`（3 条）。
+- **Phase 4**：`POST /api/jobs/{job_id}/workbench/rewrite` 复用为单条重试入口；
+  修复"重试成功的 invalid diff 仍残留在 `invalid_diffs` 造成重复卡片"的缺陷，
+  成功后从 `invalid_diffs` 移除并晋升到 `diffs`；前端 diff 卡片在失败态渲染
+  `↻ 重试此条`（复用 `polish-bullet` → rewrite 端点）。测试：
+  `tests/test_jd_preanalyze_rewrite.py`、前端 `split-canvas.test.mjs`。
+- **Phase 5**：新增 `local_fallback.py`（`local_diagnose` / `local_gap_report` /
+  `local_ats_score`，纯规则零网络）；API job worker 在 `build_config()` 未配置
+  LLM 且无活动节点时改用本地规则产出 `Report(fallback="local")`；同时放开
+  analyze / diagnose 路由的 503 硬门禁，让"开箱即用、绝不白屏"可达。测试：
+  `tests/test_local_fallback.py`（含 worker Report 断言）。
 
 ## 明确不做 / 保留的约束
 
@@ -42,3 +61,6 @@
 - 每次换 Provider 的第一道保险是"连通性测试"（已具备），第二道是 sanitizer
   （本轮），第三道是局部重试与兜底（后续）。
 - 前端感知从"20-40s 转圈"逐步降为"秒级首字符 + 失败条目局部重试"。
+
+（Phase 3 的流式原语已完成并可用，editor 管线全链路 SSE 化保留为后续可选增强；
+workbench / batch 对齐仍要求配置 LLM，因为这些环节需要真实润色能力。）

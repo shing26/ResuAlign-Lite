@@ -20,7 +20,11 @@ import logging
 import os
 from typing import Any
 
-from .llm import LLMClient, LLMResponseError, OpenAIClient
+from .llm import (
+    LLMResponseError,
+    OpenAIClient,
+    StreamConnectionError,
+)
 from .llm_nodes import LLMNodeStore
 
 logger = logging.getLogger(__name__)
@@ -173,6 +177,83 @@ def call_with_role(
     client = OpenAIClient(fallback_config, timeout=_role_timeout(role))
     try:
         result = fn(client, **fn_kwargs)
+        return result, meta
+    except Exception as exc:
+        meta["error"] = str(exc)[:200]
+        raise
+    finally:
+        client.close()
+
+
+def call_with_role_streaming(
+    role: str,
+    stream_or_fallback_fn: Any,
+    node_store: LLMNodeStore,
+    tenant_id: str,
+    *,
+    fn_kwargs: dict[str, Any] | None = None,
+    idle_timeout: float = 15.0,
+) -> tuple[Any, dict[str, Any]]:
+    """Call a streaming function with role-appropriate LLM client + fallback.
+
+    Resolves the role node, builds an ``OpenAIClient``, and calls
+    ``stream_or_fallback_fn`` (which should accept ``client`` as its first
+    argument plus any ``fn_kwargs``). On ``StreamConnectionError`` or
+    ``LLMResponseError`` it falls back to the default node once.
+
+    Returns ``(result, meta)`` where ``meta`` mirrors ``call_with_role``:
+    ``role``, ``node_name``, ``model``, ``fallback_used``,
+    ``fallback_node_name``, and ``error``.
+    """
+    fn_kwargs = dict(fn_kwargs or {})
+    fn_kwargs.setdefault("idle_timeout", idle_timeout)
+    meta: dict[str, Any] = {
+        "role": role,
+        "node_name": "",
+        "model": "",
+        "fallback_used": False,
+        "fallback_node_name": None,
+        "error": None,
+    }
+
+    # ---- Primary attempt with role node ----
+    resolved = resolve_config_for_role(node_store, tenant_id, role)
+    if resolved is not None:
+        from .models import ResuAlignConfig
+        primary_config = ResuAlignConfig(**resolved)
+        meta["node_name"] = resolved.get("model", "")
+        meta["model"] = resolved.get("model", "")
+        client = OpenAIClient(primary_config, timeout=_role_timeout(role))
+        try:
+            result = stream_or_fallback_fn(client, **fn_kwargs)
+            return result, meta
+        except (StreamConnectionError, LLMResponseError) as exc:
+            logger.warning(
+                "Role %s primary stream failed: %s; falling back to default",
+                role, exc,
+            )
+            meta["error"] = str(exc)[:200]
+            meta["fallback_used"] = True
+        finally:
+            client.close()
+
+    # ---- Fallback to default node ----
+    fallback_node = node_store.get_active_node(tenant_id)
+    if fallback_node is None:
+        meta["error"] = "No default node available for fallback"
+        raise LLMResponseError(meta["error"])
+    from .models import ResuAlignConfig
+    fallback_config = ResuAlignConfig(
+        provider=fallback_node.get("provider", ""),
+        model=fallback_node.get("model", ""),
+        api_key=fallback_node.get("api_key", ""),
+        base_url=fallback_node.get("base_url", ""),
+    )
+    meta["fallback_node_name"] = fallback_node.get("name", "")
+
+    client = OpenAIClient(fallback_config, timeout=_role_timeout(role))
+    try:
+        result = stream_or_fallback_fn(client, **fn_kwargs)
         return result, meta
     except Exception as exc:
         meta["error"] = str(exc)[:200]

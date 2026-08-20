@@ -94,8 +94,6 @@ def diagnose_master_resume(resume_id: str, request: Request, user: dict[str, Any
         raise HTTPException(status_code=404, detail='Master resume not found')
     if not (resume.get('content') or '').strip():
         raise HTTPException(status_code=422, detail='Resume content is empty; edit it before diagnosing')
-    if not api_module.build_config().is_llm_configured:
-        raise HTTPException(status_code=503, detail='LLM 未配置。请设置 API Key（远程供应商）或激活 Ollama 本地节点。')
     payload = {'resume_text': resume['content'], 'jd_text': None, 'run_eval': False, 'diagnosis': True, 'master_resume_id': resume_id}
     job_id = api_module._queue_job(user, payload)
     api_module._resumes.set_latest_diagnosis_job(user['user_id'], resume_id, job_id)

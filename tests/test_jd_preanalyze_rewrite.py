@@ -392,5 +392,59 @@ def test_rewrite_bullet_missing_diff_404():
     assert response.status_code == 404
 
 
+def test_rewrite_invalid_bullet_promotes_and_dedups():
+    # Phase 4: retrying a failed bullet must move it out of invalid_diffs so
+    # the workbench does not show a duplicate card.
+    job = _create_job()
+    job_id = job["job_id"]
+    api_module._jobs.update_job(
+        _auth_user_id(),
+        job_id,
+        diffs=[],
+        invalid_diffs=[
+            {
+                "diff_id": "diff-fail",
+                "type": "modify",
+                "original": "Built services with Python.",
+                "proposed": "",
+                "reason": "生成失败，可单条重试: timeout",
+                "provenance_state": "missing",
+            }
+        ],
+    )
+    rewritten = DiffItem(
+        diff_id="diff-fail",
+        type="modify",
+        original="Built services with Python.",
+        proposed="Built high-concurrency services with Python and Redis.",
+        reason="JD scenario match",
+        confidence="high",
+        provenance="Built services with Python.",
+        provenance_quote="Built services with Python.",
+        source_span=(0, 26),
+        provenance_state="verified",
+    )
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api.rewrite_bullet", return_value=rewritten
+    ):
+        response = client.post(
+            f"/api/jobs/{job_id}/workbench/rewrite",
+            json={"diff_id": "diff-fail", "instruction": "high_concurrency"},
+            headers=_auth_headers(),
+        )
+    assert response.status_code == 200
+
+    persisted = client.get(
+        f"/api/jobs/{job_id}", headers=_auth_headers()
+    ).json()
+    assert any(
+        diff["diff_id"] == "diff-fail" for diff in persisted["diffs"]
+    )
+    assert not any(
+        diff["diff_id"] == "diff-fail"
+        for diff in (persisted.get("invalid_diffs") or [])
+    )
+
+
 def _auth_user_id() -> str:
     return client.get("/api/auth/me", headers=_auth_headers()).json()["user_id"]

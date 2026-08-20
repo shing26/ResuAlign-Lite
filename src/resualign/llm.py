@@ -178,6 +178,11 @@ def _parse_json_object(content: str) -> dict[str, Any]:
 class LLMResponseError(Exception):
     """Raised when the LLM fails to return a parseable response."""
     pass
+
+
+class StreamConnectionError(Exception):
+    """Raised when an SSE stream stalls without producing a new token."""
+    pass
 class LLMClient(ABC):
     """Abstract LLM client for dependency injection in engine.py."""
     max_retries: ClassVar[int] = STRUCTURED_MAX_EXTRA_RETRIES
@@ -341,6 +346,83 @@ class OpenAIClient(LLMClient):
                 model=model or self.model,
                 duration_ms=(time.monotonic() - _t0) * 1000,
                 attempts=attempts,
+                status=status,
+            )
+
+    def stream_chat_json(
+        self,
+        system: str,
+        user: str,
+        model: Optional[str] = None,
+        idle_timeout: float = 15.0,
+        max_tokens: int = 16384,
+    ) -> dict:
+        """Stream a chat completion over SSE and return the parsed JSON.
+
+        Accumulates ``choices[*].delta.content`` deltas into a single JSON
+        string and returns the parsed dict. Raises ``StreamConnectionError``
+        when no new token arrives within ``idle_timeout`` seconds.
+        """
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        body = {
+            "model": model or self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": self.DEFAULT_TEMPERATURE,
+            "max_tokens": max_tokens,
+            "stream": True,
+            **self._provider_extras(),
+        }
+        _t0 = time.monotonic()
+        status = "failed"
+        try:
+            with self._client.stream(
+                "POST",
+                f"{self.base_url.rstrip('/')}/chat/completions",
+                headers=headers,
+                json=body,
+            ) as r:
+                r.raise_for_status()
+                deltas: list[str] = []
+                last_token_at = time.monotonic()
+                for line in r.iter_lines():
+                    line = (line or "").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[len("data:"):].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    try:
+                        delta = chunk["choices"][0]["delta"]
+                    except (KeyError, IndexError, TypeError):
+                        continue
+                    content = delta.get("content")
+                    if content:
+                        deltas.append(content)
+                        last_token_at = time.monotonic()
+                    if time.monotonic() - last_token_at >= idle_timeout:
+                        raise StreamConnectionError(
+                            f"No new token received for {idle_timeout}s "
+                            "during SSE stream"
+                        )
+                result = _parse_json_object("".join(deltas))
+                status = "ok"
+                return result
+        finally:
+            _observe_llm_call(
+                stage="stream_chat_json",
+                provider=self.provider,
+                model=model or self.model,
+                duration_ms=(time.monotonic() - _t0) * 1000,
+                attempts=1,
                 status=status,
             )
     def chat_structured(

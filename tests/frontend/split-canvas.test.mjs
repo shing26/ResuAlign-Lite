@@ -282,6 +282,26 @@ test("diffCard flags modify diffs with missing provenance as invalid gate", () =
   assert.match(html, /data-diff-proposed/);
 });
 
+test("diffCard offers per-item retry on invalid cards", () => {
+  const invalid = diffCard(
+    {
+      type: "modify",
+      original: "Gap line",
+      proposed: "",
+      reason: "生成失败，可单条重试: timeout",
+      provenance_state: "missing",
+    },
+    4,
+    "job-1",
+  );
+  assert.match(invalid, /diff-card--invalid/);
+  assert.match(invalid, /data-action="polish-bullet"/);
+  assert.match(invalid, /↻ 重试此条/);
+  assert.doesNotMatch(invalid, /data-action="accept-bullet"/);
+
+  assert.match(diffCard(SAMPLE_DIFF, 0, "job-1"), /AI 润色/);
+});
+
 test("diffList renders cards or the empty state", () => {
   const html = diffList({ alignment: { diffs: [SAMPLE_DIFF] } }, "job-1");
   assert.match(html, /data-diff-list/);

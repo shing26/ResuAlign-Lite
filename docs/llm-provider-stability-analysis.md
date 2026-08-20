@@ -1,6 +1,6 @@
 # LLM Provider 稳定性：成因剖析与落地方案
 
-_日期: 2026-08-20 · 状态: 已审阅待实施 · 相关: ADR-0030, ADR-0032_
+_日期: 2026-08-20 · 状态: 已审阅并已实施 · 相关: ADR-0030, ADR-0032_
 
 ## 一、结论先行
 
@@ -101,18 +101,28 @@ ResuAlign 已经具备角色化 LLM 拆分（ADR-0030）、分级超时、角色
   推送前端批注气泡；15s 内零 Token 触发节点 Fallback（复用
   `call_with_role` 的默认节点回退）。
 - 验收：前端 500ms 内看到首字符，断连时换备用节点，不再无限等待。
+- **本轮落地**：`llm.py::OpenAIClient.stream_chat_json(...)`（SSE 增量聚合 +
+  `idle_timeout=15.0` 零 Token 熔断）+ `role_router.py::call_with_role_streaming`
+  （角色节点失败自动切默认节点）。测试 `tests/test_llm_streaming.py` 全绿；
+  editor 全链路 SSE 化保留为后续可选增强。
 
 ### Phase 4 — 局部单条重试（Granular Retry）
 
 - 在 diff 建议气泡内为失败条目增加 `⚠️ 生成超时 [↻ 重试此条]`，仅重试该
   `rewrite_bullet`，其余建议与正文不受影响。
 - 验收：前端 node 测试 + E2E 覆盖重试后仅替换该条。
+- **本轮落地**：复用 `POST /api/jobs/{job_id}/workbench/rewrite` 为单条重试；
+  修复重试成功后 invalid diff 残留重复卡片缺陷；失败 diff 渲染 `↻ 重试此条`。
+  测试 `tests/test_jd_preanalyze_rewrite.py` 与前端 `split-canvas.test.mjs` 全绿。
 
 ### Phase 5 — 零配置本地兜底
 
 - 未配置任何云端 Key / 本地节点时，pipeline 自动切入确定性规则引擎 + 内置正则
   （基础打分、缺口清单、关键词归属），保证开箱即用不白屏。
 - 验收：无 API Key 状态下工作台仍返回可用结果并在 UI 标注 `fallback=local`。
+- **本轮落地**：新增 `local_fallback.py`；API job worker 在无 LLM 且无活动节点
+  时产出 `Report(fallback="local")`；analyze / diagnose 路由放开 503 硬门禁。
+  测试 `tests/test_local_fallback.py` 全绿。
 
 ## 五、验收总标准
 
