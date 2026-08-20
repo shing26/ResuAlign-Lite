@@ -55,7 +55,7 @@ def _as_text(value) -> str:
 
 
 def _skill_pattern(skill: str) -> re.Pattern:
-    esc = re.escape(skill)
+    esc = re.escape(skill.lower())
     return re.compile(rf"(?<![a-z0-9]){esc}(?![a-z0-9])")
 
 
@@ -72,9 +72,9 @@ def _has_quantified_metrics(text: str) -> bool:
     return bool(QUANTIFIED_RE.search(text))
 
 
-def _contains_ci(haystack: str, needle: str) -> bool:
-    stripped = _as_text(needle).strip().lower()
-    return bool(stripped) and stripped in _as_text(haystack).lower()
+def _matches_skill(text: str, skill: str) -> bool:
+    """Word-boundary, case-insensitive match shared by all rule paths."""
+    return bool(_skill_pattern(skill).search(_as_text(text).lower()))
 
 
 def local_diagnose(resume_text) -> dict:
@@ -142,7 +142,7 @@ def local_ats_score(resume_text, jd_profile) -> dict:
     if total == 0:
         return {"score": 1.0, "details": ["No required skills specified."]}
 
-    matched = [skill for skill in required if _contains_ci(resume, skill)]
+    matched = [skill for skill in required if _matches_skill(resume, skill)]
     score = len(matched) / total
     details = [
         f"Matched: {skill}" if skill in matched else f"Missing: {skill}"

@@ -83,6 +83,34 @@ def test_stream_chat_json_raises_on_idle_timeout():
         client.stream_chat_json("system", "user", idle_timeout=idle_timeout)
 
 
+def test_stream_transport_error_becomes_stream_connection_error():
+    """Provider transport failures degrade to StreamConnectionError."""
+
+    def handler(request):
+        raise httpx.ConnectTimeout("provider unreachable", request=request)
+
+    client = _stream_client(httpx.MockTransport(handler))
+    with pytest.raises(StreamConnectionError, match="transport"):
+        client.stream_chat_json("system", "user")
+
+
+def test_no_token_heartbeats_trigger_breaker():
+    """Heartbeat deltas without tokens still trip the idle breaker."""
+    idle_timeout = 0.05
+
+    def chunks():
+        yield _delta_line(None)
+        time.sleep(0.2)
+        yield _delta_line(None)
+
+    def handler(request):
+        return httpx.Response(200, stream=_ChunkStream(chunks()))
+
+    client = _stream_client(httpx.MockTransport(handler))
+    with pytest.raises(StreamConnectionError):
+        client.stream_chat_json("system", "user", idle_timeout=idle_timeout)
+
+
 def test_call_with_role_streaming_falls_back_to_default(tmp_path):
     """A StreamConnectionError on the primary node falls back to default."""
     store = LLMNodeStore(db_path=str(tmp_path / "nodes.db"))

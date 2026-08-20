@@ -360,8 +360,60 @@ class OpenAIClient(LLMClient):
         """Stream a chat completion over SSE and return the parsed JSON.
 
         Accumulates ``choices[*].delta.content`` deltas into a single JSON
-        string and returns the parsed dict. Raises ``StreamConnectionError``
-        when no new token arrives within ``idle_timeout`` seconds.
+        string (via ``_stream_deltas``, which yields each token) and returns
+        the parsed dict. Raises ``StreamConnectionError`` when no new token
+        arrives within ``idle_timeout`` seconds or when the transport stalls /
+        disconnects (read/connect timeout, TCP drop).
+        """
+        _t0 = time.monotonic()
+        status = "failed"
+        try:
+            deltas = list(
+                self._stream_deltas(
+                    system,
+                    user,
+                    model=model,
+                    idle_timeout=idle_timeout,
+                    max_tokens=max_tokens,
+                )
+            )
+            result = _parse_json_object("".join(deltas))
+            status = "ok"
+            return result
+        except StreamConnectionError:
+            raise
+        except httpx.HTTPError as exc:
+            # Provider transport failures (read/connect timeout, silent TCP
+            # drop) degrade into the breaker error so role-level fallback can
+            # retry on the default node instead of surfacing a raw httpx error.
+            raise StreamConnectionError(
+                f"Stream transport failure: {exc.__class__.__name__}: {exc}"
+            ) from exc
+        finally:
+            _observe_llm_call(
+                stage="stream_chat_json",
+                provider=self.provider,
+                model=model or self.model,
+                duration_ms=(time.monotonic() - _t0) * 1000,
+                attempts=1,
+                status=status,
+            )
+
+    def _stream_deltas(
+        self,
+        system: str,
+        user: str,
+        model: Optional[str] = None,
+        idle_timeout: float = 15.0,
+        max_tokens: int = 16384,
+    ):
+        """Yield each streamed content delta, enforcing the idle breaker.
+
+        Applies an ``httpx.Timeout`` scoped to the stream so a fully silent
+        provider (no bytes at all) raises a transport timeout after
+        ``idle_timeout`` instead of blocking forever, and converts that into
+        ``StreamConnectionError``. Individual SSE ``data:`` deltas are yielded
+        as they arrive.
         """
         headers = {}
         if self.api_key:
@@ -377,54 +429,59 @@ class OpenAIClient(LLMClient):
             "stream": True,
             **self._provider_extras(),
         }
-        _t0 = time.monotonic()
-        status = "failed"
-        try:
-            with self._client.stream(
-                "POST",
-                f"{self.base_url.rstrip('/')}/chat/completions",
-                headers=headers,
-                json=body,
-            ) as r:
-                r.raise_for_status()
-                deltas: list[str] = []
-                last_token_at = time.monotonic()
-                for line in r.iter_lines():
-                    line = (line or "").strip()
-                    if not line.startswith("data:"):
-                        continue
-                    data = line[len("data:"):].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    try:
-                        delta = chunk["choices"][0]["delta"]
-                    except (KeyError, IndexError, TypeError):
-                        continue
-                    content = delta.get("content")
-                    if content:
-                        deltas.append(content)
-                        last_token_at = time.monotonic()
+        timeout = httpx.Timeout(
+            idle_timeout,
+            connect=idle_timeout,
+            write=idle_timeout,
+            pool=idle_timeout,
+        )
+        with self._client.stream(
+            "POST",
+            f"{self.base_url.rstrip('/')}/chat/completions",
+            headers=headers,
+            json=body,
+            timeout=timeout,
+        ) as r:
+            r.raise_for_status()
+            last_token_at = time.monotonic()
+            for line in r.iter_lines():
+                line = (line or "").strip()
+                if not line.startswith("data:"):
                     if time.monotonic() - last_token_at >= idle_timeout:
                         raise StreamConnectionError(
                             f"No new token received for {idle_timeout}s "
                             "during SSE stream"
                         )
-                result = _parse_json_object("".join(deltas))
-                status = "ok"
-                return result
-        finally:
-            _observe_llm_call(
-                stage="stream_chat_json",
-                provider=self.provider,
-                model=model or self.model,
-                duration_ms=(time.monotonic() - _t0) * 1000,
-                attempts=1,
-                status=status,
-            )
+                    continue
+                data = line[len("data:"):].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                try:
+                    delta = chunk["choices"][0]["delta"]
+                except (KeyError, IndexError, TypeError):
+                    if time.monotonic() - last_token_at >= idle_timeout:
+                        raise StreamConnectionError(
+                            f"No new token received for {idle_timeout}s "
+                            "during SSE stream"
+                        ) from None
+                    continue
+                content = delta.get("content")
+                if content:
+                    last_token_at = time.monotonic()
+                    yield content
+                    continue
+                if time.monotonic() - last_token_at >= idle_timeout:
+                    # Content-less SSE deltas (heartbeats / keep-alive frames
+                    # without a token) must not reset the breaker; if the
+                    # provider stalls without emitting a token, fall through.
+                    raise StreamConnectionError(
+                        f"No new token received for {idle_timeout}s "
+                        "during SSE stream"
+                    ) from None
     def chat_structured(
         self,
         system: str,
