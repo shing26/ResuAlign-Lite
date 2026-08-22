@@ -494,7 +494,8 @@ def test_job_list_filter_get_patch_delete():
         json={"status": "已投递", "seniority": "高级", "salary_min": 30000},
     )
     assert r.status_code == 200
-    assert r.json()["status"] == "已投递"
+    assert r.json()["status"] == "applied"  # Bug-12 canonical
+    assert r.json()["status_label"] == "已投递"
     assert r.json()["salary_min"] == 30000
     assert r.json()["classification_pending"] == 0
 

@@ -23,6 +23,8 @@ _STAGE_LABELS = {
     "jd_analysis": "JD 画像与差距分析",
     "tailoring": "简历定制",
     "evaluation": "效果评估",
+    "overview": "整体分析",
+    "polishing": "模块化润色",
     "extract": "JD 内容提取",
 }
 
@@ -48,11 +50,12 @@ def _job_failure_detail(stage: str, exc: BaseException) -> str:
         elif (
             "expecting value" in lowered
             or "no json object found" in lowered
-            or "schema validation" in lowered
             or "empty response" in lowered
             or "empty content" in lowered
         ):
             reason = "模型返回了空内容或无法解析的 JSON，请重新运行；若仍失败可尝试更换模型"
+        elif "schema validation" in lowered or "failed validation" in lowered:
+            reason = "模型返回的定制内容结构不符合预期，已自动修复重试后仍失败；请重新运行，若持续失败可尝试更换模型"
         else:
             reason = "模型服务暂时不可用或返回异常，请检查 API Key 与网络连接后重试"
     else:
@@ -438,6 +441,12 @@ def _run_job(job_id: str) -> None:
             if payload.get('jd_url') and (not jd_text):
                 jd_text = api_module.crawl_jd(payload['jd_url'])
             t0 = time.monotonic()
+            if payload.get('optimize_resume'):
+                result = api_module._run_resume_optimize(
+                    payload, on_stage, tenant_id
+                )
+                api_module._registry.succeed(job_id, result)
+                return
             report = api_module.run(
                 config,
                 payload['resume_text'],
@@ -627,6 +636,10 @@ def _run_job(job_id: str) -> None:
             logger.exception('Analysis job %s failed', job_id)
             if payload.get('diagnosis'):
                 error = '诊断任务暂时失败：模型服务不可用或返回异常，请检查 API Key 与网络连接后重试'
+            elif payload.get('optimize_resume'):
+                error = api_module._job_failure_detail(
+                    failed_stage, exc
+                ).replace('对齐分析', '简历优化')
             else:
                 error = api_module._job_failure_detail(
                     failed_stage, exc
@@ -665,6 +678,112 @@ def _accepted_diffs(job: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _export_plain_text(draft: str) -> str:
+    """Render a Markdown draft as plain text without Markdown markers.
+
+    Bug-03: the JSON export keeps ``content`` as a readable, structure-
+    free rendering (heading markers #/##, bullet markers -/* and blank
+    lines removed) so downstream consumers never receive raw Markdown.
+    """
+    lines_out: list[str] = []
+    for line in (draft or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("## "):
+            lines_out.append(stripped[3:].strip())
+        elif stripped.startswith("#"):
+            lines_out.append(stripped.lstrip("#").strip())
+        elif stripped.startswith(("- ", "* ")):
+            lines_out.append(stripped[2:].strip())
+        else:
+            lines_out.append(stripped)
+    return "\n".join(lines_out)
+
+
+def _iter_sections(draft: str):
+    """Yield ``(heading, body_lines)`` for each ``## `` section.
+
+    The aligned draft is authored with ``## `` level-2 headings
+    (联系方式/工作经历/项目经历/专业技能...).  The H1 title belongs to
+    job_title/meta and is not repeated as a section; the preamble before
+    the first heading is skipped.
+    """
+    heading: str | None = None
+    body: list[str] = []
+    for line in (draft or "").splitlines():
+        if line.startswith("## "):
+            if heading is not None:
+                yield heading, body
+            heading = line[3:].strip()
+            body = []
+        elif heading is not None:
+            body.append(line)
+    if heading is not None:
+        yield heading, body
+
+
+def _export_sections(draft: str) -> list[dict[str, Any]]:
+    """Split a Markdown final draft into its ordered ``## `` sections."""
+    sections: list[dict[str, Any]] = []
+    for heading, body in _iter_sections(draft):
+        content = "\n".join(line for line in body if line.strip()).strip()
+        sections.append({"heading": heading, "content": content})
+    return sections
+
+
+_SKILL_SECTION_HEADING_RE = re.compile(
+    r"^(专业技能|技能清单|技能|skills?)$", re.IGNORECASE
+)
+
+
+def _draft_declared_skills(draft: str) -> list[str]:
+    """Extract the bullet skills from the final draft's skills section."""
+    skills: list[str] = []
+    for heading, body in _iter_sections(draft):
+        if not _SKILL_SECTION_HEADING_RE.match(heading):
+            continue
+        for line in body:
+            stripped = line.strip()
+            if not stripped.startswith("- "):
+                continue
+            item = stripped[2:].strip()
+            if not item:
+                continue
+            if "：" in item or ":" in item:
+                separator = "：" if "：" in item else ":"
+                values = item.partition(separator)[2]
+                parts = [
+                    part.strip()
+                    for part in re.split(r"[、，,;；]", values)
+                    if part.strip()
+                ]
+                skills.extend(parts or [item])
+            else:
+                skills.append(item)
+        break
+    seen: set[str] = set()
+    unique: list[str] = []
+    for skill in skills:
+        if skill not in seen:
+            seen.add(skill)
+            unique.append(skill)
+    return unique
+
+
+def _export_skills(job: dict[str, Any], draft: str) -> list[str]:
+    """Skill list for the JSON export.
+
+    Declared skills come from the final draft's skills section; when the
+    draft has none, fall back to the JD must-have list so downstream
+    consumers still get a usable skill set.
+    """
+    declared = _draft_declared_skills(draft)
+    if declared:
+        return declared
+    jd_profile = job.get("jd_profile") or {}
+    return list(jd_profile.get("must_have_skills") or [])
+
 def build_job_export(
     job: dict[str, Any],
     fmt: str,
@@ -697,7 +816,9 @@ def build_job_export(
     if fmt == "json":
         return {
             **base,
-            "content": draft,
+            "sections": _export_sections(draft),
+            "skills": _export_skills(job, draft),
+            "content": _export_plain_text(draft),
             "filename": _export_filename(job, "json"),
         }
     if fmt == "pdf":

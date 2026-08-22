@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS library_jobs (
     job_function TEXT,
     seniority TEXT,
     tech_tags TEXT NOT NULL DEFAULT '[]',
-    status TEXT NOT NULL DEFAULT '未投递',
+    status TEXT NOT NULL DEFAULT 'draft',
     classification_pending INTEGER NOT NULL DEFAULT 0,
     final_draft TEXT,
     final_draft_updated_at REAL,
@@ -257,6 +257,15 @@ def _due_date_key(value: str | None) -> str | None:
     return parsed.date().isoformat() if parsed is not None else None
 
 
+def _reminder_status_filter() -> tuple[tuple[str, ...], str]:
+    """Return (statuses, placeholders) for the applied/interview scope."""
+    statuses = _status_filter_values("applied") + _status_filter_values(
+        "interview"
+    )
+    placeholders = ", ".join("?" for _ in statuses)
+    return statuses, placeholders
+
+
 class JobLibraryStore(_SqliteStore):
     """SQLite-backed, tenant-scoped storage for job postings."""
 
@@ -410,7 +419,7 @@ class JobLibraryStore(_SqliteStore):
         job_function: str | None = None,
         seniority: str | None = None,
         tech_tags: list[str] | None = None,
-        status: str = "未投递",
+        status: str = "draft",
         classification_pending: int = 0,
         final_draft: str | None = None,
         final_draft_updated_at: float | None = None,
@@ -448,7 +457,7 @@ class JobLibraryStore(_SqliteStore):
             raise UserStoreError(f"Invalid job_function: {job_function}")
         if seniority is not None and seniority not in seniorities:
             raise UserStoreError(f"Invalid seniority: {seniority}")
-        status = _validate_status(status)
+        status = canonical_status(_validate_status(status))
         if classification_pending not in (0, 1):
             raise UserStoreError(
                 "classification_pending must be 0 or 1"
@@ -895,13 +904,13 @@ class JobLibraryStore(_SqliteStore):
             raise UserStoreError(f"Invalid reminder scope: {scope}")
         now_ts = now if now is not None else time.time()
         today = date.fromtimestamp(now_ts).isoformat()
-        statuses = ("已投递", "面试中")
+        statuses, placeholders = _reminder_status_filter()
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT * FROM library_jobs "
-                    "WHERE tenant_id = ? AND status IN (?, ?) "
+                    f"WHERE tenant_id = ? AND status IN ({placeholders}) "
                     "AND next_step_due_at IS NOT NULL "
                     "ORDER BY next_step_due_at ASC",
                     (tenant_id, *statuses),
@@ -943,14 +952,14 @@ class JobLibraryStore(_SqliteStore):
         idempotent: only one caller can claim a row.
         """
         now_ts = now if now is not None else time.time()
-        statuses = ("已投递", "面试中")
+        statuses, placeholders = _reminder_status_filter()
         claimed: list[dict[str, Any]] = []
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT * FROM library_jobs "
-                    "WHERE status IN (?, ?) "
+                    f"WHERE status IN ({placeholders}) "
                     "AND next_step_due_at IS NOT NULL "
                     "AND reminder_sent_at IS NULL",
                     statuses,
@@ -995,13 +1004,13 @@ class JobLibraryStore(_SqliteStore):
         successful send is the only thing that persists ``reminder_sent_at``.
         """
         now_ts = now if now is not None else time.time()
-        statuses = ("已投递", "面试中")
+        statuses, placeholders = _reminder_status_filter()
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT * FROM library_jobs "
-                    "WHERE status IN (?, ?) "
+                    f"WHERE status IN ({placeholders}) "
                     "AND next_step_due_at IS NOT NULL "
                     "AND reminder_sent_at IS NULL",
                     statuses,
@@ -1047,20 +1056,20 @@ class JobLibraryStore(_SqliteStore):
         The row stays un-sent until ``mark_reminder_sent`` succeeds.
         """
         now_ts = now if now is not None else time.time()
-        statuses = ("已投递", "面试中")
+        statuses, placeholders = _reminder_status_filter()
         claimed: list[dict[str, Any]] = []
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT * FROM library_jobs "
-                    "WHERE status IN (?, ?) "
+                    f"WHERE status IN ({placeholders}) "
                     "AND next_step_due_at IS NOT NULL "
                     "AND reminder_sent_at IS NULL "
                     "AND reminder_attempts < ? "
                     "AND (reminder_next_retry_at IS NULL "
                     "OR reminder_next_retry_at <= ?)",
-                    (statuses[0], statuses[1], max_attempts, now_ts),
+                    (*statuses, max_attempts, now_ts),
                 ).fetchall()
                 for row in rows:
                     due_ts = _due_timestamp(row["next_step_due_at"])
@@ -1318,7 +1327,7 @@ class JobLibraryStore(_SqliteStore):
         if seniority is not None and seniority not in seniorities:
             raise UserStoreError(f"Invalid seniority: {seniority}")
         if status is not None:
-            status = _validate_status(status)
+            status = canonical_status(_validate_status(status))
         if (
             classification_pending is not None
             and classification_pending not in (0, 1)
@@ -1401,14 +1410,13 @@ class JobLibraryStore(_SqliteStore):
                         interview_stage = value
 
         if append_only_snapshot:
-            # The status and every timeline field stay untouched on append.
-            applied_at = None
-            next_step = None
-            notes = None
-            offer_at = None
-            rejected_at = None
-            next_step_due_at = None
-            interview_stage = None
+            # ADR-0028: re-recording an applied job freezes a new snapshot
+            # without downgrading the stored status or rewriting the existing
+            # timeline history. An explicitly provided applied_at is still
+            # written so a 200 response never silently drops it (Bug-02);
+            # None still leaves the stored value unchanged and "" still
+            # clears per the clear-on-empty contract.
+            pass
 
         sets = ["updated_at = ?"]
         values: list[Any] = [time.time()]
@@ -1882,7 +1890,7 @@ class JobLibraryStore(_SqliteStore):
         """
         if not job_ids:
             return []
-        status = _validate_status(status)
+        status = canonical_status(_validate_status(status))
         expected = (
             canonical_status(_validate_status(expected_status))
             if expected_status is not None

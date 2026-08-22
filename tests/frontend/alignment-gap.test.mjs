@@ -94,8 +94,9 @@ test("index.html: rail brand, jobs count badge and topbar title slots", () => {
   assert.match(html, /id="page-title"/, "dynamic topbar title");
   assert.match(html, /id="page-title"[^>]*>驾驶舱</, "dashboard title matches template");
   assert.match(html, /id="page-subtitle"/, "dynamic topbar subtitle");
-  assert.match(html, /quick-jd-btn/, "quick import JD button");
-  assert.match(html, /快速导入 JD/, "quick import JD label matches template");
+  assert.doesNotMatch(html, /quick-jd-btn/, "A1: quick import JD button removed");
+  assert.doesNotMatch(html, /快速导入 JD/, "A1: quick import JD label removed");
+  assert.match(html, /data-rail-quota/, "rail foot quota card slot (A1/rail quota)");
   assert.match(html, /class="nav-index\b/, "numbered rail indicators");
   assert.match(html, />驾驶舱</, "dashboard rail label");
   assert.match(html, />工作台</, "workspace rail label");

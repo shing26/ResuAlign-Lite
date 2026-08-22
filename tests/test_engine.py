@@ -64,7 +64,7 @@ def test_engine_jd_and_tailoring_use_extended_timeouts(monkeypatch):
         "Python dev resume",
         jd_text="Java backend",
     )
-    assert seen_timeouts == [20.0, 15.0, 40.0]
+    assert seen_timeouts == [45.0, 30.0, 90.0]
     assert seen_retries == [None, None, 1]
 
 
@@ -287,3 +287,41 @@ def test_truncate_text_keeps_prefix_and_line_boundary():
 def test_truncate_text_cuts_long_line():
     cut = truncate_text("a" * 5000, 2000)
     assert len(cut) == 2000
+def test_engine_local_diagnosis_fallback_on_llm_failure():
+    class FailingDiagClient(MockLLMClient):
+        def chat_structured(self, system, user, schema_model, model=None):
+            if getattr(schema_model, "__name__", "") == "Analysis":
+                raise RuntimeError("simulated diagnose failure")
+            return super().chat_structured(system, user, schema_model, model=model)
+
+    mock = FailingDiagClient(
+        [_jd_profile_only(), _gap_only(), _tailor()]
+    )
+    resume = (
+        "张三\n"
+        "13800138000\n"
+        "zhangsan@example.com\n"
+        "\n"
+        "教育背景\n"
+        "2015-2019 某某大学 计算机科学与技术 本科\n"
+        "\n"
+        "技能\n"
+        "Python, Redis, Docker, Kubernetes\n"
+        "\n"
+        "项目经历\n"
+        "- 负责订单服务模块开发，使用 Redis 缓存热点数据，QPS 提升 30%，接口耗时降低 40%\n"
+        "- 使用 Docker 部署服务，通过 CI/CD 流水线发布\n"
+        "- 参与数据库索引优化，慢查询数量下降 50%\n"
+    )
+    report = run(
+        ResuAlignConfig(model="m"),
+        resume,
+        jd_text="Java backend",
+        llm_client=mock,
+    )
+    assert report.score == 75
+    assert report.issues == []
+    assert report.jd_profile is not None
+    assert report.gap_report is not None
+    assert report.tailored_resume is not None
+    assert mock.call_count == 3

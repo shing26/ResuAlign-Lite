@@ -10,6 +10,7 @@ from . import (
     jobs,
     kanban,
     nodes,
+    optimize,
     refresh,
     reminders,
     resumes,
@@ -31,6 +32,7 @@ router.include_router(resumes.router)
 router.include_router(applications.router)
 router.include_router(settings.router)
 router.include_router(nodes.router)
+router.include_router(optimize.router)
 router.include_router(refresh.router)
 router.include_router(reminders.router)
 router.include_router(workspace.router)

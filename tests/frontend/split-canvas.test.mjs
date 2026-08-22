@@ -249,7 +249,9 @@ test("diffCard renders actionable modify card with provenance", () => {
   const html = diffCard(SAMPLE_DIFF, 0, "job-1");
   assert.match(html, /data-diff-id="d1"/);
   assert.match(html, /data-action="accept-bullet"/);
-  assert.match(html, /🛡️ 高可信/);
+  assert.match(html, /provenance-badge provenance-badge--verified/);
+  assert.match(html, /provenance-icon/);
+  assert.match(html, /高可信/);
   assert.match(html, /置信度 high/);
   assert.doesNotMatch(html, /diff-card--invalid/);
 });

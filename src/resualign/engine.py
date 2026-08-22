@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
 from .evaluator import evaluate
@@ -13,7 +11,8 @@ from .jd_profiler import profile_jd
 from .llm import LLMClient, OpenAIClient, diagnose_resume
 from .llm_nodes import LLMNodeStore
 from .models import Report, ResuAlignConfig
-from .role_router import call_with_role, is_parallel_safe, _role_timeout
+from .role_router import call_with_role, _role_timeout
+from .rule_diagnose import diagnose_resume_local
 from .tailor import tailor_resume
 
 logger = logging.getLogger(__name__)
@@ -23,6 +22,11 @@ MAX_JD_CONTEXT_CHARS = 6000
 # Tailoring is the longest single stage. Two attempts keep a degraded
 # provider from multiplying a slow response into a six-minute failure.
 TAILOR_MAX_RETRIES = 1
+
+# Defensive cap on resume input so an exceptionally long resume cannot
+# blow out prompt size and slow the LLM calls. Typical resumes (2-3k
+# chars) are far below this limit.
+MAX_RESUME_INPUT_CHARS = 15000
 
 
 def truncate_text(text: str, limit: int) -> str:
@@ -35,6 +39,27 @@ def truncate_text(text: str, limit: int) -> str:
     if newline >= limit // 2:
         cut = cut[:newline]
     return cut.strip()
+
+
+def _local_diagnosis(resume_text: str) -> dict:
+    """Run local rule-based diagnosis as the LLM-failure fallback.
+
+    Used when the LLM diagnose call fails (exception or role-router error)
+    so the pipeline still yields ATS basics. The inner try/except keeps an
+    unexpected rule bug from failing the whole pipeline either.
+    """
+    try:
+        return diagnose_resume_local(resume_text)
+    except Exception as exc:  # pragma: no cover - defensive only
+        logger.warning(
+            "Local diagnosis raised unexpectedly; using safe default: %s", exc
+        )
+        return {
+            "score": 75,
+            "skills": [],
+            "issues": ["建议在项目中补充具体量化指标"],
+            "fallback_used": True,
+        }
 
 
 def _profile_progress_message(profile) -> str:
@@ -95,9 +120,9 @@ def run(
         notify("diagnose", "正在分析简历结构与 ATS 基础信息...")
         if diagnosis is not None:
             diag_result = diagnosis
-        else:
-            if use_roles:
-                diag_result, _ = call_with_role(
+        elif use_roles:
+            try:
+                diag_result, diag_meta = call_with_role(
                     "diagnose", diagnose_resume,
                     node_store, tenant_id,
                     fn_kwargs={
@@ -107,7 +132,19 @@ def run(
                         "model": config.model,
                     },
                 )
-            else:
+                if diag_meta.get("error"):
+                    logger.warning(
+                        "LLM diagnose failed (%s); falling back to local rules",
+                        diag_meta["error"],
+                    )
+                    diag_result = _local_diagnosis(resume_text)
+            except Exception as exc:
+                logger.warning(
+                    "LLM diagnose raised (%s); falling back to local rules", exc
+                )
+                diag_result = _local_diagnosis(resume_text)
+        else:
+            try:
                 diag_result = diagnose_resume(
                     client,
                     resume_text,
@@ -115,6 +152,11 @@ def run(
                     tenant=tenant,
                     model=config.model,
                 )
+            except Exception as exc:
+                logger.warning(
+                    "LLM diagnose raised (%s); falling back to local rules", exc
+                )
+                diag_result = _local_diagnosis(resume_text)
 
         report = Report(
             score=diag_result.get("score", 0),
@@ -135,173 +177,18 @@ def run(
             )
 
             if use_roles:
-                # ---- Role-based path with parallel diagnose + profile ----
-                parallel_ok = (
-                    os.environ.get("RESUALIGN_LLM_PARALLEL", "1") == "1"
-                    and is_parallel_safe(node_store, tenant_id, "diagnose", "profiler")
+                # Diagnose ran above (LLM with local fallback); profile the
+                # JD via its role node.
+                report.jd_profile, _ = call_with_role(
+                    "profiler", profile_jd,
+                    node_store, tenant_id,
+                    fn_kwargs={
+                        "jd_text": jd_input,
+                        "cache": cache,
+                        "tenant": tenant,
+                    },
                 )
-
-                if parallel_ok and diagnosis is None:
-                    # Run diagnose and profile_jd concurrently
-                    with ThreadPoolExecutor(max_workers=2) as pool:
-                        diag_future = pool.submit(
-                            call_with_role,
-                            "diagnose", diagnose_resume,
-                            node_store, tenant_id,
-                            fn_kwargs={
-                                "resume_text": resume_text,
-                                "cache": cache,
-                                "tenant": tenant,
-                                "model": config.model,
-                            },
-                        )
-                        prof_future = pool.submit(
-                            call_with_role,
-                            "profiler", profile_jd,
-                            node_store, tenant_id,
-                            fn_kwargs={
-                                "jd_text": jd_input,
-                                "cache": cache,
-                                "tenant": tenant,
-                            },
-                        )
-                        diag_result, _ = diag_future.result()
-                        profile_result, _ = prof_future.result()
-                    report.jd_profile = profile_result
-                else:
-                    if use_roles:
-                        if diagnosis is None:
-                            diag_result, _ = call_with_role(
-                                "diagnose", diagnose_resume,
-                                node_store, tenant_id,
-                                fn_kwargs={
-                                    "resume_text": resume_text,
-                                    "cache": cache,
-                                    "tenant": tenant,
-                                    "model": config.model,
-                                },
-                            )
-                        report.jd_profile, _ = call_with_role(
-                            "profiler", profile_jd,
-                            node_store, tenant_id,
-                            fn_kwargs={
-                                "jd_text": jd_input,
-                                "cache": cache,
-                                "tenant": tenant,
-                            },
-                        )
-                    else:
-                        if llm_client is None:
-                            jd_client = OpenAIClient(
-                                config, timeout=_role_timeout("profiler")
-                            )
-                            jd_client_owned = True
-                        report.jd_profile = profile_jd(
-                            jd_client,
-                            jd_input,
-                            cache=cache,
-                            tenant=tenant,
-                        )
-
-                # Gap analysis
-                notify("jd_profiled", _profile_progress_message(report.jd_profile))
-                notify("jd_analysis", "正在比对岗位画像与主简历...")
-                import json as _json
-                _profile_str = _json.dumps(
-                    jd_profile_to_dict(report.jd_profile),
-                    ensure_ascii=False,
-                )
-                if use_roles:
-                    gap_result, _ = call_with_role(
-                        "gap_analyzer", analyze_gaps,
-                        node_store, tenant_id,
-                        fn_kwargs={
-                            "resume_text": resume_text,
-                            "jd_profile_text": _profile_str,
-                        },
-                    )
-                    report.gap_report = gap_result
-                else:
-                    report.gap_report = analyze_gaps(
-                        jd_client,
-                        resume_text,
-                        _profile_str,
-                    )
-
-                # Tailoring
-                notify("gap_analyzed", _gap_progress_message(report.gap_report))
-                notify("tailoring", "正在生成 STAR 精修建议（约 3-15 条）...")
-                import json as _json
-                gap_report_str = _json.dumps({
-                    "missing_keywords": report.gap_report.missing_keywords,
-                    "misaligned_emphasis": report.gap_report.misaligned_emphasis,
-                    "strength_matches": report.gap_report.strength_matches,
-                    "business_scenarios": report.jd_profile.business_scenarios,
-                    "jd_context": truncate_text(
-                        filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
-                    ),
-                }, ensure_ascii=False)
-                if use_roles:
-                    tailor_result, _ = call_with_role(
-                        "editor", tailor_resume,
-                        node_store, tenant_id,
-                        fn_kwargs={
-                            "resume_text": resume_text,
-                            "gap_report_text": gap_report_str,
-                            "granularity": granularity,
-                            "prompt_focus": prompt_focus,
-                            "custom_prompt": custom_prompt,
-                        },
-                    )
-                    report.tailored_resume = tailor_result
-                else:
-                    if llm_client is None:
-                        tailor_client = OpenAIClient(
-                            config,
-                            timeout=_role_timeout("editor"),
-                            max_retries=TAILOR_MAX_RETRIES,
-                        )
-                        tailor_client_owned = True
-                    report.tailored_resume = tailor_resume(
-                        tailor_client,
-                        resume_text,
-                        gap_report_str,
-                        granularity=granularity,
-                        prompt_focus=prompt_focus,
-                        custom_prompt=custom_prompt,
-                    )
-
-                # Diffs from tailor_resume replace the old legacy alignment diffs
-                report.diffs = report.tailored_resume.diffs
-
-                # Optional evaluation
-                if run_eval and report.tailored_resume:
-                    notify("evaluation", "正在检查经历真实性、量化占位与 ATS 匹配...")
-                    sections_text = "\n".join(
-                        report.tailored_resume.sections.values()
-                    ) if report.tailored_resume.sections else resume_text
-                    if use_roles:
-                        eval_result, _ = call_with_role(
-                            "evaluator", evaluate,
-                            node_store, tenant_id,
-                            fn_kwargs={
-                                "original_resume": resume_text,
-                                "tailored_resume": sections_text,
-                                "jd_text": truncate_text(jd_text, MAX_JD_CONTEXT_CHARS),
-                                "diffs": report.tailored_resume.diffs,
-                            },
-                        )
-                        report.eval_score = eval_result
-                    else:
-                        report.eval_score = evaluate(
-                            tailor_client,
-                            resume_text,
-                            sections_text,
-                            truncate_text(jd_text, MAX_JD_CONTEXT_CHARS),
-                            diffs=report.tailored_resume.diffs,
-                        )
             else:
-                # ---- Legacy path (no role router) ----
                 if llm_client is None:
                     jd_client = OpenAIClient(
                         config, timeout=_role_timeout("profiler")
@@ -313,31 +200,59 @@ def run(
                     cache=cache,
                     tenant=tenant,
                 )
-                notify("jd_profiled", _profile_progress_message(report.jd_profile))
-                notify("jd_analysis", "正在比对岗位画像与主简历...")
-                import json as _json
-                _profile_str = _json.dumps(
-                    jd_profile_to_dict(report.jd_profile),
-                    ensure_ascii=False,
+
+            # Gap analysis
+            notify("jd_profiled", _profile_progress_message(report.jd_profile))
+            notify("jd_analysis", "正在比对岗位画像与主简历...")
+            import json as _json
+            _profile_str = _json.dumps(
+                jd_profile_to_dict(report.jd_profile),
+                ensure_ascii=False,
+            )
+            if use_roles:
+                gap_result, _ = call_with_role(
+                    "gap_analyzer", analyze_gaps,
+                    node_store, tenant_id,
+                    fn_kwargs={
+                        "resume_text": resume_text,
+                        "jd_profile_text": _profile_str,
+                    },
                 )
+                report.gap_report = gap_result
+            else:
                 report.gap_report = analyze_gaps(
                     jd_client,
                     resume_text,
                     _profile_str,
                 )
 
-                notify("gap_analyzed", _gap_progress_message(report.gap_report))
-                notify("tailoring", "正在生成 STAR 精修建议（约 3-15 条）...")
-                import json as _json
-                gap_report_str = _json.dumps({
-                    "missing_keywords": report.gap_report.missing_keywords,
-                    "misaligned_emphasis": report.gap_report.misaligned_emphasis,
-                    "strength_matches": report.gap_report.strength_matches,
-                    "business_scenarios": report.jd_profile.business_scenarios,
-                    "jd_context": truncate_text(
-                        filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
-                    ),
-                }, ensure_ascii=False)
+            # Tailoring
+            notify("gap_analyzed", _gap_progress_message(report.gap_report))
+            notify("tailoring", "正在生成 STAR 精修建议（约 3-15 条）...")
+            import json as _json
+            gap_report_str = _json.dumps({
+                "missing_keywords": report.gap_report.missing_keywords,
+                "misaligned_emphasis": report.gap_report.misaligned_emphasis,
+                "strength_matches": report.gap_report.strength_matches,
+                "business_scenarios": report.jd_profile.business_scenarios,
+                "jd_context": truncate_text(
+                    filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
+                ),
+            }, ensure_ascii=False)
+            if use_roles:
+                tailor_result, _ = call_with_role(
+                    "editor", tailor_resume,
+                    node_store, tenant_id,
+                    fn_kwargs={
+                        "resume_text": resume_text,
+                        "gap_report_text": gap_report_str,
+                        "granularity": granularity,
+                        "prompt_focus": prompt_focus,
+                        "custom_prompt": custom_prompt,
+                    },
+                )
+                report.tailored_resume = tailor_result
+            else:
                 if llm_client is None:
                     tailor_client = OpenAIClient(
                         config,
@@ -353,19 +268,52 @@ def run(
                     prompt_focus=prompt_focus,
                     custom_prompt=custom_prompt,
                 )
-                report.diffs = report.tailored_resume.diffs
-                if run_eval and report.tailored_resume:
-                    notify("evaluation", "正在检查经历真实性、量化占位与 ATS 匹配...")
-                    sections_text = "\n".join(
-                        report.tailored_resume.sections.values()
-                    ) if report.tailored_resume.sections else resume_text
-                    report.eval_score = evaluate(
-                        tailor_client,
-                        resume_text,
-                        sections_text,
-                        truncate_text(jd_text, MAX_JD_CONTEXT_CHARS),
-                        diffs=report.tailored_resume.diffs,
-                    )
+
+            # Diffs from tailor_resume replace the old legacy alignment diffs
+            report.diffs = report.tailored_resume.diffs
+
+            # Optional evaluation
+            if run_eval and report.tailored_resume:
+                notify("evaluation", "正在检查经历真实性、量化占位与 ATS 匹配...")
+                sections_text = "\n".join(
+                    report.tailored_resume.sections.values()
+                ) if report.tailored_resume.sections else resume_text
+                if use_roles:
+                    try:
+                        eval_result, _ = call_with_role(
+                            "evaluator", evaluate,
+                            node_store, tenant_id,
+                            fn_kwargs={
+                                "original_resume": resume_text,
+                                "tailored_resume": sections_text,
+                                "jd_text": truncate_text(jd_text, MAX_JD_CONTEXT_CHARS),
+                                "diffs": report.tailored_resume.diffs,
+                            },
+                        )
+                        report.eval_score = eval_result
+                    except Exception as exc:
+                        # Eval is a bonus stage: never let it destroy an
+                        # otherwise successful alignment.
+                        logger.warning(
+                            "Evaluation failed; keeping successful alignment: %s", exc
+                        )
+                        report.eval_score = None
+                else:
+                    try:
+                        report.eval_score = evaluate(
+                            tailor_client,
+                            resume_text,
+                            sections_text,
+                            truncate_text(jd_text, MAX_JD_CONTEXT_CHARS),
+                            diffs=report.tailored_resume.diffs,
+                        )
+                    except Exception as exc:
+                        # Eval is a bonus stage: never let it destroy an
+                        # otherwise successful alignment.
+                        logger.warning(
+                            "Evaluation failed; keeping successful alignment: %s", exc
+                        )
+                        report.eval_score = None
         return report
     finally:
         if jd_client_owned:

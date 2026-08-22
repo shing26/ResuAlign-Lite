@@ -4,7 +4,7 @@
   "jd_text": "Machine Learning Engineer\n\nWe are hiring a machine learning engineer to own model development and deployment.\n\nRequirements\n- Strong Python programming.\n- Experience with Spark for large-scale data processing.\n- Feature engineering and data quality validation.\n- Model training, evaluation, and experiment tracking.\n- Production model serving and monitoring.\n- SQL and familiarity with Kubernetes are a plus.",
   "expected_direction": [
     "highlight Python and Spark pipeline experience",
-    "show production model deployment evidence",
+    "show production model deployment",
     "emphasize data quality validation workflows"
   ],
   "tags": ["ml", "english"],

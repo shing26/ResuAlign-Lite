@@ -42,6 +42,17 @@ class MasterResumeUpdateRequest(BaseModel):
 class MasterResumeRollbackRequest(BaseModel):
     version: int
 
+class OptimizeRequest(BaseModel):
+    jd_text: str | None = Field(default=None, max_length=_JD_TEXT_MAX)
+
+class OptimizeApplyItem(BaseModel):
+    module: str = Field(max_length=64)
+    index: int = Field(ge=0)
+    optimized: str = Field(max_length=_RESUME_TEXT_MAX)
+
+class OptimizeApplyRequest(BaseModel):
+    items: list[OptimizeApplyItem] = Field(default_factory=list, max_length=200)
+
 class ApplicationCreateRequest(BaseModel):
     title: str = Field(max_length=_TITLE_MAX)
     master_resume_id: str
@@ -487,6 +498,8 @@ class JobExportResponse(BaseModel):
     meta: JobExportMeta = Field(default_factory=JobExportMeta)
     accepted_diff_ids: list[str] = Field(default_factory=list)
     accepted_diffs: list[dict[str, Any]] = Field(default_factory=list)
+    sections: list[dict[str, Any]] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
     render: str | None = None
     print_target: str | None = None
 

@@ -25,6 +25,7 @@ import {
   jobApplyLinkHtml,
   jobCompletenessBadge,
   renderGap,
+  renderA4PaperHtml,
   renderMatchBadge,
   renderSkills,
   stageStepper,
@@ -147,10 +148,16 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const tagItems = [...requiredSkills.slice(0, 6), ...niceSkills.slice(0, 3)];
   const inspectorActive = activeAuxPane === "inspector" || state.wbMobilePane !== "diff";
   const livesheetActive = activeAuxPane === "livesheet" || state.wbMobilePane === "diff";
+  const suggestActive = activeAuxPane === "suggest";
+  const controlsActive = activeAuxPane === "controls";
   const hasGuideDraft = Boolean(
     job.final_draft ||
       (session && session.alignment && session.alignment.draft),
   );
+  if (state.wbViewMode !== "a4" && state.wbViewMode !== "diff") {
+    state.wbViewMode = hasGuideDraft ? "a4" : "diff";
+  }
+  const viewMode = state.wbViewMode === "a4" ? "a4" : "diff";
   const dutyText = String(
     (summary && summary.summary) || job.jd_text || "",
   ).trim().slice(0, 240);
@@ -179,21 +186,34 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <div class="row">
             ${jobApplyLinkHtml(job)}
             <button class="btn btn-primary" type="button" data-action="record-application" data-id="${esc(jobId)}">记录投递</button>
-            ${workbenchPrimaryButtonHtml(resumes, alignmentRunning)}
+            ${workbenchPrimaryButtonHtml(resumes, alignmentRunning, alignment)}
           </div>
         </div>
       </div>
+      ${
+        alignment.status === "failed" || alignment.status === "canceled"
+          ? `<div class="align-error-banner" role="alert" data-align-error-banner>
+          <strong>对齐失败</strong>
+          <span>${esc(alignment.error || "对齐任务失败，请重新运行")}</span>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="run-alignment">重新运行对齐</button>
+        </div>`
+          : ""
+      }
       ${workbenchGuideHtml(job, hasGuideDraft)}
       <div class="wb-grid" data-split-layout>
         <section class="wb-main ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>
           <div class="wb-main-head">
             <div>
               <h2>简历精修</h2>
-              <p>逐条采纳 AI 精修建议，每条建议都可追溯来源</p>
+              <p>${viewMode === "a4" ? "以 A4 纸预览定稿，建议集中在右侧处理" : "逐条采纳 AI 精修建议，每条建议都可追溯来源"}</p>
             </div>
             <div class="toolbar-group">
+              <div class="wb-view-toggle" role="group" aria-label="工作台显示模式">
+                <button type="button" class="wb-view-toggle__btn ${viewMode === "diff" ? "active" : ""}" data-action="set-wb-view-mode" data-wb-view-mode="diff" aria-pressed="${viewMode === "diff"}">对照编辑</button>
+                <button type="button" class="wb-view-toggle__btn ${viewMode === "a4" ? "active" : ""}" data-action="set-wb-view-mode" data-wb-view-mode="a4" aria-pressed="${viewMode === "a4"}">A4 预览</button>
+              </div>
               ${exportDock(jobId, job)}
-              ${alignment.diffs && alignment.diffs.length ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-live-compare">对比视图</button>` : ""}
+              ${viewMode === "diff" && alignment.diffs && alignment.diffs.length ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-live-compare">对比视图</button>` : ""}
             </div>
           </div>
           <div class="align-summary">
@@ -206,15 +226,21 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
             </div>
           </div>
           <div class="panel panel--success final-draft-panel" data-final-draft-panel hidden></div>
-          <div class="diff-list">${diffList(session, jobId)}</div>
+          ${viewMode === "a4" ? `<div class="a4-wrap" data-a4-wrap>${renderA4PaperHtml(liveSheetDraft)}</div>` : `<div class="diff-list">${diffList(session, jobId)}</div>`}
         </section>
         <aside class="wb-aux">
           ${workbenchProgressPipelineHtml(session)}
           <div class="wb-tabs" role="tablist" aria-label="工作台辅助信息">
-            <button type="button" class="wb-tab ${activeAuxPane === "inspector" ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector" aria-selected="${activeAuxPane === "inspector"}">岗位分析</button>
-            <button type="button" class="wb-tab ${activeAuxPane === "livesheet" ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="livesheet" aria-selected="${activeAuxPane === "livesheet"}">Live Sheet</button>
+            ${viewMode === "a4" ? `<button type="button" class="wb-tab ${suggestActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="suggest" aria-selected="${suggestActive}">建议</button>` : ""}
+            <button type="button" class="wb-tab ${inspectorActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector" aria-selected="${inspectorActive}">岗位分析</button>
+            <button type="button" class="wb-tab ${livesheetActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="livesheet" aria-selected="${livesheetActive}">面试记录</button>
+            <button type="button" class="wb-tab ${controlsActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="controls" aria-selected="${controlsActive}">优化设置</button>
           </div>
-          <div class="wb-pane ${inspectorActive ? "active" : ""}" data-wb-pane="controls" data-inspector-pane data-jd-canvas>
+          ${viewMode === "a4" ? `<div class="wb-pane ${suggestActive ? "active" : ""}" data-wb-pane="suggest" data-wb-aux-pane="suggest" data-suggest-pane>
+            <div class="suggest-pane__head"><h3>改写建议</h3><span class="small muted">采纳后将自动应用到定稿</span></div>
+            ${diffList(session, jobId)}
+          </div>` : ""}
+          <div class="wb-pane ${inspectorActive ? "active" : ""}" data-wb-pane="controls" data-wb-aux-pane="inspector" data-inspector-pane data-jd-canvas>
             <section class="pane-section" data-jd-summary>
               <h3>岗位职责萃取</h3>
               ${dutyText ? `<p class="workbench-duty-text">${esc(dutyText)}</p>` : `<p class="small muted">岗位职责摘要生成中。</p>`}
@@ -231,12 +257,14 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
               <summary>查看原始 JD</summary>
               <pre>${esc(job.jd_text || "")}</pre>
             </details>
-            <details class="inspector-controls" data-inspector-controls ${state.wbControlsOpen ? "open" : ""}>
-              <summary>优化设置</summary>
-              ${alignmentControls(session, resumes, jobId)}
-            </details>
           </div>
-          <div class="wb-pane ${livesheetActive ? "active" : ""}" data-wb-pane="livesheet" data-live-sheet-pane></div>
+          <div class="wb-pane ${controlsActive ? "active" : ""}" data-wb-pane="controls-opt" data-wb-aux-pane="controls" data-controls-pane>
+            <section class="pane-section pane-section--controls">
+              <div class="pane-section__head"><h3>优化设置</h3><span class="small muted">主简历与对齐参数</span></div>
+              ${alignmentControls(session, resumes, jobId)}
+            </section>
+          </div>
+          <div class="wb-pane ${livesheetActive ? "active" : ""}" data-wb-pane="livesheet" data-wb-aux-pane="livesheet" data-live-sheet-pane></div>
         </aside>
         <form data-form="wb-run" hidden aria-hidden="true">
           <input type="hidden" name="job_id" value="${jobId}">
@@ -529,7 +557,7 @@ function renderFinalDraftPanel(app) {
   if (!panel) return;
   const draft = state.wbFinalDraft;
   const job = state.wbJob || {};
-  if (!draft || !draft.draft) {
+  if (!draft || !draft.draft || state.wbViewMode === "a4") {
     panel.hidden = true;
     panel.innerHTML = "";
     return;
@@ -605,16 +633,19 @@ async function reconcileAlignmentFailure(session) {
     const terminalStatus =
       snapshot.status === "expired" ? "failed" : snapshot.status;
     if (terminalStatus === "failed" || terminalStatus === "canceled") {
+      const detail =
+        snapshot.error ||
+        (snapshot.status === "expired"
+          ? "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成"
+          : "对齐任务失败，请重试");
       session.alignment = {
         ...(session.alignment || {}),
         status: terminalStatus,
         stage: snapshot.status === "expired" ? "" : snapshot.stage || "",
-        error:
-          snapshot.error ||
-          (snapshot.status === "expired"
-            ? "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成"
-            : "对齐任务失败，请重试"),
+        error: detail,
       };
+      /* Bug-09: 失败绝不静默——toast 立即提示，随后的 render 会带持久错误条。 */
+      toast(String(detail).slice(0, 300), "error");
     }
   } catch {
     session.alignment = {
@@ -645,7 +676,7 @@ export async function renderOptimizerCanvas(app, jobId) {
           ? `#/workspace/${encodeURIComponent(targetId)}?resume=${encodeURIComponent(resumeId)}`
           : `#/workspace/${encodeURIComponent(targetId)}`,
       );
-      toast("已自动打开最近岗位，可在顶部切换", "info");
+      toast("已自动打开最近岗位，可在工作台右上角切换", "info");
       return renderOptimizerCanvas(app, targetId);
     }
     const resumes = await api("/api/master-resumes");
@@ -1351,8 +1382,10 @@ function stopAlignmentPoll() {
   alignmentStartedAt = 0;
 }
 
+const WB_AUX_PANES = ["suggest", "inspector", "livesheet", "controls"];
+
 export function setWbAuxPane(pane) {
-  if (pane !== "inspector" && pane !== "livesheet") return;
+  if (!WB_AUX_PANES.includes(pane)) return;
   activeAuxPane = pane;
   const app = $("#app-router-view");
   if (!app) return;
@@ -1361,10 +1394,19 @@ export function setWbAuxPane(pane) {
     tab.classList.toggle("active", active);
     tab.setAttribute("aria-selected", String(active));
   });
-  const inspector = app.querySelector("[data-inspector-pane]");
-  const livesheet = app.querySelector("[data-live-sheet-pane]");
-  if (inspector) inspector.classList.toggle("active", pane === "inspector");
-  if (livesheet) livesheet.classList.toggle("active", pane === "livesheet");
+  app.querySelectorAll("[data-wb-aux-pane]").forEach((node) => {
+    node.classList.toggle("active", node.dataset.wbAuxPane === pane);
+  });
+}
+
+/* 工作台主区显示模式：diff=对照编辑（diff list 在 main），
+ * a4=A4 纸预览（diff list 移入右栏「建议」tab，避免 DOM 重复）。 */
+export function setWbViewMode(mode) {
+  if (mode !== "diff" && mode !== "a4") return;
+  state.wbViewMode = mode;
+  const app = $("#app-router-view");
+  if (!app || !state.route || state.route.name !== "workspace") return;
+  renderOptimizerCanvas(app, activeJobId || (state.route && state.route.jobId) || "");
 }
 
 export function closeSplitCanvas() {

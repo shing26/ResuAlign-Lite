@@ -75,9 +75,37 @@ def _parse_json_object(content: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise LLMResponseError("Structured response is not a JSON object")
     return value
+
+
+def _schema_feedback_prompt(user: str, exc: BaseException) -> str:
+    """Append pydantic validation errors for a single corrective retry.
+
+    Instead of blindly retrying an identical prompt on schema validation
+    failure, feed the validation errors back once so the model can repair
+    the structure (Bug-01 one-shot corrective retry).
+    """
+    return (
+        f"{user}\n"
+        "\n"
+        "## Schema validation failed\n"
+        "Your previous JSON did not match the required output structure. "
+        "Reproduce the same content with the structure fixed, and output "
+        "ONLY valid JSON matching the schema.\n"
+        f"Validation errors: {exc}"
+    )
+
+
 class LLMResponseError(Exception):
     """Raised when the LLM fails to return a parseable response."""
     pass
+
+
+def _raise_network_timeout(kind: str, attempt: int, exc: BaseException) -> None:
+    """Map a transport-level network failure to the API's LLM error."""
+    raise LLMResponseError(
+        f"{kind} call failed after {attempt + 1} attempt(s) "
+        f"(network timeout): {exc}"
+    ) from exc
 class LLMClient(ABC):
     """Abstract LLM client for dependency injection in engine.py."""
     max_retries: ClassVar[int] = STRUCTURED_MAX_EXTRA_RETRIES
@@ -98,9 +126,14 @@ class LLMClient(ABC):
         subclass fall back to JSON mode plus bounded schema-validation retries.
         """
         last_error: Optional[Exception] = None
-        for _ in range(self.max_retries + 1):
+        for attempt in range(self.max_retries + 1):
+            user_prompt = (
+                _schema_feedback_prompt(user, last_error)
+                if attempt > 0 and last_error is not None
+                else user
+            )
             try:
-                result = self.chat_json(system, user, model=model)
+                result = self.chat_json(system, user_prompt, model=model)
                 return schema_model.model_validate(result).model_dump()
             except ValidationError as exc:
                 last_error = exc
@@ -114,13 +147,14 @@ class OpenAIClient(LLMClient):
     strict_provenance = True
     # Defaults that can be overridden per instance or per subclass
     DEFAULT_MAX_TOKENS: ClassVar[int] = 16384
-    DEFAULT_MAX_RETRIES: ClassVar[int] = 2
-    # Per-request read timeout. Tailoring is a high-throughput structured
-    # task on standard instruction models (e.g. deepseek-chat). Sprint 5
-    # tuned this down from 60s to 40s so a stuck provider bounds worst-case
-    # hangs at 3 attempts x 40s = 120s instead of the old 3 x 60s = 180s.
-    # Connect uses a short 10s window so unreachable hosts fail fast
-    # rather than blocking the pool.
+    DEFAULT_MAX_RETRIES: ClassVar[int] = 1
+    # Per-request read timeout. A stuck provider is bounded by the
+    # role-appropriate timeout (role_router) times two attempts.
+    # Transport errors (timeouts / connection loss) are NOT retried: a
+    # timeout on a large prompt rarely succeeds on retry, and retrying only
+    # multiplies the wait. The retry budget is kept for resumable failures
+    # (HTTP 5xx, schema validation, finish_reason=length). Connect uses a
+    # short window so unreachable hosts fail fast rather than blocking.
     DEFAULT_TIMEOUT: ClassVar[float] = 120.0
     DEFAULT_CONNECT_TIMEOUT: ClassVar[float] = 30.0
     DEFAULT_TEMPERATURE: ClassVar[float] = 0.1
@@ -228,6 +262,8 @@ class OpenAIClient(LLMClient):
                     return result
                 except LLMResponseError:
                     raise
+                except httpx.TransportError as e:
+                    _raise_network_timeout("LLM", attempt, e)
                 except Exception as e:
                     if attempt == self.max_retries:
                         raise LLMResponseError(
@@ -318,13 +354,27 @@ class OpenAIClient(LLMClient):
                             f"{self.max_retries + 1} attempts: {exc}"
                         ) from exc
                     time.sleep(1)
-                except (ValidationError, json.JSONDecodeError, LLMResponseError) as exc:
+                except ValidationError as exc:
+                    if attempt == self.max_retries:
+                        raise LLMResponseError(
+                            "Structured response failed schema validation after "
+                            f"{self.max_retries + 1} attempts: {exc}"
+                        ) from exc
+                    # One corrective retry (Bug-01): feed validation
+                    # errors back so the model can repair the structure.
+                    body["messages"][1]["content"] = _schema_feedback_prompt(
+                        user, exc
+                    )
+                    time.sleep(1)
+                except (json.JSONDecodeError, LLMResponseError) as exc:
                     if attempt == self.max_retries:
                         raise LLMResponseError(
                             "Structured response failed validation after "
                             f"{self.max_retries + 1} attempts: {exc}"
                         ) from exc
                     time.sleep(1)
+                except httpx.TransportError as exc:
+                    _raise_network_timeout("Structured LLM", attempt, exc)
                 except Exception as exc:
                     if attempt == self.max_retries:
                         raise LLMResponseError(
@@ -402,7 +452,20 @@ class OpenAIClient(LLMClient):
                     ).model_dump()
                     status = "ok"
                     return result
-                except (ValidationError, json.JSONDecodeError, LLMResponseError) as exc:
+                except ValidationError as exc:
+                    last_error = exc
+                    if attempt >= self.max_retries:
+                        raise LLMResponseError(
+                            "Structured response failed schema validation after "
+                            f"{self.max_retries + 1} attempts: {last_error}"
+                        ) from exc
+                    # One corrective retry (Bug-01): feed validation
+                    # errors back so the model can repair the structure.
+                    body["messages"][1]["content"] = _schema_feedback_prompt(
+                        user, exc
+                    )
+                    time.sleep(1)
+                except (json.JSONDecodeError, LLMResponseError) as exc:
                     last_error = exc
                     if attempt >= self.max_retries:
                         raise LLMResponseError(
@@ -410,6 +473,8 @@ class OpenAIClient(LLMClient):
                             f"{self.max_retries + 1} attempts: {last_error}"
                         ) from exc
                     time.sleep(1)
+                except httpx.TransportError as exc:
+                    _raise_network_timeout("Structured LLM", attempt, exc)
                 except Exception as exc:
                     last_error = exc
                     if attempt >= self.max_retries:

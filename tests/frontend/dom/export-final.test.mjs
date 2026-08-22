@@ -86,6 +86,12 @@ const EXPORT_BODY = {
     prompt_version: "engine.v1",
   },
   accepted_diff_ids: ["d1"],
+  /* Bug-03: 结构化导出字段（后端 JSON 分支新增） */
+  sections: [
+    { heading: "专业技能", content: "- Python\n- Go" },
+    { heading: "工作经历", content: "后端开发" },
+  ],
+  skills: ["Python", "Go"],
 };
 
 function jsonBody(body, status = 200) {
@@ -127,7 +133,9 @@ async function mockFetch(path, options = {}) {
     const body = JSON.parse(String(options.body || "{}"));
     const format = body.format || "markdown";
     exportsCalls.push(format);
-    return jsonBody({ ...EXPORT_BODY, format, filename: EXPORT_BODY.filename.replace(".md", `.${format === "json" ? "json" : format === "pdf" ? "pdf" : "md"}`) });
+    /* Bug-03: JSON content 为去除 Markdown 标记的纯文本（后端同契约） */
+    const jsonContent = format === "json" ? "定稿 canonical" : EXPORT_BODY.content;
+    return jsonBody({ ...EXPORT_BODY, format, content: jsonContent, filename: EXPORT_BODY.filename.replace(".md", `.${format === "json" ? "json" : format === "pdf" ? "pdf" : "md"}`) });
   }
   return jsonBody({ detail: `no mock for ${method} ${url}` }, 404);
 }
@@ -155,6 +163,18 @@ test("workbench export dock enables final actions and shows final badge", async 
     document.querySelectorAll("[data-export-dock] button[disabled]").length,
     0,
   );
+  /* B2 双模式：有定稿时默认进入 A4 预览，源稿面板隐藏（由 A4 纸呈现）；
+   * 切到「对照编辑」后原面板显示导出/记录投递等操作。 */
+  const initialPanel = document.querySelector("[data-final-draft-panel]");
+  assert.ok(initialPanel && initialPanel.hidden, "a4 preview hides the source draft panel");
+  document.querySelector('[data-wb-view-mode="diff"]').click();
+  await waitFor(
+    () => {
+      const p = document.querySelector("[data-final-draft-panel]");
+      return p && !p.hidden;
+    },
+    "final draft panel shown after switching to diff mode",
+  );
   const panel = document.querySelector("[data-final-draft-panel]");
   assert.ok(panel && !panel.hidden);
   assert.ok(panel.querySelector('[data-action="export-final-draft-json"]'));
@@ -172,7 +192,7 @@ test("export Markdown downloads the canonical API content", async () => {
   assert.equal(downloads[0].content, "# 定稿 canonical");
 });
 
-test("export JSON downloads the canonical API content", async () => {
+test("export JSON downloads the canonical structured API content", async () => {
   document.querySelector('[data-action="export-final-draft-json"]').click();
   await waitFor(
     () => exportsCalls.filter((format) => format === "json").length >= 1,
@@ -180,7 +200,15 @@ test("export JSON downloads the canonical API content", async () => {
   );
   await waitFor(() => downloads.length >= 2, "json download");
   assert.match(downloads[1].filename, /\.json$/);
-  assert.equal(downloads[1].content, "# 定稿 canonical");
+  /* Bug-03: JSON 下载的是整个结构化响应（JSON.stringify(body, null, 2)），
+   * 而不是把 Markdown 字符串当 JSON 写出。 */
+  const body = JSON.parse(downloads[1].content);
+  assert.equal(body.job_id, "j1");
+  assert.equal(body.format, "json");
+  assert.equal(body.filename, "resualign-后端工程师-v1.json");
+  assert.equal(body.content, "定稿 canonical");
+  assert.equal(body.sections[0].heading, "专业技能");
+  assert.deepEqual(body.skills, ["Python", "Go"]);
 });
 
 test("export PDF fills #print-root and calls print", async () => {

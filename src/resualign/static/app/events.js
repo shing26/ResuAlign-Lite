@@ -21,6 +21,9 @@ import {
   jobStatusRank,
   normalizeVocabulary,
   normalizeVocabularyList,
+  optimizeActionsHtml,
+  optimizeModuleHtml,
+  optimizeOverviewHtml,
   renderBatchMatrixHtml,
 } from "./format.js";
 import { API_CACHE_TTL, apiCache } from "./cache-manager.js";
@@ -63,6 +66,9 @@ export const STAGE_WEIGHTS = {
   gap_analysis: 0.6,
   tailoring: 0.85,
   evaluation: 0.95,
+  /* 简历优化（xzjobs 式）：overview 本地即时完成，polishing 为逐模块 LLM 阶段 */
+  overview: 0.15,
+  polishing: 0.7,
   succeeded: 1,
 };
 
@@ -101,6 +107,16 @@ export const state = {
   diagnosis: null,
   diagnosisPolling: null,
   diagnosisResumeId: null,
+  /* AI 优化（xzjobs 式模块化润色）：optimizeJob = 任务快照；
+   * optimizeJobResumeId = 任务所属简历（跨简历导航不串数据）；
+   * optimizeModules = result.modules；optimizeAccepted 以模块位置为键。 */
+  optimizeJob: null,
+  optimizePolling: null,
+  optimizeResumeId: null,
+  optimizeJobResumeId: null,
+  optimizeModules: [],
+  optimizeAccepted: {},
+  optimizeJdText: "",
   settings: null,
   vocabulary: null,
   applicationSnapshots: {},
@@ -605,6 +621,248 @@ export function renderDiagnosisError(snapshot) {
   /* Sprint 4 T3: 失败态清空右侧 ATS 卡，避免展示过期结果。 */
   const atsNode = $("[data-ats-health-mount]");
   if (atsNode) atsNode.innerHTML = atsHealthCardHtml(null);
+}
+
+/* ------------------------------------------------------------------ */
+/* Resume optimizer（xzjobs 式模块化润色）: polling + panel renders     */
+/* ------------------------------------------------------------------ */
+
+export function startOptimizePolling(jobId, resumeId) {
+  stopOptimizePolling();
+  state.optimizeResumeId = resumeId || state.optimizeResumeId;
+  state.optimizePolling = { jobId };
+  startPolling("optimize", () => pollOptimizeJob(jobId), 1000);
+}
+
+export function stopOptimizePolling() {
+  stopPolling("optimize");
+  state.optimizePolling = null;
+}
+
+export async function pollOptimizeJob(jobId) {
+  if (!state.optimizePolling || state.optimizePolling.jobId !== jobId) return;
+  try {
+    const snapshot = await api(
+      `/api/jobs/${encodeURIComponent(jobId)}/analysis-status`,
+    );
+    if (!state.optimizePolling || state.optimizePolling.jobId !== jobId) return;
+    renderOptimizeProgress(snapshot);
+    if (
+      ["succeeded", "failed", "canceled", "expired"].includes(
+        snapshot.status,
+      )
+    ) {
+      stopOptimizePolling();
+      state.optimizeJob = { job_id: jobId, ...snapshot };
+      if (snapshot.status === "succeeded") {
+        state.optimizeModules =
+          (snapshot.result && snapshot.result.modules) || [];
+        renderOptimizeResult(snapshot);
+        const overview = (snapshot.result && snapshot.result.overview) || {};
+        toast(
+          `整体分析完成（${overview.score != null ? `${overview.score} 分` : "已生成"}），模块润色已逐条返回`,
+          "success",
+        );
+      } else if (snapshot.status === "expired") {
+        renderOptimizeIdle();
+      } else {
+        renderOptimizeError(snapshot);
+      }
+    }
+  } catch (error) {
+    stopOptimizePolling();
+    renderOptimizeError({ status: "failed", error: error.message });
+  }
+}
+
+export function recoverOptimization(resume) {
+  const resumeId = resume && resume.resume_id;
+  const job = state.optimizeJob;
+  if (!resumeId || !job || state.optimizeJobResumeId !== resumeId) {
+    renderOptimizeIdle();
+    return;
+  }
+  state.optimizeResumeId = resumeId;
+  if (job.status === "succeeded") {
+    state.optimizeModules =
+      (job.result && job.result.modules) || state.optimizeModules || [];
+    renderOptimizeResult(job);
+  } else if (job.status === "failed" || job.status === "canceled") {
+    renderOptimizeError(job);
+  } else if (job.status === "expired") {
+    renderOptimizeIdle();
+  } else {
+    renderOptimizeProgress(job);
+    startOptimizePolling(job.job_id, resumeId);
+  }
+}
+
+export function renderOptimizeIdle() {
+  const panel = $("[data-optimize-panel]");
+  if (!panel) return;
+  const meta = $("[data-optimize-meta]", panel);
+  if (meta) meta.textContent = "尚未运行";
+  const progress = $("[data-optimize-progress]", panel);
+  if (progress) progress.hidden = true;
+  const result = $("[data-optimize-result]", panel);
+  if (result) {
+    result.hidden = true;
+    result.innerHTML = "";
+  }
+  const error = $("[data-optimize-error]", panel);
+  if (error) {
+    error.hidden = true;
+    error.innerHTML = "";
+  }
+  const runBtn = $("[data-action='optimize-resume']", panel);
+  if (runBtn) {
+    runBtn.disabled = false;
+    runBtn.textContent = "运行 AI 优化";
+    runBtn.classList.remove("is-loading");
+  }
+  const cancel = $("[data-action='cancel-optimize']", panel);
+  if (cancel) cancel.hidden = true;
+}
+
+export function renderOptimizeProgress(snapshot) {
+  const panel = $("[data-optimize-panel]");
+  if (!panel) return;
+  const progress = $("[data-optimize-progress]", panel);
+  if (progress) progress.hidden = false;
+  const result = $("[data-optimize-result]", panel);
+  if (result) result.hidden = true;
+  const error = $("[data-optimize-error]", panel);
+  if (error) {
+    error.hidden = true;
+    error.innerHTML = "";
+  }
+  const meta = $("[data-optimize-meta]", panel);
+  if (meta) {
+    meta.textContent =
+      snapshot.message ||
+      (snapshot.status === "queued" ? "排队中..." : "优化进行中...");
+  }
+  const fill = $("[data-optimize-fill]", panel);
+  const stage = $("[data-optimize-stage]", panel);
+  const elapsed = $("[data-optimize-elapsed]", panel);
+  const weight =
+    STAGE_WEIGHTS[snapshot.stage || snapshot.status] ?? STAGE_WEIGHTS.running;
+  if (fill) fill.style.width = `${Math.round(weight * 100)}%`;
+  if (stage) {
+    stage.textContent =
+      STAGE_LABELS[snapshot.stage || snapshot.status] ||
+      snapshot.stage ||
+      snapshot.status;
+  }
+  if (elapsed) elapsed.textContent = `${snapshot.elapsed_seconds || 0}s`;
+  const cancel = $("[data-action='cancel-optimize']", panel);
+  if (cancel) {
+    cancel.hidden =
+      snapshot.status !== "queued" && snapshot.status !== "running";
+  }
+  const runBtn = $("[data-action='optimize-resume']", panel);
+  if (runBtn) {
+    runBtn.disabled = true;
+    runBtn.textContent = "优化中...";
+    runBtn.classList.add("is-loading");
+  }
+}
+
+export function renderOptimizeResult(snapshot) {
+  const panel = $("[data-optimize-panel]");
+  if (!panel) return;
+  const result = snapshot.result || {};
+  const overview = result.overview || {};
+  const modules = Array.isArray(result.modules) ? result.modules : [];
+  const meta = $("[data-optimize-meta]", panel);
+  if (meta) {
+    const llmPart = result.llm_used && result.model ? ` · 模型 ${result.model}` : "";
+    meta.textContent = `最近优化 · 用时 ${snapshot.elapsed_seconds || result.elapsed_seconds || 0}s${llmPart}`;
+  }
+  const progress = $("[data-optimize-progress]", panel);
+  if (progress) progress.hidden = true;
+  const error = $("[data-optimize-error]", panel);
+  if (error) {
+    error.hidden = true;
+    error.innerHTML = "";
+  }
+  const runBtn = $("[data-action='optimize-resume']", panel);
+  if (runBtn) {
+    runBtn.disabled = false;
+    runBtn.textContent = "运行 AI 优化";
+    runBtn.classList.remove("is-loading");
+  }
+  const cancel = $("[data-action='cancel-optimize']", panel);
+  if (cancel) cancel.hidden = true;
+  const target = $("[data-optimize-result]", panel);
+  if (!target) return;
+  target.hidden = false;
+  target.innerHTML = `
+    ${optimizeOverviewHtml(overview)}
+    ${optimizeActionsHtml(modules, state.optimizeAccepted || {})}
+    <div class="optimize-modules" data-optimize-modules></div>
+    ${result.note ? `<div class="small muted">${esc(result.note)}</div>` : ""}
+  `;
+  renderOptimizeModuleList();
+}
+
+export function renderOptimizeError(snapshot) {
+  const panel = $("[data-optimize-panel]");
+  if (!panel) return;
+  const meta = $("[data-optimize-meta]", panel);
+  if (meta) {
+    meta.textContent =
+      snapshot.status === "canceled"
+        ? "最近一次优化已取消"
+        : "最近一次优化失败";
+  }
+  const progress = $("[data-optimize-progress]", panel);
+  if (progress) progress.hidden = true;
+  const result = $("[data-optimize-result]", panel);
+  if (result) {
+    result.hidden = true;
+    result.innerHTML = "";
+  }
+  const error = $("[data-optimize-error]", panel);
+  if (error) {
+    error.hidden = false;
+    error.setAttribute("role", "alert");
+    error.innerHTML = `
+      <div><strong>${snapshot.status === "canceled" ? "优化已取消" : "优化失败"}</strong>：${esc(snapshot.error || "优化任务暂时失败，请重试")}</div>`;
+  }
+  const runBtn = $("[data-action='optimize-resume']", panel);
+  if (runBtn) {
+    runBtn.disabled = false;
+    runBtn.textContent = "运行 AI 优化";
+    runBtn.classList.remove("is-loading");
+  }
+  const cancel = $("[data-action='cancel-optimize']", panel);
+  if (cancel) cancel.hidden = true;
+}
+
+export function renderOptimizeModuleList() {
+  const container = $("[data-optimize-modules]");
+  if (!container) return;
+  const modules = state.optimizeModules || [];
+  const accepted = state.optimizeAccepted || {};
+  container.innerHTML = modules.length
+    ? modules
+        .map((item, key) =>
+          optimizeModuleHtml(item, key, Boolean(accepted[String(key)])),
+        )
+        .join("")
+    : `<div class="small muted">未识别到项目经历/工作经历模块，跳过逐项润色。</div>`;
+}
+
+export function refreshOptimizePanel() {
+  renderOptimizeModuleList();
+  const actionsNode = $("[data-optimize-actions]");
+  if (actionsNode) {
+    actionsNode.innerHTML = optimizeActionsHtml(
+      state.optimizeModules || [],
+      state.optimizeAccepted || {},
+    );
+  }
 }
 
 export function buildDiagnosisMarkdown(originalContent = "") {

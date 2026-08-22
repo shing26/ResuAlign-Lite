@@ -102,6 +102,9 @@ _Avoid_: 匹配率, fit score (ambiguous with Worth Appraisal)
 
 **Alignment** *(minimal version)*
 The process of comparing a resume with a specific JD and generating suggested edits.
+UI 中「对齐」只指该过程；「已对齐」= 该岗位 final draft 的 alignment_status
+为 succeeded（看板 badge 用，不是第 6 种投递状态）。
+_Avoid_: 对齐快照, 对齐成功当状态流转用
 
 **Diff**
 A single atomic edit suggestion. Carries a type (add/modify/remove), the original sentence, proposed sentence, reason, confidence, and a **provenance field** linking back to the exact source sentence in the Master Resume. Never invents.
@@ -175,7 +178,9 @@ Snapshots are append-only: re-recording the same Job appends a new
 `version_index` row instead of overwriting, and the drawer lists them newest
 first. Legacy applied Jobs without a snapshot fall back to the current
 final_draft with an explicit 早期投递版本 warning.
-_Avoid_: 当前定稿冒充投递版, 快照可被覆盖, 同岗多轮覆盖
+UI canonical term: **投递快照**（快照抽屉 / 工作台入口统一叫法）。
+_Avoid_: 对齐快照, 记录快照, 投递版本快照, 当前定稿冒充投递版,
+快照可被覆盖, 同岗多轮覆盖
 
 **安排跟进 (Schedule Follow-up)**
 A quick capture of interview stage, next step, and due time that updates the

@@ -179,6 +179,20 @@ export function renderMarkdown(text) {
   closeList();
   return html.join("");
 }
+export function renderA4PaperHtml(draft = "") {
+  const text = String(draft || "").trim();
+  if (!text) {
+    return `<div class="a4-paper a4-paper--empty" data-a4-paper role="article" aria-label="A4 定稿预览">
+      <div class="a4-paper__empty">
+        <div class="a4-paper__empty-title">还没有定稿简历</div>
+        <p class="small muted">运行对齐并采纳建议后，这里会以 A4 纸样式预览定稿。</p>
+      </div>
+    </div>`;
+  }
+  return `<div class="a4-paper" data-a4-paper role="article" aria-label="A4 定稿预览">
+    <div class="a4-paper__doc resume-doc">${renderMarkdown(text)}</div>
+  </div>`;
+}
 
 /* Pure core of buildDiagnosisMarkdown: given the diagnosis object and a
  * document title, produce the Markdown export text. */
@@ -377,9 +391,9 @@ export const STAGE_STEPS = [
 ];
 
 export const PROVENANCE_LABELS = {
-  verified: "🛡️ 高可信",
-  ambiguous: "⚠️ 建议复核",
-  missing: "❓ 待确认",
+  verified: "高可信",
+  ambiguous: "建议复核",
+  missing: "待确认",
   pending_review: "⚠️ 建议复核",
 };
 
@@ -393,6 +407,9 @@ export const STAGE_LABELS = {
   gap_analysis: "差距分析",
   tailoring: "AI 改写简历",
   evaluation: "LLM 评估",
+  /* 简历优化（xzjobs 式）：overview = 本地整体分析，polishing = 模块润色 */
+  overview: "整体分析",
+  polishing: "模块化润色",
 };
 
 export function matchTone(score) {
@@ -672,6 +689,14 @@ export function crawlStatusLine(session) {
     </div>`;
 }
 
+/* 来源徽标内联图标：verified=盾牌，其余=警示三角。 */
+function provenanceBadgeIcon(stateKey) {
+  if (stateKey === "verified") {
+    return '<svg class="provenance-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8 13 3.6v4.1c0 3.2-2.1 5.6-5 6.5-2.9-.9-5-3.3-5-6.5V3.6L8 1.8z"/><path d="m5.8 8 1.5 1.5 2.9-3"/></svg>';
+  }
+  return '<svg class="provenance-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.2 14.3 13H1.7L8 2.2z"/><path d="M8 6.3v3.2"/><path d="M8 11.6v.1"/></svg>';
+}
+
 export function diffCard(diff, index, jobId) {
   const diffId = diff.diff_id || `diff-${index}`;
   const type = diff.type || "modify";
@@ -710,7 +735,7 @@ export function diffCard(diff, index, jobId) {
           ${diffSectionBadge(diff)}
           <span class="small muted">${diff.confidence ? `置信度 ${esc(diff.confidence)}` : ""}</span>
         </div>
-        <div class="provenance-badge provenance-badge--${esc(stateKey)}" data-provenance title="${esc(provenance)}">${esc(label)}</div>
+        <span class="provenance-badge provenance-badge--${esc(stateKey)}" data-provenance title="${esc(provenance)}">${provenanceBadgeIcon(stateKey)}<span>${esc(label)}</span></span>
       </div>
       <div class="diff-card__columns">
         <div class="diff-card__col diff-card__col--original">
@@ -2098,14 +2123,25 @@ export function workbenchGuideHtml(job, hasDraft = false) {
     </div>`;
 }
 
-export function workbenchPrimaryButtonHtml(resumes, alignmentRunning = false) {
+export function workbenchPrimaryButtonHtml(
+  resumes,
+  alignmentRunning = false,
+  alignment = null,
+) {
   const hasResumes = Array.isArray(resumes) && resumes.length > 0;
-  const label = hasResumes
-    ? alignmentRunning
-      ? "对齐生成中..."
-      : "开始优化"
-    : "先创建主简历";
-  return `<button class="btn btn-primary" type="button" data-action="${hasResumes ? "run-alignment" : "go-resumes"}" ${hasResumes && alignmentRunning ? "disabled" : ""}>${esc(label)}</button>`;
+  const failed = Boolean(
+    alignment && (alignment.status === "failed" || alignment.status === "canceled"),
+  );
+  let label = hasResumes ? "开始优化" : "先创建主简历";
+  let extraClass = "";
+  if (hasResumes && alignmentRunning) {
+    label = "对齐生成中...";
+  } else if (hasResumes && failed) {
+    /* Bug-09: 失败后主按钮给出明确的重试入口与警示样式。 */
+    label = "重新运行对齐";
+    extraClass = " btn-danger";
+  }
+  return `<button class="btn btn-primary${extraClass}" type="button" data-action="${hasResumes ? "run-alignment" : "go-resumes"}" ${hasResumes && alignmentRunning ? "disabled" : ""}>${esc(label)}</button>`;
 }
 
 export function offerCelebrationHtml(job) {
@@ -2196,7 +2232,7 @@ export function matchBadgeInfo(session, job) {
 export function renderMatchBadge(session, job) {
   const { score, source } = matchBadgeInfo(session, job);
   if (score == null) return "";
-  return `<span class="match-badge ${matchTone(score)}" data-match-badge title="${esc(source)}">🛡️ 匹配 ${Math.round(score)}</span>${source ? `<span class="small muted" data-match-source>${esc(source)}</span>` : ""}`;
+  return `<span class="match-badge ${matchTone(score)}" data-match-badge title="${esc(source)}"><svg class="match-badge__icon" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8 13 3.6v4.1c0 3.2-2.1 5.6-5 6.5-2.9-.9-5-3.3-5-6.5V3.6L8 1.8z"/><path d="m5.8 8 1.5 1.5 2.9-3"/></svg>匹配 ${Math.round(score)}</span>${source ? `<span class="small muted" data-match-source>${esc(source)}</span>` : ""}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2358,6 +2394,13 @@ export function interviewCheatSheetHtml(job = {}) {
     </section>`;
 }
 
+/* Bug-11: datetime-local 赋值必须为 yyyy-MM-ddTHH:mm；date-only 值补
+ * T00:00，空值保持空串，避免浏览器控制台 format 警告。 */
+function toDateTimeInputValue(value) {
+  const text = String(value ?? "");
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? `${text}T00:00` : text;
+}
+
 /* 岗位详情/时间线弹窗表单。next_step_due_at 为 datetime-local（本地时间，
  * 无时区，与 parseNextStepDate 语义一致）；interview_stage 值域含“无”。 */
 export function jobTimelineFormHtml(job, snapshots = []) {
@@ -2379,12 +2422,12 @@ export function jobTimelineFormHtml(job, snapshots = []) {
           </div>
         </div>
         <div class="field"><label>状态</label><select name="status">${statusOptions}</select></div>
-        <div class="field"><label>投递时间</label><input type="datetime-local" name="applied_at" value="${esc(job.applied_at || "")}"></div>
+        <div class="field"><label>投递时间</label><input type="datetime-local" name="applied_at" value="${esc(toDateTimeInputValue(job.applied_at))}"></div>
         <div class="field"><label>下一步</label><input type="text" name="next_step" value="${esc(job.next_step || "")}"></div>
-        <div class="field"><label>到期时间</label><input type="datetime-local" name="next_step_due_at" value="${esc(job.next_step_due_at || "")}"></div>
+        <div class="field"><label>到期时间</label><input type="datetime-local" name="next_step_due_at" value="${esc(toDateTimeInputValue(job.next_step_due_at))}"></div>
         <div class="field"><label>面试阶段</label><select name="interview_stage">${stageOptions}</select></div>
-        <div class="field"><label>Offer 时间</label><input type="datetime-local" name="offer_at" value="${esc(job.offer_at || "")}"></div>
-        <div class="field"><label>放弃日期</label><input type="datetime-local" name="rejected_at" value="${esc(job.rejected_at || "")}"></div>
+        <div class="field"><label>Offer 时间</label><input type="datetime-local" name="offer_at" value="${esc(toDateTimeInputValue(job.offer_at))}"></div>
+        <div class="field"><label>放弃日期</label><input type="datetime-local" name="rejected_at" value="${esc(toDateTimeInputValue(job.rejected_at))}"></div>
         <div class="field wide"><label>备注</label><textarea name="notes" rows="3">${esc(job.notes || "")}</textarea></div>
       </div>
       ${applicationSnapshotsHtml(job, snapshots)}
@@ -2416,7 +2459,7 @@ export function jobFollowupFormHtml(job) {
         <div class="field"><label>状态</label><select name="status">${statusOptions}</select></div>
         <div class="field"><label>面试阶段</label><select name="interview_stage">${stageOptions}</select></div>
         <div class="field wide"><label>下一步</label><input type="text" name="next_step" value="${esc(job.next_step || "")}"></div>
-        <div class="field wide"><label>到期时间</label><input type="datetime-local" name="next_step_due_at" value="${esc(job.next_step_due_at || "")}"></div>
+        <div class="field wide"><label>到期时间</label><input type="datetime-local" name="next_step_due_at" value="${esc(toDateTimeInputValue(job.next_step_due_at))}"></div>
       </div>
       <p class="small muted" style="margin:6px 0 0;color:var(--danger,#c0392b)">提示：保存后岗位状态将更新为「面试中」并记录投递日期。</p>
       <div class="actions">
@@ -3128,6 +3171,175 @@ export function versionTimelineHtml(versions, currentVersion, resumeId = "") {
     })
     .join("");
   return `<div class="version-timeline" data-version-timeline>${items}</div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Resume optimizer: overview + modular polish (xzjobs 式)              */
+/* ------------------------------------------------------------------ */
+/* 简历中心「AI 优化」面板的纯函数构造器（DOM-free，Node 可单测）。
+ * 数据契约与后端 run_resume_optimize / build_overview 对齐：
+ *   overview = {score, verdict, skills, issues, highlights,
+ *               project_count, sections_found, jd:{provided, ...}}
+ *   module   = {module, index, title, original, optimized, rationale,
+ *               status: "ok"|"failed", error}
+ * accepted 由调用方以「模块在 result.modules 中的位置」为键传入，避免
+ * 不同 section 出现相同 index 时互相覆盖。
+ */
+
+export function optimizeVerdict(score) {
+  if (score === null || score === undefined || score === "") return "建议优化";
+  const value = Number(score);
+  if (!Number.isFinite(value)) return "建议优化";
+  if (value >= 80) return "优秀";
+  if (value >= 60) return "建议优化";
+  return "需重点优化";
+}
+
+export function optimizeOverviewHtml(overview) {
+  const data = overview && typeof overview === "object" ? overview : {};
+  const rawScore = Number(data.score);
+  const score = Number.isFinite(rawScore)
+    ? Math.max(0, Math.min(100, rawScore))
+    : null;
+  const verdict = optimizeVerdict(score);
+  const verdictClass =
+    score == null
+      ? "badge-gray"
+      : score >= 80
+        ? "badge-green"
+        : score >= 60
+          ? "badge-amber"
+          : "badge-red";
+  const projectCount = Number(data.project_count) || 0;
+  const highlights = Array.isArray(data.highlights)
+    ? data.highlights.map((item) => String(item ?? "")).filter(Boolean)
+    : [];
+  const issues = Array.isArray(data.issues)
+    ? data.issues.map((item) => String(item ?? "")).filter(Boolean)
+    : [];
+  const skills = Array.isArray(data.skills)
+    ? data.skills.map((item) => String(item ?? "")).filter(Boolean)
+    : [];
+  const jd =
+    data.jd && typeof data.jd === "object" && data.jd.provided ? data.jd : null;
+  const matched = jd
+    ? (Array.isArray(jd.matched_keywords)
+        ? jd.matched_keywords.map((item) => String(item ?? ""))
+        : []
+      ).filter(Boolean)
+    : [];
+  const unmatched = jd
+    ? (Array.isArray(jd.unmatched_keywords)
+        ? jd.unmatched_keywords.map((item) => String(item ?? ""))
+        : []
+      ).filter(Boolean)
+    : [];
+  return `
+    <div class="optimize-overview" data-optimize-overview>
+      <div class="optimize-overview__head">
+        <span class="optimize-overview__score">${score ?? "—"}</span>
+        <span class="badge ${verdictClass}" data-optimize-verdict>${esc(verdict)}</span>
+        <span class="small muted">本地规则整体分析 · 识别 ${projectCount} 条项目/经历模块</span>
+      </div>
+      ${skills.length ? `
+      <div class="optimize-overview__section" data-optimize-skills>
+        <h4>技能亮点</h4>
+        <div class="chips">${skills.slice(0, 8).map((item) => `<span class="chip">${esc(item)}</span>`).join("")}</div>
+      </div>` : ""}
+      ${highlights.length ? `
+      <div class="optimize-overview__section" data-optimize-highlights>
+        <h4>量化亮点</h4>
+        <ul class="optimize-overview__list">${highlights.slice(0, 6).map((item) => `<li>${esc(item)}</li>`).join("")}</ul>
+      </div>` : ""}
+      ${issues.length ? `
+      <div class="optimize-overview__section" data-optimize-issues>
+        <h4>待优化点</h4>
+        <ul class="optimize-overview__list">${issues.slice(0, 6).map((item) => `<li>${esc(item)}</li>`).join("")}</ul>
+      </div>` : ""}
+      ${jd ? `
+      <div class="optimize-overview__section" data-optimize-jd>
+        <h4>JD 关键词命中 <span class="small muted">${matched.length} 命中 / ${unmatched.length} 未命中</span></h4>
+        ${matched.length ? `<div class="chips">${matched.map((item) => `<span class="chip chip--matched">${esc(item)}</span>`).join("")}</div>` : `<div class="small muted">未命中 JD 关键词</div>`}
+        ${unmatched.length ? `<div class="small muted optimize-overview__unmatched">未命中：${unmatched.map((item) => esc(item)).join("、")}</div>` : ""}
+      </div>` : ""}
+    </div>`;
+}
+
+export function optimizeModuleHtml(item, key, accepted = false) {
+  const data = item && typeof item === "object" ? item : {};
+  const keyAttr = Number.isInteger(Number(key)) && Number(key) >= 0
+    ? Number(key)
+    : Math.max(0, Number(data.index) || 0);
+  const failed = data.status === "failed" || data.status === "error";
+  const title = String(data.title || `模块 ${Number(data.index) + 1}`);
+  const moduleLabel = String(data.module || "");
+  if (failed) {
+    return `
+      <div class="optimize-module optimize-module--failed" data-optimize-module data-optimize-key="${keyAttr}">
+        <div class="optimize-module__head">
+          <span class="optimize-module__title">${esc(title)}</span>
+          ${moduleLabel ? `<span class="badge badge-gray">${esc(moduleLabel)}</span>` : ""}
+          <span class="badge badge-red">润色失败</span>
+        </div>
+        <div class="form-error" role="alert">${esc(data.error || "润色失败，请重试")}</div>
+      </div>`;
+  }
+  const original = data.original || "";
+  const optimized = data.optimized || "";
+  const rationale = data.rationale || "";
+  const diffHtml = lineDiff(original, optimized)
+    .map((row) => {
+      const isAdd = row.type === "add";
+      return `<div class="optimize-diff ${isAdd ? "optimize-diff--add" : "optimize-diff--remove"}">
+        <span class="optimize-diff__sign">${isAdd ? "+" : "−"}</span>
+        <span class="optimize-diff__text">${esc(row.text)}</span>
+      </div>`;
+    })
+    .join("");
+  return `
+    <div class="optimize-module${accepted ? " is-accepted" : ""}" data-optimize-module data-optimize-key="${keyAttr}">
+      <div class="optimize-module__head">
+        <span class="optimize-module__title">${esc(title)}</span>
+        ${moduleLabel ? `<span class="badge badge-gray">${esc(moduleLabel)}</span>` : ""}
+        ${accepted ? `<span class="badge badge-green" data-optimize-accepted-mark>已采纳</span>` : ""}
+      </div>
+      <div class="optimize-module__diff">${diffHtml || `<span class="small muted">无改动</span>`}</div>
+      ${rationale ? `<div class="optimize-module__rationale">${esc(rationale)}</div>` : ""}
+      <div class="optimize-module__actions">
+        <button type="button" class="btn ${accepted ? "btn-primary" : "btn-outline"} btn-sm" data-action="optimize-accept-item" data-optimize-key="${keyAttr}">${accepted ? "已采纳" : "采纳"}</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-action="optimize-reject-item" data-optimize-key="${keyAttr}">忽略</button>
+      </div>
+    </div>`;
+}
+
+export function optimizeActionsHtml(modules, accepted) {
+  const list = Array.isArray(modules) ? modules : [];
+  const okCount = list.filter((item) => item && item.status === "ok").length;
+  const acceptedCount = Object.values(accepted || {}).filter(Boolean).length;
+  return `
+    <div class="optimize-actions" data-optimize-actions>
+      <button type="button" class="btn btn-primary btn-sm" data-action="optimize-apply-accepted" ${acceptedCount ? "" : "disabled"}>应用已采纳（${acceptedCount}）为新版本</button>
+      <button type="button" class="btn btn-outline btn-sm" data-action="optimize-accept-all" ${okCount ? "" : "disabled"}>全部采纳</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="optimize-rerun">重新润色</button>
+    </div>`;
+}
+
+export function collectAcceptedOptimizeItems(modules, accepted) {
+  const list = Array.isArray(modules) ? modules : [];
+  const acceptedMap = accepted && typeof accepted === "object" ? accepted : {};
+  return list
+    .filter(
+      (item, key) =>
+        item &&
+        item.status === "ok" &&
+        acceptedMap[String(key)] &&
+        String(item.optimized || "").trim(),
+    )
+    .map((item) => ({
+      module: String(item.module || ""),
+      index: Number(item.index),
+      optimized: item.optimized,
+    }));
 }
 
 /* ------------------------------------------------------------------ */

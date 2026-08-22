@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Analysis(BaseModel):
@@ -72,6 +72,31 @@ class TailoredResume(BaseModel):
     sections: dict[str, str] = Field(default_factory=dict)
     diffs: list[DiffItem] = Field(default_factory=list)
     invalid_diffs: list[DiffItem] = Field(default_factory=list)
+
+    @field_validator("sections", mode="before")
+    @classmethod
+    def _normalize_section_values(cls, value: object) -> object:
+        """Accept nested section values by flattening them into Markdown text.
+
+        LLM JSON responses occasionally nest section content as objects or
+        arrays (e.g. ``{"工作经历": {"公司": "…", "职位": "…"}}``); the strict
+        ``dict[str, str]`` declaration used to reject those with a confusing
+        ``Input should be a valid string`` error. Flattening keeps the content
+        and gives callers a single string per section.
+        """
+        if not isinstance(value, dict):
+            return value
+
+        def _flatten(item: object) -> str:
+            if isinstance(item, dict):
+                return "\n".join(f"{k}: {_flatten(v)}" for k, v in item.items())
+            if isinstance(item, list):
+                return "\n".join(f"- {_flatten(v)}" for v in item)
+            if item is None:
+                return ""
+            return str(item)
+
+        return {str(key): _flatten(item) for key, item in value.items()}
 
 
 class EvalScore(BaseModel):

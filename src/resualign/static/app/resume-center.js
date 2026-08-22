@@ -7,6 +7,7 @@ import {
   api,
   closeModal,
   recoverDiagnosis,
+  recoverOptimization,
   showModal,
   state,
   toast,
@@ -90,12 +91,15 @@ async function renderResumeDetailView(app, resumeId) {
   /* Sprint 4 T3: ATS 卡数据源 —— state.diagnosis 只在 job_id 与本简历最新诊断
    * 任务一致时才可信（防止跨简历串数据）。renderDiagnosisResult 完成后还会
    * 通过 [data-ats-health-mount] 实时刷新（见 events.js）。 */
+  /* Bug-05: 优先消费服务端持久化的 latest_diagnosis 快照；无快照时才
+   * 回退到 state.diagnosis（仅在 job_id 与最新诊断任务一致时可信）。 */
   const diagnosis =
-    state.diagnosis &&
-    resume.latest_diagnosis_job_id &&
-    state.diagnosis.job_id === resume.latest_diagnosis_job_id
+    resume.latest_diagnosis ||
+    (state.diagnosis &&
+      resume.latest_diagnosis_job_id &&
+      state.diagnosis.job_id === resume.latest_diagnosis_job_id
       ? diagnosisFromSnapshot(state.diagnosis)
-      : null;
+      : null);
   state.resumeVersions = versions;
   state.resumeCurrentContent = resume.content || "";
 
@@ -134,6 +138,28 @@ async function renderResumeDetailView(app, resumeId) {
         </div>
         <div data-diagnosis-result hidden></div>
         <div class="form-error" data-diagnosis-error hidden></div>
+      </section>
+      <section class="panel optimize-panel" data-optimize-panel>
+        <div class="optimize-panel__head optimize-panel__row">
+          <div class="optimize-panel__copy">
+            <span class="optimize-panel__label">AI 优化（模块化润色项目经历）</span>
+            <span class="small muted" data-optimize-meta>尚未运行</span>
+          </div>
+          <div class="optimize-panel__actions">
+            <button class="btn btn-primary btn-sm" data-action="optimize-resume" data-id="${resume.resume_id}">运行 AI 优化</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-action="cancel-optimize" hidden>取消任务</button>
+          </div>
+        </div>
+        <div class="optimize-panel__jd">
+          <textarea class="optimize-jd-input" data-optimize-jd rows="2" placeholder="可选：粘贴目标 JD，模块润色时会自然融入 JD 关键词与业务场景"></textarea>
+        </div>
+        <div class="progress-wrap" data-optimize-progress hidden>
+          <div class="progress-track"><div class="progress-fill" data-optimize-fill style="width:5%"></div></div>
+          <span class="small" data-optimize-stage>排队中</span>
+          <span class="small muted" data-optimize-elapsed>0s</span>
+        </div>
+        <div data-optimize-result hidden></div>
+        <div class="form-error" data-optimize-error hidden></div>
       </section>
       <div class="resume-archive-grid resume-grid">
         <section class="panel resume-sheet" data-resume-sheet>
@@ -182,6 +208,9 @@ async function renderResumeDetailView(app, resumeId) {
     </div>`;
   state.diagnosisResumeId = resumeId;
   await recoverDiagnosis(resume);
+  /* AI 优化面板：恢复上次任务状态（结果/失败/进行中继续轮询）。 */
+  state.optimizeResumeId = resumeId;
+  recoverOptimization(resume);
 }
 
 /* ------------------------------------------------------------------ */
@@ -246,7 +275,12 @@ export async function renderResumeCenter(app, { resumeId = null, showList = fals
     /* v2.0 shell：默认直达最新主简历的 65/35 详情视图（preview.html 契约）；
      * 显式 #/resume/list 或无简历时才渲染列表/空态。 */
     state.resumes = await api("/api/master-resumes");
-    const first = Array.isArray(state.resumes) ? state.resumes[0] : null;
+    /* Bug-05: 默认直达带诊断的主简历，避免最新“另存版”抢占入口。 */
+    const first = Array.isArray(state.resumes)
+      ? state.resumes.find((resume) => resume && resume.latest_diagnosis) ||
+        state.resumes[0] ||
+        null
+      : null;
     if (first) {
       await renderResumeDetailView(app, first.resume_id);
     } else {

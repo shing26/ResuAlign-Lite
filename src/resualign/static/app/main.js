@@ -17,16 +17,21 @@ import {
   jobStatusRank,
   normalizeVocabulary,
   renderBatchResults,
+  refreshOptimizePanel,
   renderDiagnosisError,
   renderDiagnosisProgress,
+  renderOptimizeError,
+  renderOptimizeProgress,
   setWbMobilePane,
   showModal,
   startBatchPolling,
   startDiagnosisPolling,
+  startOptimizePolling,
   state,
   stopAllPolling,
   stopBatchPolling,
   stopDiagnosisPolling,
+  stopOptimizePolling,
   toast,
   vocabularyList,
 } from "./events.js";
@@ -52,6 +57,7 @@ import {
   getLiveSheetDraft,
   renderOptimizerCanvas,
   setWbAuxPane,
+  setWbViewMode,
   startAlignmentRun,
   syncLiveSheetDraft,
 } from "./split-canvas.js";
@@ -70,6 +76,7 @@ import {
   blockerCountBadge,
   blockerListHtml,
   buildJobsBackup,
+  collectAcceptedOptimizeItems,
   buildLiveCompareHtml,
   costGuardPanelHtml,
   dueReminders,
@@ -252,6 +259,63 @@ async function renderTodayView(app) {
     console.warn("Today view fallback", error);
   }
   app.innerHTML = todayViewHtml(items);
+  const railCount = $("[data-today-rail-count]");
+  if (railCount) {
+    railCount.hidden = items.length === 0;
+    railCount.textContent = items.length;
+  }
+}
+
+/* 侧栏 footer 配额条：与设置页成本护栏同源（GET /api/settings/status 的
+ * status.daily），消除「今日额度」数据不一致。 */
+let railQuotaInFlight = false;
+async function refreshRailQuota() {
+  if (railQuotaInFlight) return;
+  railQuotaInFlight = true;
+  try {
+    const status = await api("/api/settings/status", {
+      cacheKey: "rail:status",
+    });
+    fillRailQuota((status && status.daily) || {});
+  } catch {
+    /* 保留占位状态，不打断路由渲染 */
+  } finally {
+    railQuotaInFlight = false;
+  }
+}
+
+function fillRailQuota(daily = {}) {
+  const root = $("[data-rail-quota]");
+  if (!root || typeof daily !== "object") return;
+  const callsNum = Number(daily.calls);
+  const calls = Number.isFinite(callsNum) ? callsNum : 0;
+  const costNum = Number(daily.estimated_cost);
+  const cost = Number.isFinite(costNum) ? costNum : 0;
+  const hasCap = daily.cap != null && daily.cap !== "";
+  const capNum = Number(daily.cap);
+  const capLabel = hasCap ? String(daily.cap) : "不限制";
+  const remainingLabel = hasCap && daily.remaining != null ? String(daily.remaining) : "—";
+  const blocked = Boolean(daily.blocked);
+  const costEl = $("[data-rail-quota-cost]", root);
+  if (costEl) costEl.textContent = `¥${cost.toFixed(4)} / ¥${capLabel}`;
+  const percent = hasCap && Number.isFinite(capNum) && capNum > 0 ? Math.min(100, (cost / capNum) * 100) : 0;
+  const trackEl = $("[data-rail-quota-track]", root);
+  if (trackEl) {
+    trackEl.classList.toggle("is-blocked", blocked);
+    trackEl.setAttribute("aria-valuenow", String(Math.round(percent)));
+  }
+  const fillEl = $("[data-rail-quota-fill]", root);
+  if (fillEl) fillEl.style.width = `${percent}%`;
+  const remainingEl = $("[data-rail-quota-remaining]", root);
+  if (remainingEl) remainingEl.textContent = `剩余 ¥${remainingLabel}`;
+  const callsEl = $("[data-rail-quota-calls]", root);
+  if (callsEl) callsEl.textContent = `${calls} 次调用`;
+  const statusEl = $("[data-rail-quota-status]", root);
+  if (statusEl) {
+    statusEl.textContent = blocked ? "今日已阻止新 LLM 任务" : "";
+    statusEl.classList.toggle("is-error", blocked);
+  }
+  root.hidden = false;
 }
 
 async function render() {
@@ -287,6 +351,7 @@ async function render() {
     app.innerHTML = `<div class="panel"><h3>出错了</h3><p class="muted">${esc(error.message)}</p>
       <div class="row" style="margin-top:12px"><button class="btn btn-primary" data-action="reload">重试</button></div></div>`;
   }
+  refreshRailQuota();
 }
 
 /* ------------------------------------------------------------------ */
@@ -878,9 +943,13 @@ async function exportFinalDraft(format) {
     return;
   }
   const ext = format === "json" ? "json" : "md";
+  /* Bug-03: JSON 导出下载整个结构化响应（meta/sections/skills/diffs），
+   * 而不是把 Markdown 字符串当 JSON 写出。 */
+  const payload =
+    format === "json" ? JSON.stringify(body, null, 2) : body.content || "";
   download(
     body.filename || `resualign-${body.job_title || "job"}.${ext}`,
-    body.content || "",
+    payload,
     format === "json"
       ? "application/json;charset=utf-8"
       : "text/markdown;charset=utf-8",
@@ -1047,6 +1116,125 @@ const actions = {
     } else {
       stopDiagnosisPolling();
       toast("任务将继续在后台完成，结果仍会保存；已停止本地等待", "info");
+    }
+  },
+  /* AI 优化（xzjobs 式模块化润色）：运行 → 轮询 → 逐条采纳/忽略 →
+   * 全部采纳 → 应用已采纳为新版本。 */
+  "optimize-resume": async (button) => {
+    const resumeId =
+      button.dataset.id ||
+      state.optimizeResumeId ||
+      (state.route && state.route.resumeId);
+    if (!resumeId) return;
+    const panel = button.closest("[data-optimize-panel]");
+    const jdInput = panel && panel.querySelector("[data-optimize-jd]");
+    const jdText = jdInput ? jdInput.value.trim() : (state.optimizeJdText || "");
+    stopOptimizePolling();
+    state.optimizeResumeId = resumeId;
+    state.optimizeJobResumeId = resumeId;
+    state.optimizeJdText = jdText;
+    state.optimizeAccepted = {};
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = "排队中...";
+    renderOptimizeProgress({
+      status: "queued",
+      stage: "",
+      message: "排队中...",
+      elapsed_seconds: 0,
+    });
+    try {
+      const response = await api(
+        `/api/master-resumes/${encodeURIComponent(resumeId)}/optimize`,
+        { method: "POST", body: JSON.stringify({ jd_text: jdText || null }) },
+      );
+      state.optimizeJob = { job_id: response.job_id, status: "queued", result: null };
+      startOptimizePolling(response.job_id, resumeId);
+      toast("优化任务已排队：先出整体分析，再逐条润色项目经历", "success");
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = originalText;
+      button.classList.remove("is-loading");
+      renderOptimizeError({ status: "failed", error: error.message });
+    }
+  },
+  "optimize-rerun": (button) => {
+    const runBtn = $("[data-optimize-panel] [data-action='optimize-resume']");
+    if (runBtn && !runBtn.disabled) {
+      runBtn.click();
+    } else if (button.dataset.id) {
+      actions["optimize-resume"](button);
+    }
+  },
+  "cancel-optimize": async () => {
+    const job = state.optimizeJob;
+    if (!job || !state.optimizePolling) return;
+    if (job.status === "queued") {
+      await api(
+        `/api/jobs/${encodeURIComponent(job.job_id)}/cancel`,
+        { method: "POST" },
+      );
+      stopOptimizePolling();
+      renderOptimizeError({ status: "canceled", error: "Canceled by user" });
+      toast("优化任务已取消", "success");
+    } else {
+      stopOptimizePolling();
+      toast("任务将继续在后台完成，结果仍会保存；已停止本地等待", "info");
+    }
+  },
+  "optimize-accept-item": (button) => {
+    const key = button.dataset.optimizeKey;
+    if (key == null) return;
+    state.optimizeAccepted = { ...(state.optimizeAccepted || {}) };
+    state.optimizeAccepted[key] = true;
+    refreshOptimizePanel();
+  },
+  "optimize-reject-item": (button) => {
+    const key = button.dataset.optimizeKey;
+    if (key == null) return;
+    state.optimizeAccepted = { ...(state.optimizeAccepted || {}) };
+    state.optimizeAccepted[key] = false;
+    refreshOptimizePanel();
+  },
+  "optimize-accept-all": () => {
+    const modules = state.optimizeModules || [];
+    const next = {};
+    let okCount = 0;
+    modules.forEach((item, key) => {
+      if (item && item.status === "ok") {
+        next[String(key)] = true;
+        okCount += 1;
+      }
+    });
+    state.optimizeAccepted = next;
+    refreshOptimizePanel();
+    toast(`已全部采纳 ${okCount} 条优化`, "success");
+  },
+  "optimize-apply-accepted": async () => {
+    const resumeId =
+      state.optimizeResumeId || (state.route && state.route.resumeId);
+    if (!resumeId) return;
+    const items = collectAcceptedOptimizeItems(
+      state.optimizeModules || [],
+      state.optimizeAccepted || {},
+    );
+    if (!items.length) {
+      toast("请先采纳至少一条优化", "error");
+      return;
+    }
+    const btn = $("[data-action='optimize-apply-accepted']");
+    if (btn) btn.disabled = true;
+    try {
+      const body = await api(
+        `/api/master-resumes/${encodeURIComponent(resumeId)}/optimize/apply`,
+        { method: "POST", body: JSON.stringify({ items }) },
+      );
+      toast(`已应用 ${(body && body.applied_count) || items.length} 条优化为新版本`, "success");
+      render();
+    } catch (error) {
+      const again = $("[data-action='optimize-apply-accepted']");
+      if (again) again.disabled = false;
+      toast(error.message, "error");
     }
   },
   "export-resume-md": async (button) => {
@@ -1827,6 +2015,7 @@ const actions = {
   "toggle-theme": () => toggleTheme(),
   "set-wb-tab": (button) => setWbMobilePane(button.dataset.wbTab),
   "set-wb-tab-v3": (button) => setWbAuxPane(button.dataset.wbTabV3),
+  "set-wb-view-mode": (button) => setWbViewMode(button.dataset.wbViewMode),
   "cancel-workbench": () => cancelActiveAlignment(),
   "retry-workbench": () => {
     const form = $('[data-form="split-align"]') || $('[data-form="wb-run"]');

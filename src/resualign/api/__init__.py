@@ -87,6 +87,9 @@ from .schemas import (
     MasterResumeCreateRequest,
     MasterResumeRollbackRequest,
     MasterResumeUpdateRequest,
+    OptimizeApplyItem,
+    OptimizeApplyRequest,
+    OptimizeRequest,
     SettingsUpdateRequest,
     SignupRequest,
     WorkbenchAcceptRequest,
@@ -129,6 +132,9 @@ __all__ = [
     "MasterResumeStore",
     "MasterResumeUpdateRequest",
     "OpenAIClient",
+    "OptimizeApplyItem",
+    "OptimizeApplyRequest",
+    "OptimizeRequest",
     "Report",
     "RuleFilterEngine",
     "RuleVerdict",
@@ -147,6 +153,8 @@ __all__ = [
     "_fetcher",
     "_get_batch_align",
     "_queue_batch_align",
+    "_run_resume_optimize",
+    "apply_resume_optimize_items",
     "build_config",
     "classify_job",
     "crawl_jd",
@@ -264,6 +272,7 @@ from .state import (  # noqa: F401, I001  (explicit bindings used below)
 from .services import batch as _batch_service
 from .services import jobs as _jobs_service
 from .services import resumes as _resumes_service
+from .services import resume_optimize as _resume_optimize_service
 from .services import workbench as _workbench_service
 from .services.cost_guard import (
     enforce_daily_llm_cap,
@@ -300,6 +309,9 @@ _library_dedupe_key = _workbench_service._library_dedupe_key
 _content_sha256 = _resumes_service._content_sha256
 _cached_diagnosis = _resumes_service._cached_diagnosis
 _backfill_diagnosis_snapshots = _resumes_service.backfill_diagnosis_snapshots
+
+_run_resume_optimize = _resume_optimize_service.run_resume_optimize
+apply_resume_optimize_items = _resume_optimize_service.apply_resume_optimize_items
 
 _queue_batch_align = _batch_service.queue_batch_align
 _get_batch_align = _batch_service.get_batch_align
@@ -520,6 +532,9 @@ from .routers import (
     resumes as _resumes_router,
 )
 from .routers import (
+    optimize as _optimize_router,
+)
+from .routers import (
     rules as _rules_router,
 )
 from .routers import (
@@ -591,6 +606,8 @@ update_llm_node = _nodes_router.update_llm_node
 delete_llm_node = _nodes_router.delete_llm_node
 activate_llm_node = _nodes_router.activate_llm_node
 test_llm_node = _nodes_router.test_llm_node
+optimize_master_resume = _optimize_router.optimize_master_resume
+apply_resume_optimize = _optimize_router.apply_resume_optimize
 list_blockers = _blockers_router.list_blockers
 ignore_blocker = _blockers_router.ignore_blocker
 resolve_blocker = _blockers_router.resolve_blocker

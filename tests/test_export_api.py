@@ -135,8 +135,50 @@ def test_export_json_is_canonical_and_ignores_client_diff_ids():
     assert body["format"] == "json"
     assert body["accepted_diff_ids"] == ["d1"]
     assert len(body["accepted_diffs"]) == 1
-    assert body["content"].startswith("# Experience")
+    # Bug-03: JSON content is plain text (dry of Markdown markers) while
+    # sections/skills stay structured; the raw draft stays untouched.
+    assert body["content"] == "Experience\nPython developer with Redis caching."
     assert body["filename"] == "resualign-Backend-Engineer-v1.json"
+    # Bug-03: JSON 导出带结构化 sections/skills（无 ## 节的草稿 sections 为空，
+    # skills 回退到 JD must_have）。
+    assert body["sections"] == []
+    assert body["skills"] == ["Python"]
+
+
+def test_export_json_splits_sections_and_skills():
+    job = _create_job()
+    _seed_accepted_draft(job)
+    saved = client.post(
+        f"/api/jobs/{job['job_id']}/final-draft",
+        json={
+            "draft": "# 张三\n\n"
+            "## 联系方式\n- 电话：138-0000-0000\n"
+            "## 工作经历\n\n### 某某电商 高级后端工程师\n- 主导微服务化改造\n"
+            "## 专业技能\n- 编程语言：Java、Go、Python\n"
+            "- 框架：Spring Boot、Spring Cloud\n",
+        },
+    )
+    assert saved.status_code == 200
+    r = client.post(
+        f"/api/jobs/{job['job_id']}/exports",
+        json={"format": "json"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert [s["heading"] for s in body["sections"]] == [
+        "联系方式",
+        "工作经历",
+        "专业技能",
+    ]
+    assert "138-0000-0000" in body["sections"][0]["content"]
+    assert "主导微服务化改造" in body["sections"][1]["content"]
+    assert body["skills"] == [
+        "Java",
+        "Go",
+        "Python",
+        "Spring Boot",
+        "Spring Cloud",
+    ]
 
 
 def test_export_pdf_returns_print_html_contract():

@@ -7,11 +7,11 @@ a single-call-fallback wrapper for the pipeline.
 
 Tiered timeouts (env overrides via ``RESUALIGN_ROLE_TIMEOUT_<ROLE>``):
 
-- profiler / gap_analyzer: 15s (lightweight extraction)
-- diagnose: 20s
-- editor: 40s (heavier generation)
-- evaluator: 30s
-- connect timeout: 10s (shared across all roles)
+- profiler / gap_analyzer: 30s
+- diagnose: 45s
+- editor: 90s (heavier generation)
+- evaluator: 60s
+- connect timeout: 30s (shared via OpenAIClient.DEFAULT_CONNECT_TIMEOUT)
 """
 
 from __future__ import annotations
@@ -28,15 +28,12 @@ logger = logging.getLogger(__name__)
 # Per-role timeout defaults (seconds). Environment variables override:
 # ``RESUALIGN_ROLE_TIMEOUT_DIAGNOSE``, ``RESUALIGN_ROLE_TIMEOUT_PROFILER``, etc.
 _ROLE_TIMEOUT_DEFAULTS: dict[str, float] = {
-    "diagnose": 20.0,
-    "profiler": 15.0,
-    "gap_analyzer": 15.0,
-    "editor": 40.0,
-    "evaluator": 30.0,
+    "diagnose": 45.0,
+    "profiler": 30.0,
+    "gap_analyzer": 30.0,
+    "editor": 90.0,
+    "evaluator": 60.0,
 }
-_CONNECT_TIMEOUT = 10.0
-
-
 def _role_timeout(role: str) -> float:
     """Return the effective timeout for a role (env override > default)."""
     key = f"RESUALIGN_ROLE_TIMEOUT_{role.upper()}"

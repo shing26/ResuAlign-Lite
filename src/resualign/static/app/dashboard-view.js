@@ -65,7 +65,11 @@ export async function renderDashboard(container) {
   const completionRate =
     jobsTotal > 0 ? Math.round((alignedCount / jobsTotal) * 100) : 0;
 
-  const currentResume = Array.isArray(resumes) ? resumes[0] : null;
+  const currentResume = Array.isArray(resumes)
+    ? resumes.find((resume) => resume && resume.latest_diagnosis) ||
+      resumes[0] ||
+      null
+    : null;
   const diagnosis =
     (currentResume && currentResume.latest_diagnosis) ||
     (state.diagnosis &&
@@ -183,7 +187,7 @@ export async function renderDashboard(container) {
             <div class="recent-jobs">
               <div class="recent-jobs__head">
                 <h3>最近岗位动态</h3>
-                <span class="small muted">最近 3 条 · 对齐快照</span>
+                <span class="small muted">最近 3 条 · 投递快照</span>
               </div>
               <div class="recent-jobs__list" data-dashboard-recent>${recentHtml}</div>
             </div>
