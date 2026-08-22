@@ -103,6 +103,7 @@ import {
   ruleListHtml,
   runEvalFromForm,
   settingsBentoHtml,
+  snapshotDrawerHtml,
   todayViewHtml,
 } from "./format.js";
 import {
@@ -492,6 +493,8 @@ async function openJobDetail(job) {
   state.applicationSnapshots = {
     ...(state.applicationSnapshots || {}),
     [job.job_id]: {
+      jobId: job.job_id,
+      job,
       snapshots: Array.isArray(snapshots) ? snapshots : [],
       legacyDraft: job.final_draft || null,
     },
@@ -798,7 +801,7 @@ async function printTarget(kind, options = {}) {
   } else if (kind === "snapshot") {
     const snapshot = options || {};
     const job = state.wbJob || {};
-    title = `${snapshot.job_title || job.title || "投递定稿"} · 第 ${snapshot.version_index || 1} 版`;
+    title = `${snapshot.job_title || job.title || "投递快照"} · 第 ${snapshot.version_index || 1} 版`;
     body =
       `<h1>${esc(title)}</h1>` +
       `<div class="print-meta">投递于 ${esc(snapshot.applied_at || formatDate(snapshot.created_at))}${snapshot.match_score != null ? ` · 匹配度 ${Math.round(snapshot.match_score)}` : " · 匹配度 —"}</div>` +
@@ -1398,7 +1401,7 @@ const actions = {
     if (jobStatusRank(job.status) >= jobStatusRank("applied")) {
       showModal(
         "再次记录投递",
-        `<p>岗位已是「${esc(jobStatusLabel(job.status))}」。再次记录会追加一轮不可篡改的投递定稿快照，不会改变当前状态或时间线。</p>
+        `<p>岗位已是「${esc(jobStatusLabel(job.status))}」。再次记录会追加一轮不可篡改的投递快照，不会改变当前状态或时间线。</p>
         <div class="actions">
           <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
           <button class="btn btn-primary" type="button" data-action="confirm-append-application" data-id="${esc(job.job_id)}">确认追加</button>
@@ -2037,19 +2040,15 @@ const actions = {
   "open-snapshot": (button) => {
     const snapshot = findApplicationSnapshot(button.dataset.id);
     if (!snapshot) {
-      toast("投递定稿快照不存在", "error");
+      toast("投递快照不存在", "error");
       return;
     }
+    const entry =
+      (snapshot.job_id && findApplicationEntry(snapshot.job_id)) || {};
     showModal(
-      `投递定稿快照 · 第 ${snapshot.version_index} 版`,
-      `<div class="snapshot-preview">
-        <div class="resume-doc">${renderMarkdown(snapshot.final_draft || "")}</div>
-        <div class="actions">
-          <button class="btn btn-ghost" type="button" data-action="close-modal">关闭</button>
-          <button class="btn btn-secondary btn-sm" type="button" data-action="export-snapshot-md" data-id="${esc(snapshot.snapshot_id)}">下载 Markdown</button>
-          <button class="btn btn-primary btn-sm" type="button" data-action="export-snapshot-pdf" data-id="${esc(snapshot.snapshot_id)}">导出 PDF</button>
-        </div>
-      </div>`,
+      `投递快照 · 第 ${snapshot.version_index} 版`,
+      snapshotDrawerHtml(snapshot, entry),
+      { className: "modal--drawer", closeBtn: true },
     );
   },
   "export-snapshot-md": (button) => {
@@ -2067,22 +2066,14 @@ const actions = {
   },
   "view-legacy-draft": (button) => {
     const entry = findApplicationEntry(button.dataset.id);
-    const draft = entry && entry.legacyDraft;
-    if (!draft) {
+    if (!entry || !entry.legacyDraft) {
       toast("当前岗位没有定稿", "error");
       return;
     }
     showModal(
       "早期投递版本（未生成不可篡改快照）",
-      `<div class="snapshot-preview">
-        <p class="legacy-warning">⚠️ 早期投递版本（未生成不可篡改快照）</p>
-        <div class="resume-doc">${renderMarkdown(draft)}</div>
-        <div class="actions">
-          <button class="btn btn-ghost" type="button" data-action="close-modal">关闭</button>
-          <button class="btn btn-secondary btn-sm" type="button" data-action="export-legacy-draft-md" data-id="${esc(button.dataset.id)}">下载 Markdown</button>
-          <button class="btn btn-primary btn-sm" type="button" data-action="export-legacy-draft-pdf" data-id="${esc(button.dataset.id)}">导出 PDF</button>
-        </div>
-      </div>`,
+      snapshotDrawerHtml(null, entry),
+      { className: "modal--drawer", closeBtn: true },
     );
   },
   "export-legacy-draft-md": (button) => {

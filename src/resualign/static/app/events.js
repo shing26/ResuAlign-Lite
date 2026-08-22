@@ -261,7 +261,7 @@ function dismissModal() {
   modalReturnFocus = null;
 }
 
-export function showModal(title, bodyHtml) {
+export function showModal(title, bodyHtml, options = {}) {
   dismissModal();
   modalReturnFocus =
     document.activeElement instanceof HTMLElement
@@ -269,10 +269,14 @@ export function showModal(title, bodyHtml) {
       : null;
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
+  if (options.className) backdrop.classList.add(options.className);
   backdrop.setAttribute("role", "dialog");
   backdrop.setAttribute("aria-modal", "true");
   backdrop.setAttribute("aria-label", title);
-  backdrop.innerHTML = `<div class="modal"><h3>${esc(title)}</h3>${bodyHtml}</div>`;
+  const closeBtn = options.closeBtn
+    ? `<button type="button" class="modal-close" data-action="close-modal" aria-label="关闭">✕</button>`
+    : "";
+  backdrop.innerHTML = `<div class="modal"><h3>${esc(title)}</h3>${closeBtn}${bodyHtml}</div>`;
   backdrop.addEventListener("click", (event) => {
     if (event.target === backdrop) closeModal();
   });

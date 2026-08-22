@@ -394,7 +394,7 @@ export const PROVENANCE_LABELS = {
   verified: "高可信",
   ambiguous: "建议复核",
   missing: "待确认",
-  pending_review: "⚠️ 建议复核",
+  pending_review: "建议复核",
 };
 
 /* Shared stage labels (also re-exported by events.js for progress bars). */
@@ -534,7 +534,7 @@ export function workbenchProgressPipelineHtml(session) {
         .map(
           (step) => `
         <div class="workbench-live-progress__step ${step.done ? "is-done" : ""} ${step.active ? "is-active" : ""}" data-progress-step="${esc(step.key)}">
-          <span class="workbench-live-progress__dot" aria-hidden="true">${step.done ? "✓" : step.active ? "…" : "·"}</span>
+          <span class="workbench-live-progress__dot" aria-hidden="true">${step.done ? ICON_PROGRESS_CHECK : step.active ? "…" : "·"}</span>
           <div class="workbench-live-progress__copy">
             <span class="workbench-live-progress__label">${esc(step.label)}</span>
             ${step.detail ? `<span class="workbench-live-progress__detail">${esc(step.detail)}</span>` : ""}
@@ -689,6 +689,12 @@ export function crawlStatusLine(session) {
     </div>`;
 }
 
+/* ADR-0033 决策9：emoji 全部替换为 16px 线性 SVG 图标（紧凑场景用 --sm 变体）。 */
+const ICON_CHECK = '<svg class="ic ic--sm" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3L13 4.5"/></svg>';
+const ICON_X = '<svg class="ic ic--sm" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 4 8 8"/><path d="m12 4-8 8"/></svg>';
+const ICON_WARN = '<svg class="ic" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.2 14.3 13H1.7L8 2.2z"/><path d="M8 6.3v3.2"/><path d="M8 11.6v.1"/></svg>';
+const ICON_PROGRESS_CHECK = '<svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3L13 4.5"/></svg>';
+
 /* 来源徽标内联图标：verified=盾牌，其余=警示三角。 */
 function provenanceBadgeIcon(stateKey) {
   if (stateKey === "verified") {
@@ -751,8 +757,8 @@ export function diffCard(diff, index, jobId) {
       ${provenance ? `<div class="provenance-quote">${esc(provenance)}</div>` : ""}
       ${invalidWarning ? `<div class="diff-card__warning" role="alert">${esc(invalidWarning)}</div>` : ""}
       <div class="diff-card__actions" data-diff-actions>
-        ${invalid ? "" : `<button class="btn btn-primary btn-sm" data-action="accept-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">✓ 采纳</button>`}
-        <button class="btn btn-ghost btn-sm" data-action="reject-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">✗ 跳过</button>
+        ${invalid ? "" : `<button class="btn btn-primary btn-sm" data-action="accept-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_CHECK} 采纳</button>`}
+        <button class="btn btn-ghost btn-sm" data-action="reject-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_X} 跳过</button>
         <button class="btn btn-secondary btn-sm" data-action="polish-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}" data-instruction="quantified">AI 润色</button>
       </div>
     </article>`;
@@ -822,7 +828,7 @@ export function alignmentControls(session, resumes, jobId) {
       <div class="align-form__row">
         <button class="btn btn-primary" type="submit" data-align-run ${running ? "disabled" : ""}>${running ? "对齐运行中..." : failed ? "重新运行对齐" : "一键生成对齐简历"}</button>
         <button class="btn btn-outline btn-sm" type="button" data-action="cancel-align-job" ${running ? "" : "hidden"}>${alignment.status === "queued" ? "取消任务" : "停止等待"}</button>
-        <button class="btn btn-ghost btn-sm" type="button" data-action="apply-accepted-bullets" data-id="${esc(jobId)}" ${!alignment.draft ? "disabled" : ""}>应用已✓ 采纳</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="apply-accepted-bullets" data-id="${esc(jobId)}" ${!alignment.draft ? "disabled" : ""}>应用已${ICON_CHECK} 采纳</button>
         <span class="small muted" data-align-status>${alignment.status === "succeeded" ? "已生成对齐版本" : alignment.status === "failed" ? `任务失败：${esc(alignment.error || "请重试")}` : alignment.status === "running" || alignment.status === "queued" ? "正在生成..." : ""}</span>
       </div>
       <label class="eval-option">
@@ -2261,7 +2267,7 @@ const SUBMITTED_JOB_STATUSES = new Set([
   "withdrawn",
 ]);
 
-/* 岗位详情抽屉的投递定稿快照区。created_at DESC 由后端排序；无快照的存量
+/* 岗位详情抽屉的投递快照区。created_at DESC 由后端排序；无快照的存量
  * 已投递岗位降级展示当前 final_draft，并明确标注“早期投递版本”。 */
 export function applicationSnapshotsHtml(job, snapshots = []) {
   const items = (Array.isArray(snapshots) ? snapshots : [])
@@ -2272,7 +2278,7 @@ export function applicationSnapshotsHtml(job, snapshots = []) {
         snapshot.applied_at || formatDate(snapshot.created_at);
       return `<div class="snapshot-item" data-snapshot-item data-snapshot-id="${esc(snapshot.snapshot_id)}">
         <div class="snapshot-item__head">
-          <strong>第 ${esc(snapshot.version_index)} 版投递定稿</strong>
+          <strong>第 ${esc(snapshot.version_index)} 版投递快照</strong>
           <span class="small muted">${esc(appliedAt)}</span>
         </div>
         <div class="snapshot-item__meta">匹配度 ${esc(score)}${snapshot.master_resume_id ? ` · 主简历 ${esc(snapshot.master_resume_id)}` : ""}</div>
@@ -2285,7 +2291,7 @@ export function applicationSnapshotsHtml(job, snapshots = []) {
     })
     .join("");
   if (items) {
-    return `${interviewCheatSheetHtml(job)}<div class="snapshot-section"><h4>投递定稿快照</h4><div class="snapshot-list">${items}</div></div>`;
+    return `${interviewCheatSheetHtml(job)}<div class="snapshot-section"><h4>投递快照</h4><div class="snapshot-list">${items}</div></div>`;
   }
   const canonical = canonicalJobStatus(job && job.status);
   if (
@@ -2294,9 +2300,9 @@ export function applicationSnapshotsHtml(job, snapshots = []) {
     (job.final_draft || "").trim()
   ) {
     return `${interviewCheatSheetHtml(job)}<div class="snapshot-section snapshot-section--legacy" data-legacy-snapshot>
-      <h4>投递定稿快照</h4>
+      <h4>投递快照</h4>
       <div class="snapshot-item snapshot-item--legacy">
-        <p class="legacy-warning">⚠️ 早期投递版本（未生成不可篡改快照）</p>
+        <p class="legacy-warning">${ICON_WARN} 早期投递版本（未生成不可篡改快照）</p>
         <p class="small muted">岗位已投递但尚无不可篡改快照，以下为当前 final_draft。</p>
         <div class="row">
           <button type="button" class="btn btn-secondary btn-sm" data-action="view-legacy-draft" data-id="${esc(job.job_id)}">查看当前定稿 Markdown</button>
@@ -2307,6 +2313,70 @@ export function applicationSnapshotsHtml(job, snapshots = []) {
     </div>`;
   }
   return "";
+}
+
+
+/* ADR-0033 决策5：投递快照右侧抽屉正文。开发版带匹配度 pill、固化时间、
+ * 防深挖卡与定稿正文预览；无快照的存量投递（entry.legacyDraft）降级为
+ * legacy 形态，仍可下载/导出当前 final_draft。 */
+export function snapshotDrawerHtml(snapshot, entry = {}) {
+  const job = entry.job || {};
+  const jobId = entry.jobId || (job && job.job_id) || "";
+  const legacyDraft = (entry && entry.legacyDraft) || "";
+  const isLegacy = !snapshot;
+  const draft = isLegacy ? legacyDraft : snapshot.final_draft || "";
+  const score =
+    !isLegacy && snapshot.match_score != null
+      ? Math.round(snapshot.match_score)
+      : null;
+  const createdAt =
+    !isLegacy && snapshot.created_at != null
+      ? formatDate(snapshot.created_at)
+      : "";
+  const meta = isLegacy
+    ? ""
+    : `${createdAt ? `固化时间 ${createdAt}` : snapshot.applied_at ? `投递时间 ${snapshot.applied_at}` : ""}${snapshot.version_index != null ? ` · 版本 v${esc(snapshot.version_index)}` : ""}`.trim();
+  const cheatsheet = interviewCheatSheetHtml(job);
+  const cheatsheetBlock = cheatsheet
+    ? `<div class="snapshot-drawer__cheatsheet">${cheatsheet}</div>`
+    : "";
+  const actions = isLegacy
+    ? `<div class="snapshot-drawer__actions">
+        <button type="button" class="btn btn-secondary btn-sm" data-action="export-legacy-draft-md" data-id="${esc(jobId)}">下载 Markdown</button>
+        <button type="button" class="btn btn-primary btn-sm" data-action="export-legacy-draft-pdf" data-id="${esc(jobId)}">导出 PDF</button>
+      </div>`
+    : `<div class="snapshot-drawer__actions">
+        <button type="button" class="btn btn-secondary btn-sm" data-action="export-snapshot-md" data-id="${esc(snapshot.snapshot_id)}">下载 Markdown</button>
+        <button type="button" class="btn btn-primary btn-sm" data-action="export-snapshot-pdf" data-id="${esc(snapshot.snapshot_id)}">导出 PDF</button>
+      </div>`;
+  if (isLegacy) {
+    return `<div class="snapshot-drawer" data-snapshot-drawer data-snapshot-legacy>
+      <p class="legacy-warning">${ICON_WARN} 早期投递版本（未生成不可篡改快照）</p>
+      <p class="small muted">岗位已投递但尚无不可篡改快照，以下为当前 final_draft。</p>
+      ${actions}
+      ${cheatsheetBlock}
+      <div class="snapshot-drawer__preview">
+        <div class="snapshot-drawer__preview-title">定稿正文（预览）</div>
+        <div class="resume-doc">${renderMarkdown(draft)}</div>
+      </div>
+    </div>`;
+  }
+  const matchPill =
+    score != null
+      ? `<span class="snapshot-drawer__match" data-snapshot-match>投递时匹配度 ${score} 分</span>`
+      : `<span class="snapshot-drawer__match is-muted" data-snapshot-match>投递时匹配度 —</span>`;
+  return `<div class="snapshot-drawer" data-snapshot-drawer>
+    <div class="snapshot-drawer__meta">
+      ${matchPill}
+      ${meta ? `<span class="small muted" data-snapshot-meta>${esc(meta)}</span>` : ""}
+    </div>
+    ${actions}
+    ${cheatsheetBlock}
+    <div class="snapshot-drawer__preview">
+      <div class="snapshot-drawer__preview-title">投递快照正文（预览）</div>
+      <div class="resume-doc" data-snapshot-draft>${renderMarkdown(draft)}</div>
+    </div>
+  </div>`;
 }
 
 /* 面试防深挖清单：从已保存的 JD 画像、差距报告和高置信 diff 中确定性提炼。
@@ -2367,7 +2437,7 @@ export function interviewCheatSheetHtml(job = {}) {
 
   const hallucinationWarning =
     evalScore && evalScore.hallucination_detected
-      ? `<div class="cheatsheet__warning">⚠️ 检测到待复核内容，面试前请先回到工作台核对数字与来源。</div>`
+      ? `<div class="cheatsheet__warning">${ICON_WARN} 检测到待复核内容，面试前请先回到工作台核对数字与来源。</div>`
       : "";
 
   return `
@@ -3017,7 +3087,7 @@ export function blockerListHtml(blockers) {
         <div class="blocker-item__meta">${url}${category ? ` · ${category}` : ""}</div>
         ${reason ? `<div class="blocker-item__reason">${reason}</div>` : ""}
         <div class="blocker-item__actions">
-          <button type="button" class="btn btn-outline btn-sm" data-action="ignore-blocker" data-id="${id}">✗ 跳过</button>
+          <button type="button" class="btn btn-outline btn-sm" data-action="ignore-blocker" data-id="${id}">${ICON_X} 跳过</button>
           <button type="button" class="btn btn-secondary btn-sm" data-action="toggle-blocker-resolve" data-id="${id}">手动补全</button>
         </div>
         <form class="blocker-resolve" data-form="blocker-resolve" data-id="${id}" hidden>
