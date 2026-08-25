@@ -153,3 +153,91 @@ test("failed alignment renders classified banner with stage+elapsed and no inner
   assert.ok(topButton, "top-bar rerun button stays as the single entry");
   assert.match(topButton.textContent, /重新运行对齐/);
 });
+
+/* R5 P1-4（02-UID ③-4 + R2 合议 Q4）：移动端底栏动作条 —— 仅失败/取消/过期
+   （可重试）与运行中常驻；idle/succeeded 不渲染底栏。底栏按钮与顶栏同款，
+   ≤640px 时由 CSS 隐藏顶栏按钮避免同屏双入口。 */
+test("failed alignment renders the mobile bottom action bar with the rerun button", () => {
+  document.body.innerHTML = '<div id="app-router-view"></div>';
+  state.route = { name: "workspace", jobId: "j3", resumeId: null };
+  state.wbMobilePane = "controls";
+  renderSplitCanvas(
+    document.querySelector("#app-router-view"),
+    {
+      job: job({ job_id: "j3" }),
+      jd: {},
+      gap: {},
+      alignment: {
+        status: "failed",
+        error: "模型响应超时",
+        elapsed_seconds: 60,
+        diffs: [],
+      },
+      meta: {},
+    },
+    [{ resume_id: "r1", title: "主简历", current_version: 1 }],
+    [job({ job_id: "j3" })],
+  );
+  const view = document.querySelector(".workbench-view");
+  assert.equal(
+    view.getAttribute("data-mobile-action-bar"),
+    "true",
+    "failed state activates the mobile action bar",
+  );
+  const bar = document.querySelector("[data-wb-action-bar]");
+  assert.ok(bar, "bottom action bar is rendered");
+  const barButton = bar.querySelector('[data-action="run-alignment"]');
+  assert.ok(barButton, "bar carries the rerun button");
+  assert.match(barButton.textContent, /重新运行对齐/);
+});
+
+test("running alignment renders the bottom action bar with a busy button", () => {
+  document.body.innerHTML = '<div id="app-router-view"></div>';
+  state.route = { name: "workspace", jobId: "j4", resumeId: null };
+  state.wbMobilePane = "controls";
+  renderSplitCanvas(
+    document.querySelector("#app-router-view"),
+    {
+      job: job({ job_id: "j4" }),
+      jd: {},
+      gap: {},
+      alignment: { status: "running", diffs: [] },
+      meta: {},
+    },
+    [{ resume_id: "r1", title: "主简历", current_version: 1 }],
+    [job({ job_id: "j4" })],
+  );
+  assert.equal(
+    document.querySelector(".workbench-view").getAttribute("data-mobile-action-bar"),
+    "true",
+  );
+  const barButton = document.querySelector('[data-wb-action-bar] [data-action="run-alignment"]');
+  assert.ok(barButton);
+  assert.ok(barButton.disabled, "running bar button is disabled");
+});
+
+test("idle/succeeded workbench does not render the bottom action bar", () => {
+  for (const status of ["idle", "succeeded"]) {
+    document.body.innerHTML = '<div id="app-router-view"></div>';
+    state.route = { name: "workspace", jobId: "j5", resumeId: null };
+    state.wbMobilePane = "controls";
+    renderSplitCanvas(
+      document.querySelector("#app-router-view"),
+      {
+        job: job({ job_id: "j5", status: "applied" }),
+        jd: {},
+        gap: {},
+        alignment: { status, diffs: [] },
+        meta: {},
+      },
+      [{ resume_id: "r1", title: "主简历", current_version: 1 }],
+      [job({ job_id: "j5", status: "applied" })],
+    );
+    assert.equal(
+      document.querySelector(".workbench-view").getAttribute("data-mobile-action-bar"),
+      null,
+      `${status} must not reserve the bottom bar`,
+    );
+    assert.equal(document.querySelector("[data-wb-action-bar]"), null);
+  }
+});

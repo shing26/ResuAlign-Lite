@@ -12222,3 +12222,84 @@ select,
   opacity: 0.85;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
 }
+
+/* ================================================================
+   R5 前端收尾（expert-team-20260825）
+   P1-2 词表联动触控基线 / P1-3 驾驶舱失败标识 / P1-4 移动端可达性最小集
+   ================================================================ */
+
+/* P1-2 (02-UID ③-2/④ .select--vocab)：岗位卡状态下拉触控 ≥40px */
+.board-status-select {
+  min-height: var(--touch-min-safe, 40px);
+  padding: 6px 10px;
+}
+
+/* P1-3 (02-UID ③-6 / 01-GPM P1-3)：快速继续卡失败警示型
+   —— 左条 4px --error + 红标识，不再被误读为「待分析」。 */
+.quick-row--failed {
+  box-shadow: inset 4px 0 0 var(--error, #c0392b);
+  padding-left: 10px;
+}
+
+.quick-continue--failed {
+  box-shadow: inset 4px 0 0 var(--error, #c0392b);
+}
+
+/* P1-4 可达性保险：若失败横幅/提示 toast 未来出现关闭钮，触控 ≥32px。
+ * 当前对齐失败横幅按 R2 合议 Q3 为持久横幅（无关闭钮），此规则仅兜底。 */
+.align-error-banner .banner__close,
+.align-error-banner button,
+.toast button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 6px;
+}
+
+/* P1-4 (02-UID ③-4 + R2 合议 Q4)：移动端底栏动作条
+   —— 仅失败/取消/过期（可重试）或运行中常驻，idle/succeeded 不占底栏；
+   底栏接管主按钮（顶栏同款隐藏），保持 P0-2「同屏单重试入口」。 */
+.wb-action-bar {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  /* 工作台主按钮触控 ≥40px（390px 实测 36px → 补齐） */
+  .workbench-view [data-action="run-alignment"],
+  .workbench-view [data-action="go-resumes"] {
+    min-height: var(--touch-min-safe, 40px);
+    padding: 12px 16px;
+  }
+
+  .workbench-view[data-mobile-action-bar="true"] .wb-action-bar {
+    display: flex;
+    gap: 10px;
+    position: sticky;
+    bottom: 0;
+    z-index: 30;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+    background: color-mix(in srgb, var(--ra-surface-2, #1d2129) 92%, transparent);
+    backdrop-filter: blur(12px);
+    border-top: 1px solid var(--ra-border, rgba(255, 255, 255, 0.08));
+  }
+
+  .wb-action-bar .btn {
+    flex: 1 1 auto;
+    min-height: var(--touch-min, 44px);
+  }
+
+  /* 底栏激活时顶栏主按钮隐藏（避免同屏两个重试入口）；桌面不受影响 */
+  .workbench-view[data-mobile-action-bar="true"]
+    .wb-context-actions [data-action="run-alignment"],
+  .workbench-view[data-mobile-action-bar="true"]
+    .wb-context-actions [data-action="go-resumes"] {
+    display: none;
+  }
+
+  /* 内容滚动到底不底栏遮挡（R2 合议 Q4 约束 b） */
+  .app-shell {
+    scroll-padding-bottom: 76px;
+  }
+}

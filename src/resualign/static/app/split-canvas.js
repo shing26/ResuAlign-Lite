@@ -211,8 +211,14 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const dutyText = String(
     (summary && summary.summary) || job.jd_text || "",
   ).trim().slice(0, 240);
+  /* R5 P1-4（02-UID ③-4 + R2 合议 Q4）：移动端底栏动作条仅在「必须行动」
+   * 态常驻 —— 失败/取消/过期（可重试）或 运行中；idle/succeeded 不占底栏。
+   * ≤640px 时底栏接管主按钮（顶栏同款按钮隐藏，保持 P0-2 单入口）。 */
+  const barActive =
+    alignmentRunning ||
+    ["failed", "canceled", "expired"].includes(alignment.status);
   app.innerHTML = `
-    <div class="view view-fit workbench-view" data-surface-mode="optimizer">
+    <div class="view view-fit workbench-view" data-surface-mode="optimizer"${barActive ? ' data-mobile-action-bar="true"' : ""}>
       ${crawlStatusLine(session)}
       <div class="wb-mobile-tabs" role="tablist" aria-label="工作台面板">
         <button type="button" class="segmented-button seg" data-action="set-wb-tab" data-wb-tab="controls" aria-selected="${state.wbMobilePane === "controls"}">调优</button>
@@ -316,6 +322,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <input type="checkbox" name="run_eval" hidden>
         </form>
       </div>
+      ${barActive ? `<div class="wb-action-bar" data-wb-action-bar>${workbenchPrimaryButtonHtml(resumes, alignmentRunning, alignment)}</div>` : ""}
     </div>`;
   const form = $("[data-form='split-align']");
   if (form) {
