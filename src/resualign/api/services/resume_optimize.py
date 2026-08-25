@@ -58,7 +58,12 @@ def run_resume_optimize(
         client = None
         build_error = None
         try:
-            client = api_module.OpenAIClient(config, timeout=polish_timeout())
+            client = api_module.OpenAIClient(
+                config,
+                timeout=polish_timeout(),
+                # R4 P0-2：polish 非 role 直连调用，输出钳制 1024（03-AIE §③）。
+                max_tokens=1024,
+            )
         except Exception as exc:  # noqa: BLE001 - report as per-module failure
             logger.warning("Failed to build LLM client for resume optimize: %s", exc)
             build_error = module_failure_detail(exc, "模型客户端")
