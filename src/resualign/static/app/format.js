@@ -2154,7 +2154,8 @@ export function workbenchPrimaryButtonHtml(
   } else if (hasResumes && failed) {
     /* Bug-09: 失败后主按钮给出明确的重试入口与警示样式。 */
     label = "重新运行对齐";
-    extraClass = " btn-danger";
+    /* R2 合议：失败态危险操作与「确认删除」同级，升级为红实底白字（btn-danger-solid）。 */
+    extraClass = " btn-danger-solid";
   }
   return `<button class="btn btn-primary${extraClass}" type="button" data-action="${hasResumes ? "run-alignment" : "go-resumes"}" ${hasResumes && alignmentRunning ? "disabled" : ""}>${esc(label)}</button>`;
 }

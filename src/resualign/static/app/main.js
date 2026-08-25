@@ -1769,7 +1769,7 @@ const actions = {
   "run-alignment": () => {
     const form = $("[data-form='split-align']");
     if (!form) {
-      toast("请先在左侧「优化设置」中配置主简历", "error");
+      toast("请先在右侧「优化设置」中配置主简历", "error");
       return;
     }
     if (typeof form.requestSubmit === "function") {
