@@ -77,6 +77,14 @@ test("styles.css styles the inline source editor", () => {
   );
   assert.match(css, /\.resume-inline-edit\s*\{/);
   assert.match(css, /body\.resume-inline-editing/, "view hidden while editing");
+  /* P1-1 回归：.resume-inline-edit {display:flex} 靠后声明会压过早先的
+     .hidden {display:none}，必须存在 body:not(.resume-inline-editing) 守卫
+     保证简历档案页初始不渲染内联源码编辑框。 */
+  assert.match(
+    css,
+    /body:not\(\.resume-inline-editing\)\s*\.resume-inline-edit\.hidden/,
+    "initial hidden beats the flex layout rule",
+  );
 });
 
 /* ------------------------------------------------------------------ */
@@ -172,7 +180,7 @@ test("split-canvas.js renders the template workbench three-pane structure", () =
   assert.match(src, /简历精修/, "alignment canvas title");
   assert.match(src, /workbenchPrimaryButtonHtml/, "primary button helper mounted");
   const formatSrc = read("format.js");
-  assert.match(formatSrc, /开始优化/, "rerun alignment button");
+  assert.match(formatSrc, /开始对齐/, "rerun alignment button");
   assert.match(formatSrc, /data-action="run-alignment"/, "rerun alignment action");
   assert.match(src, /data-inspector-pane/, "inspector pane contract");
   assert.match(src, /data-diff-pane/, "diff pane contract");

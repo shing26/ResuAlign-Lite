@@ -293,6 +293,17 @@ test("diffList renders cards or the empty state", () => {
   assert.match(empty, /还没有对齐结果/);
 });
 
+/* P0-2 回归：失败/取消/过期态不再渲染「还没有对齐结果」首次引导卡 ——
+   失败反馈收敛到顶部横幅 + 顶栏「重新运行对齐」单入口。 */
+test("diffList suppresses the first-run guide for failed/canceled/expired states", () => {
+  ["failed", "canceled", "expired"].forEach((status) => {
+    const html = diffList({ alignment: { status } }, "job-1");
+    assert.doesNotMatch(html, /data-resume-canvas-empty/, `${status} hides guide`);
+    assert.doesNotMatch(html, /还没有对齐结果/, `${status} hides guide title`);
+    assert.match(html, /data-diff-list/, `${status} keeps list container`);
+  });
+});
+
 /* T3: diff.section 徽章（后端契约：DiffItem.section，字符串，可为空） */
 
 test("diffSectionBadge renders empty for missing or blank section", () => {

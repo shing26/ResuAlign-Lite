@@ -402,8 +402,8 @@ def test_workbench_json_parse_error_gets_actionable_message():
         ),
     )
     assert "简历定制" in detail
-    assert "空内容或无法解析" in detail
-    assert "重新运行" in detail
+    assert "格式异常" in detail
+    assert "重试" in detail
 
 
 def test_workbench_rate_limit_error_gets_retry_message():
@@ -417,6 +417,48 @@ def test_workbench_rate_limit_error_gets_retry_message():
     )
     assert "繁忙" in detail
     assert "稍后重试" in detail
+
+
+def test_workbench_timeout_quotes_elapsed_when_available():
+    detail = api_module._job_failure_detail(
+        "jd_analysis",
+        LLMResponseError(
+            "Structured LLM call failed after 1 attempt (network timeout): "
+            "The read operation timed out"
+        ),
+        elapsed_secs=166.2,
+    )
+    assert "JD 画像与差距分析" in detail
+    assert "模型响应超时" in detail
+    assert "166.2" in detail
+    assert "API Key" not in detail
+
+
+def test_workbench_empty_response_gets_retry_message():
+    detail = api_module._job_failure_detail(
+        "tailoring",
+        LLMResponseError("Structured response was empty after 2 attempts"),
+    )
+    assert "模型返回为空" in detail
+    assert "API Key" not in detail
+
+
+def test_workbench_api_key_only_mentioned_for_auth_failures():
+    detail = api_module._job_failure_detail(
+        "tailoring",
+        LLMResponseError(
+            "Structured LLM call failed after 2 attempts: "
+            "Client error '401 Unauthorized' for url "
+            "https://api.openai.com/chat/completions"
+        ),
+    )
+    assert "API Key" in detail
+
+    unknown = api_module._job_failure_detail(
+        "tailoring", LLMResponseError("provider exploded mysteriously")
+    )
+    assert "API Key" not in unknown
+    assert "模型服务暂时不可用" in unknown
 
 
 def test_timeout_defaults_bound_request_hangs():

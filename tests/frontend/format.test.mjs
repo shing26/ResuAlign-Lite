@@ -979,7 +979,7 @@ test("workbenchPrimaryButtonHtml swaps to create resume without resumes", () => 
 
   const ready = workbenchPrimaryButtonHtml([{ resume_id: "r1" }]);
   assert.match(ready, /data-action="run-alignment"/);
-  assert.match(ready, />开始优化<\/button>/);
+  assert.match(ready, />开始对齐<\/button>/);
 
   const running = workbenchPrimaryButtonHtml([{ resume_id: "r1" }], true);
   assert.match(running, /disabled/);

@@ -772,12 +772,18 @@ export function diffList(session, jobId) {
     .map((diff, index) => diffCard(diff, index, jobId))
     .join("");
   if (!cards) {
+    /* P0-2: 失败/取消/过期态不再渲染「还没有对齐结果」首次引导卡 —— 失败反馈
+     * 收敛到顶部错误横幅 + 顶栏危险级「重新运行对齐」单入口，避免同屏 3 个
+     * 对齐入口、2 套标签（2026-08-25 走查实测的失败态三入口问题）。 */
+    if (["failed", "canceled", "expired"].includes(alignment.status)) {
+      return '<div class="diff-card-list" data-diff-list></div>';
+    }
     return `
       <div class="resume-empty" data-resume-canvas-empty>
         <div class="resume-empty__title">还没有对齐结果</div>
         <ol class="resume-empty__steps">
-          <li>在左侧「优化设置」选择主简历</li>
-          <li>点击右侧顶部「开始优化」</li>
+          <li>在右侧「优化设置」中选择主简历</li>
+          <li>点击上方「开始对齐」开始分析</li>
           <li>逐条采纳建议并保存定稿</li>
         </ol>
         <button class="btn btn-primary btn-sm" type="button" data-action="run-alignment">开始对齐</button>
@@ -2135,10 +2141,13 @@ export function workbenchPrimaryButtonHtml(
   alignment = null,
 ) {
   const hasResumes = Array.isArray(resumes) && resumes.length > 0;
+  /* P0-2: 失败/取消/过期统一走危险级「重新运行对齐」单入口（顶栏）。 */
   const failed = Boolean(
-    alignment && (alignment.status === "failed" || alignment.status === "canceled"),
+    alignment &&
+      ["failed", "canceled", "expired"].includes(alignment.status),
   );
-  let label = hasResumes ? "开始优化" : "先创建主简历";
+  /* P0-2: 全站统一动词 —— 「开始优化」→「开始对齐」。 */
+  let label = hasResumes ? "开始对齐" : "先创建主简历";
   let extraClass = "";
   if (hasResumes && alignmentRunning) {
     label = "对齐生成中...";

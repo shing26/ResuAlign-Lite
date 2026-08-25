@@ -79,7 +79,7 @@ test("workbench guide advances to follow-up and restores alignment button", () =
   );
   const primary = app.querySelector('[data-action="run-alignment"]');
   assert.ok(primary, "alignment button returns when resumes exist");
-  assert.match(primary.textContent, /开始优化/);
+  assert.match(primary.textContent, /开始对齐/);
 });
 
 test("workbench guide completes after follow-up is arranged", () => {
@@ -106,4 +106,50 @@ test("workbench guide completes after follow-up is arranged", () => {
       .length,
     0,
   );
+});
+
+/* P0-1/P0-2: 失败横幅 = 分类徽标 + 阶段/耗时元信息，且不再自带第二个
+   「重新运行对齐」按钮（收敛到顶栏单入口）；失败态同时抑制首次引导卡。 */
+test("failed alignment renders classified banner with stage+elapsed and no inner rerun button", () => {
+  document.body.innerHTML = '<div id="app-router-view"></div>';
+  const bannerHtml = (() => {
+    /* 直接复用 renderSplitCanvas 的失败对齐态：控制台上重新渲染一次 */
+    state.route = { name: "workspace", jobId: "j2", resumeId: null };
+    state.wbMobilePane = "controls";
+    renderSplitCanvas(
+      document.querySelector("#app-router-view"),
+      {
+        job: job({ job_id: "j2" }),
+        jd: {},
+        gap: {},
+        alignment: {
+          status: "failed",
+          stage: "jd_analysis",
+          elapsed_seconds: 166.2,
+          error:
+            "对齐分析在「JD 画像与差距分析」阶段失败：模型响应超时（本次耗时 166.2 秒），可尝试更换更快的模型或稍后重试",
+          diffs: [],
+        },
+        meta: {},
+      },
+      [{ resume_id: "r1", title: "主简历", current_version: 1 }],
+      [job({ job_id: "j2" })],
+    );
+    return document.querySelector("#app-router-view").innerHTML;
+  })();
+  assert.match(bannerHtml, /data-align-error-banner/);
+  assert.match(bannerHtml, /data-align-error-kind="timeout"/);
+  assert.match(bannerHtml, /模型响应超时（本次耗时 166\.2 秒）/);
+  assert.match(bannerHtml, /本次耗时 2:46/);
+  assert.doesNotMatch(bannerHtml, /data-resume-canvas-empty/, "failed state hides first-run guide");
+  const banner = document.querySelector("[data-align-error-banner]");
+  assert.ok(banner, "banner element rendered");
+  assert.equal(
+    banner.querySelectorAll('[data-action="run-alignment"]').length,
+    0,
+    "banner carries no inner rerun button (top-bar single entry)",
+  );
+  const topButton = document.querySelector('[data-action="run-alignment"]');
+  assert.ok(topButton, "top-bar rerun button stays as the single entry");
+  assert.match(topButton.textContent, /重新运行对齐/);
 });

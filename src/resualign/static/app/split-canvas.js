@@ -74,6 +74,56 @@ let liveSheetApiPromise = null;
 let pendingSkillFocus = null;
 let activeAuxPane = "inspector";
 
+/* P0-1: 对齐失败分类 —— 后端 jobs.py 已按超时/格式/空内容/限流/auth 分类产出
+ * 文案，这里按文案特征再打一个简短类别徽标；横幅同时展示后端快照带来的
+ * 阶段与本次耗时（analysis-status 的 stage / elapsed_seconds）。 */
+const ALIGN_FAILURE_KINDS = {
+  timeout: "超时",
+  format: "内容格式异常",
+  empty: "返回为空",
+  auth: "模型配置",
+  ratelimit: "服务限流",
+  expired: "任务已过期",
+  canceled: "任务已取消",
+  other: "任务失败",
+};
+
+function alignmentFailureKind(message, status) {
+  const text = String(message || "").toLowerCase();
+  if (status === "expired" || text.includes("过期")) return "expired";
+  if (status === "canceled" || text.includes("取消")) return "canceled";
+  if (/(timeout|timed out|超时)/.test(text)) return "timeout";
+  if (/(expecting value|not a json|invalid json|schema|failed validation|格式异常|无法解析)/.test(text)) return "format";
+  if (/(empty|返回为空)/.test(text)) return "empty";
+  if (/(429|rate limit|限流|繁忙)/.test(text)) return "ratelimit";
+  if (/(401|403|api key|unauthorized|无效或缺少权限|无效或缺失)/.test(text)) return "auth";
+  return "other";
+}
+
+/* P0-2: 失败/取消/过期横幅只承担「讲清失败原因」职责，不再放第二个
+ * 「重新运行对齐」按钮 —— 重试收敛到顶栏危险级单入口（workbenchPrimaryButtonHtml）。 */
+function workbenchAlignmentErrorBanner(alignment) {
+  const status = alignment && alignment.status;
+  if (!["failed", "canceled", "expired"].includes(status)) return "";
+  const errorText = (alignment && alignment.error) || "对齐任务失败，请重新运行";
+  const kind = alignmentFailureKind(errorText, status);
+  const meta = [];
+  if (alignment.stage && alignment.stage !== status) {
+    meta.push(`阶段：${STAGE_LABELS[alignment.stage] || alignment.stage}`);
+  }
+  const elapsedSecs = Number(alignment.elapsed_seconds);
+  if (Number.isFinite(elapsedSecs) && elapsedSecs > 0) {
+    meta.push(`本次耗时 ${formatElapsed(Math.round(elapsedSecs * 1000))}`);
+  }
+  return (
+    `<div class="align-error-banner" role="alert" data-align-error-banner data-align-error-kind="${esc(kind)}">` +
+    `<strong>对齐失败 · ${esc(ALIGN_FAILURE_KINDS[kind] || "任务失败")}</strong>` +
+    `<span>${esc(errorText)}</span>` +
+    (meta.length ? `<span class="align-error-meta">${esc(meta.join(" · "))}</span>` : "") +
+    `</div>`
+  );
+}
+
 
 export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   /* A workspace render started before a route change may resolve after the
@@ -190,15 +240,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           </div>
         </div>
       </div>
-      ${
-        alignment.status === "failed" || alignment.status === "canceled"
-          ? `<div class="align-error-banner" role="alert" data-align-error-banner>
-          <strong>对齐失败</strong>
-          <span>${esc(alignment.error || "对齐任务失败，请重新运行")}</span>
-          <button type="button" class="btn btn-ghost btn-sm" data-action="run-alignment">重新运行对齐</button>
-        </div>`
-          : ""
-      }
+      ${workbenchAlignmentErrorBanner(alignment)}
       ${workbenchGuideHtml(job, hasGuideDraft)}
       <div class="wb-grid" data-split-layout>
         <section class="wb-main ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>
@@ -1115,10 +1157,11 @@ function setAlignmentTerminal(snapshot) {
   activeSession.alignment = {
     ...(activeSession.alignment || {}),
     status,
-    stage: status,
+    stage: snapshot.stage || status,
     error:
       snapshot.error ||
       (status === "canceled" ? "对齐任务已取消" : "对齐任务失败，请重新运行"),
+    elapsed_seconds: Number(snapshot.elapsed_seconds) || 0,
     diffs: (snapshot.result && snapshot.result.diffs) || [],
     invalid_diffs: (snapshot.result && snapshot.result.invalid_diffs) || [],
     draft: (snapshot.result && snapshot.result.draft) || activeSession.alignment?.draft || null,
@@ -1295,6 +1338,7 @@ async function pollAlignmentJob() {
           (snapshot.status === "expired"
             ? "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成"
             : null),
+        elapsed_seconds: Number(snapshot.elapsed_seconds) || 0,
         diffs: (snapshot.result && snapshot.result.diffs) || [],
         invalid_diffs: (snapshot.result && snapshot.result.invalid_diffs) || [],
         draft: (snapshot.result && snapshot.result.draft) || activeSession.alignment?.draft || null,

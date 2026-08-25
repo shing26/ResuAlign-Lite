@@ -29,11 +29,18 @@ _STAGE_LABELS = {
 }
 
 
-def _job_failure_detail(stage: str, exc: BaseException) -> str:
+def _job_failure_detail(
+    stage: str, exc: BaseException, elapsed_secs: float | None = None
+) -> str:
     """Return a readable, stage-aware failure reason for an analysis job.
 
     Replaces the old generic ``Analysis failed after an internal error`` so
-    the workbench can show *where* the run died and why.
+    the workbench can show *where* the run died and why. P0-1: failures are
+    classified into actionable copy — timeouts no longer blame the API Key /
+    network (the 2026-08-25 walkthrough proved the Key/connectivity were fine
+    while the guardrail timeout was the real cause); ``elapsed_secs`` lets the
+    timeout branch quote the actual run duration (the workbench also surfaces
+    ``elapsed_seconds`` from the snapshot). Return structure stays a plain str.
     """
     stage_label = _STAGE_LABELS.get(stage, stage or "未知阶段")
     message = str(exc) or exc.__class__.__name__
@@ -42,22 +49,48 @@ def _job_failure_detail(stage: str, exc: BaseException) -> str:
         if "429" in message or "rate limit" in lowered:
             reason = "模型服务繁忙（限流），请稍后重试"
         elif (
+            "401" in message
+            or "403" in message
+            or "unauthorized" in lowered
+            or "authentication" in lowered
+            or "invalid api key" in lowered
+            or "api key" in lowered
+        ):
+            # P0-1: 只有 auth 类失败才引导用户检查 API Key（2026-08-25 走查实测
+            # Key 有效+连通正常时，超时才是真因，不能一概归因到 Key/网络）。
+            reason = "API Key 无效或缺少权限，请检查模型设置"
+        elif (
             "timeout" in lowered
             or "timed out" in lowered
             or "time-out" in lowered
         ):
-            reason = "模型响应超时，请检查 API Key 与网络连接后重试"
+            if elapsed_secs is not None:
+                reason = (
+                    "模型响应超时（本次耗时 "
+                    f"{elapsed_secs:.1f} 秒），可尝试更换更快的模型或稍后重试"
+                )
+            else:
+                reason = "模型响应超时，可尝试更换更快的模型或稍后重试"
+        elif (
+            "empty response" in lowered
+            or "empty content" in lowered
+            or "returned empty" in lowered
+            or "was empty" in lowered
+            or "empty after" in lowered
+        ):
+            reason = "模型返回为空，请重试"
         elif (
             "expecting value" in lowered
             or "no json object found" in lowered
-            or "empty response" in lowered
-            or "empty content" in lowered
+            or "not a json object" in lowered
+            or "invalid json" in lowered
+            or "schema validation" in lowered
+            or "failed validation" in lowered
         ):
-            reason = "模型返回了空内容或无法解析的 JSON，请重新运行；若仍失败可尝试更换模型"
-        elif "schema validation" in lowered or "failed validation" in lowered:
-            reason = "模型返回的定制内容结构不符合预期，已自动修复重试后仍失败；请重新运行，若持续失败可尝试更换模型"
+            reason = "模型返回内容格式异常，请重试或更换模型"
         else:
-            reason = "模型服务暂时不可用或返回异常，请检查 API Key 与网络连接后重试"
+            # P0-1: 未分类失败不再归因 API Key/网络（仅 auth 分支引导查 Key）。
+            reason = "模型服务暂时不可用，请稍后重试"
     else:
         reason = message[:300] or "内部错误"
     return f"对齐分析在「{stage_label}」阶段失败：{reason}"
@@ -634,15 +667,22 @@ def _run_job(job_id: str) -> None:
                     )
         except Exception as exc:
             logger.exception('Analysis job %s failed', job_id)
+            # t0 is only bound once the try body reached the run phase; guard
+            # so crawls/claims that fail earlier never NameError here.
+            elapsed_secs = (
+                round(time.monotonic() - t0, 1)
+                if 't0' in locals() and t0 is not None
+                else None
+            )
             if payload.get('diagnosis'):
                 error = '诊断任务暂时失败：模型服务不可用或返回异常，请检查 API Key 与网络连接后重试'
             elif payload.get('optimize_resume'):
                 error = api_module._job_failure_detail(
-                    failed_stage, exc
+                    failed_stage, exc, elapsed_secs
                 ).replace('对齐分析', '简历优化')
             else:
                 error = api_module._job_failure_detail(
-                    failed_stage, exc
+                    failed_stage, exc, elapsed_secs
                 )
             api_module._registry.fail(job_id, error, stage=failed_stage or None)
             if application_id:

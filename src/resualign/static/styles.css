@@ -9567,6 +9567,17 @@ html {
   padding: 16px 20px;
 }
 
+/* P1-1: 初始隐藏回归 —— 上面的 .resume-inline-edit {display:flex} 位于
+ * .hidden {display:none}（~:7998）之后且同权重，会覆盖它，导致简历档案页
+ * 加载后内联源码编辑框（整份 Markdown textarea + 保存按钮）默认可见。
+ * 用 body:not(.resume-inline-editing) 守卫：未进入双态编辑时强制隐藏；
+ * 进入编辑态（body 加 resume-inline-editing，取消/保存由 main.js 管理
+ * hidden 属性）时恢复如下 flex 布局；属性态隐藏由全局 [hidden] 兜底。 */
+body:not(.resume-inline-editing) .resume-editor.hidden,
+body:not(.resume-inline-editing) .resume-inline-edit.hidden {
+  display: none !important;
+}
+
 .resume-editor textarea,
 .resume-inline-edit textarea {
   flex: 1;
@@ -12203,4 +12214,11 @@ select,
   font-size: 0.82rem;
   color: inherit;
   overflow-wrap: anywhere;
+}
+/* P0-1: 失败横幅的阶段/耗时元信息行（后端快照 elapsed_seconds + stage）。 */
+.align-error-banner .align-error-meta {
+  flex: 1 1 100%;
+  font-size: 0.72rem;
+  opacity: 0.85;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
 }

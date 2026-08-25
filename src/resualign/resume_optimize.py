@@ -291,22 +291,36 @@ def module_failure_detail(exc: BaseException, module_label: str) -> str:
         lowered = message.lower()
         if "402" in message or "payment" in lowered or "insufficient" in lowered or "余额" in message:
             reason = "模型账户欠费或余额不足，请充值后重试"
-        elif "401" in message or "403" in message or "invalid" in lowered or "api key" in lowered:
+        elif (
+            "401" in message
+            or "403" in message
+            or "invalid api key" in lowered
+            or "api key" in lowered
+            or "unauthorized" in lowered
+            or "authentication" in lowered
+        ):
+            # P0-1: 仅 auth 类失败提示查 API Key；"invalid" 若继续保留会误吞
+            # "invalid json" 之类的结构解析失败。
             reason = "API Key 无效或缺失，请检查模型设置"
         elif "429" in message or "rate limit" in lowered:
             reason = "模型服务限流，请稍后重试"
         elif "timeout" in lowered or "timed out" in lowered or "time-out" in lowered:
-            reason = "模型响应超时，请检查网络后重试"
-        elif "schema" in lowered or "failed validation" in lowered:
-            reason = "模型返回的润色内容结构不符合预期，可重新润色；若持续失败可尝试更换模型"
+            reason = "模型响应超时，可尝试更换更快的模型或稍后重试"
         elif (
             "empty" in lowered
+            or "returned nothing" in lowered
+        ):
+            reason = "模型返回为空，请重试"
+        elif (
+            "schema" in lowered
+            or "failed validation" in lowered
             or "expecting value" in lowered
             or "no json" in lowered
+            or "not a json object" in lowered
         ):
-            reason = "模型返回了空内容或无法解析的 JSON，可重新润色"
+            reason = "模型返回内容格式异常，请重试或更换模型"
         else:
-            reason = "模型服务暂时不可用，请检查 API Key 与网络后重试"
+            reason = "模型服务暂时不可用，请稍后重试"
     else:
         reason = (message or "内部错误")[:200]
     return f"「{module_label or '该条目'}」润色失败：{reason}"
