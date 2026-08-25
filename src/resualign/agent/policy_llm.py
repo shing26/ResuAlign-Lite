@@ -82,7 +82,10 @@ class LLMJdIntakePolicy:
                     "LLM not configured for the JD intake policy"
                 )
             with OpenAIClient(
-                config, timeout=_JD_INTAKE_POLICY_TIMEOUT
+                config,
+                timeout=_JD_INTAKE_POLICY_TIMEOUT,
+                # R4 P0-2：intake 非 role 直连调用，输出钳制 64（03-AIE §③）。
+                max_tokens=64,
             ) as client:
                 result = _structured_or_json(
                     client,

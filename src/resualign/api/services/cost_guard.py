@@ -49,6 +49,34 @@ def enforce_daily_llm_cap(tenant_id: str) -> None:
         )
 
 
+# R4 P0-6（03-AIE §③）：同一 job（library_job_id）连续失败熔断阈值。
+# 失败后用户可无脑连点重试烧额度（体验报告 P0-1④），熔断前先引导换节点/缩短 JD。
+_FAIL_STREAK_LIMIT = 3
+_REPEATED_FAILURES_DETAIL = {
+    "message": "该任务已连续失败 3 次，建议先更换模型/节点或缩短 JD 后重试",
+    "code": "repeated_failures",
+}
+
+
+def enforce_llm_task_entry(
+    tenant_id: str,
+    job_ref_key: str | None = None,
+) -> None:
+    """Entry interception: daily cap + consecutive-failure circuit breaker.
+
+    Wired into ``_queue_job`` (api/services/jobs.py) so every queued LLM task
+    is gated; ``job_ref_key`` is the library_job_id for workbench retries.
+    """
+    enforce_daily_llm_cap(tenant_id)
+    if job_ref_key:
+        streak = api_module._registry.recent_fail_streak(tenant_id, job_ref_key)
+        if streak >= _FAIL_STREAK_LIMIT:
+            raise HTTPException(
+                status_code=429,
+                detail=_REPEATED_FAILURES_DETAIL,
+            )
+
+
 def record_daily_llm_usage() -> None:
     """Persist one logical LLM call for the current tenant (recorder hook)."""
     from ...llm_usage import current_llm_tenant

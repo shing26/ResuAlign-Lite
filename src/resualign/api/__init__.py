@@ -159,6 +159,7 @@ __all__ = [
     "classify_job",
     "crawl_jd",
     "enforce_daily_llm_cap",
+    "enforce_llm_task_entry",
     "extract_salary_range",
     "extract_text",
     "get_current_user",
@@ -276,6 +277,7 @@ from .services import resume_optimize as _resume_optimize_service
 from .services import workbench as _workbench_service
 from .services.cost_guard import (
     enforce_daily_llm_cap,
+    enforce_llm_task_entry,
     llm_daily_status,
     record_daily_llm_usage,
 )

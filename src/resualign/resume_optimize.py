@@ -297,39 +297,58 @@ def module_failure_detail(exc: BaseException, module_label: str) -> str:
     """Return a readable, user-facing reason when ONE module fails to polish."""
     message = str(exc) or exc.__class__.__name__
     if isinstance(exc, LLMResponseError):
-        lowered = message.lower()
-        if "402" in message or "payment" in lowered or "insufficient" in lowered or "余额" in message:
-            reason = "模型账户欠费或余额不足，请充值后重试"
-        elif (
-            "401" in message
-            or "403" in message
-            or "invalid api key" in lowered
-            or "api key" in lowered
-            or "unauthorized" in lowered
-            or "authentication" in lowered
-        ):
-            # P0-1: 仅 auth 类失败提示查 API Key；"invalid" 若继续保留会误吞
-            # "invalid json" 之类的结构解析失败。
-            reason = "API Key 无效或缺失，请检查模型设置"
-        elif "429" in message or "rate limit" in lowered:
-            reason = "模型服务限流，请稍后重试"
-        elif "timeout" in lowered or "timed out" in lowered or "time-out" in lowered:
-            reason = "模型响应超时，可尝试更换更快的模型或稍后重试"
-        elif (
-            "empty" in lowered
-            or "returned nothing" in lowered
-        ):
-            reason = "模型返回为空，请重试"
-        elif (
-            "schema" in lowered
-            or "failed validation" in lowered
-            or "expecting value" in lowered
-            or "no json" in lowered
-            or "not a json object" in lowered
-        ):
-            reason = "模型返回内容格式异常，请重试或更换模型"
+        # R4 P0-1：结构化 code 优先分支（与 _job_failure_detail 同口径）；
+        # code == "other" 回退文本分类（兼容无 code 构造的老调用方）。
+        code = getattr(exc, "code", "other")
+        if code != "other":
+            if code == "quota":
+                reason = "模型账户欠费或余额不足，请充值后重试"
+            elif code == "auth":
+                reason = "API Key 无效或缺失，请检查模型设置"
+            elif code == "rate_limit":
+                reason = "模型服务限流，请稍后重试"
+            elif code == "timeout":
+                reason = "模型响应超时，可尝试更换更快的模型或稍后重试"
+            elif code == "empty":
+                reason = "模型返回为空，请重试"
+            elif code in ("parse", "schema"):
+                reason = "模型返回内容格式异常，请重试或更换模型"
+            else:
+                reason = "模型服务暂时不可用，请稍后重试"
         else:
-            reason = "模型服务暂时不可用，请稍后重试"
+            lowered = message.lower()
+            if "402" in message or "payment" in lowered or "insufficient" in lowered or "余额" in message:
+                reason = "模型账户欠费或余额不足，请充值后重试"
+            elif (
+                "401" in message
+                or "403" in message
+                or "invalid api key" in lowered
+                or "api key" in lowered
+                or "unauthorized" in lowered
+                or "authentication" in lowered
+            ):
+                # P0-1: 仅 auth 类失败提示查 API Key；"invalid" 若继续保留会误吞
+                # "invalid json" 之类的结构解析失败。
+                reason = "API Key 无效或缺失，请检查模型设置"
+            elif "429" in message or "rate limit" in lowered:
+                reason = "模型服务限流，请稍后重试"
+            elif "timeout" in lowered or "timed out" in lowered or "time-out" in lowered:
+                reason = "模型响应超时，可尝试更换更快的模型或稍后重试"
+            elif (
+                "empty" in lowered
+                or "returned nothing" in lowered
+            ):
+                reason = "模型返回为空，请重试"
+            elif (
+                "schema" in lowered
+                or "failed validation" in lowered
+                or "expecting value" in lowered
+                or "no json" in lowered
+                or "not a json object" in lowered
+            ):
+                reason = "模型返回内容格式异常，请重试或更换模型"
+            else:
+                reason = "模型服务暂时不可用，请稍后重试"
     else:
         reason = (message or "内部错误")[:200]
     return f"「{module_label or '该条目'}」润色失败：{reason}"

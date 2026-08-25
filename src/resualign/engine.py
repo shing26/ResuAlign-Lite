@@ -8,9 +8,9 @@ from .extractor import extract_structured
 from .gap_analyzer import analyze_gaps
 from .jd_analysis import jd_profile_to_dict
 from .jd_profiler import profile_jd
-from .llm import LLMClient, OpenAIClient, diagnose_resume
+from .llm import LLMClient, LLMResponseError, OpenAIClient, diagnose_resume
 from .llm_nodes import LLMNodeStore
-from .models import Report, ResuAlignConfig
+from .models import GapReport, Report, ResuAlignConfig
 from .role_router import call_with_role, _role_timeout
 from .rule_diagnose import diagnose_resume_local
 from .tailor import tailor_resume
@@ -210,21 +210,45 @@ def run(
                 ensure_ascii=False,
             )
             if use_roles:
-                gap_result, _ = call_with_role(
-                    "gap_analyzer", analyze_gaps,
-                    node_store, tenant_id,
-                    fn_kwargs={
-                        "resume_text": resume_text,
-                        "jd_profile_text": _profile_str,
-                    },
-                )
-                report.gap_report = gap_result
+                # R4 P0-5（03-AIE §③）：gap 结构失败（code ∈ schema/parse/empty）
+                # 降级为空 GapReport + gap_degraded 标记，任务继续而非整体 fail；
+                # profiler 维持硬失败（无画像则 gap/tailor 无意义）。timeout/quota/
+                # auth/rate_limit 等非结构失败仍冒泡。
+                try:
+                    gap_result, _ = call_with_role(
+                        "gap_analyzer", analyze_gaps,
+                        node_store, tenant_id,
+                        fn_kwargs={
+                            "resume_text": resume_text,
+                            "jd_profile_text": _profile_str,
+                        },
+                    )
+                    report.gap_report = gap_result
+                except LLMResponseError as exc:
+                    if getattr(exc, "code", "") in ("schema", "parse", "empty"):
+                        logger.warning(
+                            "gap degraded, continuing with empty report: %s", exc
+                        )
+                        report.gap_report = GapReport()
+                        report.gap_degraded = True
+                    else:
+                        raise
             else:
-                report.gap_report = analyze_gaps(
-                    jd_client,
-                    resume_text,
-                    _profile_str,
-                )
+                try:
+                    report.gap_report = analyze_gaps(
+                        jd_client,
+                        resume_text,
+                        _profile_str,
+                    )
+                except LLMResponseError as exc:
+                    if getattr(exc, "code", "") in ("schema", "parse", "empty"):
+                        logger.warning(
+                            "gap degraded, continuing with empty report: %s", exc
+                        )
+                        report.gap_report = GapReport()
+                        report.gap_degraded = True
+                    else:
+                        raise
 
             # Tailoring
             notify("gap_analyzed", _gap_progress_message(report.gap_report))

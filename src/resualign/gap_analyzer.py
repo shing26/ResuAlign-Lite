@@ -1,5 +1,6 @@
-from .llm import LLMClient
+from .llm import LLMClient, _structured_or_json
 from .models import GapReport
+from .schema_registry import GapReportSchema
 # PROMPT_VERSION bump: gap_analyzer/v1 -> v2（2026-08-25，对照 04b-PE §2.3）
 # 本次升级说明：
 # - 变更点 1：missing_keywords 由无上限改为 5-12 项、每项 ≤ 30 字符，语义重复合并
@@ -33,7 +34,11 @@ GAP_ANALYSIS_PROMPT = """PROMPT_VERSION: gap_analyzer/v2
 
 def analyze_gaps(client: LLMClient, resume_text: str, jd_profile_text: str) -> GapReport:
     user = f"Resume:\n{resume_text}\n\nJD Profile:\n{jd_profile_text}"
-    result = client.chat_json(GAP_ANALYSIS_PROMPT, user)
+    # R4 §2.3-附（04b-PE）：chat_json → _structured_or_json —— gap 获得 schema 校验
+    # + 纠错重试（max_retries=1，最多 2 次往返）。配套义务（AIE P0-5）：
+    # engine.py:212-227 在结构失败（code ∈ schema/parse/empty）时降级为空 gap +
+    # gap_degraded，不整体 fail；本行与降级 patch 同时合入（合入顺序：降级先于/同时）。
+    result = _structured_or_json(client, GAP_ANALYSIS_PROMPT, user, GapReportSchema)
     return GapReport(
         missing_keywords=result.get("missing_keywords", []),
         misaligned_emphasis=result.get("misaligned_emphasis", []),

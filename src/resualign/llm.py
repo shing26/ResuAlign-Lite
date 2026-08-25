@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import threading
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable, ClassVar, Optional, Type
@@ -73,7 +74,9 @@ def _parse_json_object(content: str) -> dict[str, Any]:
         else:
             raise
     if not isinstance(value, dict):
-        raise LLMResponseError("Structured response is not a JSON object")
+        raise LLMResponseError(
+            "Structured response is not a JSON object", code="parse"
+        )
     return value
 
 
@@ -95,17 +98,70 @@ def _schema_feedback_prompt(user: str, exc: BaseException) -> str:
     )
 
 
+# R4 P0-1（03-AIE §②/§③-P0-1）：结构化失败分类。LLMResponseError 携带
+# 稳定 code 枚举，_job_failure_detail 按 code 分支，杜绝 message substring 漂移
+# 导致的误归因（166.2s 现场失败文案曾落入「检查 API Key 与网络」else 分支）。
+_KNOWN_CODES = {
+    "timeout",
+    "empty",
+    "parse",
+    "schema",
+    "quota",
+    "rate_limit",
+    "auth",
+    "http",
+    "other",
+}
+
+
 class LLMResponseError(Exception):
-    """Raised when the LLM fails to return a parseable response."""
-    pass
+    """Raised when the LLM fails to return a parseable response.
+
+    ``code`` is a stable failure category (see ``_KNOWN_CODES``); callers that
+    surface user-facing copy branch on it instead of parsing the message text.
+    """
+
+    def __init__(self, message: str, code: str = "other"):
+        super().__init__(message)
+        self.code = code if code in _KNOWN_CODES else "other"
 
 
 def _raise_network_timeout(kind: str, attempt: int, exc: BaseException) -> None:
     """Map a transport-level network failure to the API's LLM error."""
     raise LLMResponseError(
         f"{kind} call failed after {attempt + 1} attempt(s) "
-        f"(network timeout): {exc}"
+        f"(network timeout): {exc}",
+        code="timeout",
     ) from exc
+
+
+def _http_error_code(exc: BaseException) -> str:
+    """Classify an HTTP status code into a stable LLMResponseError code.
+
+    P0-1 G2：402 欠费 / 401·403 鉴权 / 429 限流不再落入「检查 API Key」else 分支。
+    """
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status == 402:
+        return "quota"
+    if status in (401, 403):
+        return "auth"
+    if status == 429 or "rate limit" in str(exc).lower():
+        return "rate_limit"
+    return "http"
+
+
+class _WallClockDeadlineExceeded(httpx.ReadTimeout):
+    """Raised when a single POST exceeds its wall-clock deadline.
+
+    Subclasses ``httpx.ReadTimeout`` so existing ``TransportError`` handlers
+    keep working; ``deadline_exceeded`` marks P0-3 deadlines, which must
+    NEVER be transport-retried (retrying a genuinely slow generation only
+    multiplies the wait, and the client was closed on deadline).
+    """
+
+    def __init__(self, deadline_s: float):
+        super().__init__(f"wall-clock deadline exceeded ({deadline_s:.1f}s)")
+        self.deadline_exceeded = True
 class LLMClient(ABC):
     """Abstract LLM client for dependency injection in engine.py."""
     max_retries: ClassVar[int] = STRUCTURED_MAX_EXTRA_RETRIES
@@ -140,7 +196,8 @@ class LLMClient(ABC):
                 time.sleep(1)
         raise LLMResponseError(
             "Structured response failed schema validation after "
-            f"{self.max_retries + 1} attempts: {last_error}"
+            f"{self.max_retries + 1} attempts: {last_error}",
+            code="schema",
         )
 class OpenAIClient(LLMClient):
     """Concrete LLM client compatible with OpenAI / DeepSeek / Ollama APIs."""
@@ -164,6 +221,10 @@ class OpenAIClient(LLMClient):
         config,
         timeout: Optional[float] = None,
         max_retries: Optional[int] = None,
+        max_tokens: Optional[int] = None,
+        token_cap: Optional[int] = None,
+        deadline: Optional[float] = None,
+        retry_transport: Optional[bool] = None,
     ):
         self.api_key = config.api_key
         self.model = config.model
@@ -182,6 +243,25 @@ class OpenAIClient(LLMClient):
             if max_retries is None
             else int(max_retries)
         )
+        # R4 P0-2：per-role max_tokens 钳制。实例级起始上限；length 翻倍只允许
+        # 1 次且受 ``_token_cap`` 约束（默认保留 65536 兜底，角色路径由 role_router
+        # 传入收缩后的 cap——诊断 1024 / profiler·gap 2048 / editor 6144 / eval 768）。
+        self.max_tokens = (
+            self.DEFAULT_MAX_TOKENS
+            if max_tokens is None
+            else int(max_tokens)
+        )
+        self._token_cap = (
+            self.MAX_OUTPUT_TOKENS
+            if token_cap is None
+            else int(token_cap)
+        )
+        # R4 P0-3：墙钟 deadline（秒）。None = 不启用（保持旧直连语义）；
+        # 角色路径由 role_router 显式传入（= 角色超时），单次 POST 超时即中断。
+        self._deadline_s = float(deadline) if deadline is not None else None
+        # R4 P0-4：短角色条件性 transport 重试（classifier/intake/profiler/gap/polish）。
+        # 长生成角色（editor/tailor）恒 False：超时重试只会再等一个世纪。
+        self._retry_transport = bool(retry_transport) if retry_transport is not None else False
         # DeepSeek reasoning models spend the output budget on
         # ``reasoning_content`` before emitting the final JSON, which can
         # cause 200 responses with empty ``content`` and finish_reason=length
@@ -195,6 +275,37 @@ class OpenAIClient(LLMClient):
             ),
             headers={"Content-Type": "application/json"},
         )
+    def _post_with_deadline(
+        self, url: str, headers: dict, json_body: dict, deadline_s: float
+    ) -> httpx.Response:
+        """Single-shot POST bounded by a wall-clock deadline.
+
+        Runs the blocking post on a worker thread; on deadline the client is
+        closed (aborts the in-flight request) and a transport timeout is
+        raised. Each attempt uses this client only, so closing is safe (the
+        caller falls back with a fresh client). R4 P0-3（03-AIE §③）——
+        空闲读超时拦不住慢生成，墙钟语义让「30s 真成 30s」。
+        """
+        result: dict[str, Any] = {}
+
+        def _run() -> None:
+            try:
+                result["r"] = self._client.post(url, headers=headers, json=json_body)
+            except Exception as exc:  # noqa: BLE001 - surfaced below
+                result["exc"] = exc
+
+        t = threading.Thread(target=_run, name="resualign-llm-post", daemon=True)
+        t.start()
+        t.join(timeout=deadline_s)
+        if t.is_alive():
+            self.close()  # 中断在途请求
+            raise _WallClockDeadlineExceeded(deadline_s)
+        if "exc" in result:
+            raise result["exc"]
+        return result["r"]
+    def _should_retry_transport(self) -> bool:
+        """Whether a transport error may be retried once (short roles only)."""
+        return self._retry_transport
     def _provider_extras(self) -> dict[str, Any]:
         """Return provider-specific request fields for direct JSON output."""
         if self.request_direct_output:
@@ -220,22 +331,33 @@ class OpenAIClient(LLMClient):
             "temperature": self.DEFAULT_TEMPERATURE,
             **self._provider_extras(),
         }
-        max_tokens = self.DEFAULT_MAX_TOKENS
+        max_tokens = self.max_tokens
         _t0 = time.monotonic()
         attempts = 0
         status = "failed"
         try:
+            def _post(payload: dict) -> httpx.Response:
+                if self._deadline_s is not None:
+                    return self._post_with_deadline(
+                        f"{self.base_url.rstrip('/')}/chat/completions",
+                        headers,
+                        payload,
+                        self._deadline_s,
+                    )
+                return self._client.post(
+                    f"{self.base_url.rstrip('/')}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+
             for attempt in range(self.max_retries + 1):
                 attempts += 1
                 try:
                     payload = {**body, "max_tokens": max_tokens}
-                    if attempt == 0:
-                        payload["response_format"] = {"type": "json_object"}
-                    r = self._client.post(
-                        f"{self.base_url.rstrip('/')}/chat/completions",
-                        headers=headers,
-                        json=payload,
-                    )
+                    # R4 P0-5（03-AIE）：纠错/翻倍重试也带 json_object，避免模型
+                    # 退化成 markdown fence 文本（旧实现只在 attempt==0 带）。
+                    payload["response_format"] = {"type": "json_object"}
+                    r = _post(payload)
                     r.raise_for_status()
                     response = r.json()
                     message = response["choices"][0]["message"]
@@ -244,18 +366,38 @@ class OpenAIClient(LLMClient):
                     start = content.find("{")
                     if start < 0:
                         if attempt == self.max_retries:
-                            raise LLMResponseError("No JSON object found in response")
-                        if finish_reason == "length" and max_tokens < self.MAX_OUTPUT_TOKENS:
-                            max_tokens = min(max_tokens * 2, self.MAX_OUTPUT_TOKENS)
+                            raise LLMResponseError(
+                                "No JSON object found in response", code="empty"
+                            )
+                        if (
+                            finish_reason == "length"
+                            and attempt < self.max_retries
+                            and max_tokens < self._token_cap
+                        ):
+                            max_tokens = min(max_tokens * 2, self._token_cap)
                         time.sleep(1)
                         continue
                     try:
                         result = _parse_json_object(content)
+                    except LLMResponseError:
+                        if attempt == self.max_retries:
+                            # 已携带 code（parse），直接透传。
+                            raise
+                        time.sleep(1)
+                        continue
                     except Exception:
                         if attempt == self.max_retries:
-                            raise
-                        if finish_reason == "length" and max_tokens < self.MAX_OUTPUT_TOKENS:
-                            max_tokens = min(max_tokens * 2, self.MAX_OUTPUT_TOKENS)
+                            raise LLMResponseError(
+                                "LLM call failed to parse JSON response "
+                                f"after {self.max_retries + 1} attempts",
+                                code="parse",
+                            ) from None
+                        if (
+                            finish_reason == "length"
+                            and attempt < self.max_retries
+                            and max_tokens < self._token_cap
+                        ):
+                            max_tokens = min(max_tokens * 2, self._token_cap)
                         time.sleep(1)
                         continue
                     status = "ok"
@@ -263,11 +405,21 @@ class OpenAIClient(LLMClient):
                 except LLMResponseError:
                     raise
                 except httpx.TransportError as e:
+                    # R4 P0-4：短角色条件性 1 次重试（瞬时抖动恢复收益高）；
+                    # 墙钟 deadline 触发绝不重试（慢生成重试 = 再等一个世纪）。
+                    if (
+                        self._should_retry_transport()
+                        and attempt < self.max_retries
+                        and not getattr(e, "deadline_exceeded", False)
+                    ):
+                        time.sleep(1)  # 网络抖动缓冲
+                        continue
                     _raise_network_timeout("LLM", attempt, e)
                 except Exception as e:
                     if attempt == self.max_retries:
                         raise LLMResponseError(
-                            f"LLM call failed after {self.max_retries + 1} attempts: {e}"
+                            f"LLM call failed after {self.max_retries + 1} attempts: {e}",
+                            code=_http_error_code(e),
                         ) from e
                     time.sleep(1)
         finally:
@@ -312,7 +464,7 @@ class OpenAIClient(LLMClient):
             ],
             "temperature": self.DEFAULT_TEMPERATURE,
             **self._provider_extras(),
-            "max_tokens": self.DEFAULT_MAX_TOKENS,
+            "max_tokens": self.max_tokens,
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
@@ -326,14 +478,24 @@ class OpenAIClient(LLMClient):
         attempts = 0
         status = "failed"
         try:
+            def _post() -> httpx.Response:
+                if self._deadline_s is not None:
+                    return self._post_with_deadline(
+                        f"{self.base_url.rstrip('/')}/chat/completions",
+                        headers,
+                        body,
+                        self._deadline_s,
+                    )
+                return self._client.post(
+                    f"{self.base_url.rstrip('/')}/chat/completions",
+                    headers=headers,
+                    json=body,
+                )
+
             for attempt in range(self.max_retries + 1):
                 attempts += 1
                 try:
-                    r = self._client.post(
-                        f"{self.base_url.rstrip('/')}/chat/completions",
-                        headers=headers,
-                        json=body,
-                    )
+                    r = _post()
                     r.raise_for_status()
                     response = r.json()
                     message = response["choices"][0]["message"]
@@ -351,14 +513,16 @@ class OpenAIClient(LLMClient):
                     if attempt == self.max_retries:
                         raise LLMResponseError(
                             "Structured LLM call failed after "
-                            f"{self.max_retries + 1} attempts: {exc}"
+                            f"{self.max_retries + 1} attempts: {exc}",
+                            code=_http_error_code(exc),
                         ) from exc
                     time.sleep(1)
                 except ValidationError as exc:
                     if attempt == self.max_retries:
                         raise LLMResponseError(
                             "Structured response failed schema validation after "
-                            f"{self.max_retries + 1} attempts: {exc}"
+                            f"{self.max_retries + 1} attempts: {exc}",
+                            code="schema",
                         ) from exc
                     # One corrective retry (Bug-01): feed validation
                     # errors back so the model can repair the structure.
@@ -370,16 +534,26 @@ class OpenAIClient(LLMClient):
                     if attempt == self.max_retries:
                         raise LLMResponseError(
                             "Structured response failed validation after "
-                            f"{self.max_retries + 1} attempts: {exc}"
+                            f"{self.max_retries + 1} attempts: {exc}",
+                            code=getattr(exc, "code", "parse"),
                         ) from exc
                     time.sleep(1)
                 except httpx.TransportError as exc:
+                    # R4 P0-4：短角色条件性 1 次重试；deadline 触发绝不重试。
+                    if (
+                        self._should_retry_transport()
+                        and attempt < self.max_retries
+                        and not getattr(exc, "deadline_exceeded", False)
+                    ):
+                        time.sleep(1)
+                        continue
                     _raise_network_timeout("Structured LLM", attempt, exc)
                 except Exception as exc:
                     if attempt == self.max_retries:
                         raise LLMResponseError(
                             "Structured LLM call failed after "
-                            f"{self.max_retries + 1} attempts: {exc}"
+                            f"{self.max_retries + 1} attempts: {exc}",
+                            code=_http_error_code(exc),
                         ) from exc
                     time.sleep(1)
         finally:
@@ -412,21 +586,31 @@ class OpenAIClient(LLMClient):
             **self._provider_extras(),
             "response_format": {"type": "json_object"},
         }
-        max_tokens = self.DEFAULT_MAX_TOKENS
+        max_tokens = self.max_tokens
         last_error: Optional[Exception] = None
         _t0 = time.monotonic()
         attempts = 0
         status = "failed"
         try:
+            def _post(payload: dict) -> httpx.Response:
+                if self._deadline_s is not None:
+                    return self._post_with_deadline(
+                        f"{self.base_url.rstrip('/')}/chat/completions",
+                        headers,
+                        payload,
+                        self._deadline_s,
+                    )
+                return self._client.post(
+                    f"{self.base_url.rstrip('/')}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+
             for attempt in range(self.max_retries + 1):
                 attempts += 1
                 try:
                     payload = {**body, "max_tokens": max_tokens}
-                    r = self._client.post(
-                        f"{self.base_url.rstrip('/')}/chat/completions",
-                        headers=headers,
-                        json=payload,
-                    )
+                    r = _post(payload)
                     r.raise_for_status()
                     response = r.json()
                     message = response["choices"][0]["message"]
@@ -435,17 +619,18 @@ class OpenAIClient(LLMClient):
                     if (
                         not content
                         and finish_reason == "length"
-                        and max_tokens < self.MAX_OUTPUT_TOKENS
+                        and max_tokens < self._token_cap
                     ):
                         max_tokens = min(
-                            max_tokens * 2, self.MAX_OUTPUT_TOKENS
+                            max_tokens * 2, self._token_cap
                         )
                         if attempt < self.max_retries:
                             time.sleep(1)
                             continue
                         raise LLMResponseError(
                             "Structured response was empty after "
-                            f"{self.max_retries + 1} attempts"
+                            f"{self.max_retries + 1} attempts",
+                            code="empty",
                         )
                     result = schema_model.model_validate(
                         _parse_json_object(content)
@@ -457,7 +642,8 @@ class OpenAIClient(LLMClient):
                     if attempt >= self.max_retries:
                         raise LLMResponseError(
                             "Structured response failed schema validation after "
-                            f"{self.max_retries + 1} attempts: {last_error}"
+                            f"{self.max_retries + 1} attempts: {last_error}",
+                            code="schema",
                         ) from exc
                     # One corrective retry (Bug-01): feed validation
                     # errors back so the model can repair the structure.
@@ -470,17 +656,27 @@ class OpenAIClient(LLMClient):
                     if attempt >= self.max_retries:
                         raise LLMResponseError(
                             "Structured response failed schema validation after "
-                            f"{self.max_retries + 1} attempts: {last_error}"
+                            f"{self.max_retries + 1} attempts: {last_error}",
+                            code=getattr(exc, "code", "parse"),
                         ) from exc
                     time.sleep(1)
                 except httpx.TransportError as exc:
+                    # R4 P0-4：短角色条件性 1 次重试；deadline 触发绝不重试。
+                    if (
+                        self._should_retry_transport()
+                        and attempt < self.max_retries
+                        and not getattr(exc, "deadline_exceeded", False)
+                    ):
+                        time.sleep(1)
+                        continue
                     _raise_network_timeout("Structured LLM", attempt, exc)
                 except Exception as exc:
                     last_error = exc
                     if attempt >= self.max_retries:
                         raise LLMResponseError(
                             "Structured LLM call failed after "
-                            f"{self.max_retries + 1} attempts: {last_error}"
+                            f"{self.max_retries + 1} attempts: {last_error}",
+                            code=_http_error_code(exc),
                         ) from exc
                     time.sleep(1)
         finally:

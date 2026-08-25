@@ -90,6 +90,9 @@ class Report:
     provenance_ratio: float = 0.0
     graph_status: str = ""
     trace_id: str = ""
+    # R4 P0-5（03-AIE §③）：gap 结构失败时降级为空 GapReport 并置位本标记，
+    # 任务继续而非整体 fail；随 asdict(report) 流入 API 结果（落库标记）。
+    gap_degraded: bool = False
 
 
 @dataclass

@@ -36,6 +36,7 @@ from resualign.schema_registry import (
     JDProfileSchema,
     TailoredResumeSchema,
 )
+from resualign.schema_registry import GapReportSchema
 from resualign.settings_store import SettingsStore
 from resualign.workspace import MasterResumeStore, UserStore
 
@@ -286,6 +287,14 @@ def test_analyze_job_timeout_failure_is_retryable():
                 "min_years_experience": None,
                 "education_requirements": [],
             }
+        if schema_model is GapReportSchema:
+            # R4 §2.3-附：gap 调用点已从 chat_json 切到 _structured_or_json →
+            # 走 chat_structured（GapReportSchema 校验）。
+            return {
+                "missing_keywords": [],
+                "misaligned_emphasis": [],
+                "strength_matches": [],
+            }
         if schema_model is TailoredResumeSchema:
             return {
                 "sections": {"exp": "Built services"},
@@ -337,9 +346,9 @@ def test_analyze_job_timeout_failure_is_retryable():
     assert second_data["result"]["tailored_resume"] is not None
     # Job 1: diagnose succeeds (and is cached), profile times out, the run
     # fails. Job 2: cached diagnosis skips the LLM, profile + gap + tailor
-    # succeed.
-    assert calls["structured"] == 4
-    assert calls["json"] == 1
+    # succeed. R4: gap 走 _structured_or_json（chat_structured）后 json 计数归 0。
+    assert calls["structured"] == 5
+    assert calls["json"] == 0
 
 def test_diagnosis_job_succeeds_with_local_rules_when_llm_is_down():
     """取舍一方案 A: the diagnosis stage never calls the LLM anymore.

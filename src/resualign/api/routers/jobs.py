@@ -825,7 +825,12 @@ def rewrite_workbench_bullet(
         ensure_ascii=False,
     )
     with llm_tenant_context(user['user_id']):
-        with api_module.OpenAIClient(config, timeout=45.0) as client:
+        with api_module.OpenAIClient(
+            config,
+            timeout=45.0,
+            # R4 P0-2：bullet 改写非 role 直连调用，输出钳制 256（03-AIE §③）。
+            max_tokens=256,
+        ) as client:
             rewritten = api_module.rewrite_bullet(
                 client,
                 original,

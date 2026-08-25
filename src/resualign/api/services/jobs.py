@@ -45,52 +45,77 @@ def _job_failure_detail(
     stage_label = _STAGE_LABELS.get(stage, stage or "未知阶段")
     message = str(exc) or exc.__class__.__name__
     if isinstance(exc, api_module.LLMResponseError):
-        lowered = message.lower()
-        if "429" in message or "rate limit" in lowered:
-            reason = "模型服务繁忙（限流），请稍后重试"
-        elif (
-            "401" in message
-            or "403" in message
-            or "unauthorized" in lowered
-            or "authentication" in lowered
-            or "invalid api key" in lowered
-            or "api key" in lowered
-        ):
-            # P0-1: 只有 auth 类失败才引导用户检查 API Key（2026-08-25 走查实测
-            # Key 有效+连通正常时，超时才是真因，不能一概归因到 Key/网络）。
-            reason = "API Key 无效或缺少权限，请检查模型设置"
-        elif (
-            "timeout" in lowered
-            or "timed out" in lowered
-            or "time-out" in lowered
-        ):
-            if elapsed_secs is not None:
-                reason = (
-                    "模型响应超时（本次耗时 "
-                    f"{elapsed_secs:.1f} 秒），可尝试更换更快的模型或稍后重试"
-                )
+        # R4 P0-1（03-AIE §③）：结构化 code 优先分支，杜绝 message substring 漂移
+        # 误归因；code == "other"（旧调用方/测试构造的无 code 异常）回退文本分类。
+        code = getattr(exc, "code", "other")
+        if code != "other":
+            if code == "rate_limit":
+                reason = "模型服务繁忙（限流），请稍后重试"
+            elif code == "quota":
+                reason = "模型账户欠费或余额不足，请充值后重试（可先在设置页更换节点）"
+            elif code == "auth":
+                reason = "API Key 无效或权限不足，请检查模型设置"
+            elif code == "timeout":
+                if elapsed_secs is not None:
+                    reason = (
+                        "模型响应超时（本次耗时 "
+                        f"{elapsed_secs:.1f} 秒），可尝试更换更快的模型或稍后重试"
+                    )
+                else:
+                    reason = "模型响应超时，可尝试更换更快的模型或稍后重试"
+            elif code == "empty":
+                reason = "模型返回为空，请重试"
+            elif code in ("parse", "schema"):
+                reason = "模型返回内容格式异常，请重试或更换模型"
             else:
-                reason = "模型响应超时，可尝试更换更快的模型或稍后重试"
-        elif (
-            "empty response" in lowered
-            or "empty content" in lowered
-            or "returned empty" in lowered
-            or "was empty" in lowered
-            or "empty after" in lowered
-        ):
-            reason = "模型返回为空，请重试"
-        elif (
-            "expecting value" in lowered
-            or "no json object found" in lowered
-            or "not a json object" in lowered
-            or "invalid json" in lowered
-            or "schema validation" in lowered
-            or "failed validation" in lowered
-        ):
-            reason = "模型返回内容格式异常，请重试或更换模型"
+                reason = "模型服务暂时不可用，请稍后重试"
         else:
-            # P0-1: 未分类失败不再归因 API Key/网络（仅 auth 分支引导查 Key）。
-            reason = "模型服务暂时不可用，请稍后重试"
+            lowered = message.lower()
+            if "429" in message or "rate limit" in lowered:
+                reason = "模型服务繁忙（限流），请稍后重试"
+            elif (
+                "401" in message
+                or "403" in message
+                or "unauthorized" in lowered
+                or "authentication" in lowered
+                or "invalid api key" in lowered
+                or "api key" in lowered
+            ):
+                # P0-1: 只有 auth 类失败才引导用户检查 API Key（2026-08-25 走查实测
+                # Key 有效+连通正常时，超时才是真因，不能一概归因到 Key/网络）。
+                reason = "API Key 无效或缺少权限，请检查模型设置"
+            elif (
+                "timeout" in lowered
+                or "timed out" in lowered
+                or "time-out" in lowered
+            ):
+                if elapsed_secs is not None:
+                    reason = (
+                        "模型响应超时（本次耗时 "
+                        f"{elapsed_secs:.1f} 秒），可尝试更换更快的模型或稍后重试"
+                    )
+                else:
+                    reason = "模型响应超时，可尝试更换更快的模型或稍后重试"
+            elif (
+                "empty response" in lowered
+                or "empty content" in lowered
+                or "returned empty" in lowered
+                or "was empty" in lowered
+                or "empty after" in lowered
+            ):
+                reason = "模型返回为空，请重试"
+            elif (
+                "expecting value" in lowered
+                or "no json object found" in lowered
+                or "not a json object" in lowered
+                or "invalid json" in lowered
+                or "schema validation" in lowered
+                or "failed validation" in lowered
+            ):
+                reason = "模型返回内容格式异常，请重试或更换模型"
+            else:
+                # P0-1: 未分类失败不再归因 API Key/网络（仅 auth 分支引导查 Key）。
+                reason = "模型服务暂时不可用，请稍后重试"
     else:
         reason = message[:300] or "内部错误"
     return f"对齐分析在「{stage_label}」阶段失败：{reason}"
@@ -107,7 +132,12 @@ def _classify_job(jd_text: str, job_functions: list[str] | None=None, senioritie
     leak across tenants (S1). Callers pass the owning user id.
     """
     config = api_module.build_config()
-    with api_module.OpenAIClient(config, timeout=45.0) as client:
+    with api_module.OpenAIClient(
+        config,
+        timeout=45.0,
+        # R4 P0-2：classifier 非 role 直连调用，输出钳制 128（03-AIE §③）。
+        max_tokens=128,
+    ) as client:
         return api_module.classify_job(
             client,
             jd_text,
@@ -419,6 +449,11 @@ def _prune_import_batches(max_kept: int=50) -> None:
 def _queue_job(user: dict[str, Any], payload: dict[str, Any], application_id: str | None=None, workbench: bool=False) -> str:
     """Create a job row, keep its payload in memory, and start the worker."""
     config = api_module.build_config()
+    # R4 P0-6（03-AIE §③）：入口统一护栏 —— 每日 cap + 同一 job 连续失败熔断
+    # （防无脑重试烧额度）。job_ref_key 仅工作台重试携带（library_job_id）。
+    api_module.enforce_llm_task_entry(
+        user['user_id'], job_ref_key=(payload or {}).get('library_job_id')
+    )
     job = api_module._registry.create(payload, config, tenant_id=user['user_id'], application_id=application_id)
     payload['workbench'] = workbench
     api_module._payloads[job.job_id] = (payload, config, application_id, user['user_id'])
@@ -693,7 +728,11 @@ def _run_job(job_id: str) -> None:
                 else None
             )
             if payload.get('diagnosis'):
-                error = '诊断任务暂时失败：模型服务不可用或返回异常，请检查 API Key 与网络连接后重试'
+                # G4（03-AIE §②-gap G4）：诊断分支不再硬编码「请检查 API Key 与
+                # 网络连接」——经由 _job_failure_detail 按结构化 code 分类归因。
+                error = api_module._job_failure_detail(
+                    failed_stage or 'diagnose', exc, elapsed_secs
+                ).replace('对齐分析', '诊断任务')
             elif payload.get('optimize_resume'):
                 error = api_module._job_failure_detail(
                     failed_stage, exc, elapsed_secs
