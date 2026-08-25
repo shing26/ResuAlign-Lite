@@ -82,6 +82,27 @@ export function jobStatusLabel(status) {
   return JOB_STATUS_LABELS[canonical] || canonical;
 }
 
+/* P1-2: 岗位卡状态下拉与筛选/编辑同源 —— 标签取自设置词表
+ * （vocabularyList("statuses")），不再硬编码渲染 JOB_STATUS_LABELS。
+ * 实现为「按 canonical 合并」：词表每项是内建五态的中文标签，按
+ * JOB_STATUS_ALIASES 归并到 canonical；option 恒为五个 canonical key
+ * （保证状态机完整与后端 _validate_status 校验），词表缺项/子集/新增
+ * 标签回退内建标签（设置侧「仅改名不增删」约束尚未在后端强制——子集
+ * 目前可通过校验，故不能逐字渲染词表，否则会把五态缩成子集）。 */
+export function jobStatusOptionsHtml(statuses, selectedCanonical) {
+  const labelByCanonical = {};
+  if (Array.isArray(statuses)) {
+    for (const label of statuses) {
+      const key = JOB_STATUS_ALIASES[label] || null;
+      if (key) labelByCanonical[key] = label;
+    }
+  }
+  return JOB_STATUS_CANONICAL.map((value) => {
+    const label = labelByCanonical[value] || JOB_STATUS_LABELS[value];
+    return `<option value="${esc(value)}" ${selectedCanonical === value ? "selected" : ""}>${esc(label)}</option>`;
+  }).join("");
+}
+
 export function normalizeVocabularyList(values, fallback) {
   if (!Array.isArray(values)) return [...fallback];
   const cleaned = values
@@ -942,12 +963,9 @@ function boardMatchBlock(job) {
   return `<div class="board-match" data-match-block>${parts.join("")}</div>`;
 }
 
-export function boardCard(job) {
+export function boardCard(job, statuses = null) {
   const canonical = canonicalJobStatus(job.status);
-  const optionsHtml = JOB_STATUS_CANONICAL.map(
-    (value) =>
-      `<option value="${value}" ${canonical === value ? "selected" : ""}>${esc(JOB_STATUS_LABELS[value])}</option>`,
-  ).join("");
+  const optionsHtml = jobStatusOptionsHtml(statuses, canonical);
   const match = job.match_score != null ? Math.round(job.match_score) : null;
   /* #F10: job.match_score persists the last workbench eval result, so the
    * badge title discloses the score origin instead of a bare "匹配度". */
@@ -986,12 +1004,9 @@ export function boardCard(job) {
 /* Workbench board card (jobs view)                                    */
 /* ------------------------------------------------------------------ */
 
-export function renderBoardCard(job) {
+export function renderBoardCard(job, statuses = null) {
   const canonical = canonicalJobStatus(job.status);
-  const statusOptions = JOB_STATUS_CANONICAL.map(
-    (value) =>
-      `<option value="${value}" ${canonical === value ? "selected" : ""}>${esc(JOB_STATUS_LABELS[value])}</option>`,
-  ).join("");
+  const statusOptions = jobStatusOptionsHtml(statuses, canonical);
   const match = job.match_score != null ? Math.round(job.match_score) : null;
   const matchTitle = match != null ? "匹配度 · 来自 AI 评估" : "尚未分析";
   return `

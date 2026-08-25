@@ -116,6 +116,72 @@ test("renderBoardCard renders the same match block contract", () => {
   );
 });
 
+/* P1-2：卡片状态下拉与筛选/编辑同源 —— 标签取自设置词表，恒为五个
+ * canonical key（状态机完整）；词表缺项回退内建标签。 */
+test("boardCard status dropdown follows the settings vocabulary labels", () => {
+  const renamed = ["未投递", "已投递", "面试中", "已拿Offer", "放弃"];
+  const body = bodyFrom(boardCard(DETAIL_JOB, renamed));
+  const select = body.querySelector("[data-board-status]");
+  const options = [...select.querySelectorAll("option")];
+  assert.deepEqual(
+    options.map((option) => option.value),
+    ["draft", "applied", "interview", "offer", "withdrawn"],
+    "values stay the canonical five (FSM intact)",
+  );
+  assert.deepEqual(
+    options.map((option) => option.textContent),
+    renamed,
+    "labels are rendered from the settings vocabulary",
+  );
+  assert.equal(options[0].selected, true, "draft job selects the draft option");
+});
+
+test("boardCard status dropdown keeps all five options even for a subset vocabulary", () => {
+  const subset = ["未投递", "已投递"]; /* 后端目前允许子集（Q1 约束未强制） */
+  const body = bodyFrom(boardCard(DETAIL_JOB, subset));
+  const options = [...body.querySelectorAll("[data-board-status] option")];
+  assert.equal(options.length, 5, "subset vocabulary must not shrink the card dropdown");
+  assert.deepEqual(options.map((option) => option.value), [
+    "draft",
+    "applied",
+    "interview",
+    "offer",
+    "withdrawn",
+  ]);
+  assert.deepEqual(
+    options.map((option) => option.textContent),
+    ["未投递", "已投递", "面试中", "已拿Offer", "放弃"],
+    "missing vocabulary entries fall back to built-in labels",
+  );
+});
+
+test("boardCard status dropdown falls back to built-in statuses", () => {
+  const body = bodyFrom(boardCard(DETAIL_JOB));
+  const options = [...body.querySelectorAll("[data-board-status] option")];
+  assert.equal(options.length, 5);
+  assert.deepEqual(options.map((option) => option.value), [
+    "draft",
+    "applied",
+    "interview",
+    "offer",
+    "withdrawn",
+  ]);
+});
+
+test("renderBoardCard status dropdown follows the settings vocabulary", () => {
+  const renamed = ["未投递", "已投递", "面试中", "已拿Offer", "放弃"];
+  const body = bodyFrom(renderBoardCard(DETAIL_JOB, renamed));
+  const options = [...body.querySelectorAll("[data-board-status] option")];
+  assert.deepEqual(options.map((option) => option.value), [
+    "draft",
+    "applied",
+    "interview",
+    "offer",
+    "withdrawn",
+  ]);
+  assert.deepEqual(options.map((option) => option.textContent), renamed);
+});
+
 test("match dimensions tolerate missing or invalid values", () => {
   const partial = {
     ...DETAIL_JOB,

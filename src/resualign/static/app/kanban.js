@@ -88,7 +88,7 @@ export async function renderKanban(app) {
           <span class="board-col-count">${items.length}</span>
         </div>
         <div class="board-col-body">
-          ${items.map(boardCard).join("") || '<div class="board-column__empty">暂无岗位</div>'}
+          ${items.map((job) => boardCard(job, vocabulary.statuses)).join("") || '<div class="board-column__empty">暂无岗位</div>'}
         </div>
       </section>`;
   }).join("");
