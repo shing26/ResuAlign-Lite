@@ -500,6 +500,10 @@ def _run_job(job_id: str) -> None:
             if payload.get('diagnosis'):
                 result['diagnosis'] = api_module._build_diagnosis_section(result)
                 result['diagnosis_source_hash'] = api_module._content_sha256(payload.get('resume_text') or '')
+                # R4 §3.6：诊断快照内嵌提示词版本（P3，04b-PE 建议），随快照整包
+                # JSON 序列化持久化，便于追溯快照对应的提示词文本。
+                from resualign.llm import DIAG_PROMPT_VERSION
+                result['diagnosis']['prompt_version'] = DIAG_PROMPT_VERSION
                 master_resume_id = payload.get('master_resume_id')
                 if master_resume_id:
                     try:
@@ -587,6 +591,14 @@ def _run_job(job_id: str) -> None:
                                 "tentative": True,
                             },
                         )
+                # R4 §3.2：保存对齐时写入组合提示词版本串（旧值 'engine.v1' 过时，
+                # 04-PE 写 jobs.py:572 已修正为最新位置 605）。用局部 import 避免
+                # 顶层循环依赖（本文件走 api_module 间接风格、无顶层提示词 import）。
+                from resualign.llm import DIAG_PROMPT_VERSION
+                from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
+                from resualign.gap_analyzer import GAP_ANALYZER_PROMPT_VERSION
+                from resualign.tailor import TAILOR_PROMPT_VERSION
+                from resualign.evaluator import EVALUATOR_PROMPT_VERSION
                 try:
                     api_module._jobs.save_alignment(
                         tenant_id,
@@ -602,7 +614,13 @@ def _run_job(job_id: str) -> None:
                         draft=draft,
                         eval_score=eval_score,
                         model=result.get('model') or '',
-                        prompt_version='engine.v1',
+                        prompt_version=(
+                            f"engine:diag:{DIAG_PROMPT_VERSION};"
+                            f"profiler:{JD_PROFILER_PROMPT_VERSION};"
+                            f"gap:{GAP_ANALYZER_PROMPT_VERSION};"
+                            f"tailor:{TAILOR_PROMPT_VERSION};"
+                            f"eval:{EVALUATOR_PROMPT_VERSION}"
+                        ),
                         alignment_status='succeeded',
                     )
                 except Exception:

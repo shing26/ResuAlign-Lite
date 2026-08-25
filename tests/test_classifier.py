@@ -27,7 +27,8 @@ def test_classify_returns_controlled_vocabulary():
     assert result["job_function"] == "后端"
     assert result["seniority"] == "高级"
     assert result["tech_tags"] == ["Python", "FastAPI", "Kubernetes"]
-    assert "job classifier" in client.calls[0][0].lower()
+    # R4: 04b-PE §2.7 新提示词中文化，首行版本标记作为稳定断言锚点。
+    assert "PROMPT_VERSION: classifier/v2" in client.calls[0][0]
 
 
 def test_classify_normalizes_unknown_values():

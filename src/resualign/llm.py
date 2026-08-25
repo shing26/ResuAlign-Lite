@@ -493,16 +493,31 @@ class OpenAIClient(LLMClient):
                 status=status,
                 mode="json_object",
             )
-DIAG_PROMPT = (
-    "You are a resume auditor. Return JSON with score (0-100), issues (list of strings), "
-    "and skills (list of strings). Output ONLY JSON.\\n"
-    "## Output Constraints\\n"
-    "- Max tokens: 500\\n"
-    "- Temperature: 0.0\\n"
-    "- If uncertain: return empty list instead of guessing\\n"
-    "- Output ONLY valid JSON, no markdown fences\\n"
-)
-DIAG_PROMPT_VERSION = "v2"
+DIAG_PROMPT = """PROMPT_VERSION: diagnose/v3
+
+你是简历审计员。针对主简历文本输出结构化诊断：评估整体质量分、列出问题与技能清单。
+
+## Output Contract（只能输出一个 JSON 对象，3 个字段，不得增减字段）
+键名固定为：score / issues / skills
+
+- score：0-100 的整数。评分锚点：80+ = 优秀（可直接投递）；60-79 = 建议优化；<60 = 需重点优化。拿不准时给 60，不要给极端值。
+- issues：3-8 条最值得改的问题，每条 ≤ 40 个汉字；直接、具体、可操作；禁止空泛套话；没有问题给 []。
+- skills：5-15 个技能/领域标签，每项 ≤ 12 字；技术名词保留原文英文拼写（如 Python、Kubernetes、Kafka）；每个标签必须能在简历原文中找到依据，不得发明。
+
+## 语言
+- 值用简历同语言（中文简历 → 中文输出）；键名固定英文；技术名词保留英文原文。
+
+## 提交前自查
+- score ∈ [0,100]；issues/skills 数量与单项长度在上限内；每个标签都能在原文找到依据；
+- 只输出一个 JSON 对象，无 markdown fence，无任何解释文字。"""
+# PROMPT_VERSION bump: diagnose/v2 -> v3（2026-08-25，对照 04b-PE §2.1）
+# 本次升级说明：
+# - 变更点 1：新增评分锚点（80+/60-79/<60），消除「0 分匹配」与确定性兜底混淆
+# - 变更点 2：issues/skills 数量与单项长度封顶（3-8 条 / 5-15 项，≤40 / ≤12）
+# - 变更点 3：删除假指令 Max tokens/Temperature（拼接缺陷消失），控制权归调用层
+# - 缓存影响：版本常量随文本变更 bump，缓存键自动失效（cache.py 以 prompt_version 为键）；
+#   若只改文本不 bump，新旧提示词结果互串缓存（B3 类事故）。
+DIAG_PROMPT_VERSION = "v3"
 _DEFAULT_PROVIDER_URLS: dict[str, str] = {
     "deepseek": "https://api.deepseek.com",
     "openrouter": "https://openrouter.ai/api/v1",

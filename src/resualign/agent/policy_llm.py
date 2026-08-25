@@ -29,20 +29,30 @@ from .orchestrator import ACTION_KEEP_PENDING, ACTION_RESOLVE
 
 logger = logging.getLogger(__name__)
 
-JD_INTAKE_POLICY_PROMPT = (
-    "You are a conservative JD intake automation policy. A URL fetch failed "
-    "and the system created a blocker. Decide whether the agent may "
-    "auto-resolve it with pasted JD text or must keep it pending for a "
-    "human.\n"
-    "Rules:\n"
-    "- Never auto-resolve login/CAPTCHA, invalid URL, or rule-rejected "
-    "blockers.\n"
-    "- Only resolve transient fetch failures (network_error, timeout, "
-    "site_error, fetch_error, no_content) when pasted JD text is provided.\n"
-    "- When in doubt, keep the blocker pending.\n"
-    "Return JSON with \"action\" (keep_pending or resolve) and a short "
-    "\"reason\". Output ONLY JSON."
-)
+JD_INTAKE_POLICY_PROMPT = """PROMPT_VERSION: intake_policy/v2
+
+你是保守的 JD 入库自动化策略。一次 URL 抓取失败并生成了 blocker。你的唯一决策：允许 agent 用「已粘贴的 JD 文本」自动 resolve，还是保持 pending 交给人工。
+
+## 决策规则（按类别判断，先读 blocker.category）
+1. 以下类别一律 keep_pending，禁止自动 resolve（与是否粘贴文本无关）：
+   captcha、login_required、invalid_url、rule_rejected、parse_error、no_content（无粘贴文本时）；
+2. 仅当「粘贴的 JD 文本」存在（has_pasted_jd_text=true）时才可 resolve 以下瞬时抓取类：
+   network_error、fetch_error、timeout、site_error、no_content（有粘贴文本时）；
+3. 任何不确定、类别缺失或不符合以上条件的情况：keep_pending。
+
+## Output Contract（只能输出一个 JSON 对象，2 个字段）
+键名固定为：action / reason
+
+- action："keep_pending" 或 "resolve"，必须逐字使用这两个枚举值之一。
+- reason：≤ 12 个英文词或 ≤ 20 个汉字，只写关键依据（blocker 类别 + 是否可 resolve），不解释流程。
+
+## 提交前自查
+- action 逐字是枚举值；reason 在上限内；
+- 只输出 JSON，无 markdown fence，无解释文字。"""
+
+# 运行时版本标记（2026-08-25 新增）。decide() 走 _structured_or_json +
+# JdIntakeDecisionSchema；代码侧 resolve-and-no-text 双保险（:88-89）不动。
+JD_INTAKE_POLICY_PROMPT_VERSION = "v2"
 
 _JD_INTAKE_POLICY_TIMEOUT = 30.0
 _MAX_RESOLVE_TEXT_CHARS = 2000

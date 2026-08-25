@@ -46,5 +46,6 @@ def test_profile_jd_min_years_none_when_missing():
 def test_profile_jd_prompt_used():
     mock = MockLLM()
     _ = profile_jd(mock, "Some JD text")
-    assert "job description analyst" in mock.last_system.lower()
+    # R4: 04b-PE §2.2 新提示词首行携带版本标记（旧英文引导语已替换为中文契约）。
+    assert "PROMPT_VERSION: jd_profiler/v2" in mock.last_system
     assert mock.last_user == "Some JD text"

@@ -101,7 +101,7 @@ def test_engine_passes_business_scenarios_to_tailor():
             self.tailor_user = ""
 
         def chat_json(self, system, user, model=None):
-            if "precise resume editor" in system.lower():
+            if "PROMPT_VERSION: tailor/v2" in system:
                 self.tailor_user = user
             return super().chat_json(system, user, model)
 
@@ -123,7 +123,7 @@ def test_engine_passes_custom_prompt_to_tailor():
             self.tailor_system = ""
 
         def chat_json(self, system, user, model=None):
-            if "precise resume editor" in system.lower():
+            if "PROMPT_VERSION: tailor/v2" in system:
                 self.tailor_system = system
             return super().chat_json(system, user, model)
 
@@ -210,7 +210,7 @@ def test_engine_passes_granularity_to_tailor():
             self.tailor_system = ""
 
         def chat_json(self, system, user, model=None):
-            if "precise resume editor" in system.lower():
+            if "PROMPT_VERSION: tailor/v2" in system:
                 self.tailor_system = system
             return super().chat_json(system, user, model)
 
@@ -245,7 +245,7 @@ def test_engine_passes_prompt_focus_to_tailor():
             self.tailor_system = ""
 
         def chat_json(self, system, user, model=None):
-            if "precise resume editor" in system.lower():
+            if "PROMPT_VERSION: tailor/v2" in system:
                 self.tailor_system = system
             return super().chat_json(system, user, model)
 

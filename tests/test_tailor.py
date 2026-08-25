@@ -102,10 +102,12 @@ def test_tailor_prompt_instructs_section_per_diff():
 
 
 def test_tailor_prompt_caps_diff_output():
+    # R4: 04b-PE §2.5 —— diffs 封顶「≤ 10 条」、reason「≤ 40 字」（旧文案
+    # "at most 15 diffs / 80 characters" 已被新契约取代）。
     mock = MockLLM()
     tailor_resume(mock, "Resume", "Gap")
-    assert "at most 15 diffs" in mock.last_system
-    assert "80 characters" in mock.last_system
+    assert "≤ 10" in mock.last_system
+    assert "≤ 40" in mock.last_system
 
 
 def test_tailor_granularity_fine_prompt():
