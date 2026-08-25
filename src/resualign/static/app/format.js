@@ -2851,13 +2851,17 @@ export function skillGapHtml(gaps, onSkillGapUrl) {
 }
 
 /* Quick Continue 卡：最近工作的岗位快照 + 「继续」入口。quick_continue
- * 为 null / 缺 job_id 时返回空串（调用方直接注入，无节点则什么都不显示）。 */
+ * 为 null / 缺 job_id 时返回空串（调用方直接注入，无节点则什么都不显示）。
+ * P1-3（02-UID ③-6 / 01-GPM P1-3）：消费 alignment_status 分型渲染——
+ * failed/canceled/expired 红示「上次失败 · 重新运行」；文案统一「继续」
+ * 不再出现「继续对齐」动词。 */
 const ALIGNMENT_STATUS_LABELS = {
   succeeded: "已对齐",
   running: "分析中",
   queued: "排队中",
   failed: "分析失败",
   canceled: "已取消",
+  expired: "已过期",
   idle: "待分析",
   pending: "待分析",
 };
@@ -2869,17 +2873,43 @@ export function alignmentStatusLabel(status) {
 
 export function quickContinueHtml(qc) {
   if (!qc || typeof qc !== "object" || !qc.job_id) return "";
-  const status = alignmentStatusLabel(qc.alignment_status);
+  const status = qc.alignment_status;
+  const qFailed = ["failed", "canceled", "expired"].includes(status);
+  const qBusy = ["running", "queued"].includes(status);
+  let badgeClass = "badge-gray";
+  let badgeLabel = alignmentStatusLabel(status);
+  let btnClass = "btn btn-primary btn-sm";
+  let btnLabel = "继续";
+  let btnAttr = "";
+  let btnHref = `href="#/workspace/${encodeURIComponent(qc.job_id)}"`;
+  if (qFailed) {
+    badgeClass = "badge-red";
+    badgeLabel = "上次失败 · 重新运行";
+    btnClass = "btn btn-danger-solid btn-sm";
+    btnLabel = "重新运行";
+  } else if (status === "succeeded") {
+    badgeClass = "badge-green";
+    badgeLabel = "已对齐";
+    btnClass = "btn btn-outline btn-sm";
+    btnLabel = "查看";
+  } else if (qBusy) {
+    badgeClass = "badge-blue";
+    badgeLabel = "分析中";
+    btnClass = "btn btn-primary btn-sm is-loading";
+    btnLabel = "分析中";
+    btnAttr = ' aria-disabled="true"';
+    btnHref = "";
+  }
   return `
-    <section class="panel panel-card quick-continue" data-quick-continue>
+    <section class="panel panel-card quick-continue ${qFailed ? "quick-continue--failed" : ""}" data-quick-continue>
       <div class="quick-continue__head">
         <span class="badge badge-teal">继续上次</span>
         <span class="small muted">更新于 ${formatDate(qc.updated_at)}</span>
       </div>
       <div class="quick-continue__title">${esc(qc.title)}</div>
-      <div class="quick-continue__meta">${esc(qc.company || "未知公司")} · <span class="quick-continue__status">${esc(status)}</span></div>
+      <div class="quick-continue__meta">${esc(qc.company || "未知公司")} · <span class="quick-continue__status">${esc(badgeLabel)}</span></div>
       <div class="quick-continue__actions">
-        <a class="btn btn-primary btn-sm" href="#/workspace/${encodeURIComponent(qc.job_id)}">继续</a>
+        <a class="${btnClass}" ${btnHref}${btnAttr}>${esc(btnLabel)}</a>
       </div>
     </section>`;
 }

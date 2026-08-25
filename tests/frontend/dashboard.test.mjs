@@ -198,7 +198,45 @@ test("quickContinueHtml renders title, company, status and continue link", () =>
   assert.equal(card.querySelector(".quick-continue__title").textContent, "后端工程师");
   const link = card.querySelector("a");
   assert.equal(link.getAttribute("href"), "#/workspace/j9");
-  assert.match(link.textContent, /继续/);
+  assert.equal(link.textContent, "查看");
+});
+
+/* P1-3: failed/canceled/expired 卡带红警示 + 「上次失败 · 重新运行」+ 危险主按钮 */
+test("quickContinueHtml marks failed/canceled/expired as retryable failure", () => {
+  for (const status of ["failed", "canceled", "expired"]) {
+    const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: status }));
+    const card = body.querySelector("[data-quick-continue]");
+    assert.match(card.className, /quick-continue--failed/, `${status} card is failed-styled`);
+    assert.match(card.textContent, /上次失败 · 重新运行/);
+    const link = card.querySelector("a");
+    assert.match(link.className, /btn-danger-solid/);
+    assert.match(link.textContent, /重新运行/);
+    assert.equal(link.getAttribute("href"), `#/workspace/j9`);
+  }
+});
+
+/* P1-3: running/queued 为「分析中」禁用加载态，不产生导航链接 */
+test("quickContinueHtml renders running/queued as busy, disabled", () => {
+  for (const status of ["running", "queued"]) {
+    const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: status }));
+    const card = body.querySelector("[data-quick-continue]");
+    assert.match(card.textContent, /分析中/);
+    const link = card.querySelector("a");
+    assert.equal(link.getAttribute("href"), null, `${status} link must not navigate`);
+    assert.equal(link.getAttribute("aria-disabled"), "true");
+    assert.match(link.className, /is-loading/);
+  }
+});
+
+/* P1-3: idle/pending 维持中性「待分析」+ 「继续」 */
+test("quickContinueHtml keeps idle/pending neutral", () => {
+  for (const status of ["idle", "pending", null]) {
+    const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: status }));
+    const card = body.querySelector("[data-quick-continue]");
+    assert.match(card.textContent, /待分析/);
+    const link = card.querySelector("a");
+    assert.match(link.textContent, /继续/);
+  }
 });
 
 test("quickContinueHtml returns empty for null or job-less payloads", () => {
@@ -207,9 +245,11 @@ test("quickContinueHtml returns empty for null or job-less payloads", () => {
   assert.equal(quickContinueHtml({ job_id: "" }), "");
 });
 
-test("quickContinueHtml labels unknown alignment status as 待分析", () => {
-  const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: null }));
-  assert.match(body.querySelector("[data-quick-continue]").textContent, /待分析/);
+test("quickContinueHtml passes unknown alignment status through", () => {
+  const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: "weird" }));
+  assert.match(body.querySelector("[data-quick-continue]").textContent, /weird/);
+  const link = body.querySelector("a");
+  assert.match(link.textContent, /继续/);
 });
 
 test("quickContinueHtml escapes user content", () => {

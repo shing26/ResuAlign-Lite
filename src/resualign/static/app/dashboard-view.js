@@ -110,16 +110,49 @@ export async function renderDashboard(container) {
     </div>`;
 
   const quick = payload.quick_continue || null;
+  const qStatus = quick && quick.alignment_status;
+  /* P1-3（03-AIE/01-GPM P1-3、02-UID ③-6）：快速继续卡消费 alignment_status
+   * 分型渲染 —— failed/canceled/expired 必须红示失败，不能再看成「待分析」
+   * 蓝主按钮（点进去才撞红横幅）。 */
+  const qFailed = ["failed", "canceled", "expired"].includes(qStatus);
+  const qBusy = ["running", "queued"].includes(qStatus);
+  let quickRowClass = "";
+  let quickBadgeClass = "pill-warn";
+  let quickBadgeLabel = alignmentStatusLabel(qStatus);
+  let quickBtnClass = "btn btn-primary btn-sm";
+  let quickBtnLabel = "继续";
+  let quickBtnExtra = "";
+  if (qFailed) {
+    quickRowClass = " quick-row--failed";
+    quickBadgeClass = "badge badge-red";
+    quickBadgeLabel = "上次失败 · 重新运行";
+    quickBtnClass = "btn btn-danger-solid btn-sm";
+    quickBtnLabel = "重新运行";
+  } else if (qStatus === "succeeded") {
+    quickBadgeClass = "badge badge-green";
+    quickBadgeLabel = "已对齐";
+    quickBtnClass = "btn btn-outline btn-sm";
+    quickBtnLabel = "查看";
+  } else if (qBusy) {
+    quickBadgeClass = "badge badge-blue";
+    quickBadgeLabel = "分析中";
+    quickBtnClass = "btn btn-primary btn-sm is-loading";
+    quickBtnLabel = "分析中";
+    quickBtnExtra = ' aria-disabled="true"';
+  }
+  const quickHref = qBusy
+    ? ""
+    : `href="#/workspace/${encodeURIComponent(quick.job_id)}"`;
   const quickHtml = quick && quick.job_id
     ? `
-      <div class="quick-row" data-quick-continue>
+      <div class="quick-row${quickRowClass}" data-quick-continue>
         <div class="quick-main">
           <div class="quick-title">${escAttr(quick.title || "未命名岗位")}</div>
           <div class="quick-meta">${escAttr(quick.company || "未识别公司")} · ${escAttr(alignmentStatusLabel(quick.alignment_status))}</div>
         </div>
         <div class="quick-right">
-          <span class="pill ${quick.alignment_status === "succeeded" ? "pill-success" : "pill-warn"}">${escAttr(alignmentStatusLabel(quick.alignment_status))}</span>
-          <a class="btn btn-primary btn-sm" href="#/workspace/${encodeURIComponent(quick.job_id)}">继续对齐</a>
+          <span class="${quickBadgeClass}">${escAttr(quickBadgeLabel)}</span>
+          <a class="${quickBtnClass}" ${quickHref}${quickBtnExtra}>${escAttr(quickBtnLabel)}</a>
         </div>
       </div>`
     : `
