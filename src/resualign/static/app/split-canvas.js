@@ -1457,6 +1457,14 @@ export function setWbViewMode(mode) {
   state.wbViewMode = mode;
   const app = $("#app-router-view");
   if (!app || !state.route || state.route.name !== "workspace") return;
+  /* 已有活跃会话时只重排现有画布：renderOptimizerCanvas 会整画布重挂载并
+   * 经 stopOptimizerStreams 杀掉在跑对齐的轮询/SSE，再以 session store 的
+   * 旧终态重绘——对齐进行中切视图会让画布永远停在旧结果（2026-08-27 CI
+   * mobile 冒烟复现：草稿态 A4 挂载→切对照编辑→轮询被杀→旧「已采纳」卡）。 */
+  if (activeSession) {
+    renderSplitCanvas(app, activeSession, state.wbResumes || [], workbenchJobs);
+    return;
+  }
   renderOptimizerCanvas(app, activeJobId || (state.route && state.route.jobId) || "");
 }
 
