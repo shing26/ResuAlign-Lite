@@ -292,8 +292,13 @@ export function parseHashValue(hash) {
     }
     return { name: "resume", jobId: null, resumeId };
   }
-  /* "resumes" 是 "resume" 的复数路由别名（蓝图契约 #/resumes） */
+  /* "resumes" 是 "resume" 的复数路由别名（蓝图契约 #/resumes）。
+     UX 走查 P1-A（2026-08-28）：裸 #/resumes 归一化为列表哨兵 "list"，
+     与 #/resume/list 等价出列表；#/resume/<id> 才进单份档案。 */
   const name = ROUTE_NAMES.includes(parts[0]) ? parts[0] : "resume";
+  if (name === "resumes" && !parts[1]) {
+    return { name: "resume", jobId: null, resumeId: "list" };
+  }
   return { name: name === "resumes" ? "resume" : name, jobId: null, resumeId: resumeFromQuery };
 }
 

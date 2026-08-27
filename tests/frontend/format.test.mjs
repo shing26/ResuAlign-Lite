@@ -278,11 +278,12 @@ test("parseHashValue falls back to resume for unknown or empty routes", () => {
   assert.deepEqual(parseHashValue("#/workspace"), { name: "workspace", jobId: null, resumeId: null });
 });
 
-test("parseHashValue maps the #/resumes plural route to the resume view", () => {
+test("parseHashValue maps the #/resumes plural route to the resume LIST view (UX P1-A)", () => {
+  // 裸 #/resumes ≡ #/resume/list：旧习惯路径必须出列表而非单份档案
   assert.deepEqual(parseHashValue("#/resumes"), {
     name: "resume",
     jobId: null,
-    resumeId: null,
+    resumeId: "list",
   });
   assert.deepEqual(parseHashValue("#/resumes/r-9"), {
     name: "resume",

@@ -184,6 +184,12 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
       acceptedIds.has(diff.diff_id) || diff.provenance_state === "accepted",
   ).length;
   const pendingCount = Math.max(0, diffs.length - acceptedCount);
+  /* UX 走查 2026-08-28：provenance 硬门禁拦截的建议卡（invalid_diffs）也会
+     渲染在建议面板里，但头部计数此前只统计有效 diffs——出现「0 条改写建议」
+     与面板里 N 张待复核卡的口径分裂。这里把待复核数并入同一行。 */
+  const invalidCount = Array.isArray(alignment.invalid_diffs)
+    ? alignment.invalid_diffs.length
+    : 0;
   const matchScore =
     (alignment.eval_score && alignment.eval_score.jd_match_score) ||
     gap.score ||
@@ -235,7 +241,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <div class="wb-tags">${tagItems.map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}</div>
         </div>
         <div class="wb-context-actions">
-          <span class="status-line"><span class="dot dot-success" aria-hidden="true"></span>${esc(diffs.length)} 条改写建议 · ${esc(acceptedCount)} 已采纳 · ${esc(pendingCount)} 待采纳</span>
+          <span class="status-line"><span class="dot dot-success" aria-hidden="true"></span>${esc(diffs.length)} 条改写建议${invalidCount ? ` · ${esc(invalidCount)} 条缺来源待复核` : ""} · ${esc(acceptedCount)} 已采纳 · ${esc(pendingCount)} 待采纳</span>
           <select class="input input-sm" data-job-switcher aria-label="切换岗位">
             ${jobs.map((item) => `<option value="${esc(item.job_id)}" ${item.job_id === jobId ? "selected" : ""}>${esc(item.title)}${item.company ? ` · ${esc(item.company)}` : ""}</option>`).join("")}
           </select>
