@@ -9,13 +9,11 @@ import sqlite3
 import statistics
 import time
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Optional, Sequence
 
 from ..store_base import UserStoreError, _SqliteStore
 from .models import (
-    BLOCKER_CATEGORIES,
-    BLOCKER_STATUSES,
     JOB_FUNCTIONS,
     JOB_STATUSES,
     JOB_STATUSES_CANONICAL,
@@ -34,9 +32,6 @@ from .status_lifecycle import (
 )
 
 __all__ = [
-    "BLOCKER_CATEGORIES",
-    "BLOCKER_STATUSES",
-    "CrawlTaskStore",
     "JOB_FUNCTIONS",
     "JOB_STATUSES",
     "JOB_STATUSES_CANONICAL",
@@ -66,7 +61,7 @@ CREATE TABLE IF NOT EXISTS library_jobs (
     job_function TEXT,
     seniority TEXT,
     tech_tags TEXT NOT NULL DEFAULT '[]',
-    status TEXT NOT NULL DEFAULT '未投递',
+    status TEXT NOT NULL DEFAULT 'draft',
     classification_pending INTEGER NOT NULL DEFAULT 0,
     final_draft TEXT,
     final_draft_updated_at REAL,
@@ -79,12 +74,6 @@ CREATE TABLE IF NOT EXISTS library_jobs (
     rejected_at TEXT,
     next_step_due_at TEXT,
     interview_stage TEXT,
-    reminder_sent_at REAL,
-    reminder_attempts INTEGER NOT NULL DEFAULT 0,
-    reminder_next_retry_at REAL,
-    refresh_enabled INTEGER NOT NULL DEFAULT 1,
-    last_refresh_at REAL,
-    refresh_status TEXT,
     match_stale INTEGER NOT NULL DEFAULT 0,
     workbench_job_id TEXT,
     workbench_resume_id TEXT,
@@ -117,24 +106,6 @@ CREATE INDEX IF NOT EXISTS idx_library_jobs_function
 CREATE INDEX IF NOT EXISTS idx_library_jobs_status
     ON library_jobs(status);
 
-CREATE TABLE IF NOT EXISTS crawl_tasks (
-    crawl_id TEXT PRIMARY KEY,
-    tenant_id TEXT NOT NULL,
-    job_id TEXT,
-    jd_url TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'queued',
-    stage TEXT NOT NULL DEFAULT '',
-    error TEXT,
-    attempts INTEGER NOT NULL DEFAULT 0,
-    created_at REAL NOT NULL,
-    updated_at REAL NOT NULL,
-    finished_at REAL
-);
-CREATE INDEX IF NOT EXISTS idx_crawl_tasks_tenant
-    ON crawl_tasks(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_crawl_tasks_status
-    ON crawl_tasks(status);
-
 CREATE TABLE IF NOT EXISTS kanban_bulk_ops (
     idempotency_key TEXT NOT NULL,
     tenant_id TEXT NOT NULL,
@@ -157,24 +128,6 @@ CREATE TABLE IF NOT EXISTS automation_rules (
 CREATE INDEX IF NOT EXISTS idx_automation_rules_tenant
     ON automation_rules(tenant_id);
 
-CREATE TABLE IF NOT EXISTS blocker_queue (
-    blocker_id TEXT PRIMARY KEY,
-    tenant_id TEXT NOT NULL,
-    job_id TEXT,
-    url TEXT,
-    title TEXT,
-    reason TEXT,
-    category TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    manual_text TEXT,
-    created_at REAL NOT NULL,
-    updated_at REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_blocker_queue_tenant
-    ON blocker_queue(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_blocker_queue_status
-    ON blocker_queue(status);
-
 CREATE TABLE IF NOT EXISTS application_snapshots (
     snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id TEXT NOT NULL,
@@ -189,22 +142,6 @@ CREATE TABLE IF NOT EXISTS application_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_application_snapshots_job
     ON application_snapshots(tenant_id, job_id, created_at DESC);
-
-CREATE TABLE IF NOT EXISTS job_refresh_events (
-    refresh_id TEXT PRIMARY KEY,
-    tenant_id TEXT NOT NULL,
-    job_id TEXT NOT NULL,
-    changed_at REAL NOT NULL,
-    changed_fields TEXT NOT NULL DEFAULT '[]',
-    old_summary TEXT,
-    new_summary TEXT,
-    jd_text_hash TEXT,
-    status TEXT NOT NULL DEFAULT 'succeeded',
-    error TEXT,
-    created_at REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_job_refresh_events_job
-    ON job_refresh_events(tenant_id, job_id, changed_at DESC);
 """
 
 
@@ -330,15 +267,6 @@ class JobLibraryStore(_SqliteStore):
             "created_at REAL NOT NULL, updated_at REAL NOT NULL)",
         ),
         (
-            29,
-            "CREATE TABLE IF NOT EXISTS blocker_queue ("
-            "blocker_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, "
-            "job_id TEXT, url TEXT, title TEXT, reason TEXT, "
-            "category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', "
-            "manual_text TEXT, created_at REAL NOT NULL, "
-            "updated_at REAL NOT NULL)",
-        ),
-        (
             30,
             "CREATE TABLE IF NOT EXISTS application_snapshots ("
             "snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -351,40 +279,10 @@ class JobLibraryStore(_SqliteStore):
             "CREATE INDEX IF NOT EXISTS idx_application_snapshots_job "
             "ON application_snapshots(tenant_id, job_id, created_at DESC)",
         ),
-        (31, "ALTER TABLE library_jobs ADD COLUMN reminder_sent_at REAL"),
-        (
-            40,
-            "ALTER TABLE library_jobs ADD COLUMN "
-            "reminder_attempts INTEGER NOT NULL DEFAULT 0",
-        ),
-        (
-            41,
-            "ALTER TABLE library_jobs ADD COLUMN "
-            "reminder_next_retry_at REAL",
-        ),
-        (
-            32,
-            "ALTER TABLE library_jobs ADD COLUMN "
-            "refresh_enabled INTEGER NOT NULL DEFAULT 1",
-        ),
-        (33, "ALTER TABLE library_jobs ADD COLUMN last_refresh_at REAL"),
-        (34, "ALTER TABLE library_jobs ADD COLUMN refresh_status TEXT"),
         (
             35,
             "ALTER TABLE library_jobs ADD COLUMN "
             "match_stale INTEGER NOT NULL DEFAULT 0",
-        ),
-        (
-            36,
-            "CREATE TABLE IF NOT EXISTS job_refresh_events ("
-            "refresh_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, "
-            "job_id TEXT NOT NULL, changed_at REAL NOT NULL, "
-            "changed_fields TEXT NOT NULL DEFAULT '[]', "
-            "old_summary TEXT, new_summary TEXT, jd_text_hash TEXT, "
-            "status TEXT NOT NULL DEFAULT 'succeeded', error TEXT, "
-            "created_at REAL NOT NULL); "
-            "CREATE INDEX IF NOT EXISTS idx_job_refresh_events_job "
-            "ON job_refresh_events(tenant_id, job_id, changed_at DESC)",
         ),
         (37, "ALTER TABLE library_jobs ADD COLUMN match_score_detail_json TEXT"),
         (38, "ALTER TABLE library_jobs ADD COLUMN match_reason TEXT"),
@@ -410,7 +308,7 @@ class JobLibraryStore(_SqliteStore):
         job_function: str | None = None,
         seniority: str | None = None,
         tech_tags: list[str] | None = None,
-        status: str = "未投递",
+        status: str = "draft",
         classification_pending: int = 0,
         final_draft: str | None = None,
         final_draft_updated_at: float | None = None,
@@ -448,7 +346,7 @@ class JobLibraryStore(_SqliteStore):
             raise UserStoreError(f"Invalid job_function: {job_function}")
         if seniority is not None and seniority not in seniorities:
             raise UserStoreError(f"Invalid seniority: {seniority}")
-        status = _validate_status(status)
+        status = canonical_status(_validate_status(status))
         if classification_pending not in (0, 1):
             raise UserStoreError(
                 "classification_pending must be 0 or 1"
@@ -877,377 +775,6 @@ class JobLibraryStore(_SqliteStore):
             }
             for row in rows
         ]
-
-    def list_reminders(
-        self,
-        tenant_id: str,
-        scope: str = "today",
-        now: float | None = None,
-    ) -> list[dict[str, Any]]:
-        """Return follow-up reminders for a tenant, oldest due first.
-
-        ``scope="today"`` includes overdue items plus anything due today;
-        future items beyond today are excluded. The returned projection is
-        what the today view and reminder workers need, without loading JD
-        text or alignment payloads.
-        """
-        if scope not in {"today"}:
-            raise UserStoreError(f"Invalid reminder scope: {scope}")
-        now_ts = now if now is not None else time.time()
-        today = date.fromtimestamp(now_ts).isoformat()
-        statuses = ("已投递", "面试中")
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                rows = conn.execute(
-                    "SELECT * FROM library_jobs "
-                    "WHERE tenant_id = ? AND status IN (?, ?) "
-                    "AND next_step_due_at IS NOT NULL "
-                    "ORDER BY next_step_due_at ASC",
-                    (tenant_id, *statuses),
-                ).fetchall()
-        reminders: list[dict[str, Any]] = []
-        for row in rows:
-            due_key = _due_date_key(row["next_step_due_at"])
-            if not due_key or due_key > today:
-                continue
-            due_ts = _due_timestamp(row["next_step_due_at"])
-            reminders.append(
-                {
-                    "job_id": row["job_id"],
-                    "title": row["title"],
-                    "company": row["company"],
-                    "status_canonical": canonical_status(row["status"]),
-                    "next_step_due_at": row["next_step_due_at"],
-                    "interview_stage": row["interview_stage"] or None,
-                    "next_step": row["next_step"] or None,
-                    "overdue": due_ts is not None and due_ts < now_ts,
-                    "reminder_sent_at": row["reminder_sent_at"],
-                }
-            )
-        reminders.sort(
-            key=lambda item: (
-                _due_timestamp(item["next_step_due_at"]) or float("inf"),
-                item["job_id"],
-            )
-        )
-        return reminders
-
-    def claim_due_reminders(
-        self,
-        now: float | None = None,
-    ) -> list[dict[str, Any]]:
-        """Atomically mark every due reminder as sent and return the rows.
-
-        The update guard ``reminder_sent_at IS NULL`` makes concurrent ticks
-        idempotent: only one caller can claim a row.
-        """
-        now_ts = now if now is not None else time.time()
-        statuses = ("已投递", "面试中")
-        claimed: list[dict[str, Any]] = []
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                rows = conn.execute(
-                    "SELECT * FROM library_jobs "
-                    "WHERE status IN (?, ?) "
-                    "AND next_step_due_at IS NOT NULL "
-                    "AND reminder_sent_at IS NULL",
-                    statuses,
-                ).fetchall()
-                for row in rows:
-                    due_ts = _due_timestamp(row["next_step_due_at"])
-                    if due_ts is None or due_ts > now_ts:
-                        continue
-                    updated = conn.execute(
-                        "UPDATE library_jobs "
-                        "SET reminder_sent_at = ?, updated_at = ? "
-                        "WHERE job_id = ? AND tenant_id = ? "
-                        "AND reminder_sent_at IS NULL",
-                        (now_ts, now_ts, row["job_id"], row["tenant_id"]),
-                    ).rowcount
-                    if updated:
-                        claimed.append(
-                            {
-                                "job_id": row["job_id"],
-                                "tenant_id": row["tenant_id"],
-                                "title": row["title"],
-                                "company": row["company"],
-                                "status_canonical": canonical_status(
-                                    row["status"]
-                                ),
-                                "next_step_due_at": row["next_step_due_at"],
-                                "interview_stage": row["interview_stage"] or None,
-                                "next_step": row["next_step"] or None,
-                                "reminder_sent_at": now_ts,
-                            }
-                        )
-        return claimed
-
-    def list_due_reminders(
-        self,
-        now: float | None = None,
-    ) -> list[dict[str, Any]]:
-        """Return every due reminder across tenants without claiming them.
-
-        The scheduler uses this to emit ``reminder.due`` events; actual
-        delivery claims rows through ``claim_pending_reminders`` so a
-        successful send is the only thing that persists ``reminder_sent_at``.
-        """
-        now_ts = now if now is not None else time.time()
-        statuses = ("已投递", "面试中")
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                rows = conn.execute(
-                    "SELECT * FROM library_jobs "
-                    "WHERE status IN (?, ?) "
-                    "AND next_step_due_at IS NOT NULL "
-                    "AND reminder_sent_at IS NULL",
-                    statuses,
-                ).fetchall()
-        due: list[dict[str, Any]] = []
-        for row in rows:
-            due_ts = _due_timestamp(row["next_step_due_at"])
-            if due_ts is None or due_ts > now_ts:
-                continue
-            due.append(
-                {
-                    "job_id": row["job_id"],
-                    "tenant_id": row["tenant_id"],
-                    "title": row["title"],
-                    "company": row["company"],
-                    "status_canonical": canonical_status(row["status"]),
-                    "next_step_due_at": row["next_step_due_at"],
-                    "interview_stage": row["interview_stage"] or None,
-                    "next_step": row["next_step"] or None,
-                    "reminder_attempts": int(row["reminder_attempts"] or 0),
-                }
-            )
-        due.sort(
-            key=lambda item: (
-                _due_timestamp(item["next_step_due_at"]) or float("inf"),
-                item["job_id"],
-            )
-        )
-        return due
-
-    def claim_pending_reminders(
-        self,
-        now: float | None = None,
-        *,
-        lease_seconds: float = 300.0,
-        max_attempts: int = 3,
-    ) -> list[dict[str, Any]]:
-        """Atomically claim due reminders for delivery, one worker at a time.
-
-        ``reminder_next_retry_at`` doubles as a lease: while a claim is in
-        flight it is set to ``now + lease_seconds`` so concurrent workers
-        skip the row. A crashed worker is recovered after the lease expires.
-        The row stays un-sent until ``mark_reminder_sent`` succeeds.
-        """
-        now_ts = now if now is not None else time.time()
-        statuses = ("已投递", "面试中")
-        claimed: list[dict[str, Any]] = []
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                rows = conn.execute(
-                    "SELECT * FROM library_jobs "
-                    "WHERE status IN (?, ?) "
-                    "AND next_step_due_at IS NOT NULL "
-                    "AND reminder_sent_at IS NULL "
-                    "AND reminder_attempts < ? "
-                    "AND (reminder_next_retry_at IS NULL "
-                    "OR reminder_next_retry_at <= ?)",
-                    (statuses[0], statuses[1], max_attempts, now_ts),
-                ).fetchall()
-                for row in rows:
-                    due_ts = _due_timestamp(row["next_step_due_at"])
-                    if due_ts is None or due_ts > now_ts:
-                        continue
-                    updated = conn.execute(
-                        "UPDATE library_jobs "
-                        "SET reminder_next_retry_at = ?, "
-                        "reminder_attempts = reminder_attempts + 1, "
-                        "updated_at = ? "
-                        "WHERE job_id = ? AND tenant_id = ? "
-                        "AND reminder_sent_at IS NULL "
-                        "AND reminder_attempts < ? "
-                        "AND (reminder_next_retry_at IS NULL "
-                        "OR reminder_next_retry_at <= ?)",
-                        (
-                            now_ts + lease_seconds,
-                            now_ts,
-                            row["job_id"],
-                            row["tenant_id"],
-                            max_attempts,
-                            now_ts,
-                        ),
-                    ).rowcount
-                    if updated:
-                        claimed.append(
-                            {
-                                "job_id": row["job_id"],
-                                "tenant_id": row["tenant_id"],
-                                "title": row["title"],
-                                "company": row["company"],
-                                "status_canonical": canonical_status(
-                                    row["status"]
-                                ),
-                                "next_step_due_at": row["next_step_due_at"],
-                                "interview_stage": row["interview_stage"] or None,
-                                "next_step": row["next_step"] or None,
-                                "reminder_attempts": int(
-                                    row["reminder_attempts"] or 0
-                                )
-                                + 1,
-                            }
-                        )
-        return claimed
-
-    def mark_reminder_sent(
-        self,
-        tenant_id: str,
-        job_id: str,
-        sent_at: float | None = None,
-    ) -> bool:
-        """Persist a successful reminder delivery exactly once."""
-        sent_ts = sent_at if sent_at is not None else time.time()
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                return bool(
-                    conn.execute(
-                        "UPDATE library_jobs "
-                        "SET reminder_sent_at = ?, "
-                        "reminder_next_retry_at = NULL, "
-                        "updated_at = ? "
-                        "WHERE job_id = ? AND tenant_id = ? "
-                        "AND reminder_sent_at IS NULL",
-                        (sent_ts, sent_ts, job_id, tenant_id),
-                    ).rowcount
-                )
-
-    def mark_reminder_failed(
-        self,
-        tenant_id: str,
-        job_id: str,
-        next_retry_at: float,
-    ) -> bool:
-        """Release a claim and schedule the next retry without sending."""
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                return bool(
-                    conn.execute(
-                        "UPDATE library_jobs "
-                        "SET reminder_next_retry_at = ?, updated_at = ? "
-                        "WHERE job_id = ? AND tenant_id = ? "
-                        "AND reminder_sent_at IS NULL",
-                        (next_retry_at, time.time(), job_id, tenant_id),
-                    ).rowcount
-                )
-
-    def list_refresh_candidates(self, tenant_id: str) -> list[dict[str, Any]]:
-        """Return URL-sourced jobs eligible for scheduled refresh."""
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                rows = conn.execute(
-                    "SELECT * FROM library_jobs "
-                    "WHERE tenant_id = ? AND source_type = 'url' "
-                    "AND source_url IS NOT NULL AND source_url != '' "
-                    "AND refresh_enabled = 1 "
-                    "ORDER BY updated_at DESC",
-                    (tenant_id,),
-                ).fetchall()
-                return [self._row_to_library_job(row) for row in rows]
-
-    def record_refresh_event(
-        self,
-        tenant_id: str,
-        job_id: str,
-        *,
-        changed_fields: list[str] | None = None,
-        old_summary: str | None = None,
-        new_summary: str | None = None,
-        jd_text_hash: str | None = None,
-        status: str = "succeeded",
-        error: str | None = None,
-    ) -> dict[str, Any]:
-        """Persist one structured refresh history row."""
-        refresh_id = uuid.uuid4().hex
-        now = time.time()
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                conn.execute(
-                    "INSERT INTO job_refresh_events ("
-                    "refresh_id, tenant_id, job_id, changed_at, "
-                    "changed_fields, old_summary, new_summary, "
-                    "jd_text_hash, status, error, created_at"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        refresh_id,
-                        tenant_id,
-                        job_id,
-                        now,
-                        json.dumps(changed_fields or [], ensure_ascii=False),
-                        old_summary,
-                        new_summary,
-                        jd_text_hash,
-                        status,
-                        error,
-                        now,
-                    ),
-                )
-        return {
-            "refresh_id": refresh_id,
-            "tenant_id": tenant_id,
-            "job_id": job_id,
-            "changed_at": now,
-            "changed_fields": changed_fields or [],
-            "status": status,
-        }
-
-    def list_refresh_events(
-        self,
-        tenant_id: str,
-        job_id: str | None = None,
-        limit: int = 50,
-    ) -> list[dict[str, Any]]:
-        """Return structured refresh history for a tenant or job."""
-        conditions = ["tenant_id = ?"]
-        values: list[Any] = [tenant_id]
-        if job_id:
-            conditions.append("job_id = ?")
-            values.append(job_id)
-        sql = (
-            "SELECT * FROM job_refresh_events WHERE "
-            + " AND ".join(conditions)
-            + " ORDER BY changed_at DESC LIMIT ?"
-        )
-        values.append(max(1, min(int(limit), 200)))
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                rows = conn.execute(sql, values).fetchall()
-        return [
-            {
-                "refresh_id": row["refresh_id"],
-                "job_id": row["job_id"],
-                "changed_at": row["changed_at"],
-                "changed_fields": json.loads(row["changed_fields"] or "[]"),
-                "old_summary": row["old_summary"],
-                "new_summary": row["new_summary"],
-                "jd_text_hash": row["jd_text_hash"],
-                "status": row["status"],
-                "error": row["error"],
-            }
-            for row in rows
-        ]
-
     def update_job(
         self,
         tenant_id: str,
@@ -1277,9 +804,6 @@ class JobLibraryStore(_SqliteStore):
         rejected_at: str | None = None,
         next_step_due_at: str | None = None,
         interview_stage: str | None = None,
-        refresh_enabled: int | None = None,
-        last_refresh_at: float | None = None,
-        refresh_status: str | None = None,
         match_stale: int | None = None,
         jd_profile: dict[str, Any] | None = None,
         gap_report: dict[str, Any] | None = None,
@@ -1318,7 +842,7 @@ class JobLibraryStore(_SqliteStore):
         if seniority is not None and seniority not in seniorities:
             raise UserStoreError(f"Invalid seniority: {seniority}")
         if status is not None:
-            status = _validate_status(status)
+            status = canonical_status(_validate_status(status))
         if (
             classification_pending is not None
             and classification_pending not in (0, 1)
@@ -1339,17 +863,8 @@ class JobLibraryStore(_SqliteStore):
             raise UserStoreError(f"Invalid tailor_focus: {tailor_focus}")
         if custom_prompt is not None:
             custom_prompt = custom_prompt.strip()
-        if refresh_enabled is not None and refresh_enabled not in (0, 1):
-            raise UserStoreError("refresh_enabled must be 0 or 1")
         if match_stale is not None and match_stale not in (0, 1):
             raise UserStoreError("match_stale must be 0 or 1")
-        if refresh_status is not None and refresh_status not in {
-            "queued",
-            "succeeded",
-            "failed",
-            "closed",
-        }:
-            raise UserStoreError(f"Invalid refresh_status: {refresh_status}")
         if jd_text is not None and not jd_text.strip():
             raise UserStoreError("Job description text cannot be empty")
 
@@ -1401,14 +916,13 @@ class JobLibraryStore(_SqliteStore):
                         interview_stage = value
 
         if append_only_snapshot:
-            # The status and every timeline field stay untouched on append.
-            applied_at = None
-            next_step = None
-            notes = None
-            offer_at = None
-            rejected_at = None
-            next_step_due_at = None
-            interview_stage = None
+            # ADR-0028: re-recording an applied job freezes a new snapshot
+            # without downgrading the stored status or rewriting the existing
+            # timeline history. An explicitly provided applied_at is still
+            # written so a 200 response never silently drops it (Bug-02);
+            # None still leaves the stored value unchanged and "" still
+            # clears per the clear-on-empty contract.
+            pass
 
         sets = ["updated_at = ?"]
         values: list[Any] = [time.time()]
@@ -1511,23 +1025,6 @@ class JobLibraryStore(_SqliteStore):
             else:
                 sets.append("interview_stage = ?")
                 values.append(interview_stage)
-        if (
-            (status is not None and not append_only_snapshot)
-            or next_step_due_at is not None
-            or interview_stage is not None
-        ):
-            sets.append("reminder_sent_at = NULL")
-            sets.append("reminder_attempts = 0")
-            sets.append("reminder_next_retry_at = NULL")
-        if refresh_enabled is not None:
-            sets.append("refresh_enabled = ?")
-            values.append(refresh_enabled)
-        if last_refresh_at is not None:
-            sets.append("last_refresh_at = ?")
-            values.append(last_refresh_at)
-        if refresh_status is not None:
-            sets.append("refresh_status = ?")
-            values.append(refresh_status)
         if match_stale is not None:
             sets.append("match_stale = ?")
             values.append(match_stale)
@@ -1882,7 +1379,7 @@ class JobLibraryStore(_SqliteStore):
         """
         if not job_ids:
             return []
-        status = _validate_status(status)
+        status = canonical_status(_validate_status(status))
         expected = (
             canonical_status(_validate_status(expected_status))
             if expected_status is not None
@@ -2084,11 +1581,6 @@ class JobLibraryStore(_SqliteStore):
                     (job_id, tenant_id),
                 )
                 conn.execute(
-                    "DELETE FROM crawl_tasks "
-                    "WHERE job_id = ? AND tenant_id = ?",
-                    (job_id, tenant_id),
-                )
-                conn.execute(
                     "DELETE FROM application_snapshots "
                     "WHERE job_id = ? AND tenant_id = ?",
                     (job_id, tenant_id),
@@ -2197,12 +1689,6 @@ class JobLibraryStore(_SqliteStore):
             "rejected_at": row["rejected_at"] or None,
             "next_step_due_at": row["next_step_due_at"] or None,
             "interview_stage": row["interview_stage"] or None,
-            "reminder_sent_at": row["reminder_sent_at"],
-            "reminder_attempts": int(row["reminder_attempts"] or 0),
-            "reminder_next_retry_at": row["reminder_next_retry_at"],
-            "refresh_enabled": bool(row["refresh_enabled"]),
-            "last_refresh_at": row["last_refresh_at"],
-            "refresh_status": row["refresh_status"] or None,
             "match_stale": bool(row["match_stale"]),
             "workbench_job_id": row["workbench_job_id"],
             "workbench_resume_id": row["workbench_resume_id"],
@@ -2379,174 +1865,12 @@ class JobLibraryStore(_SqliteStore):
             "updated_at": row["updated_at"],
         }
 
-    # -- Blocker queue (Sprint 3 pipeline) -----------------------------------
-
-    def create_blocker(
-        self,
-        tenant_id: str,
-        url: str | None = None,
-        title: str | None = None,
-        reason: str | None = None,
-        category: str = "fetch_error",
-        job_id: str | None = None,
-        manual_text: str | None = None,
-    ) -> dict[str, Any]:
-        """Record one blocked fetch for a tenant's pending queue."""
-        category = str(category or "").strip() or "fetch_error"
-        if category not in BLOCKER_CATEGORIES:
-            raise UserStoreError(f"Invalid blocker category: {category}")
-        blocker_id = uuid.uuid4().hex
-        now = time.time()
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                conn.execute(
-                    "INSERT INTO blocker_queue ("
-                    "blocker_id, tenant_id, job_id, url, title, reason, "
-                    "category, status, manual_text, created_at, updated_at"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
-                    (
-                        blocker_id,
-                        tenant_id,
-                        job_id,
-                        url,
-                        title,
-                        reason,
-                        category,
-                        manual_text,
-                        now,
-                        now,
-                    ),
-                )
-        blocker = self.get_blocker(tenant_id, blocker_id)
-        assert blocker is not None
-        return blocker
-
-    def get_blocker(
-        self, tenant_id: str, blocker_id: str
-    ) -> Optional[dict[str, Any]]:
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                row = conn.execute(
-                    "SELECT * FROM blocker_queue "
-                    "WHERE blocker_id = ? AND tenant_id = ?",
-                    (blocker_id, tenant_id),
-                ).fetchone()
-                return self._row_to_blocker(row) if row else None
-
-    def list_blockers(
-        self,
-        tenant_id: str,
-        status: str | None = None,
-        limit: int = 200,
-    ) -> list[dict[str, Any]]:
-        """Return a tenant's blocker queue, newest first.
-
-        status 参数缺省时返回全部状态（含 pending/ignored/resolved）；统计与展示请显式传 status=pending。
-        """
-        if status is not None and status not in BLOCKER_STATUSES:
-            raise UserStoreError(f"Invalid blocker status: {status}")
-        sql = "SELECT * FROM blocker_queue WHERE tenant_id = ?"
-        values: list[Any] = [tenant_id]
-        if status is not None:
-            sql += " AND status = ?"
-            values.append(status)
-        sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
-        values.append(max(1, min(int(limit), 500)))
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                rows = conn.execute(sql, values).fetchall()
-                return [self._row_to_blocker(row) for row in rows]
-
-    def ignore_blocker(
-        self, tenant_id: str, blocker_id: str
-    ) -> Optional[dict[str, Any]]:
-        """Mark a pending blocker ignored; non-pending blockers are a no-op."""
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                row = conn.execute(
-                    "SELECT status FROM blocker_queue "
-                    "WHERE blocker_id = ? AND tenant_id = ?",
-                    (blocker_id, tenant_id),
-                ).fetchone()
-                if row is None:
-                    return None
-                if row["status"] != "pending":
-                    return self.get_blocker(tenant_id, blocker_id)
-                conn.execute(
-                    "UPDATE blocker_queue SET status = 'ignored', "
-                    "updated_at = ? WHERE blocker_id = ? AND tenant_id = ?",
-                    (time.time(), blocker_id, tenant_id),
-                )
-        return self.get_blocker(tenant_id, blocker_id)
-
-    def resolve_blocker(
-        self,
-        tenant_id: str,
-        blocker_id: str,
-        job_id: str,
-        manual_text: str | None = None,
-    ) -> Optional[dict[str, Any]]:
-        """Mark a pending blocker resolved and link its created job."""
-        if not job_id:
-            raise UserStoreError("job_id is required to resolve a blocker")
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                row = conn.execute(
-                    "SELECT status FROM blocker_queue "
-                    "WHERE blocker_id = ? AND tenant_id = ?",
-                    (blocker_id, tenant_id),
-                ).fetchone()
-                if row is None:
-                    return None
-                if row["status"] != "pending":
-                    raise UserStoreError(
-                        "Only pending blockers can be resolved"
-                    )
-                now = time.time()
-                sets = [
-                    "status = 'resolved'",
-                    "job_id = ?",
-                    "updated_at = ?",
-                ]
-                values: list[Any] = [job_id, now]
-                if manual_text is not None:
-                    sets.append("manual_text = ?")
-                    values.append(manual_text)
-                values.extend([blocker_id, tenant_id])
-                conn.execute(
-                    f"UPDATE blocker_queue SET {', '.join(sets)} "
-                    "WHERE blocker_id = ? AND tenant_id = ?",
-                    values,
-                )
-        return self.get_blocker(tenant_id, blocker_id)
-
-    @staticmethod
-    def _row_to_blocker(row: sqlite3.Row) -> dict[str, Any]:
-        return {
-            "blocker_id": row["blocker_id"],
-            "tenant_id": row["tenant_id"],
-            "job_id": row["job_id"],
-            "url": row["url"],
-            "title": row["title"],
-            "reason": row["reason"],
-            "category": row["category"],
-            "status": row["status"],
-            "manual_text": row["manual_text"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
-
     def _ensure_initialized(self) -> None:
         super()._ensure_initialized(_JOB_LIBRARY_SCHEMA)
 
 
 # ---------------------------------------------------------------------------
-# Automation rules + blocker queue (Sprint 3 pipeline)
+# Automation rules (Sprint 3 pipeline)
 #
 # These rows live in the same database as library_jobs, so they are exposed
 # as methods on JobLibraryStore (one store, one migration journal) rather
@@ -2575,242 +1899,3 @@ def _validate_min_salary_value(value: str) -> float:
     return threshold
 
 
-CRAWL_TASK_STATES = (
-    "queued",
-    "fetching",
-    "parsing",
-    "classifying",
-    "succeeded",
-    "failed",
-)
-
-_CRAWL_TASK_TRANSITIONS: dict[str, tuple[str, ...]] = {
-    "queued": ("fetching", "failed"),
-    "fetching": ("parsing", "failed", "queued"),
-    "parsing": ("classifying", "failed", "queued"),
-    "classifying": ("succeeded", "failed", "queued"),
-    "succeeded": (),
-    "failed": ("queued",),
-}
-
-
-class CrawlTaskStore(_SqliteStore):
-    """SQLite-backed crawl task state machine with restart recovery."""
-
-    def create(
-        self,
-        tenant_id: str,
-        jd_url: str,
-        job_id: str | None = None,
-        crawl_id: str | None = None,
-    ) -> dict[str, Any]:
-        url = (jd_url or "").strip()
-        if not url:
-            raise UserStoreError("A JD URL is required")
-        task_id = crawl_id or uuid.uuid4().hex
-        now = time.time()
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                conn.execute(
-                    "INSERT INTO crawl_tasks ("
-                    "crawl_id, tenant_id, job_id, jd_url, status, stage, "
-                    "error, attempts, created_at, updated_at, finished_at"
-                    ") VALUES (?, ?, ?, ?, 'queued', '', NULL, 0, ?, ?, NULL)",
-                    (task_id, tenant_id, job_id, url, now, now),
-                )
-        task = self.get(task_id, tenant_id)
-        assert task is not None
-        return task
-
-    def get(
-        self, crawl_id: str, tenant_id: str | None = None
-    ) -> Optional[dict[str, Any]]:
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                if tenant_id is None:
-                    row = conn.execute(
-                        "SELECT * FROM crawl_tasks WHERE crawl_id = ?",
-                        (crawl_id,),
-                    ).fetchone()
-                else:
-                    row = conn.execute(
-                        "SELECT * FROM crawl_tasks "
-                        "WHERE crawl_id = ? AND tenant_id = ?",
-                        (crawl_id, tenant_id),
-                    ).fetchone()
-                return self._row_to_task(row) if row else None
-
-    def update_state(
-        self,
-        crawl_id: str,
-        status: str,
-        stage: str | None = None,
-        error: str | None = None,
-        tenant_id: str | None = None,
-    ) -> Optional[dict[str, Any]]:
-        """Advance a crawl task through the state machine."""
-        if status not in CRAWL_TASK_STATES:
-            raise UserStoreError(f"Invalid crawl task status: {status}")
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                if tenant_id is None:
-                    row = conn.execute(
-                        "SELECT status, attempts FROM crawl_tasks "
-                        "WHERE crawl_id = ?",
-                        (crawl_id,),
-                    ).fetchone()
-                else:
-                    row = conn.execute(
-                        "SELECT status, attempts FROM crawl_tasks "
-                        "WHERE crawl_id = ? AND tenant_id = ?",
-                        (crawl_id, tenant_id),
-                    ).fetchone()
-                if row is None:
-                    return None
-                current = row["status"]
-                if status not in _CRAWL_TASK_TRANSITIONS[current]:
-                    raise UserStoreError(
-                        f"Invalid crawl transition: {current} -> {status}"
-                    )
-                now = time.time()
-                finished_at = now if status in ("succeeded", "failed") else None
-                attempts = (
-                    row["attempts"] + 1
-                    if status in ("queued", "fetching")
-                    else row["attempts"]
-                )
-                sets = ["status = ?", "updated_at = ?", "attempts = ?"]
-                values: list[Any] = [status, now, attempts]
-                if stage is not None:
-                    sets.append("stage = ?")
-                    values.append(stage)
-                if error is not None:
-                    sets.append("error = ?")
-                    values.append(error)
-                if status in ("succeeded", "failed"):
-                    sets.append("finished_at = ?")
-                    values.append(finished_at)
-                values.extend([crawl_id])
-                if tenant_id is not None:
-                    values.append(tenant_id)
-                where = "crawl_id = ?"
-                if tenant_id is not None:
-                    where += " AND tenant_id = ?"
-                conn.execute(
-                    f"UPDATE crawl_tasks SET {', '.join(sets)} "
-                    f"WHERE {where}",
-                    values,
-                )
-        return self.get(crawl_id, tenant_id)
-
-    def requeue_interrupted(self, crawl_id: str) -> bool:
-        """Return a non-terminal crawl task to the queued state."""
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                row = conn.execute(
-                    "SELECT status FROM crawl_tasks WHERE crawl_id = ?",
-                    (crawl_id,),
-                ).fetchone()
-                if row is None:
-                    return False
-                if row["status"] not in (
-                    "fetching",
-                    "parsing",
-                    "classifying",
-                    "failed",
-                ):
-                    return False
-                conn.execute(
-                    "UPDATE crawl_tasks SET status = 'queued', "
-                    "stage = 'requeued', error = NULL, finished_at = NULL, "
-                    "updated_at = ? WHERE crawl_id = ?",
-                    (time.time(), crawl_id),
-                )
-                return True
-
-    def pending_crawl_ids(
-        self, tenant_id: str | None = None
-    ) -> list[str]:
-        """Return queued or in-flight crawl task ids in submission order."""
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                if tenant_id is None:
-                    rows = conn.execute(
-                        "SELECT crawl_id FROM crawl_tasks "
-                        "WHERE status IN "
-                        "('queued','fetching','parsing','classifying') "
-                        "ORDER BY created_at ASC, rowid ASC"
-                    ).fetchall()
-                else:
-                    rows = conn.execute(
-                        "SELECT crawl_id FROM crawl_tasks "
-                        "WHERE tenant_id = ? AND status IN "
-                        "('queued','fetching','parsing','classifying') "
-                        "ORDER BY created_at ASC, rowid ASC",
-                        (tenant_id,),
-                    ).fetchall()
-                return [row["crawl_id"] for row in rows]
-
-    def pending_by_job(
-        self,
-        tenant_id: str,
-        job_id: str,
-    ) -> Optional[dict[str, Any]]:
-        """Return the oldest in-flight crawl task for a library job."""
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                row = conn.execute(
-                    "SELECT * FROM crawl_tasks "
-                    "WHERE tenant_id = ? AND job_id = ? "
-                    "AND status IN "
-                    "('queued','fetching','parsing','classifying') "
-                    "ORDER BY created_at ASC, rowid ASC LIMIT 1",
-                    (tenant_id, job_id),
-                ).fetchone()
-                return self._row_to_task(row) if row else None
-
-    def recover_interrupted(self) -> int:
-        """Requeue interrupted crawl tasks after a restart."""
-        recovered = 0
-        for crawl_id in self.pending_crawl_ids():
-            if self.requeue_interrupted(crawl_id):
-                recovered += 1
-        return recovered
-
-    def list_recent(
-        self, tenant_id: str, limit: int = 50
-    ) -> list[dict[str, Any]]:
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                rows = conn.execute(
-                    "SELECT * FROM crawl_tasks WHERE tenant_id = ? "
-                    "ORDER BY updated_at DESC LIMIT ?",
-                    (tenant_id, max(1, min(int(limit), 200))),
-                ).fetchall()
-                return [self._row_to_task(row) for row in rows]
-
-    @staticmethod
-    def _row_to_task(row: sqlite3.Row) -> dict[str, Any]:
-        return {
-            "crawl_id": row["crawl_id"],
-            "tenant_id": row["tenant_id"],
-            "job_id": row["job_id"],
-            "jd_url": row["jd_url"],
-            "status": row["status"],
-            "stage": row["stage"],
-            "error": row["error"],
-            "attempts": row["attempts"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-            "finished_at": row["finished_at"],
-        }
-
-    def _ensure_initialized(self) -> None:
-        super()._ensure_initialized(_JOB_LIBRARY_SCHEMA)

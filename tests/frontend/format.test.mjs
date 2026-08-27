@@ -6,6 +6,7 @@ import {
   buildDiagnosisMarkdownFrom,
   canonicalJobStatus,
   cmpLineHtml,
+  collectAcceptedOptimizeItems,
   esc,
   formatDate,
   formatElapsed,
@@ -30,9 +31,12 @@ import {
   matchTone,
   normalizeVocabulary,
   normalizeVocabularyList,
+  optimizeActionsHtml,
+  optimizeVerdict,
   options,
   parseHashValue,
   parseImportText,
+  renderA4PaperHtml,
   renderInlineDiffSide,
   renderMatchBadge,
   runEvalFromForm,
@@ -555,10 +559,34 @@ test("renderMatchBadge renders score, source title and muted source label", () =
   );
   assert.match(html, /class="match-badge match--high" data-match-badge/);
   assert.match(html, /title="来自 AI 评估"/);
-  assert.match(html, />🛡️ 匹配 82</);
+  assert.match(html, /match-badge__icon/);
+  assert.match(html, />匹配 82</);
   assert.match(html, /data-match-source>来自 AI 评估</);
 
   assert.equal(renderMatchBadge({}, {}), "");
+});
+
+test("renderA4PaperHtml renders empty state for blank drafts", () => {
+  const html = renderA4PaperHtml("");
+  assert.match(html, /a4-paper a4-paper--empty/);
+  assert.match(html, /data-a4-paper/);
+  assert.match(html, /还没有定稿简历/);
+  assert.match(html, /a4-paper__empty-title/);
+});
+
+test("renderA4PaperHtml renders paper document for non-empty drafts", () => {
+  const html = renderA4PaperHtml("# 张三\n\n精通 React 与 Node.js");
+  assert.doesNotMatch(html, /a4-paper--empty/);
+  assert.match(html, /data-a4-paper/);
+  assert.match(html, /<h1>张三<\/h1>/);
+  assert.match(html, /精通 React 与 Node\.js/);
+  assert.match(html, /resume-doc/);
+});
+
+test("renderA4PaperHtml escapes raw HTML in draft", () => {
+  const html = renderA4PaperHtml("<script>alert(1)<\/script>");
+  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /&lt;script&gt;/);
 });
 
 /* ------------------------------------------------------------------ */
@@ -586,6 +614,28 @@ test("jobTimelineFormHtml includes structured follow-up fields", () => {
   const empty = jobTimelineFormHtml({ job_id: "j2", status: "draft" });
   assert.match(empty, /name="interview_stage"><option value="" selected>无<\/option>/);
   assert.match(empty, /type="datetime-local" name="next_step_due_at" value=""/);});
+
+test("jobTimelineFormHtml normalizes date-only values to datetime-local", () => {
+  /* Bug-11: date-only（如数据库存的 2026-08-19）必须补 T00:00，
+   * 否则浏览器控制台报 datetime format 警告；空值保持空串。 */
+  const html = jobTimelineFormHtml({
+    job_id: "j3",
+    status: "applied",
+    applied_at: "2026-08-19",
+    next_step_due_at: "2026-08-21T18:00",
+  });
+  assert.match(html, /type="datetime-local" name="applied_at" value="2026-08-19T00:00"/);
+  assert.match(html, /type="datetime-local" name="next_step_due_at" value="2026-08-21T18:00"/);
+  assert.match(html, /type="datetime-local" name="offer_at" value=""/);
+  assert.match(html, /type="datetime-local" name="rejected_at" value=""/);
+  const nulls = jobTimelineFormHtml({
+    job_id: "j4",
+    status: "draft",
+    applied_at: null,
+    next_step_due_at: undefined,
+  });
+  assert.match(nulls, /type="datetime-local" name="applied_at" value=""/);
+});
 
 test("jobSourceUrl prefers source_url then jd_url", () => {
   assert.equal(
@@ -929,9 +979,88 @@ test("workbenchPrimaryButtonHtml swaps to create resume without resumes", () => 
 
   const ready = workbenchPrimaryButtonHtml([{ resume_id: "r1" }]);
   assert.match(ready, /data-action="run-alignment"/);
-  assert.match(ready, />开始优化<\/button>/);
+  assert.match(ready, />开始对齐<\/button>/);
 
   const running = workbenchPrimaryButtonHtml([{ resume_id: "r1" }], true);
   assert.match(running, /disabled/);
   assert.match(running, />对齐生成中...<\/button>/);
+});
+/* ------------------------------------------------------------------ */
+/* optimizeVerdict / optimizeActionsHtml / collectAcceptedOptimizeItems */
+/* ------------------------------------------------------------------ */
+
+test("optimizeVerdict buckets by 80/60 thresholds", () => {
+  assert.equal(optimizeVerdict(100), "优秀");
+  assert.equal(optimizeVerdict(80), "优秀");
+  assert.equal(optimizeVerdict(79), "建议优化");
+  assert.equal(optimizeVerdict(60), "建议优化");
+  assert.equal(optimizeVerdict(59), "需重点优化");
+  assert.equal(optimizeVerdict(0), "需重点优化");
+});
+
+test("optimizeVerdict tolerates non-numeric input as 建议优化", () => {
+  assert.equal(optimizeVerdict("abc"), "建议优化");
+  assert.equal(optimizeVerdict(null), "建议优化");
+  assert.equal(optimizeVerdict(undefined), "建议优化");
+  assert.equal(optimizeVerdict("88"), "优秀");
+  assert.equal(optimizeVerdict("70"), "建议优化");
+});
+
+test("collectAcceptedOptimizeItems returns only ok+accepted+optimized items", () => {
+  const modules = [
+    { module: "projects", index: 0, original: "a", optimized: "A", status: "ok" },
+    { module: "projects", index: 1, original: "b", optimized: "B", status: "ok" },
+    { module: "projects", index: 2, original: "c", optimized: "C", status: "failed", error: "402" },
+    { module: "projects", index: 3, original: "d", optimized: "  ", status: "ok" },
+    { module: "projects", index: 4, original: "e", optimized: "", status: "ok" },
+    null,
+  ];
+  const accepted = { 0: true, 1: false, 3: true, 4: true };
+  const items = collectAcceptedOptimizeItems(modules, accepted);
+  assert.deepEqual(items, [{ module: "projects", index: 0, optimized: "A" }]);
+});
+
+test("collectAcceptedOptimizeItems treats missing accepted as empty", () => {
+  const modules = [
+    { module: "projects", index: 0, original: "a", optimized: "A", status: "ok" },
+  ];
+  assert.deepEqual(collectAcceptedOptimizeItems(modules, undefined), []);
+  assert.deepEqual(collectAcceptedOptimizeItems(modules, null), []);
+  assert.deepEqual(collectAcceptedOptimizeItems(null, { 0: true }), []);
+  assert.deepEqual(collectAcceptedOptimizeItems([], { 0: true }), []);
+});
+
+test("optimizeActionsHtml disables apply while nothing accepted", () => {
+  const html = optimizeActionsHtml(
+    [
+      { module: "projects", index: 0, status: "ok" },
+      { module: "projects", index: 1, status: "failed", error: "x" },
+    ],
+    {},
+  );
+  assert.match(html, /data-action="optimize-apply-accepted"/);
+  assert.match(html, /data-action="optimize-apply-accepted"[^>]*disabled/);
+  assert.match(html, /应用已采纳（0）为新版本/);
+  /* 有 ok 模块 → 全部采纳可点 */
+  assert.match(html, /data-action="optimize-accept-all"[^>]*/);
+  assert.doesNotMatch(html, /data-action="optimize-accept-all"[^>]*disabled/);
+});
+
+test("optimizeActionsHtml enables apply once accepted and disables accept-all without ok modules", () => {
+  const accepted = optimizeActionsHtml(
+    [
+      { module: "projects", index: 0, status: "ok" },
+      { module: "projects", index: 1, status: "failed", error: "x" },
+    ],
+    { 0: true },
+  );
+  assert.doesNotMatch(accepted, /data-action="optimize-apply-accepted"[^>]*disabled/);
+  assert.match(accepted, /应用已采纳（1）为新版本/);
+
+  const allFailed = optimizeActionsHtml(
+    [{ module: "projects", index: 2, status: "failed", error: "402" }],
+    {},
+  );
+  assert.match(allFailed, /data-action="optimize-accept-all"[^>]*disabled/);
+  assert.match(allFailed, /data-action="optimize-apply-accepted"[^>]*disabled/);
 });

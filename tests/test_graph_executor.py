@@ -1,9 +1,21 @@
 """Tests for GraphExecutor, gates, and state models."""
 from __future__ import annotations
-import sys, pathlib
+
+import pathlib
+import sys
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
-import pytest
-from resualign.graph import GraphExecutor, AlignmentState, AlignmentStatus, StageResult, NODE_ROUTER, get_node, next_node, ProvenanceGate, AntiHallucinationGate, GateResult
+from resualign.graph import (
+    NODE_ROUTER,
+    AlignmentState,
+    AlignmentStatus,
+    AntiHallucinationGate,
+    GraphExecutor,
+    ProvenanceGate,
+    get_node,
+    next_node,
+)
+
 
 def test_alignment_state_defaults():
     s = AlignmentState(job_id="test", resume_text="hello", jd_text="world")

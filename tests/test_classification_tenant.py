@@ -17,9 +17,12 @@ class _CountingLLM:
 
     shared_calls: list[str] = []
 
-    def __init__(self, config, timeout: float = 45.0) -> None:
+    def __init__(self, config, timeout: float = 45.0, max_tokens: int | None = None) -> None:
         self.config = config
         self.timeout = timeout
+        # R4 P0-2 added max_tokens to the classifier client construction;
+        # accept-and-ignore keeps this fake aligned with the real signature.
+        self.max_tokens = max_tokens
 
     def __enter__(self) -> "_CountingLLM":
         return self

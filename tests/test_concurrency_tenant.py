@@ -90,7 +90,7 @@ def temp_stores(tmp_path):
 
 
 def test_concurrent_tenant_workload_stays_isolated():
-    """8 parallel clients create jobs/resumes/applications with zero errors."""
+    """8 parallel clients create jobs/resumes with zero errors."""
     with patch("resualign.api._classify_job", return_value={}):
         outcomes: dict[tuple[str, int], dict] = {}
         errors: list[Exception] = []
@@ -129,22 +129,11 @@ def test_concurrent_tenant_workload_stays_isolated():
                     headers=headers,
                 )
                 assert resume.status_code == 201, resume.text
-                application = thread_client.post(
-                    "/api/applications",
-                    json={
-                        "title": f"{tenant} application {index}",
-                        "master_resume_id": resume.json()["resume_id"],
-                        "jd_text": f"{tenant} JD {index}",
-                    },
-                    headers=headers,
-                )
-                assert application.status_code == 201, application.text
                 outcomes[(tenant, index)] = {
                     "tenant": tenant,
                     "token": token,
                     "job": job.json(),
                     "resume": resume.json(),
-                    "application": application.json(),
                 }
             except Exception as exc:  # pragma: no cover - failure path
                 errors.append(exc)
@@ -176,23 +165,13 @@ def test_concurrent_tenant_workload_stays_isolated():
         assert len(resumes) == 1
         assert resumes[0]["resume_id"] == outcome["resume"]["resume_id"]
 
-        applications = client.get(
-            "/api/applications", headers=headers
-        ).json()
-        assert len(applications) == 1
-        assert (
-            applications[0]["application_id"]
-            == outcome["application"]["application_id"]
-        )
-
-    # The workers own disjoint tenant ids (one per user, MVP model).
+        # The workers own disjoint tenant ids (one per user, MVP model).
     assert len(tenant_ids) == CONCURRENCY
 
     # Cross-tenant reads behave like missing resources (404).
     a_job = outcomes[("tenant-a", 0)]["job"]
     b_job = outcomes[("tenant-b", 0)]["job"]
     b_resume = outcomes[("tenant-b", 0)]["resume"]
-    b_application = outcomes[("tenant-b", 0)]["application"]
 
     assert (
         client.get(
@@ -215,14 +194,6 @@ def test_concurrent_tenant_workload_stays_isolated():
         ).status_code
         == 404
     )
-    assert (
-        client.get(
-            f"/api/applications/{b_application['application_id']}",
-            headers={"Authorization": f"Bearer {outcomes[('tenant-a', 0)]['token']}"},
-        ).status_code
-        == 404
-    )
-
     # Re-run the list views after cross-tenant probes: counts unchanged.
     for (_owner, _index), outcome in outcomes.items():
         headers = {"Authorization": f"Bearer {outcome['token']}"}

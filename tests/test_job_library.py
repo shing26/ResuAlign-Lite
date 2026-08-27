@@ -7,7 +7,6 @@ import pytest
 from resualign.job_library import (
     JOB_FUNCTIONS,
     SENIORITIES,
-    CrawlTaskStore,
     JobLibraryStore,
 )
 from resualign.workspace import UserStoreError
@@ -47,7 +46,7 @@ def test_create_and_get_job(db_path):
     assert job["location"] == "Shanghai"
     assert job["salary_min"] == 20000
     assert job["salary_max"] == 30000
-    assert job["status"] == "未投递"
+    assert job["status"] == "draft"  # Bug-12: canonical storage
     assert job["job_function"] is None
     assert job["classification_pending"] == 0
     assert job["final_draft"] is None
@@ -224,7 +223,7 @@ def test_update_job_fields_and_tags(db_path):
     assert updated["job_function"] == "后端"
     assert updated["seniority"] == "高级"
     assert updated["tech_tags"] == ["Python", "FastAPI"]
-    assert updated["status"] == "面试中"
+    assert updated["status"] == "interview"  # Bug-12: canonical storage
     assert updated["salary_min"] == 25000
 
 
@@ -297,15 +296,9 @@ def test_delete_job(db_path):
     assert store.delete_job("tenant-1", job["job_id"]) == (False, None)
 
 
-def test_delete_job_removes_crawl_tasks_and_reports_analysis(db_path):
+def test_delete_job_reports_analysis_job(db_path):
     store = _store(db_path)
-    crawls = CrawlTaskStore(db_path=db_path)
     job = store.create_job(**_job_payload())
-    crawl = crawls.create(
-        tenant_id="tenant-1",
-        job_id=job["job_id"],
-        jd_url="https://example.com/jobs/1",
-    )
     store.update_job(
         "tenant-1", job["job_id"], workbench_job_id="analysis-123"
     )
@@ -314,7 +307,6 @@ def test_delete_job_removes_crawl_tasks_and_reports_analysis(db_path):
     assert deleted is True
     assert workbench_job_id == "analysis-123"
     assert store.get_job("tenant-1", job["job_id"]) is None
-    assert crawls.get(crawl["crawl_id"], "tenant-1") is None
 
 
 def test_controlled_vocabularies():

@@ -32,9 +32,7 @@ def test_e2e_diagnosis_only(httpx_mock, capsys):
     out = capsys.readouterr().out
     assert "/100" in out
     assert "78" in out
-    data = json.loads(
-        list(Path.cwd().glob("resualign-report-*.json"))[0].read_text(encoding="utf-8")
-    )
+    data = json.loads(list(Path.cwd().glob("resualign-report-*.json"))[0].read_text(encoding="utf-8"))
     assert data["score"] == 78
     cleanup_reports()
     cleanup_env()
@@ -54,9 +52,7 @@ def test_e2e_with_alignment(httpx_mock, capsys):
     out = capsys.readouterr().out
     assert "/100" in out
     assert "85" in out
-    data = json.loads(
-        list(Path.cwd().glob("resualign-report-*.json"))[0].read_text(encoding="utf-8")
-    )
+    data = json.loads(list(Path.cwd().glob("resualign-report-*.json"))[0].read_text(encoding="utf-8"))
     assert len(data["diffs"]) == 1
     cleanup_reports()
     cleanup_env()

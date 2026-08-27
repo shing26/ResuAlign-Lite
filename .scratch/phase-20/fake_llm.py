@@ -17,7 +17,6 @@ from collections import Counter
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-
 app = FastAPI(title="phase20-fake-llm")
 
 # Module-level QA state: per-stage hit counters and unknown-prompt log.
@@ -36,18 +35,19 @@ E2E_CLASSIFY_FAIL_MARKER = "__E2E_CLASSIFY_FAIL__"
 E2E_CLASSIFY_FAILS_LEFT: int = 0
 
 # Stages the phase-20 key-path smoke must exercise at least once:
-#  - job classifier        : session pipeline classification
-#  - resume auditor        : workbench diagnosis (no-JD run)
-#  - job description analyst : standalone proactive JD profile (no pinned resume)
-#  - jd_analysis           : combined JD profile + gap analysis (pinned resume)
-#  - precise resume editor : tailoring
-#  - resume quality judge  : evaluation (run_eval=False in smoke, so not required)
+#  - classifier    : session pipeline classification (PROMPT_VERSION: classifier/v2)
+#  - diagnose      : workbench diagnosis (PROMPT_VERSION: diagnose/v3)
+#  - jd_profiler   : standalone proactive JD profile (PROMPT_VERSION: jd_profiler/v2)
+#  - gap_analyzer  : gap analysis against the JD profile (PROMPT_VERSION: gap_analyzer/v2)
+#  - tailor        : tailoring (PROMPT_VERSION: tailor/v2)
+#  - evaluator     : evaluation (PROMPT_VERSION: evaluator/v2, run_eval=False in smoke,
+#                    so not required)
 REQUIRED_STAGES = [
-    "job classifier",
-    "resume auditor",
-    "job description analyst",
-    "jd_analysis",
-    "precise resume editor",
+    "classifier",
+    "diagnose",
+    "jd_profiler",
+    "gap_analyzer",
+    "tailor",
 ]
 
 
@@ -61,32 +61,41 @@ def _original_bullet_from_user(user: str) -> str:
     return match.group(1).strip() if match else "Original bullet"
 
 
+def _first_bullet(resume: str) -> str:
+    """Return the first markdown bullet in a resume, with its marker."""
+    for line in resume.splitlines():
+        stripped = line.strip()
+        if stripped[:2] in ("- ", "* ", "+ "):
+            return stripped
+    return resume.splitlines()[0].strip() if resume else "# Python Backend Engineer"
+
+
 def fake_llm_response(system: str, user: str) -> dict | None:
     """Return a deterministic OpenAI-compatible response per prompt.
 
     ``None`` marks an unknown system prompt: the caller returns HTTP 500.
     """
     global E2E_CLASSIFY_FAILS_LEFT
-    if "job classifier" in system and E2E_CLASSIFY_FAIL_MARKER in user:
+    if "PROMPT_VERSION: classifier/v2" in system and E2E_CLASSIFY_FAIL_MARKER in user:
         if E2E_CLASSIFY_FAILS_LEFT > 0:
             E2E_CLASSIFY_FAILS_LEFT -= 1
             STAGE_HITS["e2e classify fail"] += 1
             return None
-    if "job classifier" in system:
-        STAGE_HITS["job classifier"] += 1
+    if "PROMPT_VERSION: classifier/v2" in system:
+        STAGE_HITS["classifier"] += 1
         return {
             "job_function": "后端",
             "seniority": "高级",
             "tech_tags": ["Python", "FastAPI"],
         }
-    if "resume auditor" in system:
-        STAGE_HITS["resume auditor"] += 1
+    if "PROMPT_VERSION: diagnose/v3" in system:
+        STAGE_HITS["diagnose"] += 1
         return {
             "score": 82,
             "skills": ["Python", "FastAPI"],
             "issues": ["Add quantified results."],
         }
-    if "job description analyst" in system and "gap analyst" in system:
+    if "PROMPT_VERSION: jd_analysis/v3" in system:
         STAGE_HITS["jd_analysis"] += 1
         return {
             "jd_profile": {
@@ -106,8 +115,8 @@ def fake_llm_response(system: str, user: str) -> dict | None:
                 "strength_matches": ["Python"],
             },
         }
-    if "job description analyst" in system:
-        STAGE_HITS["job description analyst"] += 1
+    if "PROMPT_VERSION: jd_profiler/v2" in system:
+        STAGE_HITS["jd_profiler"] += 1
         return {
             "must_have_skills": ["Python", "FastAPI"],
             "nice_to_have_skills": ["Redis", "Docker"],
@@ -116,8 +125,8 @@ def fake_llm_response(system: str, user: str) -> dict | None:
             "min_years_experience": 5,
             "education_requirements": [],
         }
-    if "resume gap analyst" in system:
-        STAGE_HITS["resume gap analyst"] += 1
+    if "PROMPT_VERSION: gap_analyzer/v2" in system:
+        STAGE_HITS["gap_analyzer"] += 1
         return {
             "missing_keywords": [
                 "FastAPI async endpoints",
@@ -126,21 +135,10 @@ def fake_llm_response(system: str, user: str) -> dict | None:
             "misaligned_emphasis": [],
             "strength_matches": ["Python"],
         }
-    if "rewrite exactly one resume bullet" in system:
-        STAGE_HITS["precise resume editor"] += 1
-        original = _original_bullet_from_user(user)
-        return {
-            "proposed": f"{original} (high concurrency)",
-            "reason": "Matches JD high-concurrency scenario",
-        }
-    if "precise resume editor" in system:
-        STAGE_HITS["precise resume editor"] += 1
+    if "PROMPT_VERSION: tailor/v2" in system:
+        STAGE_HITS["tailor"] += 1
         resume = _resume_from_user(user)
-        original = (
-            resume.splitlines()[0]
-            if resume
-            else "# Python Backend Engineer"
-        )
+        original = _first_bullet(resume)
         proposed = f"{original} (high concurrency)"
         updated = resume.replace(original, proposed, 1)
         return {
@@ -154,8 +152,8 @@ def fake_llm_response(system: str, user: str) -> dict | None:
                 "provenance": original,
             }],
         }
-    if "resume quality judge" in system:
-        STAGE_HITS["resume quality judge"] += 1
+    if "PROMPT_VERSION: evaluator/v2" in system:
+        STAGE_HITS["evaluator"] += 1
         return {
             "jd_match_score": 88,
             "improvement": 12,
@@ -228,9 +226,9 @@ async def chat_completions(request: Request) -> dict:
                 "system": system[:200],
             },
         )
-    if schema_retry and "precise resume editor" in system:
+    if schema_retry and "PROMPT_VERSION: tailor/v2" in system:
         payload = {"broken": "schema"}
-    if invalid_provenance and "precise resume editor" in system:
+    if invalid_provenance and "PROMPT_VERSION: tailor/v2" in system:
         payload["diffs"] = [{
             "type": "add",
             "original": "",

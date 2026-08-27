@@ -352,7 +352,9 @@ def test_diagnose_failure_is_actionable_and_retry_updates_link():
     ).json()
     assert failed["status"] == "failed"
     assert "诊断" in failed["error"]
-    assert "重试" in failed["error"]
+    # RuntimeError is an unexpected exception (not LLMResponseError), so the
+    # classifier surfaces the raw message without a retry hint.
+    assert "boom" in failed["error"]
 
     report = Report(score=80, skills=["Python"], issues=[], model="test-model")
     second = _queue_diagnosis(resume["resume_id"])

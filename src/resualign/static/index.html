@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="zh-CN" class="dark">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ResuAlign - Career Studio</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/static/styles.css?v=28">
+  <link rel="stylesheet" href="/static/styles.css?v=30">
 </head>
 <body class="app-body app-shell bg-appbg text-white/90 h-screen flex overflow-hidden select-none text-[13px]">
   <aside class="app-rail rail" aria-label="主导航栏">
@@ -30,23 +30,35 @@
         <span class="rail-label">岗位库</span>
         <span class="rail-count" data-jobs-rail-count hidden></span>
       </button>
-      <button type="button" class="nav-btn" data-route="today" data-tab="today" aria-selected="false" title="今日待办" aria-label="今日待办">
-        <span class="nav-index" aria-hidden="true">04</span>
-        <span class="rail-label">今日待办</span>
-      </button>
       <button type="button" class="nav-btn" data-route="resume" data-tab="resume" aria-selected="true" title="简历中心" aria-label="简历中心">
-        <span class="nav-index" aria-hidden="true">05</span>
+        <span class="nav-index" aria-hidden="true">04</span>
         <span class="rail-label">简历中心</span>
       </button>
       <button type="button" class="nav-btn" data-route="settings" data-tab="settings" aria-selected="false" title="系统设置" aria-label="系统设置">
-        <span class="nav-index" aria-hidden="true">06</span>
+        <span class="nav-index" aria-hidden="true">05</span>
         <span class="rail-label">系统设置</span>
       </button>
     </nav>
-    <div class="rail-foot">
-      <span class="dot dot-success" aria-hidden="true"></span>
-      <span>本地 · 个人模式</span>
-      <span class="rail-tech">SQLite</span>
+    <div class="rail-foot" data-rail-foot>
+      <div class="rail-quota" data-rail-quota hidden>
+        <div class="rail-quota__head">
+          <span class="rail-quota__label">今日云端额度</span>
+          <span class="rail-quota__cost" data-rail-quota-cost>—</span>
+        </div>
+        <div class="rail-quota__bar" role="progressbar" aria-label="今日额度用量" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-rail-quota-track>
+          <span class="rail-quota__fill" data-rail-quota-fill style="width:0%"></span>
+        </div>
+        <div class="rail-quota__meta">
+          <span data-rail-quota-remaining>剩余 —</span>
+          <span data-rail-quota-calls>0 次调用</span>
+        </div>
+        <span class="rail-quota__status" data-rail-quota-status></span>
+      </div>
+      <div class="rail-foot__status">
+        <span class="dot dot-success" aria-hidden="true"></span>
+        <span>本地 · 个人模式</span>
+        <span class="rail-tech">SQLite</span>
+      </div>
     </div>
   </aside>
   <div class="app-main flex-1 flex flex-col overflow-hidden">
@@ -61,19 +73,11 @@
           <span class="truncate">搜索岗位或命令...</span>
           <kbd>Ctrl K</kbd>
         </button>
-        <button type="button" class="quick-jd-btn btn btn-primary" data-action="open-command-panel" aria-label="快速导入 JD" title="快速导入 JD">快速导入 JD</button>
-        <select class="header-job-select input input-sm" data-header-job-select aria-label="切换岗位" title="切换岗位">
-          <option value="">选择岗位...</option>
-        </select>
         <div class="topbar-actions__right flex items-center space-x-3">
           <button class="theme-toggle icon-btn" type="button" data-action="toggle-theme" data-theme-toggle aria-pressed="false" aria-label="切换明暗主题" title="切换明暗主题">
             <span class="theme-toggle-icon" aria-hidden="true">◐</span>
             <span data-theme-label>浅色</span>
           </button>
-          <div class="model-status">
-            <span class="dot dot-success" aria-hidden="true"></span>
-            <span id="mode-label">个人模式</span>
-          </div>
         </div>
       </div>
     </header>
@@ -110,6 +114,6 @@
       </form>
     </div>
   </div>
-  <script type="module" src="/static/app/main.js?v=28"></script>
+  <script type="module" src="/static/app/main.js?v=30"></script>
 </body>
 </html>

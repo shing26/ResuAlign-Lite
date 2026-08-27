@@ -115,43 +115,6 @@ export function validateCostGuardPayload(payload) {
   return { ok: true, message: "" };
 }
 
-/** Build the PUT /api/settings reminder payload from form field data.
- *
- * 只包含显式可编辑字段；webhook URL/secret 与 SMTP 密码保持环境变量
- * 来源，不会出现在表单或 payload 中。空端口转为 null 由后端清除。 */
-export function buildReminderPayload(data) {
-  const source = data || {};
-  const payload = {
-    reminder: {
-      enabled: Boolean(source.enabled),
-      auto_followup_reminder: Boolean(source.auto_followup_reminder),
-      provider: String(source.provider || "generic").trim() || "generic",
-      smtp_host: String(source.smtp_host || "").trim() || null,
-      smtp_port: (() => {
-        const raw = String(source.smtp_port || "").trim();
-        return raw === "" ? null : Number(raw);
-      })(),
-      smtp_user: String(source.smtp_user || "").trim() || null,
-      smtp_from: String(source.smtp_from || "").trim() || null,
-      smtp_to: String(source.smtp_to || "").trim() || null,
-    },
-  };
-  return payload;
-}
-
-/** Validate a built reminder payload before PUT /api/settings. */
-export function validateReminderPayload(payload) {
-  const reminder = (payload && payload.reminder) || {};
-  if (!["generic", "feishu", "wecom", "telegram"].includes(reminder.provider)) {
-    return { ok: false, message: "请选择有效的 Webhook 类型" };
-  }
-  const port = reminder.smtp_port;
-  if (port != null && (!Number.isInteger(port) || port < 1 || port > 65535)) {
-    return { ok: false, message: "SMTP 端口必须是 1-65535 的整数" };
-  }
-  return { ok: true, message: "" };
-}
-
 /* ------------------------------------------------------------------ */
 /* Sprint 5: LLM 节点 + 自动化规则表单（纯函数）                          */
 /* ------------------------------------------------------------------ */

@@ -9,18 +9,18 @@ from __future__ import annotations
 
 import json
 import os
-import re
+import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
-
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
@@ -31,6 +31,93 @@ SHOTS = PHASE20_DIR / "screenshots"
 def expect(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def _dump_diff_debug(page, base: str, job_id: str, tag: str, errors=None) -> None:
+    """Persist diagnostics when diff-card interaction fails.
+
+    Dumps the library job JSON (alignment_status / persisted accepted
+    diffs), every rendered diff-card's id + actions, and the tail of the
+    API network log so a red run shows whether the rerun POST happened,
+    whether analysis-status was polled, and whether the visible card is a
+    stale accepted one.
+    """
+    slug = tag.lower().replace(" ", "-")
+    try:
+        job = api_call(base, "GET", f"/api/jobs/{job_id}")
+        (SHOTS / f"debug-{slug}-job.json").write_text(
+            json.dumps(job, ensure_ascii=False, indent=2)[:20000],
+            encoding="utf-8",
+        )
+        wb_job_id = job.get("workbench_job_id")
+        if wb_job_id:
+            try:
+                status = api_call(
+                    base, "GET", f"/api/jobs/{wb_job_id}/analysis-status"
+                )
+                (SHOTS / f"debug-{slug}-analysis.json").write_text(
+                    json.dumps(
+                        {k: status.get(k) for k in ("status", "stage", "error")},
+                        ensure_ascii=False, indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+            except Exception as exc:
+                (SHOTS / f"debug-{slug}-analysis.json").write_text(
+                    f"analysis-status failed: {exc}", encoding="utf-8"
+                )
+    except Exception as exc:
+        (SHOTS / f"debug-{slug}-job.json").write_text(
+            f"api dump failed: {exc}", encoding="utf-8"
+        )
+    try:
+        cards = page.locator(".diff-card")
+        accept_sel = '[data-action="accept-bullet"]'
+        adopted_sel = ".adopted"
+        lines = []
+        for i in range(min(cards.count(), 20)):
+            card = cards.nth(i)
+            lines.append(
+                f"card[{i}] id={card.get_attribute('data-diff-id')} "
+                f"class={card.get_attribute('class')} "
+                f"accept={card.locator(accept_sel).count()} "
+                f"adopted={card.locator(adopted_sel).count()}"
+            )
+        (SHOTS / f"debug-{slug}-cards.txt").write_text(
+            "\n".join(lines) or "<no .diff-card>", encoding="utf-8"
+        )
+        html = (
+            cards.first.evaluate("el => el.outerHTML")
+            if cards.count()
+            else "<no .diff-card>"
+        )
+        (SHOTS / f"debug-{slug}-card.html").write_text(html, encoding="utf-8")
+        page.screenshot(path=str(SHOTS / f"debug-{slug}.png"), full_page=True)
+    except Exception as exc:
+        (SHOTS / f"debug-{slug}-card.html").write_text(
+            f"page dump failed: {exc}", encoding="utf-8"
+        )
+    if errors is not None:
+        (SHOTS / f"debug-{slug}-net.txt").write_text(
+            "\n".join(errors.get("net", [])[-120:]), encoding="utf-8"
+        )
+        (SHOTS / f"debug-{slug}-errors.txt").write_text(
+            "console:\n" + "\n".join(errors.get("console", [])[-30:])
+            + "\npage:\n" + "\n".join(errors.get("page", [])[-30:]),
+            encoding="utf-8",
+        )
+    try:
+        session_id = page.evaluate("location.hash.split('/').pop()")
+        session = api_call(base, "GET", f"/api/workspace/session/{session_id}")
+        (SHOTS / f"debug-{slug}-session.json").write_text(
+            json.dumps(session.get("alignment") or {}, ensure_ascii=False, indent=2)
+            [:12000],
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        (SHOTS / f"debug-{slug}-session.json").write_text(
+            f"session dump failed: {exc}", encoding="utf-8"
+        )
 
 
 def free_port() -> int:
@@ -73,6 +160,16 @@ def new_page(context, errors: dict):
         lambda exc: errors["page"].append(str(exc)),
     )
     page.on("dialog", lambda dialog: dialog.accept())
+    errors.setdefault("net", [])
+    page.on(
+        "response",
+        lambda resp: errors["net"].append(
+            f"{resp.request.method} {resp.status} "
+            f"{urllib.parse.urlsplit(resp.url).path}"
+        )
+        if "/api/" in resp.url
+        else None,
+    )
     return page
 
 
@@ -241,7 +338,6 @@ def run_key_path(
     created: dict,
 ) -> None:
     resume_title = f"{prefix} Master Resume"
-    job_title = f"{prefix} Senior Backend Engineer"
     resume_content = (
         "# Python Backend Engineer\n\n"
         "5 years of experience\n\n"
@@ -329,14 +425,54 @@ def run_key_path(
     # Tailor in the Optimizer split canvas.
     page = new_page(context, errors)
     page.goto(f"{base}/#/workspace/{job_id}", wait_until="domcontentloaded")
-    page.wait_for_selector("[data-inspector-controls]")
+    page.wait_for_selector("[data-surface-mode='optimizer']")
     if not page.locator("[data-form='split-align']").first.is_visible():
-        page.click("[data-inspector-controls] summary")
+        page.locator("[data-wb-tab-v3='controls']").first.click()
     page.wait_for_selector("[data-form='split-align']")
     page.select_option(
         '[data-form="split-align"] select[name="master_resume_id"]', resume_id
     )
     page.click('[data-form="split-align"] button[type="submit"]')
+    # The workbench may mount in A4 preview mode when a draft already
+    # exists; switch to diff mode so the suggestion cards are visible.
+    diff_toggle = page.locator("[data-wb-view-mode='diff']")
+    if diff_toggle.count() and not diff_toggle.first.evaluate(
+        "(el) => el.classList.contains('active')"
+    ):
+        diff_toggle.first.click()
+    # The canvas keeps re-rendering while the job runs, so wait for the
+    # terminal state before trying to click a diff-card action.
+    card_timeline: list[str] = []
+
+    def _sample_cards() -> str:
+        cards = page.locator(".diff-card")
+        accept_sel = '[data-action="accept-bullet"]'
+        parts = []
+        for i in range(min(cards.count(), 4)):
+            card = cards.nth(i)
+            parts.append(
+                f"{(card.get_attribute('data-diff-id') or '?')[:8]}"
+                f"|{(card.get_attribute('class') or '').replace('diff-card', '').strip()}"
+                f"|btn={card.locator(accept_sel).count()}"
+            )
+        return " ;; ".join(parts) if parts else "<no-cards>"
+
+    deadline = time.monotonic() + 60
+    status_job = {}
+    while time.monotonic() < deadline:
+        status_job = api_call(base, "GET", f"/api/jobs/{job_id}")
+        card_timeline.append(
+            f"{time.monotonic():0.1f} "
+            f"status={status_job.get('alignment_status')} "
+            f"cards={_sample_cards()}"
+        )
+        if status_job.get("alignment_status") == "succeeded":
+            break
+        page.wait_for_timeout(500)
+    expect(
+        status_job.get("alignment_status") == "succeeded",
+        "alignment did not reach succeeded state",
+    )
     # On narrow screens the split-canvas panes are tab-gated and the diff
     # pane (with the result cards) starts hidden; switch to it so the cards
     # are visible on mobile. Desktop tab bar is display:none, so only click
@@ -353,14 +489,33 @@ def run_key_path(
         "tailor diff controls missing",
     )
 
-    # Export markdown on every viewport (the export dock is collapsed by
-    # default in v3; expand it before clicking a menu action).
-    if not page.locator(
-        '[data-action="export-align-markdown"]'
-    ).first.is_visible():
-        page.click("[data-export-dock] summary")
+    # Accept one bullet so the canonical final draft is persisted, then
+    # export markdown from the final-draft panel (the v3 export dock is
+    # disabled until a final draft exists).
+    first_card = page.locator(".diff-card").first
+    try:
+        first_card.locator('[data-action="accept-bullet"]').click()
+    except Exception:
+        _dump_diff_debug(page, base, job_id, f"{prefix} accept-bullet", errors)
+        (SHOTS / f"debug-{prefix.lower()}-timeline.txt").write_text(
+            "\n".join(card_timeline[-60:]), encoding="utf-8"
+        )
+        raise
+    panel = page.locator("[data-final-draft-panel]:not([hidden])")
+    panel.wait_for(timeout=15000)
+    deadline = time.monotonic() + 15
+    job = {}
+    while time.monotonic() < deadline:
+        job = api_call(base, "GET", f"/api/jobs/{job_id}")
+        if (job.get("final_draft") or "").strip():
+            break
+        page.wait_for_timeout(200)
+    expect(
+        (job.get("final_draft") or "").strip(),
+        "final draft was not persisted after accepting a bullet",
+    )
     with page.expect_download() as download_info:
-        page.click('[data-action="export-align-markdown"]')
+        panel.locator('[data-action="export-final-draft-md"]').click()
     download = download_info.value
     expect(
         download.suggested_filename.endswith(".md"),
@@ -374,13 +529,36 @@ def run_key_path(
     )
     assert_no_overflow(page, f"{prefix} workspace")
 
-    # Export PDF on the desktop viewport.
+    # Export PDF on the desktop viewport from the same final-draft panel.
+    # The app writes #print-root, calls window.print(), then clears it, so
+    # validate the canonical export payload and re-render it for page.pdf().
     if prefix == "Phase20":
-        if not page.locator('[data-action="export-align-pdf"]').first.is_visible():
-            page.click("[data-export-dock] summary")
-        page.click('[data-action="export-align-pdf"]')
-        page.wait_for_selector(
-            "#print-root .resume-doc", state="attached"
+        panel = page.locator("[data-final-draft-panel]:not([hidden])")
+        panel.wait_for(timeout=15000)
+        with page.expect_response(
+            lambda resp: resp.url.endswith("/exports")
+            and resp.request.method == "POST"
+        ) as response_info:
+            panel.locator('[data-action="export-final-draft"]').click()
+        export = response_info.value.json()
+        expect(export.get("format") == "pdf", "pdf export format mismatch")
+        expect(
+            export.get("render") == "print-html",
+            "pdf export render type mismatch",
+        )
+        content = export.get("content") or ""
+        expect("export-article" in content, "pdf print html missing article")
+        expect("定稿内容" in content, "pdf print html missing draft section")
+        expect(
+            "<button" not in content.lower(),
+            "pdf print html contains buttons",
+        )
+        page.evaluate(
+            """content => {
+                const node = document.querySelector("#print-root");
+                if (node) node.innerHTML = content;
+            }""",
+            content,
         )
         expect(
             page.locator("#print-root button").count() == 0,
@@ -437,6 +615,12 @@ def main() -> None:
         # when a required stage was never reached.
         api_call(llm.base_url, "GET", "/assert-stages")
     finally:
+        try:
+            shutil.copytree(
+                app.tmp_path, SHOTS / "app-logs", dirs_exist_ok=True
+            )
+        except Exception:
+            pass
         for job_id in created["job_ids"]:
             try:
                 api_call(base, "DELETE", f"/api/jobs/{job_id}")

@@ -5,8 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from .gap_analyzer import GAP_ANALYSIS_PROMPT
-from .jd_profiler import JD_PROFILER_PROMPT, profile_jd
+from .jd_profiler import profile_jd
 from .llm import LLMClient
 from .models import GapReport, JDProfile
 
@@ -15,7 +14,15 @@ from .models import GapReport, JDProfile
 # (``required_skills``/``nice_to_have``/``business_scene``) that break
 # ``JDProfile(**cached)``; reads under the new version never touch v1 rows
 # (B3).
-JD_ANALYSIS_PROMPT_VERSION = "jd-analysis-v2"
+# PROMPT_VERSION bump: jd-analysis-v2 -> jd-analysis-v3（2026-08-25，对照 04b-PE §2.4）
+# 本次升级说明：
+# - 变更点 1：组合契约重写为纯静态文本（不再 f-string 拼插两份子提示词），
+#   jd_profile 各字段与 gap_report 各字段均带数量/长度上限
+# - 变更点 2：删除假指令 Max tokens；补充「只输出两个顶层字段」约束
+# - 说明：profile_and_gaps 为死代码路径（M3，无生产调用方），仍保留最小维护
+# - 缓存影响：版本常量随文本变更 bump（api/routers/jobs.py:475-482 预分析缓存键
+#   直接引用本常量，漏 bump 会新旧结果串扰）。
+JD_ANALYSIS_PROMPT_VERSION = "jd-analysis-v3"
 
 # Fields the current JDProfile model accepts. Cache payloads are filtered
 # against this whitelist on read so extra keys are ignored instead of
@@ -29,18 +36,31 @@ _JD_PROFILE_FIELDS = (
     "education_requirements",
 )
 
-JD_ANALYSIS_PROMPT = (
-    "You are a job description analyst and resume gap analyst. "
-    "Given a resume and a job description, return ONE JSON object with "
-    'exactly two keys:\n'
-    '1. "jd_profile": the structured JD profile described below.\n'
-    '2. "gap_report": the gap analysis described below.\n\n'
-    "JD PROFILE INSTRUCTIONS:\n"
-    f"{JD_PROFILER_PROMPT}\n\n"
-    "GAP ANALYSIS INSTRUCTIONS:\n"
-    f"{GAP_ANALYSIS_PROMPT}\n\n"
-    "Return ONLY JSON."
-)
+JD_ANALYSIS_PROMPT = """PROMPT_VERSION: jd_analysis/v3
+
+你是岗位画像与差距分析师。输入：主简历 + 岗位描述。输出一个 JSON 对象，包含且仅包含两个顶层字段：jd_profile 与 gap_report。两个子对象都必须完整给出。
+
+## Output Contract
+{"jd_profile": {...}, "gap_report": {...}}
+
+### jd_profile（6 个字段，键名固定）
+- must_have_skills：硬性技术/平台技能，5-12 项，每项 ≤ 24 字符；JD 提到交付平台技能（Docker、Kubernetes、CI/CD）或性能/可观测性要求（metrics、latency、tracing）时必须包含。
+- nice_to_have_skills：加分技能，0-8 项，每项 ≤ 24 字符。
+- soft_skills：软技能，0-5 项，每项 ≤ 12 字符。
+- business_scenarios：业务/平台场景短语，0-6 项，每项 ≤ 30 字符；逐字摘录原文（如 high concurrency、millions of requests per day、low latency、observability），去重；超过 6 个时保留与具体技能配对、最有改写价值的 6 个。
+- min_years_experience：整数年数；未提及给 null。
+- education_requirements：学历/专业要求，0-3 项，每项 ≤ 20 字符。
+
+### gap_report（3 个字段，键名固定）
+- missing_keywords：JD 要求但简历未体现的关键词或紧凑配对短语（如 "Redis caching for high concurrency"），5-12 项，每项 ≤ 30 字符；语义重复合并，不堆砌。
+- misaligned_emphasis：简历有但强调方向与 JD 不符的点，0-4 项，每项 ≤ 30 字符；没有给 []。
+- strength_matches：简历已满足的 JD 要求，2-8 项，每项 ≤ 30 字符。
+
+## 通用规则
+1. 所有内容必须能在输入原文中找到依据；技术名词保留原文英文拼写；
+2. 值用简历同语言（中文简历 → 中文输出）；
+3. 自查：两个子对象字段齐全、类型正确；各列表数量与单项长度不超上限；无多余字段；
+4. 只输出一个 JSON 对象，无 markdown fence，无解释文字。"""
 
 
 def jd_profile_to_dict(profile: JDProfile) -> dict:

@@ -7,11 +7,11 @@ a single-call-fallback wrapper for the pipeline.
 
 Tiered timeouts (env overrides via ``RESUALIGN_ROLE_TIMEOUT_<ROLE>``):
 
-- profiler / gap_analyzer: 15s (lightweight extraction)
-- diagnose: 20s
-- editor: 40s (heavier generation)
-- evaluator: 30s
-- connect timeout: 10s (shared across all roles)
+- profiler / gap_analyzer: 30s
+- diagnose: 45s
+- editor: 90s (heavier generation)
+- evaluator: 60s
+- connect timeout: 30s (shared via OpenAIClient.DEFAULT_CONNECT_TIMEOUT)
 """
 
 from __future__ import annotations
@@ -20,11 +20,7 @@ import logging
 import os
 from typing import Any
 
-from .llm import (
-    LLMResponseError,
-    OpenAIClient,
-    StreamConnectionError,
-)
+from .llm import LLMResponseError, OpenAIClient, StreamConnectionError
 from .llm_nodes import LLMNodeStore
 
 logger = logging.getLogger(__name__)
@@ -32,15 +28,53 @@ logger = logging.getLogger(__name__)
 # Per-role timeout defaults (seconds). Environment variables override:
 # ``RESUALIGN_ROLE_TIMEOUT_DIAGNOSE``, ``RESUALIGN_ROLE_TIMEOUT_PROFILER``, etc.
 _ROLE_TIMEOUT_DEFAULTS: dict[str, float] = {
-    "diagnose": 20.0,
-    "profiler": 15.0,
-    "gap_analyzer": 15.0,
-    "editor": 40.0,
-    "evaluator": 30.0,
+    "diagnose": 45.0,
+    "profiler": 30.0,
+    "gap_analyzer": 30.0,
+    "editor": 90.0,
+    "evaluator": 60.0,
 }
-_CONNECT_TIMEOUT = 10.0
+# R4 P0-2（03-AIE §③）：per-role max_tokens 钳制表 —— 值 = 04b-PE 契约输出上限
+# + 30-50% 余量（单位 tokens）。角色路径的输出在传输侧有硬上界，30B 慢模型的
+# 生成时延可估算（诊断 ~140 / profiler ~320 / gap ~400 / editor 2600 / eval ~120）。
+# 注意：本表只引入新的 max_tokens 参数，不改动 _ROLE_TIMEOUT_DEFAULTS 任何数值
+# （护栏数字为 AIE 决策域）。
+_ROLE_MAX_TOKENS: dict[str, int] = {
+    "diagnose": 512,
+    "profiler": 1024,
+    "gap_analyzer": 1024,
+    "editor": 3072,
+    "evaluator": 384,
+}
+# length 翻倍时的绝对上限（不得逼近 65536；诊断 1024 / profiler·gap 2048 /
+# editor 6144 / eval 768）。
+_ROLE_TOKEN_CAP: dict[str, int] = {
+    "diagnose": 1024,
+    "profiler": 2048,
+    "gap_analyzer": 2048,
+    "editor": 6144,
+    "evaluator": 768,
+}
+# R4 P0-4（03-AIE §③）：短输入/低 token 输出角色允许 transport 超时后条件性
+# 1 次重试（瞬时抖动恢复收益高）；长生成角色（editor/tailor）恒 False。
+_RETRY_ON_TRANSPORT_ROLES = frozenset(
+    {"classifier", "intake", "profiler", "gap_analyzer", "polish"}
+)
 
 
+def _role_max_tokens(role: str) -> int | None:
+    """Return the role's clamped starting max_tokens, or None (no clamp)."""
+    return _ROLE_MAX_TOKENS.get(role)
+
+
+def _role_token_cap(role: str) -> int | None:
+    """Return the role's length-doubling absolute cap, or None (fallback)."""
+    return _ROLE_TOKEN_CAP.get(role)
+
+
+def _role_deadline(role: str) -> float:
+    """Wall-clock deadline for one role attempt == the role timeout (P0-3)."""
+    return _role_timeout(role)
 def _role_timeout(role: str) -> float:
     """Return the effective timeout for a role (env override > default)."""
     key = f"RESUALIGN_ROLE_TIMEOUT_{role.upper()}"
@@ -93,6 +127,10 @@ def create_client_for_role(
     return OpenAIClient(
         config,
         timeout=timeout if timeout is not None else _role_timeout(role),
+        max_tokens=_role_max_tokens(role),
+        token_cap=_role_token_cap(role),
+        deadline=_role_deadline(role),
+        retry_transport=role in _RETRY_ON_TRANSPORT_ROLES,
     )
 
 
@@ -136,7 +174,14 @@ def call_with_role(
         primary_config = ResuAlignConfig(**resolved)
         meta["node_name"] = resolved.get("model", "")
         meta["model"] = resolved.get("model", "")
-        client = OpenAIClient(primary_config, timeout=_role_timeout(role))
+        client = OpenAIClient(
+            primary_config,
+            timeout=_role_timeout(role),
+            max_tokens=_role_max_tokens(role),
+            token_cap=_role_token_cap(role),
+            deadline=_role_deadline(role),
+            retry_transport=role in _RETRY_ON_TRANSPORT_ROLES,
+        )
         try:
             result = fn(client, **fn_kwargs)
             return result, meta
@@ -174,7 +219,14 @@ def call_with_role(
         )
         meta["fallback_node_name"] = fallback_node.get("name", "")
 
-    client = OpenAIClient(fallback_config, timeout=_role_timeout(role))
+    client = OpenAIClient(
+        fallback_config,
+        timeout=_role_timeout(role),
+        max_tokens=_role_max_tokens(role),
+        token_cap=_role_token_cap(role),
+        deadline=_role_deadline(role),
+        retry_transport=role in _RETRY_ON_TRANSPORT_ROLES,
+    )
     try:
         result = fn(client, **fn_kwargs)
         return result, meta

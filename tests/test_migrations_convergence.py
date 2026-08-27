@@ -122,13 +122,9 @@ def test_job_library_migrates_legacy_db_and_keeps_data(tmp_path):
     # Data preserved.
     assert job["title"] == "Legacy Backend"
     assert job["jd_text"] == "Python backend"
-    # Sprint 3 pipeline tables are created on legacy databases too.
+    # Sprint 3 automation rules live in the same DB and migrate too.
     rule = store.create_rule("t1", "blacklist", "外包")
     assert store.get_rule("t1", rule["rule_id"]) is not None
-    blocker = store.create_blocker(
-        "t1", url="https://example.com/jobs/1", category="timeout"
-    )
-    assert store.get_blocker("t1", blocker["blocker_id"]) is not None
     # Missing columns added by versioned migrations.
     assert job["alignment_status"] == "idle"
     assert job["classification_pending"] == 0
@@ -137,9 +133,10 @@ def test_job_library_migrates_legacy_db_and_keeps_data(tmp_path):
     assert job["applied_at"] is None
     assert job["next_step_due_at"] is None
     assert job["interview_stage"] is None
-    # Every historical ALTER recorded exactly once (27 column upgrades plus
-    # the Sprint 3 automation_rules / blocker_queue table migrations).
-    assert _migrated_versions(store) == set(range(1, 42))
+    # Every historical ALTER recorded exactly once. De-bloat removed the
+    # blocker_queue (29), reminder/refresh (31-34, 36, 40, 41) migrations;
+    # the surviving set is 1..28 plus {30, 35, 37, 38, 39}.
+    assert _migrated_versions(store) == set(range(1, 29)) | {30, 35, 37, 38, 39}
 
 
 def test_upgrade_keeps_historical_alignment_artifacts(tmp_path):
@@ -240,7 +237,7 @@ def test_upgrade_keeps_historical_alignment_artifacts(tmp_path):
         }
     assert snapshot["final_draft"] == "# Snapshot content"
     assert snapshot["match_score"] == 80.0
-    assert ("JobLibraryStore", 41) in rows
+    assert ("JobLibraryStore", 39) in rows
     assert ("JobLibraryStore", 1) in rows
 
 
@@ -250,7 +247,7 @@ def test_fresh_job_library_db_records_migrations_as_applied(tmp_path):
         tenant_id="t1", title="Fresh", jd_text="Python backend."
     )
     assert job["alignment_status"] == "idle"
-    assert _migrated_versions(store) == set(range(1, 42))
+    assert _migrated_versions(store) == set(range(1, 29)) | {30, 35, 37, 38, 39}
 
 
 def test_migrated_legacy_db_supports_workbench_columns(tmp_path):

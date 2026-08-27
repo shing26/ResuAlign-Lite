@@ -59,7 +59,7 @@ def test_chat_json_retry_then_fail(httpx_mock, config):
 
 
 def test_chat_json_no_json(httpx_mock, client):
-    for _ in range(3):
+    for _ in range(client.max_retries + 1):
         httpx_mock.add_response(
             json={
                 "choices": [
@@ -156,3 +156,31 @@ def test_structured_json_mode_expands_budget_on_reasoning_length(httpx_mock, cli
     assert bodies[0]["max_tokens"] == 16384
     assert bodies[1]["max_tokens"] == 32768
     assert bodies[0]["thinking"] == {"type": "disabled"}
+def test_structured_json_mode_corrects_schema_with_feedback(httpx_mock, client):
+    """Bug-01: schema validation failure retries once with error feedback."""
+    from resualign.schema_registry import AnalysisSchema
+
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"score": "high", "skills": "Python"}'
+                    }
+                }
+            ]
+        }
+    )
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {"message": {"content": '{"score": 90, "skills": ["Go"]}'}}
+            ]
+        }
+    )
+    result = client.chat_structured("system", "user", AnalysisSchema)
+    assert result["score"] == 90
+    bodies = [json.loads(r.read()) for r in httpx_mock.get_requests()]
+    assert len(bodies) == 2
+    assert "Schema validation failed" in bodies[1]["messages"][1]["content"]
+    assert "user" in bodies[1]["messages"][1]["content"]

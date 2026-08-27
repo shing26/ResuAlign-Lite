@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 import resualign.api as api_module
 from resualign.api import app
 from resualign.api.services.jobs import _derive_title, _extract_company_location
-from resualign.crawler import CrawlError
 from resualign.jobs import JobRegistry
 from resualign.settings_store import SettingsStore
 from resualign.workspace import (
@@ -114,226 +113,12 @@ def test_create_job_from_paste_text():
     assert job["job_function"] == "后端"
     assert job["seniority"] == "高级"
     assert job["tech_tags"] == ["Python", "FastAPI"]
-    assert job["salary_min"] == 20000
-    assert job["salary_max"] == 30000
+    # De-bloat: salary is no longer auto-extracted from JD text; the field
+    # stays populated only when explicitly provided.
+    assert job["salary_min"] is None
+    assert job["salary_max"] is None
     assert job["source_type"] == "paste"
     assert job["classification_pending"] == 0
-
-
-def test_parse_jd_preview_returns_title_and_text():
-    with patch(
-        "resualign.api.crawl_jd",
-        return_value="Senior Backend Engineer\nPython and FastAPI required",
-    ):
-        r = client.post(
-            "/api/jobs/parse-jd",
-            json={"jd_url": "https://example.com/jobs/1"},
-        )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["title"] == "Senior Backend Engineer"
-    assert "Python and FastAPI required" in body["jd_text"]
-    assert body["company"] is None
-    assert body["city"] is None
-    assert body["salary_min"] is None
-    assert body["salary_max"] is None
-    assert body["salary_currency"] is None
-    assert body["source_url"] == "https://example.com/jobs/1"
-
-
-def test_parse_jd_preview_returns_salary_range():
-    with patch(
-        "resualign.api.crawl_jd",
-        return_value=(
-            "Senior Backend Engineer\n"
-            "15-25K，要求熟悉 Python 和 FastAPI"
-        ),
-    ):
-        r = client.post(
-            "/api/jobs/parse-jd",
-            json={"jd_url": "https://example.com/jobs/1"},
-        )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["salary_min"] == 15000
-    assert body["salary_max"] == 25000
-    assert body["salary_currency"] == "CNY"
-
-
-def test_parse_jd_preview_returns_crawler_metadata():
-    def fake_crawl(url, meta=None):
-        if meta is not None:
-            meta.update(
-                {
-                    "title": "Backend Engineer",
-                    "company": "Acme Inc",
-                    "city": "Shenzhen",
-                }
-            )
-        return "Backend Engineer\nJD text"
-
-    with patch("resualign.api._crawl_jd_or_502", side_effect=fake_crawl):
-        r = client.post(
-            "/api/jobs/parse-jd",
-            json={"jd_url": "https://acme.jobs.feishu.cn/position/123/detail"},
-        )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["title"] == "Backend Engineer"
-    assert body["company"] == "Acme Inc"
-    assert body["city"] == "Shenzhen"
-    assert (
-        body["source_url"]
-        == "https://acme.jobs.feishu.cn/position/123/detail"
-    )
-
-
-def test_parse_jd_preview_prefers_jd_derived_title_over_site_meta():
-    """SPA pages (e.g. Alibaba campus-talent) expose the site name in
-    static meta.title while the rendered JD body has the position name;
-    the derived title must win."""
-    def fake_crawl(url, meta=None):
-        if meta is not None:
-            meta.update({"title": "阿里巴巴校园招聘"})
-        return (
-            "阿里巴巴校园招聘\n首页\n岗位\n职位\nAI应用研发工程师\n"
-            "发布于 2026-08-06\n聚焦业务场景应用 Agent 前沿技术…"
-        )
-
-    with patch("resualign.api._crawl_jd_or_502", side_effect=fake_crawl):
-        r = client.post(
-            "/api/jobs/parse-jd",
-            json={
-                "jd_url": "https://campus-talent.alibaba.com/campus/position/1"
-            },
-        )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["title"] == "AI应用研发工程师"
-
-
-def test_parse_jd_preview_falls_back_to_meta_title_when_derivation_empty():
-    def fake_crawl(url, meta=None):
-        if meta is not None:
-            meta.update({"title": "Site Job Board"})
-        return ""
-
-    with patch("resualign.api._crawl_jd_or_502", side_effect=fake_crawl):
-        r = client.post(
-            "/api/jobs/parse-jd",
-            json={"jd_url": "https://example.com/job/1"},
-        )
-    assert r.status_code == 200
-    assert r.json()["title"] == "Site Job Board"
-
-
-def test_parse_jd_preview_requires_url():
-    r = client.post("/api/jobs/parse-jd", json={"jd_url": ""})
-
-    assert r.status_code == 422
-
-
-def test_parse_jd_preview_crawl_failure_returns_actionable_error():
-    with patch(
-        "resualign.api.crawl_jd",
-        side_effect=CrawlError(
-            "blocked by anti-bot",
-            category="http",
-            url="https://example.com/jobs/1",
-        ),
-    ):
-        r = client.post(
-            "/api/jobs/parse-jd",
-            json={"jd_url": "https://example.com/jobs/1"},
-        )
-    assert r.status_code == 502
-    detail = r.json()["detail"]
-    assert isinstance(detail, dict)
-    assert detail["code"] == "site_error"
-    assert detail["reason"]
-    assert detail["action"]
-    assert "Traceback" not in r.text
-    assert "127.0.0.1" not in r.text
-
-
-@pytest.mark.parametrize(
-    "category,message,expected_code",
-    [
-        (
-            "http",
-            "Failed to fetch https://example.com/job: HTTP 401",
-            "login_required",
-        ),
-        (
-            "http",
-            "Failed to fetch https://example.com/job: HTTP 403",
-            "login_required",
-        ),
-        (
-            "empty",
-            "Empty content at https://example.com/job",
-            "no_content",
-        ),
-        (
-            "fetch",
-            "Failed to fetch https://example.com/job: timed out",
-            "timeout",
-        ),
-        (
-            "fetch",
-            "Failed to fetch https://example.com/job: connection refused",
-            "network_error",
-        ),
-        (
-            "dns",
-            "Could not resolve host: internal.example",
-            "network_error",
-        ),
-        (
-            "url",
-            "URL points to a private or local network address",
-            "blocked_by_policy",
-        ),
-        (
-            "url",
-            "Unsupported URL scheme: 'file'",
-            "invalid_url",
-        ),
-    ],
-)
-def test_parse_jd_preview_error_classification(
-    category, message, expected_code
-):
-    with patch(
-        "resualign.api.crawl_jd",
-        side_effect=CrawlError(
-            message, category=category, url="https://example.com/job"
-        ),
-    ):
-        r = client.post(
-            "/api/jobs/parse-jd",
-            json={"jd_url": "https://example.com/job"},
-        )
-    assert r.status_code == 502
-    detail = r.json()["detail"]
-    assert detail["code"] == expected_code
-    assert detail["reason"]
-    assert detail["action"]
-    assert "Traceback" not in r.text
-    assert "127.0.0.1" not in r.text
-
-
-def test_parse_jd_preview_does_not_create_job():
-    with patch(
-        "resualign.api.crawl_jd",
-        return_value="Backend Engineer\nJD text",
-    ):
-        r = client.post(
-            "/api/jobs/parse-jd",
-            json={"jd_url": "https://example.com/jobs/2"},
-        )
-    assert r.status_code == 200
-    assert client.get("/api/jobs").json() == []
 
 
 def test_create_job_derives_title_from_first_line():
@@ -346,14 +131,10 @@ def test_create_job_derives_title_from_first_line():
     assert r.json()["title"] == "Senior Java Developer"
 
 
-def test_create_job_from_url():
-    with patch(
-        "resualign.api.crawl_jd",
-        return_value="Python backend 20-30K",
-    ) as crawl, patch(
-        "resualign.api._classify_job",
-        side_effect=_classify,
-    ):
+def test_create_job_from_url_without_text_rejected():
+    """De-bloat: backend crawling retired; a URL-only create is rejected
+    with a pointer to paste / userscript ingestion."""
+    with patch("resualign.api._classify_job", return_value={}):
         r = client.post(
             "/api/jobs",
             json={
@@ -361,14 +142,12 @@ def test_create_job_from_url():
                 "jd_url": "https://example.com/job/1",
             },
         )
-    assert r.status_code == 201
-    crawl.assert_called_once_with("https://example.com/job/1")
-    assert r.json()["source_type"] == "url"
-    assert r.json()["jd_text"] == "Python backend 20-30K"
+    assert r.status_code == 422
+    assert "粘贴" in r.json()["detail"] or "油猴插件" in r.json()["detail"]
 
 
 def test_create_job_prefers_provided_jd_text_over_url():
-    with patch("resualign.api.crawl_jd") as crawl, patch(
+    with patch(
         "resualign.api._classify_job", side_effect=_classify
     ):
         r = client.post(
@@ -380,7 +159,6 @@ def test_create_job_prefers_provided_jd_text_over_url():
             },
         )
     assert r.status_code == 201
-    crawl.assert_not_called()
     body = r.json()
     assert body["jd_text"] == "Python backend engineer. 20-30K"
     assert body["source_url"] == "https://example.com/job/1"
@@ -446,22 +224,6 @@ def test_create_duplicate_returns_409():
     assert "Duplicate job" in second.json()["detail"]
 
 
-def test_url_crawl_failure_surfaces_error():
-    with patch(
-        "resualign.api.crawl_jd",
-        side_effect=CrawlError("blocked", category="http"),
-    ), patch("resualign.api._classify_job", return_value={}):
-        r = client.post(
-            "/api/jobs",
-            json={"title": "Backend", "jd_url": "https://example.com/job"},
-        )
-    assert r.status_code == 502
-    detail = r.json()["detail"]
-    assert isinstance(detail, dict)
-    assert detail["code"] == "site_error"
-    assert "Failed to crawl" not in r.text
-
-
 def test_job_list_filter_get_patch_delete():
     with patch("resualign.api._classify_job", return_value={}):
         client.post(
@@ -494,7 +256,8 @@ def test_job_list_filter_get_patch_delete():
         json={"status": "已投递", "seniority": "高级", "salary_min": 30000},
     )
     assert r.status_code == 200
-    assert r.json()["status"] == "已投递"
+    assert r.json()["status"] == "applied"  # Bug-12 canonical
+    assert r.json()["status_label"] == "已投递"
     assert r.json()["salary_min"] == 30000
     assert r.json()["classification_pending"] == 0
 
@@ -843,48 +606,21 @@ def _create_personal_job() -> dict:
     return r.json()
 
 
-def test_mark_applied_creates_auto_followup_reminder():
-    job = _create_personal_job()
-    r = client.patch(
-        f"/api/jobs/{job['job_id']}",
-        json={"status": "applied", "applied_at": "2026-08-10"},
-    )
-    assert r.status_code == 200
-    updated = r.json()
-    assert updated["status_canonical"] == "applied"
-    assert updated["next_step"] == "投递后跟进"
-    assert updated["next_step_due_at"] == "2026-08-13T09:00:00"
-
-
-def test_auto_followup_keeps_explicit_followup_schedule():
+def test_mark_applied_keeps_manual_followup_schedule():
+    """De-bloat: no auto-followup reminder is created on applied; an explicit
+    next-step schedule supplied by the user is still persisted unchanged."""
     job = _create_personal_job()
     r = client.patch(
         f"/api/jobs/{job['job_id']}",
         json={
             "status": "applied",
+            "applied_at": "2026-08-10",
             "next_step": "准备面试",
             "next_step_due_at": "2026-08-20T10:00:00",
         },
     )
     assert r.status_code == 200
     updated = r.json()
+    assert updated["status_canonical"] == "applied"
     assert updated["next_step"] == "准备面试"
     assert updated["next_step_due_at"] == "2026-08-20T10:00:00"
-
-
-def test_auto_followup_can_be_disabled_in_settings():
-    user_id = api_module._users.get_or_create_personal_user()["user_id"]
-    api_module._settings_store.update_settings(
-        user_id,
-        {"reminder": {"auto_followup_reminder": False}},
-    )
-    job = _create_personal_job()
-    r = client.patch(
-        f"/api/jobs/{job['job_id']}",
-        json={"status": "applied", "applied_at": "2026-08-10"},
-    )
-    assert r.status_code == 200
-    updated = r.json()
-    assert updated["status_canonical"] == "applied"
-    assert updated["next_step"] is None
-    assert updated["next_step_due_at"] is None

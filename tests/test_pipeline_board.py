@@ -113,7 +113,7 @@ def test_board_status_migration_maps_legacy_chinese_status(tmp_path):
         status=LEGACY_APPLIED,
     )
 
-    assert job["status"] == LEGACY_APPLIED
+    assert job["status"] == "applied"
     assert job["status_canonical"] == "applied"
     assert job["status_label"] == LEGACY_APPLIED
     by_canonical = store.list_jobs("tenant-1", status="applied")
@@ -287,4 +287,4 @@ def test_bulk_status_endpoint_validates_tenant_ownership():
     untouched = client.get(
         f"/api/jobs/{theirs['job_id']}", headers=_other_headers()
     ).json()
-    assert untouched["status"] == LEGACY_DRAFT
+    assert untouched["status"] == "draft"

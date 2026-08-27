@@ -50,22 +50,19 @@ const kpi = {
   interview: 2,
   offer: 1,
   declined: 2,
-  active_followups: 5,
 };
 
-test("dashboardKpiHtml renders four KPI cards with values", () => {
+test("dashboardKpiHtml renders three KPI cards with values", () => {
   const body = bodyFrom(dashboardKpiHtml(kpi));
   const grid = body.querySelector("[data-dashboard-kpis]");
   assert.ok(grid, "kpi grid is rendered");
   const cards = [...grid.querySelectorAll(".dashboard-kpi")];
-  assert.equal(cards.length, 4);
+  assert.equal(cards.length, 3);
   assert.equal(cards[0].querySelector(".dashboard-kpi__value").textContent, "3");
   assert.equal(cards[1].querySelector(".dashboard-kpi__value").textContent, "8");
   assert.equal(cards[2].querySelector(".dashboard-kpi__value").textContent, "4");
-  assert.equal(cards[3].querySelector(".dashboard-kpi__value").textContent, "5");
   assert.match(cards[0].querySelector(".dashboard-kpi__label").textContent, /主简历/);
   assert.match(cards[2].querySelector(".dashboard-kpi__label").textContent, /已投递/);
-  assert.match(cards[3].querySelector(".dashboard-kpi__label").textContent, /待跟进/);
 });
 
 test("dashboardKpiHtml shows an applied conversion hint", () => {
@@ -77,7 +74,7 @@ test("dashboardKpiHtml shows an applied conversion hint", () => {
 test("dashboardKpiHtml handles missing kpi gracefully", () => {
   const body = bodyFrom(dashboardKpiHtml(null));
   const cards = [...body.querySelectorAll(".dashboard-kpi")];
-  assert.equal(cards.length, 4);
+  assert.equal(cards.length, 3);
   assert.equal(cards[0].querySelector(".dashboard-kpi__value").textContent, "0");
 });
 
@@ -198,7 +195,45 @@ test("quickContinueHtml renders title, company, status and continue link", () =>
   assert.equal(card.querySelector(".quick-continue__title").textContent, "后端工程师");
   const link = card.querySelector("a");
   assert.equal(link.getAttribute("href"), "#/workspace/j9");
-  assert.match(link.textContent, /继续/);
+  assert.equal(link.textContent, "查看");
+});
+
+/* P1-3: failed/canceled/expired 卡带红警示 + 「上次失败 · 重新运行」+ 危险主按钮 */
+test("quickContinueHtml marks failed/canceled/expired as retryable failure", () => {
+  for (const status of ["failed", "canceled", "expired"]) {
+    const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: status }));
+    const card = body.querySelector("[data-quick-continue]");
+    assert.match(card.className, /quick-continue--failed/, `${status} card is failed-styled`);
+    assert.match(card.textContent, /上次失败 · 重新运行/);
+    const link = card.querySelector("a");
+    assert.match(link.className, /btn-danger-solid/);
+    assert.match(link.textContent, /重新运行/);
+    assert.equal(link.getAttribute("href"), `#/workspace/j9`);
+  }
+});
+
+/* P1-3: running/queued 为「分析中」禁用加载态，不产生导航链接 */
+test("quickContinueHtml renders running/queued as busy, disabled", () => {
+  for (const status of ["running", "queued"]) {
+    const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: status }));
+    const card = body.querySelector("[data-quick-continue]");
+    assert.match(card.textContent, /分析中/);
+    const link = card.querySelector("a");
+    assert.equal(link.getAttribute("href"), null, `${status} link must not navigate`);
+    assert.equal(link.getAttribute("aria-disabled"), "true");
+    assert.match(link.className, /is-loading/);
+  }
+});
+
+/* P1-3: idle/pending 维持中性「待分析」+ 「继续」 */
+test("quickContinueHtml keeps idle/pending neutral", () => {
+  for (const status of ["idle", "pending", null]) {
+    const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: status }));
+    const card = body.querySelector("[data-quick-continue]");
+    assert.match(card.textContent, /待分析/);
+    const link = card.querySelector("a");
+    assert.match(link.textContent, /继续/);
+  }
 });
 
 test("quickContinueHtml returns empty for null or job-less payloads", () => {
@@ -207,9 +242,11 @@ test("quickContinueHtml returns empty for null or job-less payloads", () => {
   assert.equal(quickContinueHtml({ job_id: "" }), "");
 });
 
-test("quickContinueHtml labels unknown alignment status as 待分析", () => {
-  const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: null }));
-  assert.match(body.querySelector("[data-quick-continue]").textContent, /待分析/);
+test("quickContinueHtml passes unknown alignment status through", () => {
+  const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: "weird" }));
+  assert.match(body.querySelector("[data-quick-continue]").textContent, /weird/);
+  const link = body.querySelector("a");
+  assert.match(link.textContent, /继续/);
 });
 
 test("quickContinueHtml escapes user content", () => {

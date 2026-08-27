@@ -27,7 +27,6 @@ export async function renderDashboard(container) {
       interview: 0,
       offer: 0,
       declined: 0,
-      active_followups: 0,
     },
     skill_gaps: [],
     quick_continue: null,
@@ -56,7 +55,6 @@ export async function renderDashboard(container) {
   const interview = toNumber(kpi.interview);
   const offer = toNumber(kpi.offer);
   const declined = toNumber(kpi.declined);
-  const followups = toNumber(kpi.active_followups);
   const resumeList = Array.isArray(resumes) ? resumes : [];
 
   const alignedCount = jobs.filter(
@@ -65,7 +63,11 @@ export async function renderDashboard(container) {
   const completionRate =
     jobsTotal > 0 ? Math.round((alignedCount / jobsTotal) * 100) : 0;
 
-  const currentResume = Array.isArray(resumes) ? resumes[0] : null;
+  const currentResume = Array.isArray(resumes)
+    ? resumes.find((resume) => resume && resume.latest_diagnosis) ||
+      resumes[0] ||
+      null
+    : null;
   const diagnosis =
     (currentResume && currentResume.latest_diagnosis) ||
     (state.diagnosis &&
@@ -79,7 +81,7 @@ export async function renderDashboard(container) {
     Number.isFinite(rawScore) && rawScore >= 0
       ? Math.round(Math.min(100, rawScore))
       : null;
-  const emptyGuide = jobsTotal === 0 && resumeList.length === 0 && followups === 0
+  const emptyGuide = jobsTotal === 0 && resumeList.length === 0
     ? dashboardEmptyGuideHtml()
     : "";
 
@@ -98,24 +100,52 @@ export async function renderDashboard(container) {
       <div class="metric-label">主简历 ATS</div>
       <div class="metric-value">${atsScore == null ? "—" : escAttr(atsScore)}</div>
       <div class="metric-hint">${atsScore == null ? "未诊断" : `${escAttr(currentResume ? currentResume.title : "主简历")} · v${escAttr(currentResume ? currentResume.current_version : 1)}`}</div>
-    </div>
-    <div class="metric-cell" data-kpi="followups">
-      <div class="metric-label">待跟进</div>
-      <div class="metric-value">${escAttr(followups)} <span>条</span></div>
-      <div class="metric-hint">48h 内到期口径</div>
     </div>`;
 
   const quick = payload.quick_continue || null;
+  const qStatus = quick && quick.alignment_status;
+  /* P1-3（03-AIE/01-GPM P1-3、02-UID ③-6）：快速继续卡消费 alignment_status
+   * 分型渲染 —— failed/canceled/expired 必须红示失败，不能再看成「待分析」
+   * 蓝主按钮（点进去才撞红横幅）。 */
+  const qFailed = ["failed", "canceled", "expired"].includes(qStatus);
+  const qBusy = ["running", "queued"].includes(qStatus);
+  let quickRowClass = "";
+  let quickBadgeClass = "pill-warn";
+  let quickBadgeLabel = alignmentStatusLabel(qStatus);
+  let quickBtnClass = "btn btn-primary btn-sm";
+  let quickBtnLabel = "继续";
+  let quickBtnExtra = "";
+  if (qFailed) {
+    quickRowClass = " quick-row--failed";
+    quickBadgeClass = "badge badge-red";
+    quickBadgeLabel = "上次失败 · 重新运行";
+    quickBtnClass = "btn btn-danger-solid btn-sm";
+    quickBtnLabel = "重新运行";
+  } else if (qStatus === "succeeded") {
+    quickBadgeClass = "badge badge-green";
+    quickBadgeLabel = "已对齐";
+    quickBtnClass = "btn btn-outline btn-sm";
+    quickBtnLabel = "查看";
+  } else if (qBusy) {
+    quickBadgeClass = "badge badge-blue";
+    quickBadgeLabel = "分析中";
+    quickBtnClass = "btn btn-primary btn-sm is-loading";
+    quickBtnLabel = "分析中";
+    quickBtnExtra = ' aria-disabled="true"';
+  }
+  const quickHref = qBusy
+    ? ""
+    : `href="#/workspace/${encodeURIComponent(quick.job_id)}"`;
   const quickHtml = quick && quick.job_id
     ? `
-      <div class="quick-row" data-quick-continue>
+      <div class="quick-row${quickRowClass}" data-quick-continue>
         <div class="quick-main">
           <div class="quick-title">${escAttr(quick.title || "未命名岗位")}</div>
           <div class="quick-meta">${escAttr(quick.company || "未识别公司")} · ${escAttr(alignmentStatusLabel(quick.alignment_status))}</div>
         </div>
         <div class="quick-right">
-          <span class="pill ${quick.alignment_status === "succeeded" ? "pill-success" : "pill-warn"}">${escAttr(alignmentStatusLabel(quick.alignment_status))}</span>
-          <a class="btn btn-primary btn-sm" href="#/workspace/${encodeURIComponent(quick.job_id)}">继续对齐</a>
+          <span class="${quickBadgeClass}">${escAttr(quickBadgeLabel)}</span>
+          <a class="${quickBtnClass}" ${quickHref}${quickBtnExtra}>${escAttr(quickBtnLabel)}</a>
         </div>
       </div>`
     : `
@@ -183,7 +213,7 @@ export async function renderDashboard(container) {
             <div class="recent-jobs">
               <div class="recent-jobs__head">
                 <h3>最近岗位动态</h3>
-                <span class="small muted">最近 3 条 · 对齐快照</span>
+                <span class="small muted">最近 3 条 · 投递快照</span>
               </div>
               <div class="recent-jobs__list" data-dashboard-recent>${recentHtml}</div>
             </div>

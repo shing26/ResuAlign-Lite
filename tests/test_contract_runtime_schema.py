@@ -57,7 +57,6 @@ CRITICAL_ROUTES = {
     "/api/jobs/{job_id}/workbench/accept",
     "/api/master-resumes",
     "/api/master-resumes/{resume_id}",
-    "/api/applications",
     "/api/settings",
 }
 
@@ -346,18 +345,15 @@ def test_critical_route_success_bodies_validate():
     assert r.status_code == 200
     _validate(r.json(), JOB_ITEM_SCHEMA, "GET /api/jobs/{job_id}")
 
-    # POST /api/jobs/parse-jd (crawl patched, no network).
-    with patch(
-        "resualign.api.crawl_jd",
-        return_value="Python backend engineer. Salary 25-35K.",
-    ):
-        r = client.post(
-            "/api/jobs/parse-jd",
-            json={"jd_url": "https://example.com/jobs/1"},
-            headers=headers,
-        )
-    assert r.status_code == 200
-    _validate(r.json(), JD_PARSE_PREVIEW_SCHEMA, "POST /api/jobs/parse-jd")
+    # POST /api/jobs/parse-jd (de-bloat: backend crawling retired; the route
+    # returns a pointer to paste / userscript ingestion instead of a preview).
+    r = client.post(
+        "/api/jobs/parse-jd",
+        json={"jd_url": "https://example.com/jobs/1"},
+        headers=headers,
+    )
+    assert r.status_code == 422
+    assert "粘贴" in r.json()["detail"] or "油猴插件" in r.json()["detail"]
 
     # POST /api/jobs/import (classification patched for the worker thread).
     with patch("resualign.api._classify_job", return_value={}):
@@ -404,28 +400,6 @@ def test_critical_route_success_bodies_validate():
         r.json(),
         {"type": "array", "items": RESUME_ITEM_SCHEMA},
         "GET /api/master-resumes",
-    )
-
-    # POST /api/applications + GET list.
-    r = client.post(
-        "/api/applications",
-        json={
-            "title": "Runtime application",
-            "master_resume_id": resume["resume_id"],
-            "jd_text": "FastAPI role",
-        },
-        headers=headers,
-    )
-    assert r.status_code == 201
-    _validate(
-        r.json(), APPLICATION_ITEM_SCHEMA, "POST /api/applications"
-    )
-    r = client.get("/api/applications", headers=headers)
-    assert r.status_code == 200
-    _validate(
-        r.json(),
-        {"type": "array", "items": APPLICATION_ITEM_SCHEMA},
-        "GET /api/applications",
     )
 
     # Workbench queue -> run with a patched engine -> accept.

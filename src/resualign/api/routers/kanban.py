@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, HTTPException
 
 import resualign.api as api_module
 
-from ...reminders import AUTO_FOLLOWUP_MESSAGE, auto_followup_due_at
 from ..deps import get_current_user
 from ..schemas import (
     KanbanBulkStatusRequest,
@@ -18,36 +17,6 @@ from ..schemas import (
 router = APIRouter()
 
 _MAX_BULK_ROWS = 200
-
-
-def _apply_bulk_auto_followups(
-    tenant_id: str,
-    results: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Fill the default 3-day follow-up for newly applied jobs."""
-    settings = api_module._settings_store.get_settings(tenant_id).get(
-        "reminder"
-    ) or {}
-    if not settings.get("auto_followup_reminder", True):
-        return results
-    for item in results:
-        if not item["updated"] or item["status"] != "updated":
-            continue
-        job = item.get("job") or {}
-        if (
-            job.get("status_canonical") != "applied"
-            or job.get("next_step_due_at")
-        ):
-            continue
-        updated = api_module._jobs.update_job(
-            tenant_id,
-            job["job_id"],
-            next_step=AUTO_FOLLOWUP_MESSAGE,
-            next_step_due_at=auto_followup_due_at(job.get("applied_at")),
-        )
-        if updated is not None:
-            item["job"] = updated
-    return results
 
 
 @router.post(
@@ -93,7 +62,6 @@ def bulk_update_kanban_status(
         req.status,
         expected_status=req.expected_status,
     )
-    results = _apply_bulk_auto_followups(user["user_id"], results)
     response = KanbanBulkStatusResponse(
         idempotency_key=req.idempotency_key,
         updated=sum(1 for item in results if item["updated"]),

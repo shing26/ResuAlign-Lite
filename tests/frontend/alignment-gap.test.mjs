@@ -77,6 +77,14 @@ test("styles.css styles the inline source editor", () => {
   );
   assert.match(css, /\.resume-inline-edit\s*\{/);
   assert.match(css, /body\.resume-inline-editing/, "view hidden while editing");
+  /* P1-1 回归：.resume-inline-edit {display:flex} 靠后声明会压过早先的
+     .hidden {display:none}，必须存在 body:not(.resume-inline-editing) 守卫
+     保证简历档案页初始不渲染内联源码编辑框。 */
+  assert.match(
+    css,
+    /body:not\(\.resume-inline-editing\)\s*\.resume-inline-edit\.hidden/,
+    "initial hidden beats the flex layout rule",
+  );
 });
 
 /* ------------------------------------------------------------------ */
@@ -94,8 +102,9 @@ test("index.html: rail brand, jobs count badge and topbar title slots", () => {
   assert.match(html, /id="page-title"/, "dynamic topbar title");
   assert.match(html, /id="page-title"[^>]*>驾驶舱</, "dashboard title matches template");
   assert.match(html, /id="page-subtitle"/, "dynamic topbar subtitle");
-  assert.match(html, /quick-jd-btn/, "quick import JD button");
-  assert.match(html, /快速导入 JD/, "quick import JD label matches template");
+  assert.doesNotMatch(html, /quick-jd-btn/, "A1: quick import JD button removed");
+  assert.doesNotMatch(html, /快速导入 JD/, "A1: quick import JD label removed");
+  assert.match(html, /data-rail-quota/, "rail foot quota card slot (A1/rail quota)");
   assert.match(html, /class="nav-index\b/, "numbered rail indicators");
   assert.match(html, />驾驶舱</, "dashboard rail label");
   assert.match(html, />工作台</, "workspace rail label");
@@ -132,11 +141,11 @@ test("styles.css: mobile rail hides the brand so nav buttons stay tappable", () 
   );
 });
 
-test("kanban.js: single jobs top bar keeps fetch, blocker and export contracts", () => {
+test("kanban.js: single jobs top bar keeps conversion and export contracts", () => {
   const src = read("kanban.js");
   assert.match(src, /data-jobs-topbar/, "unified jobs top bar");
-  assert.match(src, /data-fetch-url-bar/, "fetch bar inside the top bar");
-  assert.match(src, /data-blocker-badge/, "blocker badge mount inside the top bar");
+  assert.doesNotMatch(src, /data-fetch-url-bar/, "fetch bar removed (crawler de-bloat)");
+  assert.doesNotMatch(src, /data-blocker-badge/, "blocker badge mount removed (blocker UI de-bloat)");
   assert.match(src, /data-jobs-conversion/, "template conversion row");
   assert.match(src, /data-jobs-apply-rate/, "apply conversion pill");
   assert.match(src, /data-jobs-interview-rate/, "interview conversion pill");
@@ -171,7 +180,7 @@ test("split-canvas.js renders the template workbench three-pane structure", () =
   assert.match(src, /简历精修/, "alignment canvas title");
   assert.match(src, /workbenchPrimaryButtonHtml/, "primary button helper mounted");
   const formatSrc = read("format.js");
-  assert.match(formatSrc, /开始优化/, "rerun alignment button");
+  assert.match(formatSrc, /开始对齐/, "rerun alignment button");
   assert.match(formatSrc, /data-action="run-alignment"/, "rerun alignment action");
   assert.match(src, /data-inspector-pane/, "inspector pane contract");
   assert.match(src, /data-diff-pane/, "diff pane contract");

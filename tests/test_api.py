@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
-from resualign.crawler import CrawlError
 from resualign.jobs import JobRegistry
 from resualign.models import (
     DiffItem,
@@ -378,16 +377,10 @@ def test_unknown_job_returns_404():
     assert r.json()["detail"] == "Job not found"
 
 
-def test_jd_url_success_runs_inside_job():
-    report = Report(
-        score=77,
-        skills=["Python"],
-        model="test-model",
-    )
-
-    with patch("resualign.api.crawl_jd", return_value="JD from URL") as crawl, patch(
-        "resualign.api.run", return_value=report
-    ) as mock_run:
+def test_jd_url_only_job_fails_with_retirement_hint():
+    """De-bloat: backend crawling retired; a URL-only job (no JD text) fails
+    immediately with a pointer to paste/userscript ingestion."""
+    with patch("resualign.api.run") as mock_run:
         job_id = _submit(
             {
                 "resume_text": "Python developer.",
@@ -396,29 +389,9 @@ def test_jd_url_success_runs_inside_job():
         )
         api_module._run_job(job_id)
 
-    crawl.assert_called_once_with("https://example.com/job")
-    assert mock_run.call_args.args[2] == "JD from URL"
-    data = client.get(f"/api/jobs/{job_id}", headers=_auth_headers()).json()
-    assert data["status"] == "succeeded"
-    assert data["result"]["score"] == 77
-
-
-def test_jd_url_crawl_failure_becomes_failed_job():
-    with patch(
-        "resualign.api.crawl_jd", side_effect=CrawlError("boom")
-    ), patch("resualign.api.run") as mock_run:
-        job_id = _submit(
-            {
-                "resume_text": "Python developer.",
-                "jd_url": "https://example.com/bad",
-            }
-        )
-        api_module._run_job(job_id)
-
     data = client.get(f"/api/jobs/{job_id}", headers=_auth_headers()).json()
     assert data["status"] == "failed"
-    assert "Failed to crawl JD from URL" in data["error"]
-    assert "boom" in data["error"]
+    assert "油猴插件" in data["error"] or "粘贴" in data["error"]
     assert data["result"] is None
     mock_run.assert_not_called()
 
@@ -669,21 +642,6 @@ def test_restart_recovery_requeues_pending_jobs():
             time.sleep(0.01)
 
     assert {call.args[0] for call in mock_run.call_args_list} == set(job_ids)
-
-
-def test_restart_recovery_requeues_crawl_tasks():
-    task = api_module._crawl_tasks.create(
-        "tenant-crawl", "https://example.com/jobs/1"
-    )
-    api_module._crawl_tasks.update_state(task["crawl_id"], "fetching")
-
-    with patch("resualign.api._run_job"):
-        api_module._recover_pending_jobs()
-
-    refreshed = api_module._crawl_tasks.get(task["crawl_id"])
-    assert refreshed is not None
-    assert refreshed["status"] == "queued"
-    assert refreshed["stage"] == "requeued"
 
 
 def test_analyze_rate_limited_after_budget():

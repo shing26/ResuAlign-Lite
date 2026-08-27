@@ -124,7 +124,6 @@ def test_dashboard_empty_state():
         "interview": 0,
         "offer": 0,
         "declined": 0,
-        "active_followups": 0,
     }
     assert body["skill_gaps"] == []
     assert body["quick_continue"] is None
@@ -179,8 +178,6 @@ def test_dashboard_kpi_counts_and_followups():
     assert kpi["interview"] == 2
     assert kpi["offer"] == 1
     assert kpi["declined"] == 1
-    # future due dates count, past/no due dates do not
-    assert kpi["active_followups"] == 2
 
 
 def test_dashboard_kpi_uses_historical_peak_for_withdrawn_jobs():
@@ -208,40 +205,6 @@ def test_dashboard_kpi_uses_historical_peak_for_withdrawn_jobs():
     assert kpi["interview"] == 1
     assert kpi["offer"] == 1
     assert kpi["declined"] == 2
-
-
-def test_dashboard_active_followups_excludes_terminal_statuses():
-    tenant = _tenant_id()
-    _create_job(
-        tenant,
-        title="Offer",
-        jd_text="Offer text.",
-        status="已拿Offer",
-        applied_at="2026-08-01",
-        offer_at="2026-08-10",
-        next_step_due_at="2999-12-31T09:00:00Z",
-    )
-    _create_job(
-        tenant,
-        title="Withdrawn",
-        jd_text="Withdrawn text.",
-        status="放弃",
-        applied_at="2026-08-02",
-        next_step_due_at="2999-12-31T09:00:00Z",
-    )
-    _create_job(
-        tenant,
-        title="Interview",
-        jd_text="Interview text.",
-        status="面试中",
-        applied_at="2026-08-03",
-        next_step_due_at="2999-12-31T09:00:00Z",
-    )
-
-    kpi = client.get(
-        "/api/dashboard", headers=_auth_headers()
-    ).json()["kpi"]
-    assert kpi["active_followups"] == 1
 
 
 def test_dashboard_skill_gaps_frequency_and_order():
@@ -381,7 +344,6 @@ def test_dashboard_is_tenant_scoped():
         "interview": 0,
         "offer": 0,
         "declined": 0,
-        "active_followups": 0,
     }
     assert body["skill_gaps"] == []
     assert body["quick_continue"] is None

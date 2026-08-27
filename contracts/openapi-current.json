@@ -273,7 +273,7 @@
     "/api/jobs/parse-jd": {
       "post": {
         "summary": "Parse Jd Preview",
-        "description": "Crawl a JD URL and return a preview without creating a job.",
+        "description": "Preview a JD URL.\n\nDe-bloat (2026-08-27): backend crawling is retired; JD intake goes\nthrough the collector userscript (local-ingest) or pasted text. URL-only\npreviews are rejected with a pointer to those flows.",
         "operationId": "parse_jd_preview_api_jobs_parse_jd_post",
         "parameters": [
           {
@@ -1196,55 +1196,6 @@
         }
       }
     },
-    "/api/jobs/fetch-url": {
-      "post": {
-        "summary": "Fetch Url",
-        "description": "Submit one JD URL to the fetch pipeline (sync crawl + build).\n\nResponse ``status`` is one of ``created`` / ``duplicate`` /\n``blocked`` / ``rule_rejected``; ``job_id`` accompanies ``created`` and\n``duplicate``, ``blocker_id`` accompanies ``blocked`` and\n``rule_rejected``.",
-        "operationId": "fetch_url_api_jobs_fetch_url_post",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FetchUrlRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/automation/rules": {
       "get": {
         "summary": "List Automation Rules",
@@ -1285,7 +1236,7 @@
       },
       "post": {
         "summary": "Create Automation Rule",
-        "description": "Create one automation rule for the fetch pipeline.",
+        "description": "Create one automation rule.",
         "operationId": "create_automation_rule_api_automation_rules_post",
         "parameters": [
           {
@@ -1416,167 +1367,6 @@
         "responses": {
           "204": {
             "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/blockers": {
-      "get": {
-        "summary": "List Blockers",
-        "description": "List the tenant's blocker queue, optionally filtered by status.\n\nstatus 参数缺省时返回全部状态（含 pending/ignored/resolved）；统计与展示请显式传 status=pending。",
-        "operationId": "list_blockers_api_blockers_get",
-        "parameters": [
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/blockers/{blocker_id}/ignore": {
-      "post": {
-        "summary": "Ignore Blocker",
-        "description": "Mark a pending blocker ignored so it leaves the pending queue.",
-        "operationId": "ignore_blocker_api_blockers__blocker_id__ignore_post",
-        "parameters": [
-          {
-            "name": "blocker_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Blocker Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/blockers/{blocker_id}/resolve": {
-      "post": {
-        "summary": "Resolve Blocker",
-        "description": "Create a library job from pasted text and resolve the blocker.\n\nReturns ``{\"blocker\": ..., \"job\": ...}``. When the text cannot be\nturned into a job the blocker stays pending and the caller receives a\n4xx so the frontend can keep it in the queue.",
-        "operationId": "resolve_blocker_api_blockers__blocker_id__resolve_post",
-        "parameters": [
-          {
-            "name": "blocker_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Blocker Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BlockerResolveRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
           },
           "422": {
             "description": "Validation Error",
@@ -2160,285 +1950,6 @@
         },
         "responses": {
           "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/applications": {
-      "post": {
-        "summary": "Create Application",
-        "description": "Create an application pinned to the master resume's current version.\n\nDormant: the delivery loop now treats Job as the single source of\ntruth (per-job workbench runs, status, and timeline fields). The\nendpoint stays available for existing data/tools and is no longer\nsurfaced by the frontend; a separate cleanup ticket may retire it.",
-        "operationId": "create_application_api_applications_post",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApplicationCreateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "List Applications",
-        "description": "Return the current user's dormant application records.",
-        "operationId": "list_applications_api_applications_get",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/applications/{application_id}": {
-      "get": {
-        "summary": "Get Application",
-        "description": "Return one dormant application and its pinned resume snapshot.",
-        "operationId": "get_application_api_applications__application_id__get",
-        "parameters": [
-          {
-            "name": "application_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Application Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "summary": "Update Application",
-        "description": "Update application metadata without changing its resume snapshot.\n\nDormant: application records are being replaced by the Job Library\nentity. Kept available for existing callers; the frontend no longer\nsurfaces this form.",
-        "operationId": "update_application_api_applications__application_id__patch",
-        "parameters": [
-          {
-            "name": "application_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Application Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApplicationUpdateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "summary": "Delete Application",
-        "description": "Delete an application record.\n\nDormant: application records are being replaced by the Job Library\nentity. Kept available for existing callers until the cleanup ticket.",
-        "operationId": "delete_application_api_applications__application_id__delete",
-        "parameters": [
-          {
-            "name": "application_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Application Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/applications/{application_id}/run": {
-      "post": {
-        "summary": "Run Application",
-        "description": "Queue an analysis using a dormant application's pinned resume and JD.",
-        "operationId": "run_application_api_applications__application_id__run_post",
-        "parameters": [
-          {
-            "name": "application_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Application Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -3147,19 +2658,19 @@
         }
       }
     },
-    "/api/jobs/{job_id}/refresh": {
+    "/api/master-resumes/{resume_id}/optimize": {
       "post": {
-        "summary": "Refresh Library Job",
-        "description": "Queue and run one in-place refresh for an existing URL job.",
-        "operationId": "refresh_library_job_api_jobs__job_id__refresh_post",
+        "summary": "Optimize Master Resume",
+        "description": "Queue the xzjobs-style resume optimization: local overall analysis\nfollowed by per-module (project experience) LLM polish.",
+        "operationId": "optimize_master_resume_api_master_resumes__resume_id__optimize_post",
         "parameters": [
           {
-            "name": "job_id",
+            "name": "resume_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Job Id"
+              "title": "Resume Id"
             }
           },
           {
@@ -3173,14 +2684,22 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizeRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobRefreshResponse"
-                }
+                "schema": {}
               }
             }
           },
@@ -3197,61 +2716,19 @@
         }
       }
     },
-    "/api/jobs/refresh-all": {
+    "/api/master-resumes/{resume_id}/optimize/apply": {
       "post": {
-        "summary": "Refresh All Library Jobs",
-        "description": "Queue and run refresh for every eligible URL-sourced job.",
-        "operationId": "refresh_all_library_jobs_api_jobs_refresh_all_post",
+        "summary": "Apply Resume Optimize",
+        "description": "Apply accepted optimized modules onto the resume as a new version.",
+        "operationId": "apply_resume_optimize_api_master_resumes__resume_id__optimize_apply_post",
         "parameters": [
           {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
+            "name": "resume_id",
+            "in": "path",
+            "required": true,
             "schema": {
               "type": "string",
-              "default": "",
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobRefreshAllResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/reminders": {
-      "get": {
-        "summary": "List Reminders",
-        "description": "Return the tenant's today/overdue follow-up list.",
-        "operationId": "list_reminders_api_reminders_get",
-        "parameters": [
-          {
-            "name": "scope",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "today",
-              "title": "Scope"
+              "title": "Resume Id"
             }
           },
           {
@@ -3265,14 +2742,22 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizeApplyRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReminderListResponse"
-                }
+                "schema": {}
               }
             }
           },
@@ -3696,7 +3181,7 @@
     "/api/dashboard": {
       "get": {
         "summary": "Get Dashboard",
-        "description": "Return aggregated KPI, skill-gap, and quick-continue data.\n\n- ``kpi.resumes`` counts the tenant's master resumes.\n- ``kpi.jobs`` counts the tenant's library jobs; applied/interview/offer\n  use the historical peak stage (offer_at > applied_at > current status),\n  while declined stays the current withdrawn count.\n- ``kpi.active_followups`` counts jobs whose ``next_step_due_at`` is\n  non-empty and not in the past, restricted to applied/interview jobs.\n- ``skill_gaps`` ranks the frequencies of ``must_have_skills`` across\n  all job JD profiles, descending (top 8).\n- ``quick_continue`` is the most recently updated job whose\n  ``alignment_status`` is not ``succeeded``; when every job is\n  finished, it falls back to the most recently updated job.",
+        "description": "Return aggregated KPI, skill-gap, and quick-continue data.\n\n- ``kpi.resumes`` counts the tenant's master resumes.\n- ``kpi.jobs`` counts the tenant's library jobs; applied/interview/offer\n  use the historical peak stage (offer_at > applied_at > current status),\n  while declined stays the current withdrawn count.\n- ``skill_gaps`` ranks the frequencies of ``must_have_skills`` across\n  all job JD profiles, descending (top 8).\n- ``quick_continue`` is the most recently updated job whose\n  ``alignment_status`` is not ``succeeded``; when every job is\n  finished, it falls back to the most recently updated job.",
         "operationId": "get_dashboard_api_dashboard_get",
         "parameters": [
           {
@@ -3799,102 +3284,6 @@
           "resume_text"
         ],
         "title": "AnalyzeRequest"
-      },
-      "ApplicationCreateRequest": {
-        "properties": {
-          "title": {
-            "type": "string",
-            "maxLength": 200,
-            "title": "Title"
-          },
-          "master_resume_id": {
-            "type": "string",
-            "title": "Master Resume Id"
-          },
-          "jd_text": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 100000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Jd Text"
-          },
-          "jd_url": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 2000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Jd Url"
-          }
-        },
-        "type": "object",
-        "required": [
-          "title",
-          "master_resume_id"
-        ],
-        "title": "ApplicationCreateRequest"
-      },
-      "ApplicationUpdateRequest": {
-        "properties": {
-          "title": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 200
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "jd_text": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 100000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Jd Text"
-          },
-          "jd_url": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 2000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Jd Url"
-          },
-          "status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status"
-          }
-        },
-        "type": "object",
-        "title": "ApplicationUpdateRequest"
       },
       "AutomationRuleCreateRequest": {
         "properties": {
@@ -4057,21 +3446,6 @@
         ],
         "title": "BatchAlignRequest"
       },
-      "BlockerResolveRequest": {
-        "properties": {
-          "manual_text": {
-            "type": "string",
-            "maxLength": 100000,
-            "title": "Manual Text"
-          }
-        },
-        "type": "object",
-        "required": [
-          "manual_text"
-        ],
-        "title": "BlockerResolveRequest",
-        "description": "Resolve a blocker by building a library job from pasted JD text."
-      },
       "Body_parse_resume_upload_api_master_resumes_parse_post": {
         "properties": {
           "file": {
@@ -4116,11 +3490,6 @@
           "declined": {
             "type": "integer",
             "title": "Declined",
-            "default": 0
-          },
-          "active_followups": {
-            "type": "integer",
-            "title": "Active Followups",
             "default": 0
           }
         },
@@ -4203,21 +3572,6 @@
         ],
         "title": "DashboardResponse",
         "description": "Aggregated data for GET /api/dashboard."
-      },
-      "FetchUrlRequest": {
-        "properties": {
-          "url": {
-            "type": "string",
-            "maxLength": 2000,
-            "title": "Url"
-          }
-        },
-        "type": "object",
-        "required": [
-          "url"
-        ],
-        "title": "FetchUrlRequest",
-        "description": "Submit one JD URL to the fetch pipeline."
       },
       "FinalDraftRequest": {
         "properties": {
@@ -4589,6 +3943,21 @@
             "type": "array",
             "title": "Accepted Diffs"
           },
+          "sections": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Sections"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skills"
+          },
           "render": {
             "anyOf": [
               {
@@ -4792,123 +4161,6 @@
           "job_id"
         ],
         "title": "JobPreanalyzeResponse"
-      },
-      "JobRefreshAllResponse": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/JobRefreshResponse"
-            },
-            "type": "array",
-            "title": "Items"
-          }
-        },
-        "type": "object",
-        "title": "JobRefreshAllResponse"
-      },
-      "JobRefreshResponse": {
-        "properties": {
-          "queued": {
-            "type": "boolean",
-            "title": "Queued",
-            "default": false
-          },
-          "job_id": {
-            "type": "string",
-            "title": "Job Id"
-          },
-          "crawl_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Crawl Id"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status"
-          },
-          "changed": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Changed"
-          },
-          "changed_fields": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Changed Fields"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "job": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Job"
-          }
-        },
-        "type": "object",
-        "required": [
-          "job_id"
-        ],
-        "title": "JobRefreshResponse",
-        "description": "Result of queueing or running one URL job refresh."
       },
       "JobUpdateRequest": {
         "properties": {
@@ -5711,102 +4963,63 @@
         ],
         "title": "MatchScoreResponse"
       },
-      "ReminderItem": {
+      "OptimizeApplyItem": {
         "properties": {
-          "job_id": {
+          "module": {
             "type": "string",
-            "title": "Job Id"
+            "maxLength": 64,
+            "title": "Module"
           },
-          "title": {
+          "index": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Index"
+          },
+          "optimized": {
             "type": "string",
-            "title": "Title"
-          },
-          "company": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Company"
-          },
-          "status_canonical": {
-            "type": "string",
-            "title": "Status Canonical",
-            "default": "applied"
-          },
-          "next_step_due_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Step Due At"
-          },
-          "interview_stage": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Interview Stage"
-          },
-          "next_step": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Step"
-          },
-          "overdue": {
-            "type": "boolean",
-            "title": "Overdue",
-            "default": false
-          },
-          "reminder_sent_at": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reminder Sent At"
+            "maxLength": 200000,
+            "title": "Optimized"
           }
         },
         "type": "object",
         "required": [
-          "job_id",
-          "title"
+          "module",
+          "index",
+          "optimized"
         ],
-        "title": "ReminderItem",
-        "description": "One follow-up due today or overdue for the tenant."
+        "title": "OptimizeApplyItem"
       },
-      "ReminderListResponse": {
+      "OptimizeApplyRequest": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/ReminderItem"
+              "$ref": "#/components/schemas/OptimizeApplyItem"
             },
             "type": "array",
+            "maxItems": 200,
             "title": "Items"
           }
         },
         "type": "object",
-        "title": "ReminderListResponse"
+        "title": "OptimizeApplyRequest"
+      },
+      "OptimizeRequest": {
+        "properties": {
+          "jd_text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jd Text"
+          }
+        },
+        "type": "object",
+        "title": "OptimizeRequest"
       },
       "ReminderSettingsUpdate": {
         "properties": {
@@ -5913,7 +5126,7 @@
         },
         "type": "object",
         "title": "ReminderSettingsUpdate",
-        "description": "Editable reminder delivery settings (secrets stay environment-only)."
+        "description": "Editable reminder delivery settings.\n\nDe-bloat (2026-08-27): the reminder system was removed; this schema is\nkept only so legacy PUT payloads still validate instead of 422ing."
       },
       "SettingsTestConnectionRequest": {
         "properties": {

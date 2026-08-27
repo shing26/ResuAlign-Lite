@@ -137,8 +137,9 @@ def test_command_palette_preserves_multiline_jd(page, base_url, api_call):
         expect(job.get("title") == f"资深后端工程师（{tag}）", "title parsed")
         expect(job.get("company") == "星辰科技", "company parsed")
         expect(job.get("location") == "上海", "location parsed")
-        expect(job.get("salary_min") == 25000.0, "salary min parsed")
-        expect(job.get("salary_max") == 35000.0, "salary max parsed")
+        # De-bloat: salary is no longer auto-extracted from JD text.
+        expect(job.get("salary_min") is None, "salary min no longer auto-parsed")
+        expect(job.get("salary_max") is None, "salary max no longer auto-parsed")
     finally:
         if job_id:
             api_call("DELETE", f"/api/jobs/{job_id}")
@@ -204,6 +205,10 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
         # the button can detach mid-click on slower CI runners.
         page.evaluate("location.hash = '#/workspace/%s'" % job_id)
         page.wait_for_selector(WORKSPACE_SELECTOR, timeout=15000)
+        # The v3 workbench keeps the align form inside a tab-gated pane.
+        if not page.locator(SPLIT_FORM).first.is_visible():
+            page.locator("[data-wb-tab-v3='controls']").first.click()
+        page.wait_for_selector(SPLIT_FORM, timeout=10000)
 
         # --- 3. 选主简历 + granularity（fine）→ 生成（wb-run）→ 轮询 succeeded
         wait_for_function(
@@ -220,6 +225,21 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
         page.select_option(f"{SPLIT_FORM} [name='master_resume_id']", resume_id)
         page.select_option(f"{SPLIT_FORM} [name='granularity']", "fine")
         page.click("[data-align-run]")
+        # A job that already carries a draft may mount in A4 preview mode;
+        # switch back to diff mode so the suggestion cards are visible.
+        diff_toggle = page.locator("[data-wb-view-mode='diff']")
+        if diff_toggle.count() and not diff_toggle.first.evaluate(
+            "(el) => el.classList.contains('active')"
+        ):
+            diff_toggle.first.click()
+        poll_until(
+            lambda: (api_call("GET", f"/api/jobs/{job_id}") or {}).get(
+                "alignment_status"
+            )
+            == "succeeded",
+            "alignment should reach succeeded",
+            timeout=90.0,
+        )
 
         # Condition-based wait on the rendered diff cards (the frontend polls
         # the analysis job; no clock sleeps).
@@ -388,6 +408,11 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
 
         page.evaluate("location.hash = '#/workspace/%s'" % job_id)
         page.wait_for_selector(WORKSPACE_SELECTOR, timeout=15000)
+        diff_toggle = page.locator("[data-wb-view-mode='diff']")
+        if diff_toggle.count() and not diff_toggle.first.evaluate(
+            "(el) => el.classList.contains('active')"
+        ):
+            diff_toggle.first.click()
         context_actions = page.locator(".wb-context-actions")
         go_apply = context_actions.locator(
             f'[data-action="open-source-url"][data-url="{SOURCE_URL}"]'
@@ -449,15 +474,6 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
             followup_form.locator("button[type='submit']").click()
             followup_modal.wait_for(state="detached", timeout=10000)
 
-            strip = followup_page.locator("[data-reminder-strip]")
-            strip.wait_for(timeout=10000)
-            expect(
-                strip.locator(
-                    f'[data-action="open-job-followup"][data-id="{job_id}"]'
-                ).count()
-                >= 1,
-                "reminder strip should offer follow-up scheduling",
-            )
             followed = api_call("GET", f"/api/jobs/{job_id}")
             expect(
                 followed.get("status") in ("interview", "面试中"),

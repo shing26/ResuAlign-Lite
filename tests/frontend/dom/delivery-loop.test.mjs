@@ -125,7 +125,6 @@ async function mockFetch(path, options = {}) {
     });
   }
   if (method === "GET" && url.startsWith("/api/master-resumes")) return jsonBody([]);
-  if (method === "GET" && url.startsWith("/api/blockers")) return jsonBody([]);
   if (method === "PATCH" && url.startsWith("/api/jobs/")) {
     const jobId = url.split("/").pop();
     const body = JSON.parse(options.body || "{}");

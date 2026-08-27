@@ -25,6 +25,7 @@ import {
   jobApplyLinkHtml,
   jobCompletenessBadge,
   renderGap,
+  renderA4PaperHtml,
   renderMatchBadge,
   renderSkills,
   stageStepper,
@@ -72,6 +73,56 @@ let liveSheetApiPromise = null;
    arrive via SSE after the first paint). */
 let pendingSkillFocus = null;
 let activeAuxPane = "inspector";
+
+/* P0-1: 对齐失败分类 —— 后端 jobs.py 已按超时/格式/空内容/限流/auth 分类产出
+ * 文案，这里按文案特征再打一个简短类别徽标；横幅同时展示后端快照带来的
+ * 阶段与本次耗时（analysis-status 的 stage / elapsed_seconds）。 */
+const ALIGN_FAILURE_KINDS = {
+  timeout: "超时",
+  format: "内容格式异常",
+  empty: "返回为空",
+  auth: "模型配置",
+  ratelimit: "服务限流",
+  expired: "任务已过期",
+  canceled: "任务已取消",
+  other: "任务失败",
+};
+
+function alignmentFailureKind(message, status) {
+  const text = String(message || "").toLowerCase();
+  if (status === "expired" || text.includes("过期")) return "expired";
+  if (status === "canceled" || text.includes("取消")) return "canceled";
+  if (/(timeout|timed out|超时)/.test(text)) return "timeout";
+  if (/(expecting value|not a json|invalid json|schema|failed validation|格式异常|无法解析)/.test(text)) return "format";
+  if (/(empty|返回为空)/.test(text)) return "empty";
+  if (/(429|rate limit|限流|繁忙)/.test(text)) return "ratelimit";
+  if (/(401|403|api key|unauthorized|无效或缺少权限|无效或缺失)/.test(text)) return "auth";
+  return "other";
+}
+
+/* P0-2: 失败/取消/过期横幅只承担「讲清失败原因」职责，不再放第二个
+ * 「重新运行对齐」按钮 —— 重试收敛到顶栏危险级单入口（workbenchPrimaryButtonHtml）。 */
+function workbenchAlignmentErrorBanner(alignment) {
+  const status = alignment && alignment.status;
+  if (!["failed", "canceled", "expired"].includes(status)) return "";
+  const errorText = (alignment && alignment.error) || "对齐任务失败，请重新运行";
+  const kind = alignmentFailureKind(errorText, status);
+  const meta = [];
+  if (alignment.stage && alignment.stage !== status) {
+    meta.push(`阶段：${STAGE_LABELS[alignment.stage] || alignment.stage}`);
+  }
+  const elapsedSecs = Number(alignment.elapsed_seconds);
+  if (Number.isFinite(elapsedSecs) && elapsedSecs > 0) {
+    meta.push(`本次耗时 ${formatElapsed(Math.round(elapsedSecs * 1000))}`);
+  }
+  return (
+    `<div class="align-error-banner" role="alert" data-align-error-banner data-align-error-kind="${esc(kind)}">` +
+    `<strong>对齐失败 · ${esc(ALIGN_FAILURE_KINDS[kind] || "任务失败")}</strong>` +
+    `<span>${esc(errorText)}</span>` +
+    (meta.length ? `<span class="align-error-meta">${esc(meta.join(" · "))}</span>` : "") +
+    `</div>`
+  );
+}
 
 
 export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
@@ -147,15 +198,27 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const tagItems = [...requiredSkills.slice(0, 6), ...niceSkills.slice(0, 3)];
   const inspectorActive = activeAuxPane === "inspector" || state.wbMobilePane !== "diff";
   const livesheetActive = activeAuxPane === "livesheet" || state.wbMobilePane === "diff";
+  const suggestActive = activeAuxPane === "suggest";
+  const controlsActive = activeAuxPane === "controls";
   const hasGuideDraft = Boolean(
     job.final_draft ||
       (session && session.alignment && session.alignment.draft),
   );
+  if (state.wbViewMode !== "a4" && state.wbViewMode !== "diff") {
+    state.wbViewMode = hasGuideDraft ? "a4" : "diff";
+  }
+  const viewMode = state.wbViewMode === "a4" ? "a4" : "diff";
   const dutyText = String(
     (summary && summary.summary) || job.jd_text || "",
   ).trim().slice(0, 240);
+  /* R5 P1-4（02-UID ③-4 + R2 合议 Q4）：移动端底栏动作条仅在「必须行动」
+   * 态常驻 —— 失败/取消/过期（可重试）或 运行中；idle/succeeded 不占底栏。
+   * ≤640px 时底栏接管主按钮（顶栏同款按钮隐藏，保持 P0-2 单入口）。 */
+  const barActive =
+    alignmentRunning ||
+    ["failed", "canceled", "expired"].includes(alignment.status);
   app.innerHTML = `
-    <div class="view view-fit workbench-view" data-surface-mode="optimizer">
+    <div class="view view-fit workbench-view" data-surface-mode="optimizer"${barActive ? ' data-mobile-action-bar="true"' : ""}>
       ${crawlStatusLine(session)}
       <div class="wb-mobile-tabs" role="tablist" aria-label="工作台面板">
         <button type="button" class="segmented-button seg" data-action="set-wb-tab" data-wb-tab="controls" aria-selected="${state.wbMobilePane === "controls"}">调优</button>
@@ -179,21 +242,26 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <div class="row">
             ${jobApplyLinkHtml(job)}
             <button class="btn btn-primary" type="button" data-action="record-application" data-id="${esc(jobId)}">记录投递</button>
-            ${workbenchPrimaryButtonHtml(resumes, alignmentRunning)}
+            ${workbenchPrimaryButtonHtml(resumes, alignmentRunning, alignment)}
           </div>
         </div>
       </div>
+      ${workbenchAlignmentErrorBanner(alignment)}
       ${workbenchGuideHtml(job, hasGuideDraft)}
       <div class="wb-grid" data-split-layout>
         <section class="wb-main ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>
           <div class="wb-main-head">
             <div>
               <h2>简历精修</h2>
-              <p>逐条采纳 AI 精修建议，每条建议都可追溯来源</p>
+              <p>${viewMode === "a4" ? "以 A4 纸预览定稿，建议集中在右侧处理" : "逐条采纳 AI 精修建议，每条建议都可追溯来源"}</p>
             </div>
             <div class="toolbar-group">
+              <div class="wb-view-toggle" role="group" aria-label="工作台显示模式">
+                <button type="button" class="wb-view-toggle__btn ${viewMode === "diff" ? "active" : ""}" data-action="set-wb-view-mode" data-wb-view-mode="diff" aria-pressed="${viewMode === "diff"}">对照编辑</button>
+                <button type="button" class="wb-view-toggle__btn ${viewMode === "a4" ? "active" : ""}" data-action="set-wb-view-mode" data-wb-view-mode="a4" aria-pressed="${viewMode === "a4"}">A4 预览</button>
+              </div>
               ${exportDock(jobId, job)}
-              ${alignment.diffs && alignment.diffs.length ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-live-compare">对比视图</button>` : ""}
+              ${viewMode === "diff" && alignment.diffs && alignment.diffs.length ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-live-compare">对比视图</button>` : ""}
             </div>
           </div>
           <div class="align-summary">
@@ -206,15 +274,21 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
             </div>
           </div>
           <div class="panel panel--success final-draft-panel" data-final-draft-panel hidden></div>
-          <div class="diff-list">${diffList(session, jobId)}</div>
+          ${viewMode === "a4" ? `<div class="a4-wrap" data-a4-wrap>${renderA4PaperHtml(liveSheetDraft)}</div>` : `<div class="diff-list">${diffList(session, jobId)}</div>`}
         </section>
         <aside class="wb-aux">
           ${workbenchProgressPipelineHtml(session)}
           <div class="wb-tabs" role="tablist" aria-label="工作台辅助信息">
-            <button type="button" class="wb-tab ${activeAuxPane === "inspector" ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector" aria-selected="${activeAuxPane === "inspector"}">岗位分析</button>
-            <button type="button" class="wb-tab ${activeAuxPane === "livesheet" ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="livesheet" aria-selected="${activeAuxPane === "livesheet"}">Live Sheet</button>
+            ${viewMode === "a4" ? `<button type="button" class="wb-tab ${suggestActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="suggest" aria-selected="${suggestActive}">建议</button>` : ""}
+            <button type="button" class="wb-tab ${inspectorActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector" aria-selected="${inspectorActive}">岗位分析</button>
+            <button type="button" class="wb-tab ${livesheetActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="livesheet" aria-selected="${livesheetActive}">面试记录</button>
+            <button type="button" class="wb-tab ${controlsActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="controls" aria-selected="${controlsActive}">优化设置</button>
           </div>
-          <div class="wb-pane ${inspectorActive ? "active" : ""}" data-wb-pane="controls" data-inspector-pane data-jd-canvas>
+          ${viewMode === "a4" ? `<div class="wb-pane ${suggestActive ? "active" : ""}" data-wb-pane="suggest" data-wb-aux-pane="suggest" data-suggest-pane>
+            <div class="suggest-pane__head"><h3>改写建议</h3><span class="small muted">采纳后将自动应用到定稿</span></div>
+            ${diffList(session, jobId)}
+          </div>` : ""}
+          <div class="wb-pane ${inspectorActive ? "active" : ""}" data-wb-pane="controls" data-wb-aux-pane="inspector" data-inspector-pane data-jd-canvas>
             <section class="pane-section" data-jd-summary>
               <h3>岗位职责萃取</h3>
               ${dutyText ? `<p class="workbench-duty-text">${esc(dutyText)}</p>` : `<p class="small muted">岗位职责摘要生成中。</p>`}
@@ -231,12 +305,14 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
               <summary>查看原始 JD</summary>
               <pre>${esc(job.jd_text || "")}</pre>
             </details>
-            <details class="inspector-controls" data-inspector-controls ${state.wbControlsOpen ? "open" : ""}>
-              <summary>优化设置</summary>
-              ${alignmentControls(session, resumes, jobId)}
-            </details>
           </div>
-          <div class="wb-pane ${livesheetActive ? "active" : ""}" data-wb-pane="livesheet" data-live-sheet-pane></div>
+          <div class="wb-pane ${controlsActive ? "active" : ""}" data-wb-pane="controls-opt" data-wb-aux-pane="controls" data-controls-pane>
+            <section class="pane-section pane-section--controls">
+              <div class="pane-section__head"><h3>优化设置</h3><span class="small muted">主简历与对齐参数</span></div>
+              ${alignmentControls(session, resumes, jobId)}
+            </section>
+          </div>
+          <div class="wb-pane ${livesheetActive ? "active" : ""}" data-wb-pane="livesheet" data-wb-aux-pane="livesheet" data-live-sheet-pane></div>
         </aside>
         <form data-form="wb-run" hidden aria-hidden="true">
           <input type="hidden" name="job_id" value="${jobId}">
@@ -246,6 +322,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <input type="checkbox" name="run_eval" hidden>
         </form>
       </div>
+      ${barActive ? `<div class="wb-action-bar" data-wb-action-bar>${workbenchPrimaryButtonHtml(resumes, alignmentRunning, alignment)}</div>` : ""}
     </div>`;
   const form = $("[data-form='split-align']");
   if (form) {
@@ -529,7 +606,7 @@ function renderFinalDraftPanel(app) {
   if (!panel) return;
   const draft = state.wbFinalDraft;
   const job = state.wbJob || {};
-  if (!draft || !draft.draft) {
+  if (!draft || !draft.draft || state.wbViewMode === "a4") {
     panel.hidden = true;
     panel.innerHTML = "";
     return;
@@ -605,16 +682,19 @@ async function reconcileAlignmentFailure(session) {
     const terminalStatus =
       snapshot.status === "expired" ? "failed" : snapshot.status;
     if (terminalStatus === "failed" || terminalStatus === "canceled") {
+      const detail =
+        snapshot.error ||
+        (snapshot.status === "expired"
+          ? "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成"
+          : "对齐任务失败，请重试");
       session.alignment = {
         ...(session.alignment || {}),
         status: terminalStatus,
         stage: snapshot.status === "expired" ? "" : snapshot.stage || "",
-        error:
-          snapshot.error ||
-          (snapshot.status === "expired"
-            ? "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成"
-            : "对齐任务失败，请重试"),
+        error: detail,
       };
+      /* Bug-09: 失败绝不静默——toast 立即提示，随后的 render 会带持久错误条。 */
+      toast(String(detail).slice(0, 300), "error");
     }
   } catch {
     session.alignment = {
@@ -645,7 +725,7 @@ export async function renderOptimizerCanvas(app, jobId) {
           ? `#/workspace/${encodeURIComponent(targetId)}?resume=${encodeURIComponent(resumeId)}`
           : `#/workspace/${encodeURIComponent(targetId)}`,
       );
-      toast("已自动打开最近岗位，可在顶部切换", "info");
+      toast("已自动打开最近岗位，可在工作台右上角切换", "info");
       return renderOptimizerCanvas(app, targetId);
     }
     const resumes = await api("/api/master-resumes");
@@ -1084,10 +1164,11 @@ function setAlignmentTerminal(snapshot) {
   activeSession.alignment = {
     ...(activeSession.alignment || {}),
     status,
-    stage: status,
+    stage: snapshot.stage || status,
     error:
       snapshot.error ||
       (status === "canceled" ? "对齐任务已取消" : "对齐任务失败，请重新运行"),
+    elapsed_seconds: Number(snapshot.elapsed_seconds) || 0,
     diffs: (snapshot.result && snapshot.result.diffs) || [],
     invalid_diffs: (snapshot.result && snapshot.result.invalid_diffs) || [],
     draft: (snapshot.result && snapshot.result.draft) || activeSession.alignment?.draft || null,
@@ -1264,6 +1345,7 @@ async function pollAlignmentJob() {
           (snapshot.status === "expired"
             ? "上次对齐任务已过期（服务重启或任务清理），结果未保留，请重新生成"
             : null),
+        elapsed_seconds: Number(snapshot.elapsed_seconds) || 0,
         diffs: (snapshot.result && snapshot.result.diffs) || [],
         invalid_diffs: (snapshot.result && snapshot.result.invalid_diffs) || [],
         draft: (snapshot.result && snapshot.result.draft) || activeSession.alignment?.draft || null,
@@ -1351,8 +1433,10 @@ function stopAlignmentPoll() {
   alignmentStartedAt = 0;
 }
 
+const WB_AUX_PANES = ["suggest", "inspector", "livesheet", "controls"];
+
 export function setWbAuxPane(pane) {
-  if (pane !== "inspector" && pane !== "livesheet") return;
+  if (!WB_AUX_PANES.includes(pane)) return;
   activeAuxPane = pane;
   const app = $("#app-router-view");
   if (!app) return;
@@ -1361,10 +1445,27 @@ export function setWbAuxPane(pane) {
     tab.classList.toggle("active", active);
     tab.setAttribute("aria-selected", String(active));
   });
-  const inspector = app.querySelector("[data-inspector-pane]");
-  const livesheet = app.querySelector("[data-live-sheet-pane]");
-  if (inspector) inspector.classList.toggle("active", pane === "inspector");
-  if (livesheet) livesheet.classList.toggle("active", pane === "livesheet");
+  app.querySelectorAll("[data-wb-aux-pane]").forEach((node) => {
+    node.classList.toggle("active", node.dataset.wbAuxPane === pane);
+  });
+}
+
+/* 工作台主区显示模式：diff=对照编辑（diff list 在 main），
+ * a4=A4 纸预览（diff list 移入右栏「建议」tab，避免 DOM 重复）。 */
+export function setWbViewMode(mode) {
+  if (mode !== "diff" && mode !== "a4") return;
+  state.wbViewMode = mode;
+  const app = $("#app-router-view");
+  if (!app || !state.route || state.route.name !== "workspace") return;
+  /* 已有活跃会话时只重排现有画布：renderOptimizerCanvas 会整画布重挂载并
+   * 经 stopOptimizerStreams 杀掉在跑对齐的轮询/SSE，再以 session store 的
+   * 旧终态重绘——对齐进行中切视图会让画布永远停在旧结果（2026-08-27 CI
+   * mobile 冒烟复现：草稿态 A4 挂载→切对照编辑→轮询被杀→旧「已采纳」卡）。 */
+  if (activeSession) {
+    renderSplitCanvas(app, activeSession, state.wbResumes || [], workbenchJobs);
+    return;
+  }
+  renderOptimizerCanvas(app, activeJobId || (state.route && state.route.jobId) || "");
 }
 
 export function closeSplitCanvas() {

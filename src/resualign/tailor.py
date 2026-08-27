@@ -8,8 +8,47 @@ from .llm import LLMClient, _structured_or_json
 from .models import DiffItem, TailoredResume
 from .schema_registry import DiffItemSchema, TailoredResumeSchema
 
-BULLET_REWRITE_PROMPT_VERSION = "v1"
-TAILOR_PROMPT_VERSION = "v1"
+# PROMPT_VERSION bump: bullet_rewrite/v2 -> v3（2026-08-27，黄金核心 1：Few-Shot 强动词库）
+# 本次升级说明：
+# - 变更点 1：新增强动词库（构建/设计/落地/优化…）与禁止弱动词（负责/参与/协助…）
+# - 变更点 2：proposed 强制「强动词 + 具象机制 + 量化插槽」三件套，杜绝「负责系统优化」空话
+# - 缓存影响：版本常量随文本变更 bump，缓存键自动失效。
+BULLET_REWRITE_PROMPT_VERSION = "v3"
+# PROMPT_VERSION bump: tailor/v1 -> v2（2026-08-25，对照 04b-PE §2.5）
+# 本次升级说明：
+# - 变更点 1：14 条编号规则压缩为 7 条，去掉「用 JD 原话」重复堆砌
+# - 变更点 2：diffs 由「at most 15」封顶为 3-10 条；proposed ≤ 250 字、reason ≤ 40 字；
+#   sections 只含改动章节（消费方缺席回退原文已确认：engine.py:278-280、
+#   api/routers/jobs.py:461 draft 走 diffs 而非全量 sections）
+# - 变更点 3：删除假指令 Max tokens: 1500 / Temperature（editor 90s×2 超时风险）
+# - 变更点 4：provenance/original 必须逐字匹配原文，add 型 original 为空字符串
+# - 缓存影响：版本常量随文本变更 bump，缓存键自动失效。
+TAILOR_PROMPT_VERSION = "v2"
+
+BULLET_REWRITE_PROMPT = """PROMPT_VERSION: bullet_rewrite/v3
+
+你是简历单条要点改写器。针对一条简历要点（bullet）按给定指令改写，用于投递指定 JD。
+
+## 铁律
+1. 保留原条目的每一个事实、技术、指标；禁止新增技能、经验、工具、公司或数字；
+2. 只应用给定指令到已有事实上，不得发明或推断。
+
+## 强动词库（Few-Shot：从下面的动词起步，绝不使用弱动词）
+优先使用：构建、设计、落地、优化、重构、驱动、支撑、主导、搭建、打通、调优、攻克、沉淀、推广、量化
+禁止使用：负责、参与、协助、了解、熟悉（这些是简历空话；出现即视为失败输出）
+每条 proposed 必须满足「强动词 + 具象机制（如联合索引/读写分离/本地缓存）+ 量化插槽 [X%]」三件套；
+若原文无数字，保留 [待人工确认：…] 占位符并由用户补齐，绝不编造具体数值。
+
+## Output Contract（只能输出一个 JSON 对象，2 个字段）
+键名固定为：proposed / reason
+
+- proposed：改写后的新文本，≤ 250 字；保持与原文同语言；JD 技术短语（如 "production Kubernetes deployment"、"FastAPI async endpoints"）保留英文原文；必须含强动词与具象机制。
+- reason：一句话理由，≤ 40 字。
+
+## 提交前自查
+- proposed 中每个技术名词与数字都能在原文找到依据；无新增事实；长度在上限内；
+- proposed 不含「负责/参与/协助/了解/熟悉」等弱动词；
+- 只输出 JSON，无 markdown fence，无解释文字。"""
 METRIC_PLACEHOLDER = "[待人工确认：耗时降低 X% / 支撑 QPS 达 Y]"
 _METRIC_HINT_RE = re.compile(
     r"(?:\d+(?:\.\d+)?\s*(?:%|倍|万|亿|ms\b|s\b|qps\b|tps\b))|"
@@ -19,91 +58,43 @@ _METRIC_HINT_RE = re.compile(
 )
 
 
-TAILOR_PROMPT = (
-    "You are a precise resume editor. Given a resume and a gap report, \n"
-    "rewrite the resume to address gaps while preserving every existing fact.\n"
-    "RULES:\n"
-    "1. NEVER invent skills, experience, or metrics.\n"
-    "2. May rephrase, reorder, or re-emphasize existing facts only.\n"
-    "3. Keep every section that already aligns; include it unchanged.\n"
-    "4. When the resume already supports a JD keyword (e.g., Redis caching), \n"
-    "   rewrite that bullet to tie it to the JD business scenario (e.g., high \n"
-    "   concurrency) using only facts already present in the resume. When the \n"
-    "   JD pairs a skill with a scenario, keep the exact paired phrase in the \n"
-    "   rewritten bullet (e.g., 'Redis caching for high concurrency'), not a \n"
-    "   paraphrase.\n"
-    "5. The Gap Report may include business_scenarios and jd_context; use \n"
-    "   those as rewriting context. Example: \n"
-    "   resume says 'Used Redis for cache storage and session management' and \n"
-    "   the JD says high concurrency; rewrite as 'Used Redis caching for hot \n"
-    "   data and session management on the high-concurrency platform'. Never \n"
-    "   add metrics, tools, or skills that are absent from the resume.\n"
-    "6. Each change must include the exact source sentence as provenance.\n"
-    "7. When the JD names a capability and the resume supports it, use the \n"
-    "   JD's exact phrase in the rewritten bullet (e.g., 'Airflow scheduling \n"
-    "   and orchestration', 'FastAPI async endpoints') instead of a paraphrase.\n"
-    "8. After rewriting, verify that every missing_keyword and misaligned_ \n"
-    "   emphasis item from the Gap Report is covered by at least one section \n"
-    "   or diff; do not drop an earlier addressed gap when applying later rules.\n"
-    "9. When the JD asks for production deployment, performance metrics, \n"
-    "   latency, observability, or containerization, and the resume contains \n"
-    "   any supporting fact (deployed, monitored, optimized, profiled, \n"
-    "   measured, containerized), re-emphasize that fact using the JD phrase, \n"
-    "   e.g. 'production Kubernetes deployment evidence', 'low latency \n"
-    "   performance metrics', 'observability and tracing', 'Docker and \n"
-    "   Kubernetes deployment workflows'.\n"
-    "10. When the resume is written in a non-English language, keep the \n"
-    "    JD capability phrases in English verbatim inside the rewritten \n"
-    "    bullet (e.g., 'production Kubernetes deployment', 'FastAPI async \n"
-    "    endpoints', 'Docker and Kubernetes deployment workflows'); do not \n"
-    "    translate technical keywords. Preserve the resume's original \n"
-    "    language everywhere else.\n"
-    "11. When the JD pairs a skill with a scenario (e.g., Redis caching for \n"
-    "    high concurrency), keep the exact scenario word (e.g., 'high \n"
-    "    concurrency') in the same bullet; do not replace it with a \n"
-    "    different scenario phrase such as 'production platform' or \n"
-    "    'production deployment'. When the JD names a platform-level \n"
-    "    scenario (e.g., 'high concurrency', 'high-concurrency platform', \n"
-    "    'millions of requests per day') and the resume supports a related \n"
-    "    skill bullet (e.g., Redis caching), include the platform-level \n"
-    "    phrase in the same bullet as the skill, even when the JD also \n"
-    "    gives the skill a narrower scenario (e.g., 'Redis caching for hot \n"
-    "    data and rate limiting' becomes 'Used Redis caching for hot data \n"
-    "    and rate limiting on the high-concurrency platform').\n"
-    "12. Scan jd_context (the original JD text) for exact skill-plus-scenario \n"
-    "    phrases such as 'Redis caching for hot data and rate limiting', \n"
-    "    'high-concurrency platform', 'async FastAPI services', 'low \n"
-    "    latency', 'millions of requests per day'. If the resume supports \n"
-    "    the skill, echo the JD phrase in the rewritten bullet with its \n"
-    "    scenario words exactly as written. For non-English resumes, include \n"
-    "    the English phrase verbatim alongside the translated text (e.g., \n"
-    "    write 'FastAPI async endpoints' as well as the Chinese rendering).\n"
-    "13. Every rewritten experience/project bullet MUST open with a strong \n"
-    "    action verb and follow ACTION VERB + TECHNICAL METHOD + BUSINESS \n"
-    "    SCENARIO + QUANTIFIED OUTCOME. Avoid adverbs and hollow \n"
-    "    'responsible for...' filler.\n"
-    "14. If the source bullet has no number/metric, do NOT invent one. Append \n"
-    "    a clearly marked editable placeholder such as '[待人工确认：耗时降低 \n"
-    "    X% / 支撑 QPS 达 Y]' after the factual clause. Never present the \n"
-    "    placeholder as an established fact.\n"
-    "Return ONLY a JSON object with exactly two keys:\n"
-    "sections (object mapping section_name to rewritten plain text),\n"
-    "diffs (list of objects with type in ['modify','add','remove'], section, \n"
-    "original, proposed, reason, confidence in ['high','medium','low'], \n"
-    "provenance).\n"
-    "Return at most 15 diffs, prioritizing the highest-impact gaps, and \n"
-    "keep each reason under 80 characters.\n"
-    "For each diff, section is the name of the resume section the diff \n"
-    "belongs to (e.g. '项目经历', '工作经历', '教育经历'); use the exact \n"
-    "section name as it appears in the resume.\n"
-    "Output ONLY JSON."
-    "## Output Constraints\\n"
-    "- Max tokens: 1500\\n"
-    "- Temperature: 0.0\\n"
-    "- Never invent facts: every entity must be traceable to the original resume\\n"
-    "- If uncertain: leave section unchanged\\n"
-    "- Output ONLY valid JSON, no markdown fences\\n"
-)
+TAILOR_PROMPT = """PROMPT_VERSION: tailor/v2
+
+你是精确的简历编辑器。给定主简历与差距报告，重写简历以弥合差距。铁律：不得编造。禁止新增简历中不存在的技能、经验、指标、工具、公司或项目；只允许改述、重排、重强调已有事实。
+
+## Output Contract（只能输出一个 JSON 对象，2 个字段）
+{"sections": {章节名: 重写后的纯文本}, "diffs": [...]}
+
+### sections
+- 只包含【发生了改动】的章节；未改动章节不要放入本对象（调用方会用原文合并）。
+- 每章为纯文本，保持原文 Markdown 列表风格；技术名词保留原文英文拼写。
+- 部署注意：当前实施已确认「sections 消费方在缺席时回退原文」（`engine.py:278-280`，draft 由 `_apply_diffs` 生成走 diffs 而非 sections，`api/routers/jobs.py:461`）——**「只含改动章节」模式可直接启用**；若未来消费方变化，本约束可降级为「sections 含所有章节，未改动章节与原文逐字一致」。
+
+### diffs：3-10 条，按影响从大到小；每条对象字段（键名固定）
+{
+  "type": "modify" | "add" | "remove",
+  "section": 简历中的确切章节名（逐字节写自简历标题，如"项目经历"、"工作经历"），
+  "original": "modify/remove 时 = 简历原文的逐字子串；add 时 = 空字符串 ""\",
+  "proposed": "改写后的新文本，≤ 250 字",
+  "reason": "一句话理由，≤ 40 字，说清改了什么、为什么更贴近 JD",
+  "confidence": "high" | "medium" | "low",
+  "provenance": "逐字节写自简历原文的出处句；modify/remove 时与 original 一致；add 时 = 相邻的支持句（必须逐字存在于原文）"
+}
+
+## 改写规则
+1. 只允许：改述、重排、重强调简历中已存在的事实；禁止发明或推断任何事实。
+2. 简历已支持 JD 关键词时，用 JD 的确切短语改写该条（如 "Redis caching for high concurrency"），但只能依托简历已有事实，不新增能力。
+3. 原文无数字/指标时禁止补数；在事实句后附加明确标注的占位符 "[待人工确认：耗时降低 X% / 支撑 QPS 达 Y]"，不得把占位符当事实呈现。
+4. 每条 proposed 的技术名词、业务场景短语必须能在 original 或简历原文中找到依据；provenance 必须逐字匹配简历原文（允许空白差异，不允许大意或改写）。
+5. 覆盖检查：完成后确认差距报告中每个 missing_keyword / misaligned_emphasis 至少被一条 diff 或一个改动的章节覆盖；无法用已有事实覆盖的，不要硬凑。
+6. 语言：与简历原文同语言；JD 技术短语保留英文原文（如 "production Kubernetes deployment"、"FastAPI async endpoints"）。
+7. section 字段逐字节写简历中的章节标题。
+
+## 提交前自查
+- 每个 provenance / original 都能在简历原文逐字找到；
+- proposed 中不得出现原文没有的技术名、数字、公司、项目名；
+- diffs 数量 ≤ 10；type / confidence 只用枚举值；add 型 original 必须为空字符串；
+- 只输出一个 JSON 对象，无 markdown fence，无解释文字。"""
 
 GRANULARITY_GUIDES = {
     "fine": (
@@ -370,17 +361,7 @@ def rewrite_bullet(
                 provenance_state="verified",
             )
 
-    system = (
-        "You rewrite exactly one resume bullet for a job application.\n"
-        "RULES:\n"
-        "1. Preserve every fact, technology, and metric already present.\n"
-        "2. NEVER invent skills, experience, tools, or numbers.\n"
-        "3. Apply the requested instruction to the existing facts.\n"
-        "4. Keep the same language as the original bullet.\n"
-        "5. Start with a strong action verb and keep the sentence business-\n"
-        "   outcome focused: ACTION VERB + METHOD + SCENARIO + RESULT.\n"
-        "Return ONLY JSON: {\"proposed\": \"...\", \"reason\": \"...\"}."
-    )
+    system = BULLET_REWRITE_PROMPT
     user = (
         f"Original bullet:\n{original}\n\n"
         f"Instruction: {BULLET_INSTRUCTIONS[instruction]}\n\n"

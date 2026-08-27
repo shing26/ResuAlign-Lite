@@ -52,13 +52,15 @@ def test_merge_maps_statuses_and_applied_at(tmp_path):
     assert (merged, skipped) == (2, 0)
 
     by_url = jobs.get_job("t1", job_url["job_id"])
-    assert by_url["status"] == "面试中"
+    assert by_url["status"] == "interview"
     assert by_url["status_canonical"] == "interview"
+    assert by_url["status_label"] == "面试中"
     assert by_url["applied_at"] is not None
 
     by_text = jobs.get_job("t1", job_text["job_id"])
-    assert by_text["status"] == "已投递"
+    assert by_text["status"] == "applied"
     assert by_text["status_canonical"] == "applied"
+    assert by_text["status_label"] == "已投递"
     assert by_text["applied_at"] is not None
 
 
@@ -90,7 +92,7 @@ def test_merge_skips_unmatched_and_non_draft_jobs(tmp_path):
 
     merged, skipped = merge_applications_into_jobs(apps, jobs, "t1")
     assert (merged, skipped) == (0, 2)
-    assert jobs.get_job("t1", job["job_id"])["status"] == "面试中"
+    assert jobs.get_job("t1", job["job_id"])["status"] == "interview"
 
 
 def test_merge_draft_maps_to_not_applied_and_is_idempotent(tmp_path):
@@ -115,10 +117,10 @@ def test_merge_draft_maps_to_not_applied_and_is_idempotent(tmp_path):
     first = merge_applications_into_jobs(apps, jobs, "t1")
     assert first == (1, 0)
     refreshed = jobs.get_job("t1", job["job_id"])
-    assert refreshed["status"] == "未投递"
+    assert refreshed["status"] == "draft"
     assert refreshed["applied_at"] is None
 
-    # Second run: job is still 未投递 and app still draft -> merges again,
+    # Second run: job is still draft (label 未投递) and app still draft -> merges again,
     # but there is nothing new to record; counts stay stable.
     second = merge_applications_into_jobs(apps, jobs, "t1")
     assert second == (1, 0)
@@ -164,6 +166,6 @@ def test_merge_is_tenant_scoped(tmp_path):
     job_b = next(
         j for j in jobs.list_jobs("t2") if j["title"] == "Backend B"
     )
-    assert job_a["status"] == "未投递"
+    assert job_a["status"] == "draft"
     # Tenant t2's job is untouched by the t1 migration.
-    assert job_b["status"] == "未投递"
+    assert job_b["status"] == "draft"

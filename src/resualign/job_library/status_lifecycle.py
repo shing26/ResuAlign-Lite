@@ -28,7 +28,12 @@ def status_label(status: str) -> str:
 
 
 def _status_filter_values(status: str) -> tuple[str, ...]:
-    """Expand a canonical or legacy status to all values that map to it."""
+    """Expand a canonical or legacy status to all values that map to it.
+
+    The returned tuple always includes the canonical key plus every legacy
+    label for it, so either storage flavour (canonical ``applied`` or the
+    legacy 中文 ``已投递``) matches an ``IN (...)`` filter (Bug-08/Bug-12).
+    """
     value = str(status or "").strip()
     canonical = canonical_status(value)
     aliases = tuple(
@@ -36,9 +41,12 @@ def _status_filter_values(status: str) -> tuple[str, ...]:
         for legacy, canon in _JOB_STATUS_ALIASES.items()
         if canon == canonical
     )
-    if value not in aliases:
-        aliases = aliases + (value,)
-    return aliases
+    result = list(aliases)
+    if canonical not in result:
+        result.append(canonical)
+    if value not in result:
+        result.append(value)
+    return tuple(result)
 
 
 def _validate_status(status: str) -> str:

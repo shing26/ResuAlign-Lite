@@ -36,7 +36,6 @@ def test_patchable_state_names_remain_on_package():
         "_jobs",
         "_settings_store",
         "_session_store",
-        "_crawl_tasks",
         "_PERSONAL_MODE",
         "_payloads",
         "_import_batches",

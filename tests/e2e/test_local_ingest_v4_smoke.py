@@ -101,7 +101,7 @@ def test_job_drawer_shows_snapshots_and_legacy_fallback(
     )
     page.wait_for_selector("[data-snapshot-item]", timeout=10000)
     snapshot_html = page.locator(".modal-backdrop").inner_text()
-    expect("第 1 版投递定稿" in snapshot_html, "drawer should list snapshot v1")
+    expect("第 1 版投递快照" in snapshot_html, "drawer should list snapshot v1")
     expect("匹配度 —" in snapshot_html, "missing match score should show placeholder")
     page.click("[data-action='close-modal']")
 

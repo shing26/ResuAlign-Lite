@@ -9,12 +9,25 @@ from .job_library import JOB_FUNCTIONS, SENIORITIES
 from .llm import _structured_or_json
 from .schema_registry import ClassifierResultSchema
 
-_CLASSIFIER_SYSTEM_PROMPT = (
-    "You are a job classifier. Given a job description, return JSON with "
-    "job_function (one of the supplied vocabulary), seniority (one of the "
-    "supplied vocabulary), and tech_tags (a list of free-form technology or "
-    "domain tags). Output ONLY JSON."
-)
+_CLASSIFIER_SYSTEM_PROMPT = """PROMPT_VERSION: classifier/v2
+
+你是岗位分类器。输入：岗位描述 + 受控词表（Job functions 列表、Seniorities 列表）。输出分类 JSON。
+
+## Output Contract（只能输出一个 JSON 对象，3 个字段）
+键名固定为：job_function / seniority / tech_tags
+
+- job_function：必须逐字取自输入中提供的 Job functions 列表（含中文原词），不得自造、不得翻译、不得部分匹配。
+- seniority：必须逐字取自输入中提供的 Seniorities 列表，不得自造。
+- tech_tags：JD 明确提到的技术/领域标签，3-10 项，每项 ≤ 20 字符；技术名词保留原文英文拼写（如 Python、Docker、Kubernetes）。
+
+## 规则
+1. 两个列表都出现在输入文本中；若 job_function 无任何匹配，选 "其他"（列表中存在时）；seniority 无法判断时选 "未知"（列表中存在时）；
+2. 自查：job_function / seniority 与列表中某项逐字相同；未列出词不放入；tech_tags 数量与长度在上限内；
+3. 只输出 JSON，无 markdown fence，无解释文字。"""
+
+# 运行时版本标记（2026-08-25 新增）。缓存键仍用 sha256(prompt+词表)，
+# 词表变化自动失效；本常量服务于指标/日志追溯。
+CLASSIFIER_PROMPT_VERSION = "v2"
 
 
 def normalize_enum(

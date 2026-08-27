@@ -8,6 +8,8 @@ import { Window } from "happy-dom";
 import {
   atsHealthCardHtml,
   atsHealthScoreLevel,
+  optimizeModuleHtml,
+  optimizeOverviewHtml,
   versionChangeSummary,
   versionTimelineHtml,
 } from "../../src/resualign/static/app/format.js";
@@ -268,4 +270,170 @@ test("versionTimelineHtml escapes version numbers and summaries", () => {
 test("versionTimelineHtml renders empty state for no versions", () => {
   const body = bodyFrom(versionTimelineHtml([], 1));
   assert.match(body.querySelector("[data-version-timeline]").textContent, /暂无版本/);
+});
+
+/* ------------------------------------------------------------------ */
+/* Sprint 5: AI 优化面板 —— optimizeOverviewHtml / optimizeModuleHtml     */
+/* ------------------------------------------------------------------ */
+
+test("optimizeOverviewHtml renders score, verdict, skills and JD hits", () => {
+  const body = bodyFrom(
+    optimizeOverviewHtml({
+      score: 82,
+      skills: ["Python", "K8s"],
+      highlights: ["性能提升 30%", "日活 10w"],
+      issues: ["缺少量化成果"],
+      project_count: 3,
+      jd: {
+        provided: true,
+        matched_keywords: ["Python"],
+        unmatched_keywords: ["Go", "Redis"],
+      },
+    }),
+  );
+  const panel = body.querySelector("[data-optimize-overview]");
+  assert.ok(panel);
+  assert.equal(panel.querySelector("[data-optimize-score]"), null);
+  assert.equal(panel.querySelector(".optimize-overview__score").textContent, "82");
+  assert.equal(panel.querySelector("[data-optimize-verdict]").textContent, "优秀");
+  const skills = panel.querySelector("[data-optimize-skills]");
+  assert.ok(skills);
+  assert.match(skills.textContent, /Python/);
+  assert.match(skills.textContent, /K8s/);
+  assert.match(panel.querySelector("[data-optimize-highlights]").textContent, /性能提升 30%/);
+  assert.match(panel.querySelector("[data-optimize-issues]").textContent, /缺少量化成果/);
+  const jd = panel.querySelector("[data-optimize-jd]");
+  assert.ok(jd);
+  assert.match(jd.textContent, /1 命中 \/ 2 未命中/);
+  assert.match(jd.textContent, /Go/);
+  assert.equal(jd.querySelectorAll(".chip--matched").length, 1);
+  assert.match(jd.querySelector(".chip--matched").textContent, /Python/);
+});
+
+test("optimizeOverviewHtml clamps score and picks verdict by 80/60 thresholds", () => {
+  const mid = bodyFrom(optimizeOverviewHtml({ score: 60 }));
+  assert.equal(mid.querySelector(".optimize-overview__score").textContent, "60");
+  assert.equal(mid.querySelector("[data-optimize-verdict]").textContent, "建议优化");
+  const low = bodyFrom(optimizeOverviewHtml({ score: 30 }));
+  assert.equal(low.querySelector("[data-optimize-verdict]").textContent, "需重点优化");
+  const clamped = bodyFrom(optimizeOverviewHtml({ score: 150 }));
+  assert.equal(clamped.querySelector(".optimize-overview__score").textContent, "100");
+  const missing = bodyFrom(optimizeOverviewHtml(null));
+  assert.equal(missing.querySelector(".optimize-overview__score").textContent, "—");
+  assert.equal(missing.querySelector("[data-optimize-verdict]").textContent, "建议优化");
+});
+
+test("optimizeOverviewHtml escapes skills, highlights and JD keywords", () => {
+  const body = bodyFrom(
+    optimizeOverviewHtml({
+      score: 66,
+      skills: ["<script>alert(1)</script>"],
+      highlights: ["<img src=x onerror=alert(1)>"],
+      jd: {
+        provided: true,
+        matched_keywords: ["<b>Python</b>"],
+        unmatched_keywords: ["</script>"],
+      },
+    }),
+  );
+  assert.equal(body.querySelector("script"), null);
+  assert.equal(body.querySelector("img"), null);
+  assert.match(body.querySelector("[data-optimize-skills]").innerHTML, /&lt;script&gt;/);
+  assert.match(body.querySelector("[data-optimize-highlights]").innerHTML, /&lt;img/);
+  assert.match(body.querySelector("[data-optimize-jd]").innerHTML, /&lt;b&gt;Python&lt;\/b&gt;/);
+});
+
+test("optimizeModuleHtml renders diff rows, rationale and accept/ignore actions", () => {
+  const item = {
+    module: "projects",
+    index: 1,
+    title: "订单系统",
+    original: "负责订单模块开发\n修复线上问题",
+    optimized: "负责订单模块开发\n性能提升 30%",
+    rationale: "补充量化成果",
+    status: "ok",
+  };
+  const body = bodyFrom(optimizeModuleHtml(item, 3));
+  const card = body.querySelector("[data-optimize-module]");
+  assert.ok(card);
+  assert.equal(card.dataset.optimizeKey, "3");
+  assert.match(card.querySelector(".optimize-module__title").textContent, /订单系统/);
+  assert.match(card.querySelector(".badge-gray").textContent, /projects/);
+  const diffs = [...card.querySelectorAll(".optimize-diff")];
+  assert.equal(diffs.length, 2);
+  assert.match(diffs[0].className, /optimize-diff--remove/);
+  assert.match(diffs[0].textContent, /修复线上问题/);
+  assert.match(diffs[1].className, /optimize-diff--add/);
+  assert.match(diffs[1].textContent, /性能提升 30%/);
+  assert.match(card.querySelector(".optimize-module__rationale").textContent, /补充量化成果/);
+  const accept = card.querySelector('[data-action="optimize-accept-item"]');
+  const ignore = card.querySelector('[data-action="optimize-reject-item"]');
+  assert.ok(accept);
+  assert.ok(ignore);
+  assert.equal(accept.dataset.optimizeKey, "3");
+  assert.match(accept.textContent, /采纳/);
+  assert.match(ignore.textContent, /忽略/);
+  assert.equal(card.querySelector("[data-optimize-accepted-mark]"), null);
+});
+
+test("optimizeModuleHtml marks accepted card with 已采纳", () => {
+  const item = {
+    module: "projects",
+    index: 0,
+    title: "支付中台",
+    original: "a",
+    optimized: "b",
+    rationale: "",
+    status: "ok",
+  };
+  const body = bodyFrom(optimizeModuleHtml(item, 0, true));
+  const card = body.querySelector("[data-optimize-module]");
+  assert.match(card.className, /is-accepted/);
+  assert.ok(card.querySelector("[data-optimize-accepted-mark]"));
+  assert.match(card.querySelector('[data-action="optimize-accept-item"]').textContent, /已采纳/);
+});
+
+test("optimizeModuleHtml renders failed cards without accept buttons", () => {
+  const item = {
+    module: "projects",
+    index: 2,
+    title: "风控引擎",
+    status: "failed",
+    error: '模型账户欠费或余额不足 <script>alert(1)</script>',
+  };
+  const body = bodyFrom(optimizeModuleHtml(item, 2));
+  const card = body.querySelector("[data-optimize-module]");
+  assert.ok(card);
+  assert.match(card.className, /optimize-module--failed/);
+  assert.match(card.querySelector(".badge-red").textContent, /润色失败/);
+  assert.equal(card.querySelector('[data-action="optimize-accept-item"]'), null);
+  assert.equal(card.querySelector('[data-action="optimize-reject-item"]'), null);
+  assert.equal(body.querySelector("script"), null);
+  assert.match(card.querySelector(".form-error").textContent, /模型账户欠费或余额不足/);
+});
+
+/* ------------------------------------------------------------------ */
+/* Sprint 5: styles.css .optimize-* rules                              */
+/* ------------------------------------------------------------------ */
+
+test("styles.css: optimize diff rows use success/danger accents", () => {
+  const add = stylesCss.match(/\.optimize-diff--add\s*\{([^}]*)\}/s);
+  assert.ok(add, ".optimize-diff--add rule exists");
+  assert.match(add[1], /var\(--ra-success/);
+  const remove = stylesCss.match(/\.optimize-diff--remove\s*\{([^}]*)\}/s);
+  assert.ok(remove, ".optimize-diff--remove rule exists");
+  assert.match(remove[1], /var\(--ra-danger/);
+  assert.match(remove[1], /line-through/);
+});
+
+test("styles.css: accepted module and JD chip reuse success accent", () => {
+  const accepted = stylesCss.match(/\.optimize-module\.is-accepted\s*\{([^}]*)\}/s);
+  assert.ok(accepted, ".optimize-module.is-accepted rule exists");
+  assert.match(accepted[1], /var\(--ra-success/);
+  const chip = stylesCss.match(/\.chip--matched\s*\{([^}]*)\}/s);
+  assert.ok(chip, ".chip--matched rule exists");
+  assert.match(chip[1], /var\(--ra-success/);
+  const failed = stylesCss.match(/\.optimize-module--failed\s*\{([^}]*)\}/s);
+  assert.ok(failed, ".optimize-module--failed rule exists");
+  assert.match(failed[1], /var\(--ra-danger/);
 });

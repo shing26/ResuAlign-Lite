@@ -1,4 +1,4 @@
-﻿"""B3: JD analysis cache schema versioning and readable failure stages."""
+"""B3: JD analysis cache schema versioning and readable failure stages."""
 
 from unittest.mock import patch
 
@@ -200,7 +200,10 @@ def test_run_job_failure_records_stage_and_readable_reason():
     snapshot = api_module._registry.snapshot(analysis_job_id)
     assert snapshot["status"] == "failed"
     assert "阶段失败" in snapshot["error"]
-    assert "API Key" in snapshot["error"]
+    # P0-1: timeout 类失败不再归因 API Key/网络（旧断言期望 "API Key" 与新分类
+    # 矛盾，已随 R4 修正为断言超时文案 + 排除 API Key）。
+    assert "模型响应超时" in snapshot["error"]
+    assert "API Key" not in snapshot["error"]
     registry_job = api_module._registry.get(analysis_job_id)
     assert registry_job.stage in ("diagnose", "jd_analysis", "tailoring")
 

@@ -1,5 +1,5 @@
 /* ResuAlign v2.0 — Job Kanban (蓝图文件 5)
- * 岗位库重构：URL 自动抓取 Bar + Funnel Metrics + 5 列 surface3 沉降式
+ * 岗位库重构：Funnel Metrics + 5 列 surface3 沉降式
  * Kanban（未投递 ➔ 已投递 ➔ 面试中 ➔ 已拿 Offer ➔ 放弃），卡片悬浮带
  * Apple 微动效。搜索/职能/级别/状态筛选以苹果风折叠 Toolbar 呈现
  * （收合式，展开不挤占看板空间）；事件绑定复用 main.js 的
@@ -88,7 +88,7 @@ export async function renderKanban(app) {
           <span class="board-col-count">${items.length}</span>
         </div>
         <div class="board-col-body">
-          ${items.map(boardCard).join("") || '<div class="board-column__empty">暂无岗位</div>'}
+          ${items.map((job) => boardCard(job, vocabulary.statuses)).join("") || '<div class="board-column__empty">暂无岗位</div>'}
         </div>
       </section>`;
   }).join("");
@@ -100,11 +100,6 @@ export async function renderKanban(app) {
   app.innerHTML = `
     <div class="view view-fit jobs-view">
       <div class="jobs-command jobs-topbar" data-jobs-topbar>
-        <div class="fetch-url" data-fetch-url-bar>
-          <input type="url" data-fetch-url placeholder="粘贴岗位 JD 链接自动抓取..." aria-label="岗位链接" autocomplete="off">
-          <button type="button" class="btn btn-light" data-action="fetch-job-url">自动抓取</button>
-        </div>
-        <span class="blocker-btn" data-blocker-badge></span>
         <div class="conversion" data-jobs-conversion aria-label="投递面试转化统计">
           <span>投递转化 <b data-jobs-apply-rate>${esc(percent(funnel.applyRate))}</b>（${esc(funnel.applied || 0)}/${esc(stats.total || 0)}）</span>
           <span>面试转化 <b data-jobs-interview-rate>${esc(percent(funnel.interviewRate))}</b>（${esc(funnel.interview || 0)}/${esc(funnel.applied || 0)}）</span>
@@ -151,16 +146,6 @@ export async function renderKanban(app) {
     ${emptyGuide}
     <div id="job-board" class="board pipeline-board" data-pipeline-board>${columns}</div>
     </div>`;
-  const fetchInput = app.querySelector("[data-fetch-url]");
-  if (fetchInput) {
-    fetchInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        const button = app.querySelector('[data-action="fetch-job-url"]');
-        if (button) button.click();
-      }
-    });
-  }
   const sortSelect = app.querySelector("[data-job-sort]");
   if (sortSelect) {
     sortSelect.addEventListener("change", () => {

@@ -35,7 +35,6 @@ CRITICAL_ROUTES = {
     "/api/jobs/{job_id}/workbench/accept",
     "/api/master-resumes",
     "/api/master-resumes/{resume_id}",
-    "/api/applications",
     "/api/settings",
 }
 
@@ -163,7 +162,10 @@ def test_openapi_is_additive_over_golden():
     golden_schemas = golden["components"]["schemas"]
     current_schemas = current["components"]["schemas"]
     removed_props = manifest.get("removed_schema_properties", {})
+    removed_schemas = set(manifest.get("removed_schemas", []))
     for name, schema in golden_schemas.items():
+        if name in removed_schemas:
+            continue
         assert name in current_schemas, f"Golden schema removed: {name}"
         _assert_additive_schema(
             schema,
@@ -192,6 +194,10 @@ def test_incremental_manifest_matches_openapi_diff():
         - set(golden["components"]["schemas"])
     )
     removed_paths = set(golden["paths"]) - set(current["paths"])
+    removed_schemas_set = (
+        set(golden["components"]["schemas"])
+        - set(current["components"]["schemas"])
+    )
     removed_props: dict[str, list[str]] = {}
     for name, schema in golden["components"]["schemas"].items():
         if name not in current["components"]["schemas"]:
@@ -206,6 +212,7 @@ def test_incremental_manifest_matches_openapi_diff():
     assert set(manifest["paths"]) == new_paths
     assert set(manifest["schemas"]) == new_schemas
     assert set(manifest["removed_paths"]) == removed_paths
+    assert set(manifest.get("removed_schemas", [])) == removed_schemas_set
     declared_removed_props = manifest["removed_schema_properties"]
     for name, props in declared_removed_props.items():
         assert name in current["components"]["schemas"], (
@@ -221,12 +228,17 @@ def test_incremental_manifest_matches_openapi_diff():
     assert manifest["operations"] == []
     break_types = [item["type"] for item in manifest["breaking_changes"]]
     assert break_types.count("remove_path") == len(manifest["removed_paths"])
+    assert break_types.count("remove_schema") == len(
+        manifest.get("removed_schemas", [])
+    )
     assert break_types.count("remove_schema_property") == sum(
         len(props) for props in declared_removed_props.values()
     )
     for item in manifest["breaking_changes"]:
         if item["type"] == "remove_path":
             assert item["path"] in removed_paths
+        elif item["type"] == "remove_schema":
+            assert item["schema"] in removed_schemas_set
         elif item["type"] == "remove_schema_property":
             assert item["property"] in declared_removed_props.get(item["schema"], [])
 
@@ -278,7 +290,7 @@ def test_job_library_response_shape_is_additive():
     assert all(required <= set(item) for item in listing.json())
 
 
-def test_master_resume_and_application_contract():
+def test_master_resume_contract():
     client = TestClient(app)
     headers = _auth_headers(client)
     resume = client.post(
@@ -291,20 +303,12 @@ def test_master_resume_and_application_contract():
     )
     assert resume.status_code == 201
     resume_id = resume.json()["resume_id"]
-    application = client.post(
-        "/api/applications",
-        json={
-            "title": "Contract application",
-            "master_resume_id": resume_id,
-            "jd_text": "FastAPI backend role",
-        },
-        headers=headers,
+    detail = client.get(
+        f"/api/master-resumes/{resume_id}", headers=headers
     )
-    assert application.status_code == 201
-    app_body = application.json()
-    assert {"application_id", "status", "master_resume_id", "created_at"} <= set(
-        app_body
-    )
+    assert detail.status_code == 200
+    body = detail.json()
+    assert {"resume_id", "title", "content", "current_version"} <= set(body)
 
 
 def test_settings_contract():

@@ -131,9 +131,12 @@ def test_local_ingest_creates_pending_job_with_deterministic_fields():
     assert job["title"] == "后端工程师"
     assert job["company"] == "Acme"
     assert job["location"] == "Shanghai"
-    assert job["salary_min"] == 20000
-    assert job["salary_max"] == 30000
-    assert job["status"] == "未投递"
+    # De-bloat: salary is no longer auto-extracted from salary_text/JD text;
+    # the field stays populated only when explicitly provided.
+    assert job["salary_min"] is None
+    assert job["salary_max"] is None
+    assert job["status"] == "draft"  # Bug-12
+    assert job["status_label"] == "未投递"  # display layer stays localized
     assert job["source_url"] == "https://www.shixiseng.com/intern/abc"
 
 
@@ -236,7 +239,8 @@ def test_apply_freezes_snapshot_and_reapply_appends_without_downgrade():
         status="已投递",
         applied_at="2026-08-01",
     )
-    assert applied["status"] == "已投递"
+    assert applied["status"] == "applied"  # Bug-12
+    assert applied["status_label"] == "已投递"
     snapshots = store.list_application_snapshots("local", job["job_id"])
     assert len(snapshots) == 1
     snapshot = snapshots[0]
@@ -253,8 +257,12 @@ def test_apply_freezes_snapshot_and_reapply_appends_without_downgrade():
         applied_at="2026-08-02",
         interview_stage="一面",
     )
-    assert reapplied["status"] == "已投递"
-    assert reapplied["interview_stage"] is None
+    assert reapplied["status"] == "applied"
+    assert reapplied["status_label"] == "已投递"
+    # Bug-02: explicitly provided timeline fields (including applied_at) are
+    # honored on append-only re-record instead of being silently swallowed.
+    assert reapplied["applied_at"] == "2026-08-02"
+    assert reapplied["interview_stage"] == "一面"
     snapshots = store.list_application_snapshots("local", job["job_id"])
     assert [item["version_index"] for item in snapshots] == [2, 1]
     assert snapshots[0]["applied_at"] == "2026-08-02"
@@ -283,8 +291,11 @@ def test_reapplying_applied_from_interview_does_not_downgrade():
         status="已投递",
         applied_at="2026-08-03",
     )
-    assert again["status"] == "面试中"
-    assert again["applied_at"] == "2026-07-20"
+    assert again["status"] == "interview"
+    assert again["status_label"] == "面试中"
+    # Bug-02: explicit applied_at is written even on append-only re-record;
+    # only the status is pinned (no downgrade) per ADR-0028.
+    assert again["applied_at"] == "2026-08-03"
     snapshots = store.list_application_snapshots("local", job["job_id"])
     assert len(snapshots) == 1
     assert snapshots[0]["applied_at"] == "2026-08-03"

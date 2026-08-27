@@ -1,4 +1,4 @@
-"""Automation rule endpoints for the Sprint 3 fetch pipeline."""
+"""Automation rule endpoints (rule store-backed)."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def list_automation_rules(
     user: dict[str, Any] = Depends(get_current_user),
 ):
     """Return the tenant's automation rules in creation order."""
-    return api_module._fetcher.list_rules(user["user_id"])
+    return api_module._jobs.list_rules(user["user_id"])
 
 
 @router.post("/api/automation/rules", status_code=201)
@@ -27,9 +27,9 @@ def create_automation_rule(
     req: AutomationRuleCreateRequest,
     user: dict[str, Any] = Depends(get_current_user),
 ):
-    """Create one automation rule for the fetch pipeline."""
+    """Create one automation rule."""
     try:
-        return api_module._fetcher.create_rule(
+        return api_module._jobs.create_rule(
             user["user_id"],
             req.rule_type,
             req.value,
@@ -48,7 +48,7 @@ def update_automation_rule(
 ):
     """Partially update one automation rule."""
     try:
-        rule = api_module._fetcher.update_rule(
+        rule = api_module._jobs.update_rule(
             user["user_id"],
             rule_id,
             value=req.value,
@@ -68,6 +68,6 @@ def delete_automation_rule(
     user: dict[str, Any] = Depends(get_current_user),
 ):
     """Delete one automation rule."""
-    if not api_module._fetcher.delete_rule(user["user_id"], rule_id):
+    if not api_module._jobs.delete_rule(user["user_id"], rule_id):
         raise HTTPException(status_code=404, detail="Rule not found")
     return None

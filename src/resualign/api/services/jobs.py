@@ -67,38 +67,99 @@ _STAGE_LABELS = {
     "jd_analysis": "JD 画像与差距分析",
     "tailoring": "简历定制",
     "evaluation": "效果评估",
+    "overview": "整体分析",
+    "polishing": "模块化润色",
     "extract": "JD 内容提取",
 }
 
 
-def _job_failure_detail(stage: str, exc: BaseException) -> str:
+def _job_failure_detail(
+    stage: str, exc: BaseException, elapsed_secs: float | None = None
+) -> str:
     """Return a readable, stage-aware failure reason for an analysis job.
 
     Replaces the old generic ``Analysis failed after an internal error`` so
-    the workbench can show *where* the run died and why.
+    the workbench can show *where* the run died and why. P0-1: failures are
+    classified into actionable copy — timeouts no longer blame the API Key /
+    network (the 2026-08-25 walkthrough proved the Key/connectivity were fine
+    while the guardrail timeout was the real cause); ``elapsed_secs`` lets the
+    timeout branch quote the actual run duration (the workbench also surfaces
+    ``elapsed_seconds`` from the snapshot). Return structure stays a plain str.
     """
     stage_label = _STAGE_LABELS.get(stage, stage or "未知阶段")
     message = str(exc) or exc.__class__.__name__
     if isinstance(exc, api_module.LLMResponseError):
-        lowered = message.lower()
-        if "429" in message or "rate limit" in lowered:
-            reason = "模型服务繁忙（限流），请稍后重试"
-        elif (
-            "timeout" in lowered
-            or "timed out" in lowered
-            or "time-out" in lowered
-        ):
-            reason = "模型响应超时，请检查 API Key 与网络连接后重试"
-        elif (
-            "expecting value" in lowered
-            or "no json object found" in lowered
-            or "schema validation" in lowered
-            or "empty response" in lowered
-            or "empty content" in lowered
-        ):
-            reason = "模型返回了空内容或无法解析的 JSON，请重新运行；若仍失败可尝试更换模型"
+        # R4 P0-1（03-AIE §③）：结构化 code 优先分支，杜绝 message substring 漂移
+        # 误归因；code == "other"（旧调用方/测试构造的无 code 异常）回退文本分类。
+        code = getattr(exc, "code", "other")
+        if code != "other":
+            if code == "rate_limit":
+                reason = "模型服务繁忙（限流），请稍后重试"
+            elif code == "quota":
+                reason = "模型账户欠费或余额不足，请充值后重试（可先在设置页更换节点）"
+            elif code == "auth":
+                reason = "API Key 无效或权限不足，请检查模型设置"
+            elif code == "timeout":
+                if elapsed_secs is not None:
+                    reason = (
+                        "模型响应超时（本次耗时 "
+                        f"{elapsed_secs:.1f} 秒），可尝试更换更快的模型或稍后重试"
+                    )
+                else:
+                    reason = "模型响应超时，可尝试更换更快的模型或稍后重试"
+            elif code == "empty":
+                reason = "模型返回为空，请重试"
+            elif code in ("parse", "schema"):
+                reason = "模型返回内容格式异常，请重试或更换模型"
+            else:
+                reason = "模型服务暂时不可用，请稍后重试"
         else:
-            reason = "模型服务暂时不可用或返回异常，请检查 API Key 与网络连接后重试"
+            lowered = message.lower()
+            if "429" in message or "rate limit" in lowered:
+                reason = "模型服务繁忙（限流），请稍后重试"
+            elif (
+                "401" in message
+                or "403" in message
+                or "unauthorized" in lowered
+                or "authentication" in lowered
+                or "invalid api key" in lowered
+                or "api key" in lowered
+            ):
+                # P0-1: 只有 auth 类失败才引导用户检查 API Key（2026-08-25 走查实测
+                # Key 有效+连通正常时，超时才是真因，不能一概归因到 Key/网络）。
+                reason = "API Key 无效或缺少权限，请检查模型设置"
+            elif (
+                "timeout" in lowered
+                or "timed out" in lowered
+                or "time-out" in lowered
+            ):
+                if elapsed_secs is not None:
+                    reason = (
+                        "模型响应超时（本次耗时 "
+                        f"{elapsed_secs:.1f} 秒），可尝试更换更快的模型或稍后重试"
+                    )
+                else:
+                    reason = "模型响应超时，可尝试更换更快的模型或稍后重试"
+            elif (
+                "empty response" in lowered
+                or "empty content" in lowered
+                or "returned empty" in lowered
+                or "was empty" in lowered
+                or "empty after" in lowered
+            ):
+                reason = "模型返回为空，请重试"
+            elif (
+                "expecting value" in lowered
+                or "no json object found" in lowered
+                or "not a json object" in lowered
+                or "invalid json" in lowered
+                or "schema validation" in lowered
+                or "failed validation" in lowered
+            ):
+                reason = "模型返回内容格式异常，请重试或更换模型"
+            else:
+                # P0-1: 未分类失败不再归因 API Key/网络（仅 auth 分支引导查 Key）。
+                reason = "模型服务暂时不可用，请稍后重试"
     else:
         reason = message[:300] or "内部错误"
     return f"对齐分析在「{stage_label}」阶段失败：{reason}"
@@ -115,7 +176,12 @@ def _classify_job(jd_text: str, job_functions: list[str] | None=None, senioritie
     leak across tenants (S1). Callers pass the owning user id.
     """
     config = api_module.build_config()
-    with api_module.OpenAIClient(config, timeout=45.0) as client:
+    with api_module.OpenAIClient(
+        config,
+        timeout=45.0,
+        # R4 P0-2：classifier 非 role 直连调用，输出钳制 128（03-AIE §③）。
+        max_tokens=128,
+    ) as client:
         return api_module.classify_job(
             client,
             jd_text,
@@ -236,38 +302,32 @@ def _extract_company_location(
     return company, location
 
 def _crawl_jd_or_502(jd_url: str, meta: dict[str, Any] | None=None) -> str:
-    """Crawl a JD URL, mapping crawler failures to a stable 502 response."""
-    try:
-        return api_module.crawl_jd(jd_url, meta=meta)
-    except api_module.CrawlError as exc:
-        logger.warning('JD crawl failed for %s: %s', jd_url, exc)
-        raise HTTPException(status_code=502, detail=api_module._jd_parse_error_detail(exc)) from exc
+    """Crawl a JD URL, mapping crawler failures to a stable 502 response.
 
-def _jd_parse_error_detail(exc: api_module.CrawlError) -> dict[str, str]:
-    """Map a crawl failure to a user-actionable, non-leaking classification."""
-    message = str(exc.args[0]) if exc.args else str(exc)
-    lowered = message.lower()
-    if exc.category == 'url':
-        if 'private or local' in lowered or 'not globally routable' in lowered:
-            return {'code': 'blocked_by_policy', 'reason': '该链接被安全策略拦截，可能是内网地址或非公开招聘页', 'action': '请确认链接为公开职位页，或改用粘贴 JD'}
-        return {'code': 'invalid_url', 'reason': '链接格式无效，请输入有效的 https:// 招聘链接', 'action': '请检查链接后重试，或改用粘贴 JD'}
-    if exc.category == 'dns':
-        return {'code': 'network_error', 'reason': '无法解析目标站点，可能是网络问题或链接已失效', 'action': '请确认链接可访问，或改用粘贴 JD'}
-    if exc.category in ('empty', 'selector'):
-        return {'code': 'no_content', 'reason': '该站点无法直接读取正文，可能需要登录或动态加载', 'action': '请改用粘贴 JD 或更换链接重试'}
-    if exc.category == 'fetch':
-        if 'timeout' in lowered or 'timed out' in lowered:
-            return {'code': 'timeout', 'reason': '链接解析超时，站点可能暂时不可用', 'action': '请改用粘贴 JD 或稍后重试'}
-        return {'code': 'network_error', 'reason': '无法连接到目标站点，可能是网络问题或站点暂时不可用', 'action': '请改用粘贴 JD 或稍后重试'}
-    if exc.category == 'http':
-        if 'too many redirects' in lowered:
-            return {'code': 'site_error', 'reason': '站点重定向异常，无法完成解析', 'action': '请改用粘贴 JD 或更换链接重试'}
-        status_match = re.search('HTTP (\\d{3})', message)
-        status = int(status_match.group(1)) if status_match else None
-        if status in (401, 403):
-            return {'code': 'login_required', 'reason': '该站点需要登录或权限，无法直接读取正文', 'action': '请改用粘贴 JD 或更换链接重试'}
-        return {'code': 'site_error', 'reason': '目标站点返回错误，暂时无法解析正文', 'action': '请改用粘贴 JD 或稍后重试'}
-    return {'code': 'site_error', 'reason': '未能解析该岗位链接', 'action': '请改用粘贴 JD 或稍后重试'}
+    De-bloat (2026-08-27): backend crawling was fully retired; JD intake is
+    handled by the collector userscript (local-ingest) or pasted text. A
+    URL-only ingest without text is now rejected with a pointer to those
+    paths instead of hitting the network.
+    """
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            '后端已不再抓取 JD 链接：请用浏览器油猴插件一键抓取，'
+            '或改用「粘贴 JD」方式'
+        ),
+    )
+
+def _jd_parse_error_detail(exc: BaseException) -> dict[str, str]:
+    """Map a crawl failure to a user-actionable, non-leaking classification.
+
+    De-bloat (2026-08-27): backend crawling retired; only guard against
+    accidental use of the removed crawl path.
+    """
+    return {
+        'code': 'crawl_retired',
+        'reason': '后端已不再抓取 JD 链接，请使用油猴插件或粘贴 JD',
+        'action': '请改用粘贴 JD 或浏览器插件抓取',
+    }
 
 def _deterministic_job_fields(payload: dict[str, Any]) -> dict[str, Any]:
     """Resolve title/company/location/salary without any LLM round-trip."""
@@ -281,13 +341,6 @@ def _deterministic_job_fields(payload: dict[str, Any]) -> dict[str, Any]:
         location = location or extracted_location
     salary_min = payload.get('salary_min')
     salary_max = payload.get('salary_max')
-    if salary_min is None or salary_max is None:
-        salary_text = (payload.get('salary_text') or '').strip()
-        extracted_min, extracted_max = api_module.extract_salary_range(
-            salary_text or jd_text
-        )
-        salary_min = salary_min if salary_min is not None else extracted_min
-        salary_max = salary_max if salary_max is not None else extracted_max
     return {
         'title': title,
         'company': company,
@@ -298,12 +351,19 @@ def _deterministic_job_fields(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    """Crawl/derive/extract/classify one job and store it in the library."""
+    """Derive/extract/classify one job and store it in the library.
+
+    De-bloat (2026-08-27): backend crawling is retired. A URL-only payload
+    (``jd_url`` without ``jd_text``) is rejected with a pointer to the
+    collector userscript / paste flow instead of crawling the network.
+    """
     payload = dict(payload or {})
     jd_text = (payload.get('jd_text') or '').strip()
     jd_url = (payload.get('jd_url') or '').strip()
     if jd_url and (not jd_text):
-        jd_text = api_module.crawl_jd(jd_url)
+        raise api_module.UserStoreError(
+            '该岗位只有链接没有 JD 文本：请用浏览器油猴插件抓取，或用「粘贴 JD」方式录入'
+        )
     if not jd_text:
         raise api_module.UserStoreError('Job description text is required')
     payload['jd_text'] = jd_text
@@ -405,7 +465,7 @@ def _run_import(import_id: str) -> None:
             try:
                 api_module._create_job_from_source(user, row)
                 batch['created'] += 1
-            except (api_module.UserStoreError, api_module.CrawlError, api_module.LLMResponseError) as exc:
+            except (api_module.UserStoreError, api_module.LLMResponseError) as exc:
                 batch['skipped'] += 1
                 batch['errors'].append(f"{row.get('title') or 'Untitled'}: {exc}")
     except Exception as exc:
@@ -427,6 +487,11 @@ def _prune_import_batches(max_kept: int=50) -> None:
 def _queue_job(user: dict[str, Any], payload: dict[str, Any], application_id: str | None=None, workbench: bool=False) -> str:
     """Create a job row, keep its payload in memory, and start the worker."""
     config = api_module.build_config()
+    # R4 P0-6（03-AIE §③）：入口统一护栏 —— 每日 cap + 同一 job 连续失败熔断
+    # （防无脑重试烧额度）。job_ref_key 仅工作台重试携带（library_job_id）。
+    api_module.enforce_llm_task_entry(
+        user['user_id'], job_ref_key=(payload or {}).get('library_job_id')
+    )
     job = api_module._registry.create(payload, config, tenant_id=user['user_id'], application_id=application_id)
     payload['workbench'] = workbench
     api_module._payloads[job.job_id] = (payload, config, application_id, user['user_id'])
@@ -479,8 +544,20 @@ def _run_job(job_id: str) -> None:
                             },
                         )
             jd_text = (payload.get('jd_text') or '').strip()
+            # De-bloat: backend crawling retired; a URL-only queued job
+            # without JD text cannot be recovered and fails with a clear reason.
             if payload.get('jd_url') and (not jd_text):
-                jd_text = api_module.crawl_jd(payload['jd_url'])
+                api_module._registry.fail(
+                    job_id,
+                    '该岗位只有链接没有 JD 文本：请用浏览器油猴插件抓取，或用「粘贴 JD」方式重新录入',
+                )
+                return
+            if payload.get('optimize_resume'):
+                result = api_module._run_resume_optimize(
+                    payload, on_stage, tenant_id
+                )
+                api_module._registry.succeed(job_id, result)
+                return
             use_local_fallback = (
                 not config.is_llm_configured
                 and api_module._llm_nodes.get_active_node(tenant_id) is None
@@ -511,6 +588,10 @@ def _run_job(job_id: str) -> None:
             if payload.get('diagnosis'):
                 result['diagnosis'] = api_module._build_diagnosis_section(result)
                 result['diagnosis_source_hash'] = api_module._content_sha256(payload.get('resume_text') or '')
+                # R4 §3.6：诊断快照内嵌提示词版本（P3，04b-PE 建议），随快照整包
+                # JSON 序列化持久化，便于追溯快照对应的提示词文本。
+                from resualign.llm import DIAG_PROMPT_VERSION
+                result['diagnosis']['prompt_version'] = DIAG_PROMPT_VERSION
                 master_resume_id = payload.get('master_resume_id')
                 if master_resume_id:
                     try:
@@ -598,6 +679,14 @@ def _run_job(job_id: str) -> None:
                                 "tentative": True,
                             },
                         )
+                # R4 §3.2：保存对齐时写入组合提示词版本串（旧值 'engine.v1' 过时，
+                # 04-PE 写 jobs.py:572 已修正为最新位置 605）。用局部 import 避免
+                # 顶层循环依赖（本文件走 api_module 间接风格、无顶层提示词 import）。
+                from resualign.evaluator import EVALUATOR_PROMPT_VERSION
+                from resualign.gap_analyzer import GAP_ANALYZER_PROMPT_VERSION
+                from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
+                from resualign.llm import DIAG_PROMPT_VERSION
+                from resualign.tailor import TAILOR_PROMPT_VERSION
                 try:
                     api_module._jobs.save_alignment(
                         tenant_id,
@@ -613,7 +702,13 @@ def _run_job(job_id: str) -> None:
                         draft=draft,
                         eval_score=eval_score,
                         model=result.get('model') or '',
-                        prompt_version='engine.v1',
+                        prompt_version=(
+                            f"engine:diag:{DIAG_PROMPT_VERSION};"
+                            f"profiler:{JD_PROFILER_PROMPT_VERSION};"
+                            f"gap:{GAP_ANALYZER_PROMPT_VERSION};"
+                            f"tailor:{TAILOR_PROMPT_VERSION};"
+                            f"eval:{EVALUATOR_PROMPT_VERSION}"
+                        ),
                         alignment_status='succeeded',
                     )
                 except Exception:
@@ -665,24 +760,31 @@ def _run_job(job_id: str) -> None:
                         application_id,
                         job_id,
                     )
-        except api_module.CrawlError as exc:
-            api_module._registry.fail(job_id, f'Failed to crawl JD from URL: {exc}')
-            if application_id:
-                try:
-                    api_module._applications.set_application_job(tenant_id, application_id, job_id, 'failed')
-                except Exception:
-                    logger.exception(
-                        'Failed to link application %s after crawl failure %s',
-                        application_id,
-                        job_id,
-                    )
         except Exception as exc:
+            # De-bloat: the CrawlError branch was removed with the crawler;
+            # every failure (including LLM/structure errors) now lands here
+            # and is classified into a user-readable reason below.
             logger.exception('Analysis job %s failed', job_id)
+            # t0 is only bound once the try body reached the run phase; guard
+            # so claims that fail earlier never NameError here.
+            elapsed_secs = (
+                round(time.monotonic() - t0, 1)
+                if 't0' in locals() and t0 is not None
+                else None
+            )
             if payload.get('diagnosis'):
-                error = '诊断任务暂时失败：模型服务不可用或返回异常，请检查 API Key 与网络连接后重试'
+                # G4（03-AIE §②-gap G4）：诊断分支不再硬编码「请检查 API Key 与
+                # 网络连接」——经由 _job_failure_detail 按结构化 code 分类归因。
+                error = api_module._job_failure_detail(
+                    failed_stage or 'diagnose', exc, elapsed_secs
+                ).replace('对齐分析', '诊断任务')
+            elif payload.get('optimize_resume'):
+                error = api_module._job_failure_detail(
+                    failed_stage, exc, elapsed_secs
+                ).replace('对齐分析', '简历优化')
             else:
                 error = api_module._job_failure_detail(
-                    failed_stage, exc
+                    failed_stage, exc, elapsed_secs
                 )
             api_module._registry.fail(job_id, error, stage=failed_stage or None)
             if application_id:
@@ -718,6 +820,112 @@ def _accepted_diffs(job: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _export_plain_text(draft: str) -> str:
+    """Render a Markdown draft as plain text without Markdown markers.
+
+    Bug-03: the JSON export keeps ``content`` as a readable, structure-
+    free rendering (heading markers #/##, bullet markers -/* and blank
+    lines removed) so downstream consumers never receive raw Markdown.
+    """
+    lines_out: list[str] = []
+    for line in (draft or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("## "):
+            lines_out.append(stripped[3:].strip())
+        elif stripped.startswith("#"):
+            lines_out.append(stripped.lstrip("#").strip())
+        elif stripped.startswith(("- ", "* ")):
+            lines_out.append(stripped[2:].strip())
+        else:
+            lines_out.append(stripped)
+    return "\n".join(lines_out)
+
+
+def _iter_sections(draft: str):
+    """Yield ``(heading, body_lines)`` for each ``## `` section.
+
+    The aligned draft is authored with ``## `` level-2 headings
+    (联系方式/工作经历/项目经历/专业技能...).  The H1 title belongs to
+    job_title/meta and is not repeated as a section; the preamble before
+    the first heading is skipped.
+    """
+    heading: str | None = None
+    body: list[str] = []
+    for line in (draft or "").splitlines():
+        if line.startswith("## "):
+            if heading is not None:
+                yield heading, body
+            heading = line[3:].strip()
+            body = []
+        elif heading is not None:
+            body.append(line)
+    if heading is not None:
+        yield heading, body
+
+
+def _export_sections(draft: str) -> list[dict[str, Any]]:
+    """Split a Markdown final draft into its ordered ``## `` sections."""
+    sections: list[dict[str, Any]] = []
+    for heading, body in _iter_sections(draft):
+        content = "\n".join(line for line in body if line.strip()).strip()
+        sections.append({"heading": heading, "content": content})
+    return sections
+
+
+_SKILL_SECTION_HEADING_RE = re.compile(
+    r"^(专业技能|技能清单|技能|skills?)$", re.IGNORECASE
+)
+
+
+def _draft_declared_skills(draft: str) -> list[str]:
+    """Extract the bullet skills from the final draft's skills section."""
+    skills: list[str] = []
+    for heading, body in _iter_sections(draft):
+        if not _SKILL_SECTION_HEADING_RE.match(heading):
+            continue
+        for line in body:
+            stripped = line.strip()
+            if not stripped.startswith("- "):
+                continue
+            item = stripped[2:].strip()
+            if not item:
+                continue
+            if "：" in item or ":" in item:
+                separator = "：" if "：" in item else ":"
+                values = item.partition(separator)[2]
+                parts = [
+                    part.strip()
+                    for part in re.split(r"[、，,;；]", values)
+                    if part.strip()
+                ]
+                skills.extend(parts or [item])
+            else:
+                skills.append(item)
+        break
+    seen: set[str] = set()
+    unique: list[str] = []
+    for skill in skills:
+        if skill not in seen:
+            seen.add(skill)
+            unique.append(skill)
+    return unique
+
+
+def _export_skills(job: dict[str, Any], draft: str) -> list[str]:
+    """Skill list for the JSON export.
+
+    Declared skills come from the final draft's skills section; when the
+    draft has none, fall back to the JD must-have list so downstream
+    consumers still get a usable skill set.
+    """
+    declared = _draft_declared_skills(draft)
+    if declared:
+        return declared
+    jd_profile = job.get("jd_profile") or {}
+    return list(jd_profile.get("must_have_skills") or [])
+
 def build_job_export(
     job: dict[str, Any],
     fmt: str,
@@ -750,7 +958,9 @@ def build_job_export(
     if fmt == "json":
         return {
             **base,
-            "content": draft,
+            "sections": _export_sections(draft),
+            "skills": _export_skills(job, draft),
+            "content": _export_plain_text(draft),
             "filename": _export_filename(job, "json"),
         }
     if fmt == "pdf":

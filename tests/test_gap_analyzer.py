@@ -32,4 +32,5 @@ def test_analyze_gaps_empty_results():
 def test_analyze_gaps_prompt_mentions_gap():
     mock = MockLLM()
     _ = analyze_gaps(mock, "Resume", "JD")
-    assert "gap" in mock.last_system.lower()
+    # R4: 04b-PE §2.3 新提示词已中文化，首行版本标记作为稳定断言锚点。
+    assert "PROMPT_VERSION: gap_analyzer/v2" in mock.last_system

@@ -17,16 +17,21 @@ import {
   jobStatusRank,
   normalizeVocabulary,
   renderBatchResults,
+  refreshOptimizePanel,
   renderDiagnosisError,
   renderDiagnosisProgress,
+  renderOptimizeError,
+  renderOptimizeProgress,
   setWbMobilePane,
   showModal,
   startBatchPolling,
   startDiagnosisPolling,
+  startOptimizePolling,
   state,
   stopAllPolling,
   stopBatchPolling,
   stopDiagnosisPolling,
+  stopOptimizePolling,
   toast,
   vocabularyList,
 } from "./events.js";
@@ -52,6 +57,7 @@ import {
   getLiveSheetDraft,
   renderOptimizerCanvas,
   setWbAuxPane,
+  setWbViewMode,
   startAlignmentRun,
   syncLiveSheetDraft,
 } from "./split-canvas.js";
@@ -62,18 +68,13 @@ import {
 import {
   applyAcceptedDiffsToDraft,
   applyDiffToDraft,
-  applyJdParseError,
-  applyJdParseResult,
   backupRestoreGuide,
   batchPanelHtml,
   batchRowsToCsv,
-  blockerCountBadge,
-  blockerListHtml,
   buildJobsBackup,
+  collectAcceptedOptimizeItems,
   buildLiveCompareHtml,
   costGuardPanelHtml,
-  dueReminders,
-  fetchUrlResultMessage,
   isJdUrl,
   jobApplyLinkHtml,
   jobEditFormHtml,
@@ -87,27 +88,22 @@ import {
   offerCelebrationHtml,
   onboardingSteps,
   parseHashValue,
-  reminderSettingsPanelHtml,
   renderMarkdown,
   renderOnboardingCard,
-  renderReminderBanner,
-  renderReminderStrip,
   ruleFormHtml,
   ruleListHtml,
   runEvalFromForm,
   settingsBentoHtml,
-  todayViewHtml,
+  snapshotDrawerHtml,
 } from "./format.js";
 import {
   buildAutomationRulePayload,
   buildCostGuardPayload,
   buildLlmNodePayload,
-  buildReminderPayload,
   evalDefaultFromForm,
   validateAutomationRule,
   validateCostGuardPayload,
   validateLlmNodePayload,
-  validateReminderPayload,
 } from "./settings-form.js";
 
 function isTerminalJobStatus(status) {
@@ -132,17 +128,15 @@ const ROUTE_LABELS = {
   workspace: "对齐工作台",
   settings: "系统设置",
   dashboard: "驾驶舱",
-  today: "今日待办",
 };
 
 /* v3 shell: 顶栏标题/副标题随路由联动。 */
 const PAGE_META = {
   dashboard: ["驾驶舱", "主简历与岗位对齐态势"],
   workspace: ["对齐工作台", "岗位上下文、Diff 画布与 JD/Live Sheet 辅助舱"],
-  jobs: ["岗位库", "URL 自动抓取、阻断队列与 5 列 Pipeline 看板"],
+  jobs: ["岗位库", "Pipeline 看板与 JD 粘贴建库"],
   resume: ["简历中心", "Markdown 双态编辑、ATS 健康度与版本时间线"],
   settings: ["系统设置", "LLM 节点、Guardrails、自动化规则与词表"],
-  today: ["今日待办", "今天到期与已逾期的跟进，直接跳转工作台安排下一步"],
 };
 
 function parseHash() {
@@ -207,8 +201,6 @@ async function handleRoute(app) {
       const jobId =
         state.route.jobId || params.get("job_id") || params.get("id") || null;
       await renderOptimizerCanvas(app, jobId);
-      /* #11: 工作台顶部挂载当前岗位的面试/下一步到期提醒横幅 */
-      mountWorkspaceReminder(app);
       break;
     }
     case "jobs": {
@@ -232,26 +224,62 @@ async function handleRoute(app) {
     case "settings":
       await renderSettingsView(app);
       break;
-    case "today":
-      await renderTodayView(app);
-      break;
     default:
       await renderDashboard(app);
       break;
   }
 }
 
-async function renderTodayView(app) {
-  let items = [];
+/* 侧栏 footer 配额条：与设置页成本护栏同源（GET /api/settings/status 的
+ * status.daily），消除「今日额度」数据不一致。 */
+let railQuotaInFlight = false;
+async function refreshRailQuota() {
+  if (railQuotaInFlight) return;
+  railQuotaInFlight = true;
   try {
-    const body = await api("/api/reminders?scope=today", {
-      cacheKey: "today:reminders",
+    const status = await api("/api/settings/status", {
+      cacheKey: "rail:status",
     });
-    items = (body && Array.isArray(body.items)) ? body.items : [];
-  } catch (error) {
-    console.warn("Today view fallback", error);
+    fillRailQuota((status && status.daily) || {});
+  } catch {
+    /* 保留占位状态，不打断路由渲染 */
+  } finally {
+    railQuotaInFlight = false;
   }
-  app.innerHTML = todayViewHtml(items);
+}
+
+function fillRailQuota(daily = {}) {
+  const root = $("[data-rail-quota]");
+  if (!root || typeof daily !== "object") return;
+  const callsNum = Number(daily.calls);
+  const calls = Number.isFinite(callsNum) ? callsNum : 0;
+  const costNum = Number(daily.estimated_cost);
+  const cost = Number.isFinite(costNum) ? costNum : 0;
+  const hasCap = daily.cap != null && daily.cap !== "";
+  const capNum = Number(daily.cap);
+  const capLabel = hasCap ? String(daily.cap) : "不限制";
+  const remainingLabel = hasCap && daily.remaining != null ? String(daily.remaining) : "—";
+  const blocked = Boolean(daily.blocked);
+  const costEl = $("[data-rail-quota-cost]", root);
+  if (costEl) costEl.textContent = `¥${cost.toFixed(4)} / ¥${capLabel}`;
+  const percent = hasCap && Number.isFinite(capNum) && capNum > 0 ? Math.min(100, (cost / capNum) * 100) : 0;
+  const trackEl = $("[data-rail-quota-track]", root);
+  if (trackEl) {
+    trackEl.classList.toggle("is-blocked", blocked);
+    trackEl.setAttribute("aria-valuenow", String(Math.round(percent)));
+  }
+  const fillEl = $("[data-rail-quota-fill]", root);
+  if (fillEl) fillEl.style.width = `${percent}%`;
+  const remainingEl = $("[data-rail-quota-remaining]", root);
+  if (remainingEl) remainingEl.textContent = `剩余 ¥${remainingLabel}`;
+  const callsEl = $("[data-rail-quota-calls]", root);
+  if (callsEl) callsEl.textContent = `${calls} 次调用`;
+  const statusEl = $("[data-rail-quota-status]", root);
+  if (statusEl) {
+    statusEl.textContent = blocked ? "今日已阻止新 LLM 任务" : "";
+    statusEl.classList.toggle("is-error", blocked);
+  }
+  root.hidden = false;
 }
 
 async function render() {
@@ -287,6 +315,7 @@ async function render() {
     app.innerHTML = `<div class="panel"><h3>出错了</h3><p class="muted">${esc(error.message)}</p>
       <div class="row" style="margin-top:12px"><button class="btn btn-primary" data-action="reload">重试</button></div></div>`;
   }
+  refreshRailQuota();
 }
 
 /* ------------------------------------------------------------------ */
@@ -427,6 +456,8 @@ async function openJobDetail(job) {
   state.applicationSnapshots = {
     ...(state.applicationSnapshots || {}),
     [job.job_id]: {
+      jobId: job.job_id,
+      job,
       snapshots: Array.isArray(snapshots) ? snapshots : [],
       legacyDraft: job.final_draft || null,
     },
@@ -470,7 +501,6 @@ async function showDuplicateJobGuide(payload) {
 
 async function refreshOptimizerFromJob(jobId) {
   await renderOptimizerCanvas($("#app-router-view"), jobId);
-  mountWorkspaceReminder($("#app-router-view"));
 }
 
 async function refreshWbCanvas() {
@@ -551,7 +581,6 @@ async function renderSettingsView(app) {
       </div>
       ${settingsBentoHtml(activeNode, latency)}
       ${costGuardPanelHtml(settings, status.daily || {})}
-      ${reminderSettingsPanelHtml(settings, status.reminder || {})}
       <section class="panel local-ingest-panel" data-local-ingest-panel>
         <div class="panel-head">
           <div>
@@ -733,7 +762,7 @@ async function printTarget(kind, options = {}) {
   } else if (kind === "snapshot") {
     const snapshot = options || {};
     const job = state.wbJob || {};
-    title = `${snapshot.job_title || job.title || "投递定稿"} · 第 ${snapshot.version_index || 1} 版`;
+    title = `${snapshot.job_title || job.title || "投递快照"} · 第 ${snapshot.version_index || 1} 版`;
     body =
       `<h1>${esc(title)}</h1>` +
       `<div class="print-meta">投递于 ${esc(snapshot.applied_at || formatDate(snapshot.created_at))}${snapshot.match_score != null ? ` · 匹配度 ${Math.round(snapshot.match_score)}` : " · 匹配度 —"}</div>` +
@@ -755,6 +784,22 @@ async function printTarget(kind, options = {}) {
       `<div class="resume-doc">${renderMarkdown(buildDiagnosisMarkdown(content))}</div>`;
   }
   printNode.innerHTML = body;
+  /* 黄金核心 2：A4 打印单页收敛——内容超一页时分级压缩字号/行高/间距，
+   * 保证 Ctrl+P 导出的 PDF 收敛在 1 页，杜绝多出空白第二页。 */
+  const resumeDoc = printNode.querySelector(".resume-doc");
+  const textLen = resumeDoc ? resumeDoc.textContent.length : 0;
+  printNode.classList.remove(
+    "print-compact",
+    "print-compact--tight",
+    "print-compact--ultra",
+  );
+  if (textLen > 2400) {
+    printNode.classList.add("print-compact--ultra");
+  } else if (textLen > 1700) {
+    printNode.classList.add("print-compact--tight");
+  } else if (textLen > 1100) {
+    printNode.classList.add("print-compact");
+  }
   document.body.classList.add("is-printing");
   try {
     window.print();
@@ -878,9 +923,13 @@ async function exportFinalDraft(format) {
     return;
   }
   const ext = format === "json" ? "json" : "md";
+  /* Bug-03: JSON 导出下载整个结构化响应（meta/sections/skills/diffs），
+   * 而不是把 Markdown 字符串当 JSON 写出。 */
+  const payload =
+    format === "json" ? JSON.stringify(body, null, 2) : body.content || "";
   download(
     body.filename || `resualign-${body.job_title || "job"}.${ext}`,
-    body.content || "",
+    payload,
     format === "json"
       ? "application/json;charset=utf-8"
       : "text/markdown;charset=utf-8",
@@ -890,7 +939,6 @@ async function exportFinalDraft(format) {
 
 const actions = {
   reload: () => render(),
-  "goto-today": () => navigate("today"),
   /* v2.0: 新建主简历走模态框（主视图无内联 textarea）。 */
   "new-resume": () => openResumeCreator(),
   "cancel-new-resume": () => closeModal(),
@@ -1049,6 +1097,125 @@ const actions = {
       toast("任务将继续在后台完成，结果仍会保存；已停止本地等待", "info");
     }
   },
+  /* AI 优化（xzjobs 式模块化润色）：运行 → 轮询 → 逐条采纳/忽略 →
+   * 全部采纳 → 应用已采纳为新版本。 */
+  "optimize-resume": async (button) => {
+    const resumeId =
+      button.dataset.id ||
+      state.optimizeResumeId ||
+      (state.route && state.route.resumeId);
+    if (!resumeId) return;
+    const panel = button.closest("[data-optimize-panel]");
+    const jdInput = panel && panel.querySelector("[data-optimize-jd]");
+    const jdText = jdInput ? jdInput.value.trim() : (state.optimizeJdText || "");
+    stopOptimizePolling();
+    state.optimizeResumeId = resumeId;
+    state.optimizeJobResumeId = resumeId;
+    state.optimizeJdText = jdText;
+    state.optimizeAccepted = {};
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = "排队中...";
+    renderOptimizeProgress({
+      status: "queued",
+      stage: "",
+      message: "排队中...",
+      elapsed_seconds: 0,
+    });
+    try {
+      const response = await api(
+        `/api/master-resumes/${encodeURIComponent(resumeId)}/optimize`,
+        { method: "POST", body: JSON.stringify({ jd_text: jdText || null }) },
+      );
+      state.optimizeJob = { job_id: response.job_id, status: "queued", result: null };
+      startOptimizePolling(response.job_id, resumeId);
+      toast("优化任务已排队：先出整体分析，再逐条润色项目经历", "success");
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = originalText;
+      button.classList.remove("is-loading");
+      renderOptimizeError({ status: "failed", error: error.message });
+    }
+  },
+  "optimize-rerun": (button) => {
+    const runBtn = $("[data-optimize-panel] [data-action='optimize-resume']");
+    if (runBtn && !runBtn.disabled) {
+      runBtn.click();
+    } else if (button.dataset.id) {
+      actions["optimize-resume"](button);
+    }
+  },
+  "cancel-optimize": async () => {
+    const job = state.optimizeJob;
+    if (!job || !state.optimizePolling) return;
+    if (job.status === "queued") {
+      await api(
+        `/api/jobs/${encodeURIComponent(job.job_id)}/cancel`,
+        { method: "POST" },
+      );
+      stopOptimizePolling();
+      renderOptimizeError({ status: "canceled", error: "Canceled by user" });
+      toast("优化任务已取消", "success");
+    } else {
+      stopOptimizePolling();
+      toast("任务将继续在后台完成，结果仍会保存；已停止本地等待", "info");
+    }
+  },
+  "optimize-accept-item": (button) => {
+    const key = button.dataset.optimizeKey;
+    if (key == null) return;
+    state.optimizeAccepted = { ...(state.optimizeAccepted || {}) };
+    state.optimizeAccepted[key] = true;
+    refreshOptimizePanel();
+  },
+  "optimize-reject-item": (button) => {
+    const key = button.dataset.optimizeKey;
+    if (key == null) return;
+    state.optimizeAccepted = { ...(state.optimizeAccepted || {}) };
+    state.optimizeAccepted[key] = false;
+    refreshOptimizePanel();
+  },
+  "optimize-accept-all": () => {
+    const modules = state.optimizeModules || [];
+    const next = {};
+    let okCount = 0;
+    modules.forEach((item, key) => {
+      if (item && item.status === "ok") {
+        next[String(key)] = true;
+        okCount += 1;
+      }
+    });
+    state.optimizeAccepted = next;
+    refreshOptimizePanel();
+    toast(`已全部采纳 ${okCount} 条优化`, "success");
+  },
+  "optimize-apply-accepted": async () => {
+    const resumeId =
+      state.optimizeResumeId || (state.route && state.route.resumeId);
+    if (!resumeId) return;
+    const items = collectAcceptedOptimizeItems(
+      state.optimizeModules || [],
+      state.optimizeAccepted || {},
+    );
+    if (!items.length) {
+      toast("请先采纳至少一条优化", "error");
+      return;
+    }
+    const btn = $("[data-action='optimize-apply-accepted']");
+    if (btn) btn.disabled = true;
+    try {
+      const body = await api(
+        `/api/master-resumes/${encodeURIComponent(resumeId)}/optimize/apply`,
+        { method: "POST", body: JSON.stringify({ items }) },
+      );
+      toast(`已应用 ${(body && body.applied_count) || items.length} 条优化为新版本`, "success");
+      render();
+    } catch (error) {
+      const again = $("[data-action='optimize-apply-accepted']");
+      if (again) again.disabled = false;
+      toast(error.message, "error");
+    }
+  },
   "export-resume-md": async (button) => {
     const resume = await api(
       `/api/master-resumes/${encodeURIComponent(button.dataset.id)}`,
@@ -1078,43 +1245,13 @@ const actions = {
   "cancel-add-job": () => {
     $('[data-form="job-create"]').hidden = true;
   },
-  "parse-jd-link": async (button) => {
-    const form = button.closest('[data-form="job-create"]');
-    const urlInput = form.querySelector('input[name="jd_url"]');
-    const status = form.querySelector("[data-jd-parse-status]");
-    const url = (urlInput.value || "").trim();
-    if (!url) {
-      toast("请先输入 JD 链接", "error");
-      return;
-    }
-    const originalText = button.textContent;
-    button.disabled = true;
-    button.textContent = "解析中...";
-    button.classList.add("is-loading");
-    if (status) {
-      status.className = "jd-parse-status";
-      status.removeAttribute("role");
-      status.textContent = "正在抓取并解析岗位内容...";
-    }
-    try {
-      const parsed = await api("/api/jobs/parse-jd", {
-        method: "POST",
-        body: JSON.stringify({ jd_url: url }),
-      });
-      applyJdParseResult(form, parsed);
-      setJdInputMode("paste");
-      if (status) {
-        status.className = "jd-parse-status form-success";
-        status.textContent = `已解析：${parsed.title || "未知岗位"}，请核对 JD 文本后保存`;
-      }
-      toast("JD 链接解析完成", "success");
-    } catch (error) {
-      if (status) renderJdParseError(status, error.data);
-    } finally {
-      button.disabled = false;
-      button.textContent = originalText;
-      button.classList.remove("is-loading");
-    }
+  /* 后端已移除 JD 链接抓取（crawler 下线）：按钮保留以提示改用油猴插件
+   * 一键抓取或直接粘贴 JD 文本，不再调用 /api/jobs/parse-jd。 */
+  "parse-jd-link": (button) => {
+    toast(
+      "后端已不再抓取 JD 链接：请用油猴插件一键抓取，或粘贴 JD 文本",
+      "info",
+    );
   },
   "use-paste-mode": () => {
     const form = $('[data-form="job-create"]');
@@ -1210,7 +1347,7 @@ const actions = {
     if (jobStatusRank(job.status) >= jobStatusRank("applied")) {
       showModal(
         "再次记录投递",
-        `<p>岗位已是「${esc(jobStatusLabel(job.status))}」。再次记录会追加一轮不可篡改的投递定稿快照，不会改变当前状态或时间线。</p>
+        `<p>岗位已是「${esc(jobStatusLabel(job.status))}」。再次记录会追加一轮不可篡改的投递快照，不会改变当前状态或时间线。</p>
         <div class="actions">
           <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
           <button class="btn btn-primary" type="button" data-action="confirm-append-application" data-id="${esc(job.job_id)}">确认追加</button>
@@ -1578,7 +1715,7 @@ const actions = {
   "run-alignment": () => {
     const form = $("[data-form='split-align']");
     if (!form) {
-      toast("请先在左侧「优化设置」中配置主简历", "error");
+      toast("请先在右侧「优化设置」中配置主简历", "error");
       return;
     }
     if (typeof form.requestSubmit === "function") {
@@ -1655,10 +1792,27 @@ const actions = {
       return;
     }
     const diffs = job.diffs || [];
-    const diff = diffs.find((item) => item.diff_id === diffId);
+    let diff = diffs.find((item) => item.diff_id === diffId);
     if (!diff) {
       toast("该条建议不在当前对齐结果中", "error");
       return;
+    }
+    /* 黄金核心 1：原地编辑采纳——若卡片处于编辑态且用户改写了建议文本，
+     * 采纳时使用编辑后的文本而非 AI 原稿（补全量化数字等就地落稿）。 */
+    const diffCardNode = $(
+      `[data-diff-id="${CSS.escape(diffId)}"]`,
+      $("#app-router-view"),
+    );
+    const bulletEditor = diffCardNode
+      ? diffCardNode.querySelector("[data-bullet-editor]")
+      : null;
+    const editedText = bulletEditor ? bulletEditor.value.trim() : "";
+    if (bulletEditor && !editedText) {
+      toast("编辑后的建议文本不能为空", "error");
+      return;
+    }
+    if (editedText && editedText !== diff.proposed) {
+      diff = { ...diff, proposed: editedText };
     }
     /* U7: 每条采纳都在当前工作草稿上增量合并，不再从原始简历重建，
      * 连续采纳多条时前一条不会丢失。 */
@@ -1729,6 +1883,34 @@ const actions = {
       button.disabled = false;
       button.textContent = "AI 润色";
     }
+  },
+  "toggle-bullet-edit": (button) => {
+    const diffId = button.dataset.diffId;
+    const card = button.closest("[data-diff-id]");
+    if (!card) return;
+    const proposedNode = card.querySelector("[data-diff-proposed]");
+    if (!proposedNode) return;
+    const isEditing = card.classList.contains("is-editing");
+    if (isEditing) {
+      /* 退出编辑：还原高亮 HTML，移除编辑器。 */
+      const savedHtml = card.dataset.originalProposedHtml || "";
+      proposedNode.innerHTML = savedHtml;
+      card.classList.remove("is-editing");
+      button.textContent = "✏️ 编辑";
+      return;
+    }
+    /* 进入编辑：保存高亮 HTML，替换为可编辑 textarea（纯文本）。 */
+    card.dataset.originalProposedHtml = proposedNode.innerHTML;
+    const plainText = proposedNode.textContent || "";
+    const textarea = document.createElement("textarea");
+    textarea.className = "bullet-editor";
+    textarea.dataset.bulletEditor = "";
+    textarea.rows = 3;
+    textarea.value = plainText;
+    proposedNode.replaceChildren(textarea);
+    card.classList.add("is-editing");
+    button.textContent = "完成编辑";
+    textarea.focus();
   },
   "apply-accepted-bullets": async (button) => {
     const jobId = button.dataset.id;
@@ -1827,6 +2009,7 @@ const actions = {
   "toggle-theme": () => toggleTheme(),
   "set-wb-tab": (button) => setWbMobilePane(button.dataset.wbTab),
   "set-wb-tab-v3": (button) => setWbAuxPane(button.dataset.wbTabV3),
+  "set-wb-view-mode": (button) => setWbViewMode(button.dataset.wbViewMode),
   "cancel-workbench": () => cancelActiveAlignment(),
   "retry-workbench": () => {
     const form = $('[data-form="split-align"]') || $('[data-form="wb-run"]');
@@ -1848,19 +2031,15 @@ const actions = {
   "open-snapshot": (button) => {
     const snapshot = findApplicationSnapshot(button.dataset.id);
     if (!snapshot) {
-      toast("投递定稿快照不存在", "error");
+      toast("投递快照不存在", "error");
       return;
     }
+    const entry =
+      (snapshot.job_id && findApplicationEntry(snapshot.job_id)) || {};
     showModal(
-      `投递定稿快照 · 第 ${snapshot.version_index} 版`,
-      `<div class="snapshot-preview">
-        <div class="resume-doc">${renderMarkdown(snapshot.final_draft || "")}</div>
-        <div class="actions">
-          <button class="btn btn-ghost" type="button" data-action="close-modal">关闭</button>
-          <button class="btn btn-secondary btn-sm" type="button" data-action="export-snapshot-md" data-id="${esc(snapshot.snapshot_id)}">下载 Markdown</button>
-          <button class="btn btn-primary btn-sm" type="button" data-action="export-snapshot-pdf" data-id="${esc(snapshot.snapshot_id)}">导出 PDF</button>
-        </div>
-      </div>`,
+      `投递快照 · 第 ${snapshot.version_index} 版`,
+      snapshotDrawerHtml(snapshot, entry),
+      { className: "modal--drawer", closeBtn: true },
     );
   },
   "export-snapshot-md": (button) => {
@@ -1878,22 +2057,14 @@ const actions = {
   },
   "view-legacy-draft": (button) => {
     const entry = findApplicationEntry(button.dataset.id);
-    const draft = entry && entry.legacyDraft;
-    if (!draft) {
+    if (!entry || !entry.legacyDraft) {
       toast("当前岗位没有定稿", "error");
       return;
     }
     showModal(
       "早期投递版本（未生成不可篡改快照）",
-      `<div class="snapshot-preview">
-        <p class="legacy-warning">⚠️ 早期投递版本（未生成不可篡改快照）</p>
-        <div class="resume-doc">${renderMarkdown(draft)}</div>
-        <div class="actions">
-          <button class="btn btn-ghost" type="button" data-action="close-modal">关闭</button>
-          <button class="btn btn-secondary btn-sm" type="button" data-action="export-legacy-draft-md" data-id="${esc(button.dataset.id)}">下载 Markdown</button>
-          <button class="btn btn-primary btn-sm" type="button" data-action="export-legacy-draft-pdf" data-id="${esc(button.dataset.id)}">导出 PDF</button>
-        </div>
-      </div>`,
+      snapshotDrawerHtml(null, entry),
+      { className: "modal--drawer", closeBtn: true },
     );
   },
   "export-legacy-draft-md": (button) => {
@@ -2011,98 +2182,6 @@ const actions = {
   "close-modal": closeModal,
   "confirm-status-back": () => applyPendingStatusTransition(),
   "cancel-status-back": () => cancelPendingStatusTransition(),
-  /* Sprint 3: Pipeline + Blocker（抓取 Bar + 阻断队列）。所有新按钮走
-   * document 级 data-action 委托；Modal 开关复用 events.js 的
-   * showModal / closeModal（close-modal action 已在此注册）。 */
-  "fetch-job-url": async (button) => {
-    const input = $("[data-fetch-url]");
-    const url = input ? (input.value || "").trim() : "";
-    if (!url) {
-      toast("请先粘贴岗位链接", "error");
-      return;
-    }
-    if (!isJdUrl(url)) {
-      toast("请输入以 http(s):// 开头的有效链接", "error");
-      return;
-    }
-    const originalText = button.textContent;
-    button.disabled = true;
-    button.textContent = "抓取中...";
-    button.classList.add("is-loading");
-    try {
-      const result = await api("/api/jobs/fetch-url", {
-        method: "POST",
-        body: JSON.stringify({ url }),
-      });
-      const status = result && result.status;
-      const reason = result && result.reason;
-      toast(
-        fetchUrlResultMessage(status, reason),
-        status === "created"
-          ? "success"
-          : status === "rule_rejected"
-            ? "warning"
-            : "info",
-      );
-      if (status === "created") {
-        if (input) input.value = "";
-        await render();
-      } else if (status === "blocked") {
-        /* 新阻断进入队列：立即刷新微标计数。 */
-        refreshBlockerBadge();
-      }
-    } catch (error) {
-      toast(error.message || "抓取失败", "error");
-    } finally {
-      button.disabled = false;
-      button.textContent = originalText;
-      button.classList.remove("is-loading");
-    }
-  },
-  "open-blockers": () => openBlockersModal(),
-  "ignore-blocker": async (button) => {
-    const blockerId = button.dataset.id;
-    if (!blockerId) return;
-    try {
-      await api(`/api/blockers/${encodeURIComponent(blockerId)}/ignore`, {
-        method: "POST",
-      });
-      blockerState.list = blockerState.list.filter(
-        (item) => item.blocker_id !== blockerId,
-      );
-      blockerState.count = blockerState.list.length;
-      renderBlockerBadge();
-      const item = button.closest("[data-blocker-item]");
-      if (item) item.remove();
-      const container = $("[data-blocker-list]");
-      if (container && blockerState.count === 0) {
-        container.innerHTML =
-          '<div class="muted small" data-blocker-empty>暂无待处理的阻断</div>';
-      }
-      toast("已忽略该阻断", "success");
-    } catch (error) {
-      toast(error.message, "error");
-    }
-  },
-  "toggle-blocker-resolve": (button) => {
-    const item = button.closest("[data-blocker-item]");
-    if (!item) return;
-    const form = item.querySelector("[data-form='blocker-resolve']");
-    if (!form) return;
-    const willOpen = form.hidden;
-    $$("[data-form='blocker-resolve']:not([hidden])").forEach((other) => {
-      if (other !== form) other.hidden = true;
-    });
-    form.hidden = !willOpen;
-    if (willOpen) {
-      const textarea = form.querySelector("textarea[name='manual_text']");
-      if (textarea) textarea.focus();
-    }
-  },
-  "cancel-blocker-resolve": (button) => {
-    const form = button.closest("[data-form='blocker-resolve']");
-    if (form) form.hidden = true;
-  },
   "skip-onboarding-step": (button) => {
     const step = button.dataset.step;
     if (!step) return;
@@ -2148,10 +2227,6 @@ function clearJdParseStatus(status) {
   status.className = "jd-parse-status";
   status.removeAttribute("role");
   status.textContent = "";
-}
-
-function renderJdParseError(status, detail) {
-  applyJdParseError(status, detail);
 }
 
 function setSegmented(selector, active) {
@@ -2812,21 +2887,6 @@ async function handleForm(formName, data, form) {
       render();
       break;
     }
-    case "settings-reminder": {
-      const payload = buildReminderPayload(data);
-      const validation = validateReminderPayload(payload);
-      if (!validation.ok) {
-        toast(validation.message, "error");
-        return;
-      }
-      await api("/api/settings", {
-        method: "PUT",
-        body: JSON.stringify(payload),
-      });
-      toast("提醒配置已保存", "success");
-      render();
-      break;
-    }
     /* Sprint 5 T2: LLM 节点新增（POST） / 编辑（PUT，隐藏 node_id 非空）。 */
     case "llm-node-form": {
       const payload = buildLlmNodePayload(data);
@@ -2870,27 +2930,6 @@ async function handleForm(formName, data, form) {
       closeModal();
       toast("自动化规则已添加", "success");
       render();
-      break;
-    }
-    /* Sprint 3: 阻断「手动补全」——粘贴 JD 文本后调 resolve 入库存档。 */
-    case "blocker-resolve": {
-      const blockerId = data.blocker_id;
-      const manualText = (data.manual_text || "").trim();
-      if (!blockerId) {
-        toast("缺少阻断信息", "error");
-        return;
-      }
-      if (!manualText) {
-        toast("请先粘贴 JD 文本", "error");
-        return;
-      }
-      await api(`/api/blockers/${encodeURIComponent(blockerId)}/resolve`, {
-        method: "POST",
-        body: JSON.stringify({ manual_text: manualText }),
-      });
-      closeModal();
-      toast("已手动补全并入库存档", "success");
-      await render();
       break;
     }
     default:
@@ -2951,9 +2990,8 @@ async function submitImport(data, form) {
 }
 
 /* ------------------------------------------------------------------ */
-/* #11 Onboarding card + next-step reminders (DOM mounting)            */
-/* 纯函数在 format.js 末尾（onboardingSteps / dueReminders /           */
-/* renderOnboardingCard / renderReminderStrip / renderReminderBanner）  */
+/* #11 Onboarding card (DOM mounting)                                  */
+/* 纯函数在 format.js（onboardingSteps / renderOnboardingCard）。        */
 /* ------------------------------------------------------------------ */
 
 const ONBOARDING_SKIPPED_KEY = "resualign_onboarding_skipped";
@@ -2985,21 +3023,13 @@ async function loadResumesForOnboarding() {
   }
 }
 
-/* 岗位库顶部：提醒条（任何岗位数下，有到期岗位即显示）+ 三步引导卡
-   （仅当存在未完成且未跳过的步骤）。通过第二个 canvas hook 挂载，
-   不动 kanban.js 的 renderKanban。 */
+/* 岗位库顶部：三步引导卡（仅当存在未完成且未跳过的步骤）。通过第二个
+   canvas hook 挂载，不动 kanban.js 的 renderKanban。 */
 setCanvasRenderHook(async (app) => {
   const header = app.querySelector(".jobs-topbar") || app.querySelector(".page-header");
-  if (
-    !header ||
-    app.querySelector("[data-reminder-strip]") ||
-    app.querySelector("[data-onboarding-card]")
-  ) {
+  if (!header || app.querySelector("[data-onboarding-card]")) {
     return;
   }
-  const fragments = [];
-  const strip = renderReminderStrip(dueReminders(state.jobs || [], new Date()));
-  if (strip) fragments.push(strip);
   const card = renderOnboardingCard(
     onboardingSteps({
       resumes: await loadResumesForOnboarding(),
@@ -3007,65 +3037,11 @@ setCanvasRenderHook(async (app) => {
       skipped: readOnboardingSkipped(),
     }),
   );
-  if (card) fragments.push(card);
-  if (!fragments.length) return;
+  if (!card) return;
   const wrap = document.createElement("div");
-  wrap.innerHTML = fragments.join("");
+  wrap.innerHTML = card;
   while (wrap.firstChild) header.before(wrap.firstChild);
 });
-
-/* 工作台：当前岗位的面试/下一步到期提醒横幅（挂在 page-header 之后）。
-   workspace session 返回的是岗位快照（next_step 可能过期），因此先取实时
-   job 再判定；请求失败时回退到会话快照。SSE 驱动的画布重绘会整体替换
-   #app.innerHTML 冲掉横幅，故用 MutationObserver 在有提醒时自动重挂。 */
-let wsReminderState = { jobId: null, due: false, fetching: false };
-let wsReminderObserver = null;
-
-function mountWorkspaceReminder(app) {
-  if (!app) return;
-  const jobId = state.wbJob && state.wbJob.job_id;
-  if (!jobId) return;
-  if (wsReminderState.jobId !== jobId) {
-    wsReminderState = { jobId, due: false, fetching: false };
-  }
-  const insert = (job) => {
-    if (!app.isConnected) return;
-    const [reminder] = dueReminders([job], new Date());
-    wsReminderState = {
-      jobId: (job && job.job_id) || jobId,
-      due: Boolean(reminder),
-      fetching: false,
-    };
-    if (app.querySelector("[data-reminder-banner]")) return;
-    const banner = renderReminderBanner(reminder);
-    if (!banner) return;
-    const header = app.querySelector(".page-header");
-    if (header) header.insertAdjacentHTML("afterend", banner);
-    else app.insertAdjacentHTML("afterbegin", banner);
-  };
-  const load = (target) => {
-    if (wsReminderState.fetching) return;
-    wsReminderState.fetching = true;
-    api(`/api/jobs/${encodeURIComponent(target)}`)
-      .then((job) => insert(job))
-      .catch(() => {
-        wsReminderState.fetching = false;
-        insert(state.wbJob);
-      });
-  };
-  if (!wsReminderObserver) {
-    wsReminderObserver = new MutationObserver(() => {
-      if (state.route.name !== "workspace") return;
-      const current = state.wbJob && state.wbJob.job_id;
-      if (!current) return;
-      if (app.querySelector("[data-reminder-banner]")) return;
-      if (wsReminderState.jobId === current && !wsReminderState.due) return;
-      load(current);
-    });
-    wsReminderObserver.observe(app, { childList: true, subtree: true });
-  }
-  load(jobId);
-}
 
 /* ------------------------------------------------------------------ */
 /* Boot                                                                */
@@ -3108,64 +3084,8 @@ setCanvasRenderHook(async (app) => {
     const importForm = document.createElement("div");
     importForm.innerHTML = JOB_IMPORT_FORM_HTML.trim();
     formsMount.append(createForm.firstChild, importForm.firstChild);
-    renderBlockerBadge();
-    refreshBlockerBadge();
   }
 });
-
-/* ------------------------------------------------------------------ */
-/* Sprint 3: Pipeline + Blocker（抓取 Bar + 阻断微标/Modal）             */
-/* ------------------------------------------------------------------ */
-/* 页面结构在 kanban.js 的 renderKanban：抓取 Bar 与阻断微标挂载点
- * （data-fetch-url-bar / data-blocker-badge）已由 kanban.js 直接渲染，
- * 此处只负责微标数据刷新与 Modal 流程。
- *  - 抓取 Bar：<input data-fetch-url> + 「自动抓取」（data-action=fetch-job-url）
- *  - 阻断微标：blockerCountBadge 输出 <button class="blocker-badge"
- *    data-action="open-blockers">，有 pending 时显示并带闪烁动画（CSS）。
- * 契约（后端并行实现）：
- *   POST /api/jobs/fetch-url {url} -> {status, job_id?, blocker_id?, reason?}
- *   GET  /api/blockers?status=pending -> [Blockers]
- *   POST /api/blockers/{id}/ignore -> 204
- *   POST /api/blockers/{id}/resolve {manual_text} -> {status:'resolved', job_id?}
- * 后端未就绪（404）时静默降级：抓取 Bar 仍在但提交报 toast，微标保持隐藏，
- * 不打断岗位库渲染。 */
-
-let blockerState = { count: 0, list: [], loaded: false };
-
-function renderBlockerBadge() {
-  const mount = $("[data-blocker-badge]");
-  if (!mount) return;
-  mount.innerHTML = blockerCountBadge(blockerState.count);
-}
-
-async function refreshBlockerBadge() {
-  try {
-    const list = await api("/api/blockers?status=pending");
-    const blockers = Array.isArray(list) ? list : [];
-    blockerState = { count: blockers.length, list: blockers, loaded: true };
-  } catch {
-    blockerState = { count: 0, list: [], loaded: true };
-  }
-  renderBlockerBadge();
-}
-
-async function openBlockersModal() {
-  try {
-    const list = await api("/api/blockers?status=pending");
-    const blockers = Array.isArray(list) ? list : [];
-    blockerState = { count: blockers.length, list: blockers, loaded: true };
-    renderBlockerBadge();
-    showModal(
-      "抓取阻断队列",
-      `${blockerListHtml(blockers)}
-      <div class="actions">
-        <button class="btn btn-ghost" type="button" data-action="close-modal">关闭</button>
-      </div>`,
-    );
-  } catch (error) {
-    toast(error.message, "error");
-  }
-}
 
 async function boot() {
   initTheme();

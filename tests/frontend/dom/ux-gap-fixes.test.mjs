@@ -92,7 +92,7 @@ test("source contracts keep the new UX gap fixes wired", () => {
   );
   assert.match(
     splitCanvas,
-    /已自动打开最近岗位，可在顶部切换/,
+    /已自动打开最近岗位，可在工作台右上角切换/,
     "workspace auto-select explains the jump to the latest job",
   );
 

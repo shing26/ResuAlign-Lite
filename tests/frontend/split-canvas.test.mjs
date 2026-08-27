@@ -249,9 +249,26 @@ test("diffCard renders actionable modify card with provenance", () => {
   const html = diffCard(SAMPLE_DIFF, 0, "job-1");
   assert.match(html, /data-diff-id="d1"/);
   assert.match(html, /data-action="accept-bullet"/);
-  assert.match(html, /🛡️ 高可信/);
+  assert.match(html, /provenance-badge provenance-badge--verified/);
+  assert.match(html, /provenance-icon/);
+  assert.match(html, /高可信/);
   assert.match(html, /置信度 high/);
   assert.doesNotMatch(html, /diff-card--invalid/);
+});
+
+test("diffCard renders the inline edit button on valid modify cards", () => {
+  const html = diffCard(SAMPLE_DIFF, 0, "job-1");
+  assert.match(html, /data-action="toggle-bullet-edit"/);
+  assert.match(html, /✏️ 编辑/);
+});
+
+test("diffCard omits the inline edit button on invalid-gate cards", () => {
+  const html = diffCard(
+    { type: "add", proposed: "凭空新增" },
+    1,
+    "job-1",
+  );
+  assert.doesNotMatch(html, /data-action="toggle-bullet-edit"/);
 });
 
 test("diffCard flags add diffs without provenance as invalid gate", () => {
@@ -309,6 +326,17 @@ test("diffList renders cards or the empty state", () => {
   const empty = diffList({}, "job-1");
   assert.match(empty, /data-resume-canvas-empty/);
   assert.match(empty, /还没有对齐结果/);
+});
+
+/* P0-2 回归：失败/取消/过期态不再渲染「还没有对齐结果」首次引导卡 ——
+   失败反馈收敛到顶部横幅 + 顶栏「重新运行对齐」单入口。 */
+test("diffList suppresses the first-run guide for failed/canceled/expired states", () => {
+  ["failed", "canceled", "expired"].forEach((status) => {
+    const html = diffList({ alignment: { status } }, "job-1");
+    assert.doesNotMatch(html, /data-resume-canvas-empty/, `${status} hides guide`);
+    assert.doesNotMatch(html, /还没有对齐结果/, `${status} hides guide title`);
+    assert.match(html, /data-diff-list/, `${status} keeps list container`);
+  });
 });
 
 /* T3: diff.section 徽章（后端契约：DiffItem.section，字符串，可为空） */

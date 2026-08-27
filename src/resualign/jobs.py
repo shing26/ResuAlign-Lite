@@ -418,6 +418,36 @@ class JobRegistry(_SqliteStore):
                 ).fetchall()
                 return {row["status"]: int(row["n"]) for row in rows}
 
+    def recent_fail_streak(self, tenant_id: str, job_ref_key: str) -> int:
+        """Count consecutive recent 'failed' rows for a tenant + library job key.
+
+        The key is matched against the stored payload JSON (workbench payloads
+        carry ``library_job_id``; compact JSON serializes it as
+        ``"library_job_id":"<id>"``). R4 P0-6（03-AIE §③）：连续失败熔断的计数
+        来源——同一 job 连续失败 3 次即拦截，防止无脑重试烧额度。
+        """
+        if not job_ref_key:
+            return 0
+        needle = '"library_job_id":"' + str(job_ref_key) + '"'
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT status FROM jobs j "
+                    "JOIN job_payloads p ON p.job_id = j.job_id "
+                    "WHERE j.tenant_id = ? AND p.payload_json LIKE ? "
+                    "AND j.status IN ('failed', 'succeeded', 'canceled') "
+                    "ORDER BY j.created_at DESC, j.rowid DESC LIMIT 3",
+                    (tenant_id, "%" + needle + "%"),
+                ).fetchall()
+        streak = 0
+        for row in rows:
+            if row["status"] == "failed":
+                streak += 1
+            else:
+                break
+        return streak
+
     def ping(self) -> bool:
         """Readiness probe: True when the underlying database is readable."""
         try:
