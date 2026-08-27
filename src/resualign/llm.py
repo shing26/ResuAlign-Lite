@@ -58,19 +58,44 @@ def _observe_llm_call(
         duration_ms=duration_ms,
         extra=extra,
     )
-def _parse_json_object(content: str) -> dict[str, Any]:
-    """Parse a provider JSON object without using raw_decode."""
-    text = (content or "").strip()
+def _strip_json_wrapping(text: str) -> str:
+    """Strip BOM, markdown code fences, and surrounding whitespace."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    if text.startswith("\ufeff"):
+        text = text[1:].lstrip()
+    # Small/vendor models sometimes wrap JSON in a ```json fence with prose.
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
-        text = re.sub(r"\s*```$", "", text).strip()
-    try:
-        value = json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            value = json.loads(text[start : end + 1])
+        text = re.sub(r"\s*```\s*$", "", text).strip()
+    return text
+
+
+def _extract_balanced_json(text: str) -> str:
+    """Return the first balanced ``{...}`` object, ignoring braces inside strings.
+
+    When the object is truncated (never balanced), returns from the first ``{``
+    to the end so a later best-effort repair can close the brackets.
+    """
+    start = text.find("{")
+    if start < 0:
+        raise LLMResponseError("No JSON object found in LLM response")
+    depth = 0
+    in_str = False
+    esc = False
+    balanced_end = -1
+    i = start
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
         else:
             raise
     if not isinstance(value, dict):
@@ -431,6 +456,140 @@ class OpenAIClient(LLMClient):
                 attempts=attempts,
                 status=status,
             )
+
+    def stream_chat_json(
+        self,
+        system: str,
+        user: str,
+        model: Optional[str] = None,
+        idle_timeout: float = 15.0,
+        max_tokens: int = 16384,
+    ) -> dict:
+        """Stream a chat completion over SSE and return the parsed JSON.
+
+        Accumulates ``choices[*].delta.content`` deltas into a single JSON
+        string (via ``_stream_deltas``, which yields each token) and returns
+        the parsed dict. Raises ``StreamConnectionError`` when no new token
+        arrives within ``idle_timeout`` seconds or when the transport stalls /
+        disconnects (read/connect timeout, TCP drop).
+        """
+        _t0 = time.monotonic()
+        status = "failed"
+        try:
+            deltas = list(
+                self._stream_deltas(
+                    system,
+                    user,
+                    model=model,
+                    idle_timeout=idle_timeout,
+                    max_tokens=max_tokens,
+                )
+            )
+            result = _parse_json_object("".join(deltas))
+            status = "ok"
+            return result
+        except StreamConnectionError:
+            raise
+        except httpx.HTTPError as exc:
+            # Provider transport failures (read/connect timeout, silent TCP
+            # drop) degrade into the breaker error so role-level fallback can
+            # retry on the default node instead of surfacing a raw httpx error.
+            raise StreamConnectionError(
+                f"Stream transport failure: {exc.__class__.__name__}: {exc}"
+            ) from exc
+        finally:
+            _observe_llm_call(
+                stage="stream_chat_json",
+                provider=self.provider,
+                model=model or self.model,
+                duration_ms=(time.monotonic() - _t0) * 1000,
+                attempts=1,
+                status=status,
+            )
+
+    def _stream_deltas(
+        self,
+        system: str,
+        user: str,
+        model: Optional[str] = None,
+        idle_timeout: float = 15.0,
+        max_tokens: int = 16384,
+    ):
+        """Yield each streamed content delta, enforcing the idle breaker.
+
+        Applies an ``httpx.Timeout`` scoped to the stream so a fully silent
+        provider (no bytes at all) raises a transport timeout after
+        ``idle_timeout`` instead of blocking forever, and converts that into
+        ``StreamConnectionError``. Individual SSE ``data:`` deltas are yielded
+        as they arrive.
+        """
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        body = {
+            "model": model or self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": self.DEFAULT_TEMPERATURE,
+            "max_tokens": max_tokens,
+            "stream": True,
+            **self._provider_extras(),
+        }
+        timeout = httpx.Timeout(
+            idle_timeout,
+            connect=idle_timeout,
+            write=idle_timeout,
+            pool=idle_timeout,
+        )
+        with self._client.stream(
+            "POST",
+            f"{self.base_url.rstrip('/')}/chat/completions",
+            headers=headers,
+            json=body,
+            timeout=timeout,
+        ) as r:
+            r.raise_for_status()
+            last_token_at = time.monotonic()
+            for line in r.iter_lines():
+                line = (line or "").strip()
+                if not line.startswith("data:"):
+                    if time.monotonic() - last_token_at >= idle_timeout:
+                        raise StreamConnectionError(
+                            f"No new token received for {idle_timeout}s "
+                            "during SSE stream"
+                        )
+                    continue
+                data = line[len("data:"):].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                try:
+                    delta = chunk["choices"][0]["delta"]
+                except (KeyError, IndexError, TypeError):
+                    if time.monotonic() - last_token_at >= idle_timeout:
+                        raise StreamConnectionError(
+                            f"No new token received for {idle_timeout}s "
+                            "during SSE stream"
+                        ) from None
+                    continue
+                content = delta.get("content")
+                if content:
+                    last_token_at = time.monotonic()
+                    yield content
+                    continue
+                if time.monotonic() - last_token_at >= idle_timeout:
+                    # Content-less SSE deltas (heartbeats / keep-alive frames
+                    # without a token) must not reset the breaker; if the
+                    # provider stalls without emitting a token, fall through.
+                    raise StreamConnectionError(
+                        f"No new token received for {idle_timeout}s "
+                        "during SSE stream"
+                    ) from None
     def chat_structured(
         self,
         system: str,

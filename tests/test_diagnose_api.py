@@ -410,7 +410,9 @@ def test_diagnose_requires_existing_resume_and_tenant_isolation():
     assert r.status_code == 404
 
 
-def test_diagnose_requires_api_key():
+def test_diagnose_without_api_key_queues_local_fallback():
+    # Phase 5: without a key the diagnosis still queues; the worker runs the
+    # deterministic rules fallback instead of returning 503.
     resume = _create_resume()
     with patch("resualign.api._run_job"), patch(
         "resualign.api.build_config", return_value=_config("")
@@ -419,8 +421,8 @@ def test_diagnose_requires_api_key():
             f"/api/master-resumes/{resume['resume_id']}/diagnose",
             headers=_auth_headers(),
         )
-    assert r.status_code == 503
-    assert "LLM" in r.json()["detail"]
+    assert r.status_code == 202
+    assert r.json()["status"] == "queued"
 
 
 def test_diagnose_personal_mode_has_no_login_wall():

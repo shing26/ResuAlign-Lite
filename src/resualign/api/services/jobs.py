@@ -18,6 +18,50 @@ from ..schemas import JobImportRequest
 
 logger = logging.getLogger(__name__)
 
+
+def _run_local_fallback_report(resume_text: str, jd_text: str) -> "api_module.Report":
+    """Build a deterministic rules-only Report when no LLM is configured.
+
+    Mirrors the LLM-backed surface (score / skills / issues / gap report /
+    ATS) with pure-Python heuristics so the app stays usable with zero config
+    instead of failing on an unconfigured client. Never raises.
+    """
+    from ...local_fallback import (
+        local_ats_score,
+        local_diagnose,
+        local_gap_report,
+    )
+    from ...models import EvalScore, GapReport, Report
+
+    diag = local_diagnose(resume_text)
+    report = Report(
+        score=int(diag.get("score", 0)),
+        skills=list(diag.get("skills") or []),
+        issues=list(diag.get("issues") or []),
+        model="local-rules",
+        fallback="local",
+    )
+    if (jd_text or "").strip():
+        gap = local_gap_report(resume_text, jd_text)
+        report.gap_report = GapReport(
+            missing_keywords=list(gap.get("missing_keywords") or []),
+            misaligned_emphasis=list(gap.get("misaligned_emphasis") or []),
+            strength_matches=list(gap.get("strength_matches") or []),
+        )
+        ats = local_ats_score(
+            resume_text,
+            {"required_skills": report.gap_report.missing_keywords},
+        )
+        report.eval_score = EvalScore(
+            jd_match_score=int(round(float(ats.get("score", 0.0)) * 100)),
+            improvement=0,
+            hallucination_detected=False,
+            hallucination_details=[],
+            gap_coverage=float(ats.get("score", 0.0)),
+        )
+    return report
+
+
 _STAGE_LABELS = {
     "diagnose": "简历诊断",
     "jd_analysis": "JD 画像与差距分析",
@@ -530,6 +574,27 @@ def _run_job(job_id: str) -> None:
                 node_store=api_module._llm_nodes,
                 tenant_id=tenant_id,
             )
+            t0 = time.monotonic()
+            if use_local_fallback:
+                report = _run_local_fallback_report(
+                    payload['resume_text'], jd_text
+                )
+            else:
+                report = api_module.run(
+                    config,
+                    payload['resume_text'],
+                    jd_text,
+                    run_eval=bool(payload.get('run_eval', False)),
+                    granularity=payload.get('granularity', 'medium'),
+                    prompt_focus=payload.get('prompt_focus', 'balanced'),
+                    custom_prompt=payload.get('custom_prompt', ''),
+                    diagnosis=payload.get('precomputed_diagnosis'),
+                    on_stage=on_stage,
+                    cache=api_module._cache,
+                    tenant=tenant_id,
+                    node_store=api_module._llm_nodes,
+                    tenant_id=tenant_id,
+                )
             report.elapsed_seconds = round(time.monotonic() - t0, 1)
             result = api_module._report_to_dict(report)
             if payload.get('diagnosis'):

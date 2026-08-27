@@ -826,7 +826,17 @@ def rewrite_workbench_bullet(
             new_diffs.append(diff)
     if not replaced:
         new_diffs.append(replacement)
-    api_module._jobs.update_job(user['user_id'], job_id, diffs=new_diffs)
+    new_invalid_diffs = [
+        diff
+        for diff in (job.get('invalid_diffs') or [])
+        if diff.get('diff_id') != req.diff_id
+    ]
+    api_module._jobs.update_job(
+        user['user_id'],
+        job_id,
+        diffs=new_diffs,
+        invalid_diffs=new_invalid_diffs,
+    )
     return WorkbenchRewriteResponse(
         diff_id=replacement['diff_id'],
         original=original,

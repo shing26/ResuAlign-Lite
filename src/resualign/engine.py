@@ -29,6 +29,18 @@ TAILOR_MAX_RETRIES = 1
 MAX_RESUME_INPUT_CHARS = 15000
 
 
+def _bullet_editor_enabled(granularity: str) -> bool:
+    """Whether the bullet-level map-reduce editor should be used.
+
+    Enabled for fine/medium granularity by default; override with
+    ``RESUALIGN_BULLET_EDITOR=0``. Coarse restructuring always keeps the
+    whole-document path.
+    """
+    if os.environ.get("RESUALIGN_BULLET_EDITOR", "1") != "1":
+        return False
+    return granularity in {"fine", "medium"}
+
+
 def truncate_text(text: str, limit: int) -> str:
     """Cut long inputs on a line boundary so prompts stay bounded."""
     text = (text or "").strip()
@@ -429,7 +441,14 @@ def run_with_graph(
                     }
                 gap_report_str = _json.dumps(gap_dict, ensure_ascii=False)
                 if node_store and node_store.get_active_node(tenant_id):
-                    tailor_result, _ = call_with_role("editor", tailor_resume, node_store, tenant_id, fn_kwargs={"resume_text": st.resume_text, "gap_report_text": gap_report_str, "granularity": st.granularity, "prompt_focus": st.prompt_focus, "custom_prompt": st.custom_prompt})
+                    editor_kwargs = {"resume_text": st.resume_text, "gap_report_text": gap_report_str, "granularity": st.granularity, "prompt_focus": st.prompt_focus, "custom_prompt": st.custom_prompt}
+                    if _bullet_editor_enabled(st.granularity):
+                        editor_fn = tailor_resume_map_reduce
+                        editor_kwargs["jd_context"] = truncate_text(st.jd_text, MAX_JD_CONTEXT_CHARS)
+                        editor_kwargs["parallel"] = is_parallel_safe(node_store, tenant_id, "editor")
+                    else:
+                        editor_fn = tailor_resume
+                    tailor_result, _ = call_with_role("editor", editor_fn, node_store, tenant_id, fn_kwargs=editor_kwargs)
                 else:
                     tailor_client = OpenAIClient(config, timeout=node.get("timeout", 40.0), max_retries=1)
                     try:
