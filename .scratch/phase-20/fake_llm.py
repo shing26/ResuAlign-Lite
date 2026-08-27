@@ -17,7 +17,6 @@ from collections import Counter
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-
 app = FastAPI(title="phase20-fake-llm")
 
 # Module-level QA state: per-stage hit counters and unknown-prompt log.
@@ -39,7 +38,7 @@ E2E_CLASSIFY_FAILS_LEFT: int = 0
 #  - classifier    : session pipeline classification (PROMPT_VERSION: classifier/v2)
 #  - diagnose      : workbench diagnosis (PROMPT_VERSION: diagnose/v3)
 #  - jd_profiler   : standalone proactive JD profile (PROMPT_VERSION: jd_profiler/v2)
-#  - jd_analysis   : combined JD profile + gap analysis (PROMPT_VERSION: jd_analysis/v3)
+#  - gap_analyzer  : gap analysis against the JD profile (PROMPT_VERSION: gap_analyzer/v2)
 #  - tailor        : tailoring (PROMPT_VERSION: tailor/v2)
 #  - evaluator     : evaluation (PROMPT_VERSION: evaluator/v2, run_eval=False in smoke,
 #                    so not required)
@@ -47,7 +46,7 @@ REQUIRED_STAGES = [
     "classifier",
     "diagnose",
     "jd_profiler",
-    "jd_analysis",
+    "gap_analyzer",
     "tailor",
 ]
 
