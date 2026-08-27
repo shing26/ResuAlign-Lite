@@ -176,14 +176,20 @@ class FakeLatencyClient:
     @staticmethod
     def _stage(system: str) -> str:
         text = system.lower()
-        if "resume auditor" in text:
+        # R4 prompt rewrite moved the system prompts to Chinese; keep the
+        # English phrases for pre-rewrite cases and match the current openers.
+        if "resume auditor" in text or "简历审计员" in text:
             return "diag"
         if "job description analyst" in text and "gap analyst" in text:
             return "jd_analysis"
-        if "job description analyst" in text:
+        if "job description analyst" in text or "岗位画像分析师" in text:
             return "profile"
-        if "gap analyst" in text:
+        if "gap analyst" in text or "差距分析师" in text:
             return "gap"
+        if "精确的简历编辑器" in text:
+            return "tailor"
+        if "简历质量裁判" in text:
+            return "eval"
         return "tailor"
 
 

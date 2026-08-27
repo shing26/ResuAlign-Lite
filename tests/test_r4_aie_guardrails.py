@@ -23,7 +23,7 @@ import resualign.api as api_module
 from resualign.api.services.jobs import _job_failure_detail
 from resualign.jobs import JobRegistry
 from resualign.llm import LLMResponseError, OpenAIClient
-from resualign.models import ResuAlignConfig
+from resualign.models import JDProfile, ResuAlignConfig
 
 from .conftest import MockLLMClient, _diag, _jd_profile_only, _tailor
 
@@ -310,8 +310,6 @@ class _FakeNodeStore:
 
 
 def _profile_obj() -> "JDProfile":
-    from resualign.models import JDProfile
-
     return JDProfile(
         must_have_skills=["Java"],
         nice_to_have_skills=["Redis"],

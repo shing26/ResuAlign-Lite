@@ -11,8 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import resualign.api as api_module
 
-from ...job_library import canonical_status
 from ...llm_usage import llm_tenant_context
+from ...role_router import call_with_role
 from ..deps import get_current_user, get_local_ingest_user
 from ..schemas import (
     BulkStatusRequest,

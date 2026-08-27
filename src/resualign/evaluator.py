@@ -2,6 +2,7 @@ from .llm import _structured_or_json
 from .models import EvalScore
 from .schema_registry import EvalScoreSchema
 from .tailor import parse_diff_with_provenance
+
 # PROMPT_VERSION bump: evaluator/v1 -> v2（2026-08-25，对照 04b-PE §2.6）
 # 本次升级说明：
 # - 变更点 1：评分锚点（80+/60-79/<60）与不确定兜底值（50/0/0.0），不鼓励极端 0

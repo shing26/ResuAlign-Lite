@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, HTTPException
 import resualign.api as api_module
 
 from ...config import (
-    EnvSettings,
     clear_runtime_llm,
     register_stored_llm_provider,
     set_runtime_llm,
@@ -204,8 +203,7 @@ def apply_role_preset(
     if not all_nodes:
         return {"status": "ok", "message": "No nodes configured", "bindings": {}}
 
-    # Find active / ollama / cloud nodes
-    active = next((n for n in all_nodes if n["is_active"]), all_nodes[0])
+    # Find ollama / cloud nodes
     ollama_nodes = [n for n in all_nodes if n["provider"] == "ollama"]
     cloud_nodes = [n for n in all_nodes if n["provider"] != "ollama"]
 
@@ -295,7 +293,6 @@ def update_settings(req: SettingsUpdateRequest, user: dict[str, Any]=Depends(get
 def settings_status(user: dict[str, Any] = Depends(get_current_user)):
     """Return runtime status so the settings page is not just raw forms."""
     config = api_module.build_config()
-    env = EnvSettings()
     daily = api_module.llm_daily_status(user["user_id"])
     return {
         "api_key_configured": config.is_llm_configured,

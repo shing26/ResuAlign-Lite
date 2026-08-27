@@ -107,7 +107,7 @@ def test_personal_mode_workbench_without_token():
         json={"title": "Master Resume", "content": "Python developer."},
     )
     assert r.status_code == 201
-    resume_id = r.json()["resume_id"]
+    assert r.json()["resume_id"]
 
     resumes = client.get("/api/master-resumes").json()
     assert len(resumes) == 1

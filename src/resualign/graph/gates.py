@@ -3,8 +3,10 @@
 Provenance, hallucination, minimum requirements, and ATS scoring gates.
 """
 from __future__ import annotations
+
 import re
 from typing import Any, Optional
+
 from pydantic import BaseModel
 
 

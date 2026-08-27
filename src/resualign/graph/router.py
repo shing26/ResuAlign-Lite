@@ -1,7 +1,10 @@
 """Node router configuration for the alignment Graph."""
 from __future__ import annotations
+
 from typing import Any, Optional
+
 from pydantic import BaseModel
+
 
 class NodeDef(BaseModel):
     next: str = ""

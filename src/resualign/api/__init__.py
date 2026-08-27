@@ -484,10 +484,10 @@ from .routers import (
     nodes as _nodes_router,
 )
 from .routers import (
-    resumes as _resumes_router,
+    optimize as _optimize_router,
 )
 from .routers import (
-    optimize as _optimize_router,
+    resumes as _resumes_router,
 )
 from .routers import (
     rules as _rules_router,

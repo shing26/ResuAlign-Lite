@@ -1,11 +1,13 @@
 """GraphExecutor -- lightweight Pydantic-driven DAG executor for Compound AI."""
 from __future__ import annotations
+
 import logging
 import time
-from typing import Any, Callable, Optional
-from .state import AlignmentState, AlignmentStatus, StageResult
+from typing import Callable, Optional
+
+from .gates import AntiHallucinationGate, GateResult, ProvenanceGate
 from .router import get_node
-from .gates import ProvenanceGate, AntiHallucinationGate, GateResult
+from .state import AlignmentState, AlignmentStatus, StageResult
 
 logger = logging.getLogger(__name__)
 

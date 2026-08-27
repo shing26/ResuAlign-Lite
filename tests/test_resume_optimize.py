@@ -21,7 +21,6 @@ from resualign.api import app
 from resualign.jobs import JobRegistry
 from resualign.llm import LLMResponseError
 from resualign.resume_optimize import (
-    POLISH_PROMPT,
     build_overview,
     extract_project_modules,
     module_failure_detail,

@@ -629,11 +629,11 @@ def _run_job(job_id: str) -> None:
                 # R4 §3.2：保存对齐时写入组合提示词版本串（旧值 'engine.v1' 过时，
                 # 04-PE 写 jobs.py:572 已修正为最新位置 605）。用局部 import 避免
                 # 顶层循环依赖（本文件走 api_module 间接风格、无顶层提示词 import）。
-                from resualign.llm import DIAG_PROMPT_VERSION
-                from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
-                from resualign.gap_analyzer import GAP_ANALYZER_PROMPT_VERSION
-                from resualign.tailor import TAILOR_PROMPT_VERSION
                 from resualign.evaluator import EVALUATOR_PROMPT_VERSION
+                from resualign.gap_analyzer import GAP_ANALYZER_PROMPT_VERSION
+                from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
+                from resualign.llm import DIAG_PROMPT_VERSION
+                from resualign.tailor import TAILOR_PROMPT_VERSION
                 try:
                     api_module._jobs.save_alignment(
                         tenant_id,

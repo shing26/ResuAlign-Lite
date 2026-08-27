@@ -5,8 +5,8 @@ small models from being overwhelmed by long contexts.
 """
 
 from __future__ import annotations
-from typing import Optional
 
+from typing import Optional
 
 # Default budgets per role (input_tokens, output_tokens, compression_strategy)
 _ROLE_BUDGETS: dict[str, tuple[int, int, str]] = {

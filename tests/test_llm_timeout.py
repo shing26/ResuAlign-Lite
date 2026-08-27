@@ -33,10 +33,10 @@ from resualign.llm import (
 from resualign.models import ResuAlignConfig
 from resualign.schema_registry import (
     AnalysisSchema,
+    GapReportSchema,
     JDProfileSchema,
     TailoredResumeSchema,
 )
-from resualign.schema_registry import GapReportSchema
 from resualign.settings_store import SettingsStore
 from resualign.workspace import MasterResumeStore, UserStore
 

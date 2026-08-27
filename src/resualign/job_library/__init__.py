@@ -9,7 +9,7 @@ import sqlite3
 import statistics
 import time
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Optional, Sequence
 
 from ..store_base import UserStoreError, _SqliteStore

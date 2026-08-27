@@ -1,6 +1,7 @@
 from .llm import LLMClient, _structured_or_json
 from .models import GapReport
 from .schema_registry import GapReportSchema
+
 # PROMPT_VERSION bump: gap_analyzer/v1 -> v2（2026-08-25，对照 04b-PE §2.3）
 # 本次升级说明：
 # - 变更点 1：missing_keywords 由无上限改为 5-12 项、每项 ≤ 30 字符，语义重复合并
