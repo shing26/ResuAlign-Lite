@@ -325,3 +325,91 @@ def test_engine_local_diagnosis_fallback_on_llm_failure():
     assert report.gap_report is not None
     assert report.tailored_resume is not None
     assert mock.call_count == 3
+
+
+class _FakeNodeStore:
+    def get_active_node(self, tenant_id):
+        return {"name": "fake-node"}
+
+
+def _profile_obj():
+    from resualign.models import JDProfile
+
+    return JDProfile(
+        must_have_skills=["Java"],
+        nice_to_have_skills=["Redis"],
+        soft_skills=[],
+        business_scenarios=["Backend"],
+        min_years_experience=None,
+        education_requirements=[],
+    )
+
+
+def _gap_obj():
+    from resualign.models import GapReport
+
+    return GapReport(
+        missing_keywords=["Redis"],
+        misaligned_emphasis=[],
+        strength_matches=["Java"],
+    )
+
+
+def _tailor_resume_obj():
+    from resualign.models import DiffItem, TailoredResume
+
+    return TailoredResume(
+        sections={"experience": "Built services using Java"},
+        diffs=[
+            DiffItem(
+                diff_id="d1",
+                section="",
+                type="modify",
+                original="Python dev",
+                proposed="Built services using Java",
+                reason="match",
+                confidence="high",
+                provenance="Python dev",
+                provenance_quote="Python dev",
+                source_span=(0, 9),
+                provenance_state="verified",
+            )
+        ],
+        invalid_diffs=[],
+    )
+
+
+def test_engine_eval_in_role_path_uses_real_signature(monkeypatch):
+    """多节点（use_roles）分支的 evaluate 必须按真实签名传参。
+
+    回归：fn_kwargs 曾把 sections_text 误传为 ``tailored_resume``（签名是
+    ``tailored_text``），call_with_role 以 **fn_kwargs 展开后 TypeError 必现、
+    被外层 except 吞掉，多节点模式评估静默丢失（2026-08-28 修复）。
+    """
+
+    def fake_call_with_role(role, fn, node_store, tenant_id, *, fn_kwargs=None,
+                            default_config=None):
+        if role == "diagnose":
+            return _diag(), {"role": role}
+        if role == "profiler":
+            return _profile_obj(), {"role": role}
+        if role == "gap_analyzer":
+            return _gap_obj(), {"role": role}
+        if role == "editor":
+            return _tailor_resume_obj(), {"role": role}
+        if role == "evaluator":
+            # 唯一真实展开 fn_kwargs 调用 fn 的分支：参数名漂移会立即 TypeError
+            return fn(MockLLMClient([_eval()]), **(fn_kwargs or {})), {"role": role}
+        raise AssertionError(f"unexpected role {role}")
+
+    monkeypatch.setattr("resualign.engine.call_with_role", fake_call_with_role)
+    report = run(
+        ResuAlignConfig(model="m"),
+        "Python dev resume",
+        "Java backend",
+        node_store=_FakeNodeStore(),
+        tenant_id="t",
+        run_eval=True,
+    )
+    assert report.eval_score is not None
+    assert report.eval_score.jd_match_score == 82

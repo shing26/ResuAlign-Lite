@@ -322,7 +322,7 @@ def run(
                             node_store, tenant_id,
                             fn_kwargs={
                                 "original_resume": resume_text,
-                                "tailored_resume": sections_text,
+                                "tailored_text": sections_text,
                                 "jd_text": truncate_text(jd_text, MAX_JD_CONTEXT_CHARS),
                                 "diffs": report.tailored_resume.diffs,
                             },

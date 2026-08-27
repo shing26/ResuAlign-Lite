@@ -1,6 +1,6 @@
 import time
 
-from resualign.cache import ContentCache
+from resualign.cache import ContentCache, content_sha256
 from resualign.classifier import classify_job
 from resualign.jd_profiler import profile_jd
 from resualign.llm import diagnose_resume
@@ -106,3 +106,58 @@ def test_diagnosis_cache_hit_skips_llm(tmp_path):
         )
     assert first == second
     assert client.call_count == 1
+
+
+def test_prune_expired_removes_only_stale_rows(tmp_path):
+    path = tmp_path / "prune.sqlite3"
+    with ContentCache(path) as cache:
+        cache.put("tenant", "model", "v1", "fresh", {"ok": True})
+        stale_created = time.time() - cache.ttl_seconds - 10
+        with cache._lock:
+            cache._conn.execute(
+                """
+                INSERT OR REPLACE INTO content_cache (
+                    tenant, model, prompt_version, content_sha256,
+                    payload, created_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "tenant",
+                    "model",
+                    "v1",
+                    "stale-sha",
+                    "{}",
+                    stale_created,
+                    stale_created + 1,
+                ),
+            )
+            cache._conn.commit()
+
+        removed = cache.prune_expired()
+        assert removed == 1
+        # 未过期条目不受影响；再清一次幂等（0 行）
+        assert cache.get("tenant", "model", "v1", "fresh") == {"ok": True}
+        assert cache.prune_expired() == 0
+
+
+def test_init_prunes_rows_expired_from_previous_runs(tmp_path):
+    """启动即清理：上次运行遗留的过期行在 ContentCache 初始化时回收。"""
+    path = tmp_path / "startup.sqlite3"
+    with ContentCache(path) as cache:
+        cache.put("tenant", "model", "v1", "old", {"v": 1})
+        stale_created = time.time() - cache.ttl_seconds - 10
+        with cache._lock:
+            cache._conn.execute(
+                "UPDATE content_cache SET created_at = ?, expires_at = ? "
+                "WHERE content_sha256 = ?",
+                (stale_created, stale_created + 1, content_sha256("old")),
+            )
+            cache._conn.commit()
+
+    with ContentCache(path) as reopened:
+        assert reopened.get("tenant", "model", "v1", "old") is None
+        with reopened._lock:
+            count = reopened._conn.execute(
+                "SELECT COUNT(*) FROM content_cache"
+            ).fetchone()[0]
+        assert count == 0

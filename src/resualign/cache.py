@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 import sqlite3
 import threading
 import time
@@ -11,6 +12,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .store_base import _apply_sqlite_pragmas
+
+# Roughly 1 in 20 put() calls also sweeps expired rows, keeping the DB
+# bounded without a background sweeper thread.
+_PRUNE_PROBABILITY = 0.05
 
 
 def content_sha256(text: str) -> str:
@@ -35,6 +40,7 @@ class ContentCache:
             )
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._init_schema()
+        self.prune_expired()
 
     def _init_schema(self) -> None:
         with self._lock:
@@ -56,6 +62,20 @@ class ContentCache:
                 """
             )
             self._conn.commit()
+
+    def prune_expired(self, now: Optional[float] = None) -> int:
+        """Delete expired rows and return how many were removed.
+
+        ``now`` is injectable so tests can create and prune past-expiry
+        rows deterministically.
+        """
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM content_cache WHERE expires_at < ?",
+                (time.time() if now is None else now,),
+            )
+            self._conn.commit()
+            return cursor.rowcount
 
     def get(
         self,
@@ -110,6 +130,8 @@ class ContentCache:
                 ),
             )
             self._conn.commit()
+        if random.random() < _PRUNE_PROBABILITY:
+            self.prune_expired()
 
     def clear(self) -> None:
         """Delete all cached entries."""

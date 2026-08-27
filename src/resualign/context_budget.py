@@ -36,8 +36,24 @@ class ContextBudget:
 
     @staticmethod
     def estimate_tokens(text: str) -> int:
-        """Rough token estimation (4 chars per token for CJK, 1 token per 4 chars for English)."""
-        return len(text) // 4 + 1
+        """Rough token estimation: 1 token per CJK char, 4 chars per token otherwise.
+
+        CJK scripts tokenize at roughly 1 token per character (DeepSeek/GPT
+        family), so counting them at 1.0 keeps the estimate a conservative
+        upper bound; the old ``len(text) // 4`` treated Chinese like ASCII
+        and underestimated ~4x, so budgets never triggered compression.
+        """
+        if not text:
+            return 0
+        cjk = sum(
+            1
+            for ch in text
+            if "\u4e00" <= ch <= "\u9fff"
+            or "\u3040" <= ch <= "\u30ff"
+            or "\uac00" <= ch <= "\ud7af"
+        )
+        other = len(text) - cjk
+        return cjk + other // 4 + 1
 
     def get_budget(self, role: str) -> tuple[int, int, str]:
         """Return (input_budget, output_budget, compression_strategy) for a role."""
@@ -54,27 +70,44 @@ class ContextBudget:
             return text
 
         if strategy == "truncate":
-            # Truncate to fit the budget with some margin
-            max_chars = input_budget * 4
-            # Truncate on a sentence boundary
+            # Truncate to fit the budget, cutting on a sentence boundary
+            # when one survives in the window.
+            suffix = "\n[TRUNCATED: input exceeded budget]"
+            target = input_budget - self.estimate_tokens(suffix)
+            max_chars = self._chars_for_tokens(text, target)
             truncated = text[:max_chars]
             last_period = truncated.rfind(".")
             last_newline = truncated.rfind("\n")
             cut = max(last_period, last_newline)
             if cut > max_chars // 2:
                 truncated = truncated[: cut + 1]
-            return truncated + "\n[TRUNCATED: input exceeded budget]"
+            # CJK 密度不均匀时按估算差额线性收缩，保证截断后真的在预算内
+            while truncated and self.estimate_tokens(truncated) > target:
+                over = self.estimate_tokens(truncated) - target
+                truncated = truncated[: max(0, len(truncated) - over)]
+            return truncated + suffix
 
         elif strategy == "select":
             # For editor: keep first and last 30% of the text
-            max_chars = input_budget * 4
+            max_chars = self._chars_for_tokens(text, input_budget)
             if len(text) <= max_chars:
                 return text
             head_end = max_chars // 3
             tail_start = len(text) - max_chars // 3
             return text[:head_end] + "\n[...content truncated...]\n" + text[tail_start:]
 
-        return text[: input_budget * 4]
+        return text[: self._chars_for_tokens(text, input_budget)]
+
+    @staticmethod
+    def _chars_for_tokens(text: str, token_budget: int) -> int:
+        """Convert a token budget into a char cut using the text's own density.
+
+        ASCII-heavy text keeps the historical ~4 chars/token cut; CJK-heavy
+        text cuts at ~1 char/token, consistent with estimate_tokens.
+        """
+        estimated = ContextBudget.estimate_tokens(text)
+        density = max(estimated / max(len(text), 1), 1e-9)
+        return max(1, int(token_budget / density))
 
     def set_budget(
         self,
