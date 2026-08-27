@@ -582,31 +582,60 @@ export function renderSkills(profile) {
     </div>`;
 }
 
+/* UX 走查 P2-A（2026-08-28）：简历列表卡不再渲染整份 Markdown（160px 滚动盒
+ * 扫描成本过高），改为首段纯文本摘要 + 全文字数提示。 */
+export function resumeListPreview(content, max = 120) {
+  const raw = String(content || "");
+  const firstParagraph =
+    raw
+      .split(/\n{2,}/)
+      .map((part) => part.trim())
+      .find((part) => part && !part.startsWith("#")) || "";
+  const flat = firstParagraph.replace(/\s+/g, " ").trim();
+  const preview = flat.length > max ? `${flat.slice(0, max)}…` : flat;
+  const totalChars = raw.replace(/\s+/g, "").length;
+  if (!preview) return `（暂无内容 · 共 ${totalChars} 字）`;
+  return totalChars > max ? `${preview}（全文约 ${totalChars} 字）` : preview;
+}
+
+/* UX 走查 P2-B（2026-08-28）：LLM 抽取的缺口项可能是整句长文（如基线报告的
+ * 第 7 项一整句），直接渲染成巨型 tag。展示层统一短语化截断（完整原文保留
+ * 在 title 提示里），不改动数据层。 */
+const GAP_PHRASE_MAX = 40;
+
+export function shortenGapPhrase(text, max = GAP_PHRASE_MAX) {
+  const flat = String(text || "").replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat;
+  return `${flat.slice(0, max)}…`;
+}
+
 export function renderGap(gap) {
   if (!gap) return null;
   const missing = gap.missing_keywords || [];
   const strengths = gap.strength_matches || [];
   const misaligned = gap.misaligned_emphasis || [];
+  const gapTag = (item, extra = "") =>
+    `<span class="gap-tag${extra}" title="${esc(item)}">${esc(shortenGapPhrase(item))}</span>`;
   const blocks = [];
   if (missing.length) {
     blocks.push(`
       <div class="gap-group gap-group--missing">
         <div class="split-section-title">差距项</div>
-        <div class="gap-tags">${missing.map((item) => `<span class="gap-tag">${esc(item)}</span>`).join("")}</div>
+        <div class="gap-tags">${missing.map((item) => gapTag(item)).join("")}</div>
       </div>`);
   }
   if (strengths.length) {
     blocks.push(`
       <div class="gap-group gap-group--strength">
         <div class="split-section-title">已有匹配</div>
-        <div class="gap-tags">${strengths.map((item) => `<span class="gap-tag gap-tag--ok">${esc(item)}</span>`).join("")}</div>
+        <div class="gap-tags">${strengths.map((item) => gapTag(item, " gap-tag--ok")).join("")}</div>
       </div>`);
   }
   if (misaligned.length) {
     blocks.push(`
       <div class="gap-group gap-group--warn">
         <div class="split-section-title">错位强调</div>
-        <div class="gap-tags">${misaligned.map((item) => `<span class="gap-tag gap-tag--warn">${esc(item)}</span>`).join("")}</div>
+        <div class="gap-tags">${misaligned.map((item) => gapTag(item, " gap-tag--warn")).join("")}</div>
       </div>`);
   }
   if (!blocks.length) {

@@ -12031,3 +12031,10 @@ select,
     padding: 6px 14px;
   }
 }
+
+/* UX 走查 P2-E（2026-08-28）：岗位全部堆在「未投递」列时列体无限拉长页面，
+ * 给列体加视口高度上限，滚动收在列内部（board-col-body 本就 overflow-y:auto）。 */
+.board-col-body {
+  max-height: calc(100vh - 300px);
+  min-height: 120px;
+}

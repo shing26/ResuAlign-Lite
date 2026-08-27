@@ -247,7 +247,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           </select>
           <div class="row">
             ${jobApplyLinkHtml(job)}
-            <button class="btn btn-primary" type="button" data-action="record-application" data-id="${esc(jobId)}">记录投递</button>
+            <button class="btn btn-secondary" type="button" data-action="record-application" data-id="${esc(jobId)}">记录投递</button>
             ${workbenchPrimaryButtonHtml(resumes, alignmentRunning, alignment)}
           </div>
         </div>

@@ -118,3 +118,45 @@ test("P1-B: succeeded 且无任何 diffs 时渲染开始对齐空态", () => {
   const html = diffList(sessionWith([], []), "j1");
   assert.match(html, /data-resume-canvas-empty/);
 });
+
+/* ---------- 遗留待办（P1-C / P2-A / P2-B / P2-C） ---------- */
+
+import {
+  renderGap,
+  resumeListPreview,
+  shortenGapPhrase,
+  workbenchGuideHtml,
+} from "../../src/resualign/static/app/format.js";
+
+test("P2-A: 列表卡预览跳过 Markdown 标题行、截断并附全文字数", () => {
+  const longLine = "- 五年后端研发经验，主导过支付网关重构与性能优化，熟悉高并发场景，深入理解 JVM 调优与分布式事务一致性。".repeat(3);
+  const content = `# 陈振成 Java 全栈\n\n${longLine}\n\n## 技能\nJava`;
+  const preview = resumeListPreview(content);
+  assert.ok(!preview.startsWith("#"), "预览不应以 Markdown 标题开头");
+  assert.ok(preview.includes("（全文约"), "截断时应附全文字数提示");
+  assert.ok(preview.length <= 140, "预览必须短于全文（降低扫描成本）");
+  // 短简历不截断也不画蛇添足
+  const short = resumeListPreview("# 只有标题\n\nhello");
+  assert.equal(short, "hello");
+  assert.equal(resumeListPreview(""), "（暂无内容 · 共 0 字）");
+});
+
+test("P2-B: 缺口短语超长时截断为省略号，短句原样透传", () => {
+  const long = "AI Agent 基本概念（LLM API 调用、工具调用/Function Calling、MCP 协议等）或对 AI+运维方向有浓厚兴趣";
+  const shortened = shortenGapPhrase(long);
+  assert.ok(shortened.length <= 41, "截断后 ≤ 40 字 + 省略号");
+  assert.ok(shortened.endsWith("…"));
+  assert.equal(shortenGapPhrase("Redis 缓存"), "Redis 缓存");
+  // renderGap 输出完整原文进 title、短语进标签体
+  const html = renderGap({ missing_keywords: [long], strength_matches: [], misaligned_emphasis: [] });
+  assert.match(html, /title="AI Agent 基本概念/);
+  assert.ok(!html.includes("Function Calling、MCP 协议等）或对 AI+运维方向有浓厚兴趣</span>"));
+});
+
+test("P2-C: idle 任务（无草稿）不渲染投递闭环引导条", () => {
+  const idleJob = { job_id: "j1", final_draft: null };
+  assert.equal(workbenchGuideHtml(idleJob, false), "");
+  // 有草稿才出现引导（已生成草稿 → 记录投递 → 安排跟进）
+  const withDraft = { job_id: "j1", final_draft: "draft text" };
+  assert.match(workbenchGuideHtml(withDraft, false), /workbench-guide/);
+});

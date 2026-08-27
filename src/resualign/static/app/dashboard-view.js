@@ -1,7 +1,7 @@
 /* ResuAlign v3 Dashboard: metric strip + quick continue + skill gaps.
    All values are derived from the live API, never hard-coded. */
 import { alignmentStatusLabel, esc, formatDate, jobStatusLabel, state } from "./events.js";
-import { dashboardEmptyGuideHtml } from "./format.js";
+import { dashboardEmptyGuideHtml, shortenGapPhrase } from "./format.js";
 
 function escAttr(value) {
   return esc(String(value ?? ""));
@@ -167,7 +167,7 @@ export async function renderDashboard(container) {
           return `
             <button type="button" class="skill-row" data-action="goto-skill" data-skill="${escAttr(gap.skill || "")}">
               <span class="skill-main">
-                <span class="skill-name">${escAttr(gap.skill || "未命名技能")}</span>
+                <span class="skill-name" title="${escAttr(gap.skill || "")}">${escAttr(shortenGapPhrase(gap.skill || "未命名技能"))}</span>
                 <span class="skill-track"><span class="skill-fill${peak ? "" : " warn"}" style="width:${peak ? 100 : pct}%"></span></span>
               </span>
               <span class="skill-count${peak ? " peak" : " warn"}">${peak ? `需求最多 · ${count} 岗` : `${count} 岗`}</span>
