@@ -1,11 +1,11 @@
 """E2E: pending-classification amber badge -> reclassify -> badge gone.
 
 The pending state is constructed through the real API path: the fake LLM's
-``/control/classify-fail`` endpoint makes the next 3 classifier calls
+``/control/classify-fail`` endpoint makes the next 2 classifier calls
 carrying the ``__E2E_CLASSIFY_FAIL__`` marker fail with HTTP 500 (the app
-retries each LLM call 3 times), so ``_create_job_from_source`` stores the
-job with ``classification_pending=1`` -- no direct SQL, no special
-endpoints.
+retries each LLM call once, for 2 attempts total), so
+``_create_job_from_source`` stores the job with ``classification_pending=1``
+-- no direct SQL, no special endpoints.
 
 The UI has no reclassify button yet (the ``reclassify-job`` action handler
 exists in main.js but is not wired to any element), so the reclassify
@@ -46,10 +46,10 @@ def test_pending_badge_then_reclassify(
 ):
     errors = capture_errors(page)
 
-    # Make the fake LLM fail the next 3 classifier calls carrying the marker
-    # (the app retries each LLM call 3 times), so POST /api/jobs stores the
-    # job as classification_pending instead of failing the request.
-    llm_api_call("POST", "/control/classify-fail?times=3")
+    # Make the fake LLM fail both classifier attempts carrying the marker
+    # (the app retries each LLM call once), so POST /api/jobs stores the job
+    # as classification_pending instead of failing the request.
+    llm_api_call("POST", "/control/classify-fail?times=2")
 
     # Create a job whose classification fails -> stored as pending.
     job = api_call("POST", "/api/jobs", {
@@ -65,8 +65,8 @@ def test_pending_badge_then_reclassify(
     )
     health = llm_api_call("GET", "/health")
     expect(
-        health["stage_hits"].get("e2e classify fail", 0) == 3,
-        "fake LLM should have failed 3 classify attempts, "
+        health["stage_hits"].get("e2e classify fail", 0) == 2,
+        "fake LLM should have failed 2 classify attempts, "
         f"got {health['stage_hits']}",
     )
 

@@ -61,6 +61,15 @@ def _original_bullet_from_user(user: str) -> str:
     return match.group(1).strip() if match else "Original bullet"
 
 
+def _first_bullet(resume: str) -> str:
+    """Return the first markdown bullet in a resume, with its marker."""
+    for line in resume.splitlines():
+        stripped = line.strip()
+        if stripped[:2] in ("- ", "* ", "+ "):
+            return stripped
+    return resume.splitlines()[0].strip() if resume else "# Python Backend Engineer"
+
+
 def fake_llm_response(system: str, user: str) -> dict | None:
     """Return a deterministic OpenAI-compatible response per prompt.
 
@@ -129,11 +138,7 @@ def fake_llm_response(system: str, user: str) -> dict | None:
     if "PROMPT_VERSION: tailor/v2" in system:
         STAGE_HITS["tailor"] += 1
         resume = _resume_from_user(user)
-        original = (
-            resume.splitlines()[0]
-            if resume
-            else "# Python Backend Engineer"
-        )
+        original = _first_bullet(resume)
         proposed = f"{original} (high concurrency)"
         updated = resume.replace(original, proposed, 1)
         return {
