@@ -13,7 +13,6 @@ import resualign.api as api_module
 
 from ...job_library import canonical_status
 from ...llm_usage import llm_tenant_context
-from ...reminders import AUTO_FOLLOWUP_MESSAGE, auto_followup_due_at
 from ..deps import get_current_user, get_local_ingest_user
 from ..schemas import (
     BulkStatusRequest,
@@ -36,38 +35,6 @@ from ..services.jobs import build_job_export
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-def _with_auto_followup(
-    tenant_id: str,
-    job_id: str,
-    req: JobUpdateRequest,
-    raw_timeline: dict[str, Any],
-    timeline: dict[str, Any],
-) -> dict[str, Any]:
-    """Fill the default 3-day follow-up when a draft is marked as applied."""
-    if req.status is None:
-        return timeline
-    current = api_module._jobs.get_job(tenant_id, job_id)
-    if current is None:
-        return timeline
-    current_status = canonical_status(current["status"])
-    target_status = canonical_status(req.status)
-    if current_status != "draft" or target_status != "applied":
-        return timeline
-    settings = api_module._settings_store.get_settings(tenant_id).get(
-        "reminder"
-    ) or {}
-    if not settings.get("auto_followup_reminder", True):
-        return timeline
-    patched = dict(timeline)
-    if "next_step" not in raw_timeline:
-        patched["next_step"] = AUTO_FOLLOWUP_MESSAGE
-    if "next_step_due_at" not in raw_timeline:
-        patched["next_step_due_at"] = auto_followup_due_at(
-            patched.get("applied_at")
-        )
-    return patched
 
 
 def _match_inputs(user_id: str, job: dict[str, Any]) -> tuple[str, str | None]:
@@ -142,8 +109,6 @@ def create_library_job(req: JobCreateRequest, request: Request, user: dict[str, 
     try:
         with llm_tenant_context(user['user_id']):
             return api_module._create_job_from_source(user, {'title': req.title, 'jd_text': req.jd_text, 'jd_url': req.jd_url, 'company': req.company, 'location': req.location, 'salary_min': req.salary_min, 'salary_max': req.salary_max, 'salary_currency': req.salary_currency, 'source_type': req.source_type, 'source_url': req.source_url, 'job_function': req.job_function, 'seniority': req.seniority, 'tech_tags': req.tech_tags, 'status': req.status, 'posting_date': req.posting_date})
-    except api_module.CrawlError as exc:
-        raise HTTPException(status_code=502, detail=api_module._jd_parse_error_detail(exc)) from exc
     except api_module.UserStoreError as exc:
         if 'Duplicate job' in str(exc):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -151,26 +116,23 @@ def create_library_job(req: JobCreateRequest, request: Request, user: dict[str, 
 
 @router.post('/api/jobs/parse-jd')
 def parse_jd_preview(req: JDParseRequest, request: Request, user: dict[str, Any]=Depends(get_current_user)):
-    """Crawl a JD URL and return a preview without creating a job."""
+    """Preview a JD URL.
+
+    De-bloat (2026-08-27): backend crawling is retired; JD intake goes
+    through the collector userscript (local-ingest) or pasted text. URL-only
+    previews are rejected with a pointer to those flows.
+    """
     api_module._enforce_rate_limit(request, api_module._import_rate_limiter)
     jd_url = req.jd_url.strip()
     if not jd_url:
         raise HTTPException(status_code=422, detail='jd_url is required')
-    meta: dict[str, Any] = {}
-    jd_text = api_module._crawl_jd_or_502(jd_url, meta=meta)
-    salary_min, salary_max = api_module.extract_salary_range(jd_text)
-    has_salary = salary_min is not None or salary_max is not None
-    # Prefer the title derived from the rendered JD text: for SPA pages the
-    # static <title>/og:title is often the site name (e.g. "阿里巴巴校园招聘"),
-    # while the rendered body carries the actual position name. meta.title is
-    # kept as a fallback when the JD text yields no recognisable title.
-    derived_title = api_module._derive_title(jd_text)
-    title = (
-        derived_title
-        if derived_title and derived_title != '未命名岗位'
-        else meta.get('title')
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            '后端已不再抓取 JD 链接：请用浏览器油猴插件一键抓取岗位，'
+            '或改用「粘贴 JD」方式'
+        ),
     )
-    return {'title': title, 'jd_text': jd_text, 'company': meta.get('company'), 'city': meta.get('city'), 'salary_min': salary_min, 'salary_max': salary_max, 'salary_currency': 'CNY' if has_salary else None, 'source_url': jd_url}
 
 
 @router.post('/api/jobs/local-ingest')
@@ -365,9 +327,6 @@ async def update_library_job(job_id: str, req: JobUpdateRequest, request: Reques
         key: ("" if value is None else value)
         for key, value in raw_timeline.items()
     }
-    timeline = _with_auto_followup(
-        user["user_id"], job_id, req, raw_timeline, timeline
-    )
     try:
         job = api_module._jobs.update_job(user['user_id'], job_id, title=req.title, jd_text=req.jd_text, company=req.company, location=req.location, salary_min=req.salary_min, salary_max=req.salary_max, salary_currency=req.salary_currency, source_type=req.source_type, source_url=req.source_url, job_function=req.job_function, seniority=req.seniority, tech_tags=req.tech_tags, status=req.status, posting_date=req.posting_date, applied_at=timeline.get('applied_at'), next_step=timeline.get('next_step'), notes=timeline.get('notes'), offer_at=timeline.get('offer_at'), rejected_at=timeline.get('rejected_at'), next_step_due_at=timeline.get('next_step_due_at'), interview_stage=timeline.get('interview_stage'), tailor_granularity=req.tailor_granularity, tailor_focus=req.tailor_focus, custom_prompt=req.custom_prompt, allowed_job_functions=job_functions, allowed_seniorities=seniorities)
     except api_module.UserStoreError as exc:

@@ -90,7 +90,7 @@ def queue_batch_align(
                 created = api_module._create_job_from_source(
                     user, {'jd_url': jd_url, 'source_type': 'url'}
                 )
-            except (api_module.UserStoreError, api_module.CrawlError) as exc:
+            except api_module.UserStoreError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
             jobs.append(created)
     else:

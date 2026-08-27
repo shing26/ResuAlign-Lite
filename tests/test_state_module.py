@@ -11,7 +11,7 @@ import resualign.api as api_module
 from resualign.api import state
 from resualign.batch import BatchAlignStore
 from resualign.cache import ContentCache
-from resualign.job_library import CrawlTaskStore, JobLibraryStore
+from resualign.job_library import JobLibraryStore
 from resualign.jobs import JobRegistry
 from resualign.settings_store import SettingsStore
 from resualign.workspace import ApplicationStore, MasterResumeStore, UserStore
@@ -24,7 +24,6 @@ STATE_NAMES = (
     "_resumes",
     "_applications",
     "_jobs",
-    "_crawl_tasks",
     "_settings_store",
     "_cache",
     "_cache_db",
@@ -98,7 +97,6 @@ def test_state_singleton_types():
     assert isinstance(state._resumes, MasterResumeStore)
     assert isinstance(state._applications, ApplicationStore)
     assert isinstance(state._jobs, JobLibraryStore)
-    assert isinstance(state._crawl_tasks, CrawlTaskStore)
     assert isinstance(state._settings_store, SettingsStore)
     assert isinstance(state._cache, ContentCache)
     assert isinstance(state._batch_store, BatchAlignStore)

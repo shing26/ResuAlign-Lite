@@ -109,18 +109,6 @@ def test_personal_mode_workbench_without_token():
     assert r.status_code == 201
     resume_id = r.json()["resume_id"]
 
-    r = client.post(
-        "/api/applications",
-        json={
-            "title": "Backend at Acme",
-            "master_resume_id": resume_id,
-            "jd_text": "Python backend engineer.",
-        },
-    )
-    assert r.status_code == 201
-
-    apps = client.get("/api/applications").json()
-    assert len(apps) == 1
     resumes = client.get("/api/master-resumes").json()
     assert len(resumes) == 1
 

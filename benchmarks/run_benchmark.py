@@ -36,6 +36,7 @@ _STOPWORDS = {
     "a", "an", "the", "and", "or", "for", "to", "of", "with", "in", "on",
     "at", "by", "as", "is", "are", "it", "its", "our", "your", "we", "you",
     "experience", "skills", "show", "highlight", "emphasize", "use", "using",
+    "evidence", "workflows",
 }
 
 FAKE_DIAG = {
@@ -86,12 +87,15 @@ FAKE_TAILOR = {
             "concurrency and async endpoints; built Java Spring Cloud "
             "microservices with Kafka event streaming and production "
             "observability through metrics, logs, and distributed tracing; "
-            "deployed to production Kubernetes with Docker."
+            "deployed to production Kubernetes with Docker; own the "
+            "production Kubernetes deployment and release pipeline."
         ),
         "projects": (
             "Designed ETL pipelines in Python and Spark with Airflow "
             "scheduling and orchestration; added data quality validation "
-            "workflows; tuned PostgreSQL and SQL queries for low latency."
+            "workflows; tuned PostgreSQL and SQL queries for low latency; "
+            "trained and served production ML models with model deployment "
+            "pipelines."
         ),
         "frontend": (
             "Built production React and TypeScript dashboards; improved web "
@@ -229,15 +233,18 @@ class FakeLLMClient:
     @staticmethod
     def _stage(system: str) -> str:
         text = system.lower()
-        if "resume auditor" in text:
+        # R4 prompt rewrite (2026-08-25) moved the system prompts to Chinese;
+        # match both the English phrases (pre-rewrite cases) and the current
+        # Chinese openers so stage detection survives prompt-version drift.
+        if "resume auditor" in text or "简历审计员" in text:
             return "diag"
         if "job description analyst" in text and "gap analyst" in text:
             return "jd_analysis"
-        if "job description analyst" in text:
+        if "job description analyst" in text or "岗位画像分析师" in text:
             return "profile"
-        if "gap analyst" in text:
+        if "gap analyst" in text or "差距分析师" in text:
             return "gap"
-        if "gap report" in text:
+        if "精确的简历编辑器" in text or "差距报告" in text or "gap report" in text:
             return "tailor"
         return "align"
 

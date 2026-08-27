@@ -141,11 +141,11 @@ test("styles.css: mobile rail hides the brand so nav buttons stay tappable", () 
   );
 });
 
-test("kanban.js: single jobs top bar keeps fetch, blocker and export contracts", () => {
+test("kanban.js: single jobs top bar keeps conversion and export contracts", () => {
   const src = read("kanban.js");
   assert.match(src, /data-jobs-topbar/, "unified jobs top bar");
-  assert.match(src, /data-fetch-url-bar/, "fetch bar inside the top bar");
-  assert.match(src, /data-blocker-badge/, "blocker badge mount inside the top bar");
+  assert.doesNotMatch(src, /data-fetch-url-bar/, "fetch bar removed (crawler de-bloat)");
+  assert.doesNotMatch(src, /data-blocker-badge/, "blocker badge mount removed (blocker UI de-bloat)");
   assert.match(src, /data-jobs-conversion/, "template conversion row");
   assert.match(src, /data-jobs-apply-rate/, "apply conversion pill");
   assert.match(src, /data-jobs-interview-rate/, "interview conversion pill");

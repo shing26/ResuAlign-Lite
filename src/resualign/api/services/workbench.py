@@ -16,8 +16,6 @@ from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
 from resualign.llm_usage import reset_llm_tenant, set_llm_tenant
 from resualign.role_router import call_with_role
 
-from .progress_sink import CrawlProgressSink
-
 logger = logging.getLogger(__name__)
 SESSION_TTL_SECONDS = 30 * 60
 _SESSION_EVENT_QUEUE_SIZE = 512
@@ -413,10 +411,6 @@ def _create_library_job_without_llm(
         location = location or extracted_location
     salary_min = payload.get("salary_min")
     salary_max = payload.get("salary_max")
-    if salary_min is None or salary_max is None:
-        extracted_min, extracted_max = api_module.extract_salary_range(jd_text)
-        salary_min = salary_min if salary_min is not None else extracted_min
-        salary_max = salary_max if salary_max is not None else extracted_max
     job_functions, seniorities = api_module._settings_vocabulary(user["user_id"])
     return api_module._jobs.create_job(
         tenant_id=user["user_id"],
@@ -525,98 +519,32 @@ def _run_session_pipeline(session_id: str) -> None:
     _llm_tenant_token = set_llm_tenant(tenant_id)
     job = session.get("job")
     jd_url = (session.get("jd_url") or "").strip()
-    crawl_id = session.get("crawl", {}).get("crawl_id") or uuid.uuid4().hex
     try:
         if job is None and jd_url:
-            try:
-                api_module._crawl_tasks.create(
-                    tenant_id, jd_url, crawl_id=crawl_id
-                )
-            except Exception:
-                logger.warning(
-                    "Could not create crawl task %s for %s", crawl_id, jd_url
-                )
+            # De-bloat (2026-08-27): backend crawling retired; a session that
+            # only carries a URL (no JD text) cannot be ingested server-side
+            # and fails with a pointer to the paste / userscript flows.
             api_module._session_store.update(
                 session_id,
                 {
+                    "status": "failed",
                     "crawl": {
-                        "crawl_id": crawl_id,
-                        "status": "fetching",
-                        "stage": "fetching_jd",
-                        "error": None,
-                    }
+                        "crawl_id": None,
+                        "status": "failed",
+                        "stage": "crawl_retired",
+                        "error": (
+                            "该岗位只有链接没有 JD 文本：请用浏览器油猴插件抓取，"
+                            "或用「粘贴 JD」方式录入"
+                        ),
+                    },
                 },
             )
             api_module._session_store.emit(
                 session_id,
-                "crawl.status",
-                {"crawl_id": crawl_id, "status": "fetching", "stage": "fetching_jd"},
+                "job.error",
+                {"error": "后端已不再抓取 JD 链接，请使用油猴插件或粘贴 JD", "stage": "crawl"},
             )
-
-            progress = CrawlProgressSink(
-                api_module._crawl_tasks,
-                crawl_id,
-                tenant_id=tenant_id,
-            )
-
-            meta: dict[str, Any] = {}
-            jd_text = api_module.crawl_jd(
-                jd_url, meta=meta, on_stage=progress.on_stage
-            )
-            api_module._session_store.emit(
-                session_id,
-                "crawl.status",
-                {
-                    "crawl_id": crawl_id,
-                    "status": "parsing",
-                    "stage": "parsing_jd",
-                    "title": meta.get("title"),
-                },
-            )
-            job = _create_library_job_without_llm(
-                {"user_id": tenant_id},
-                {
-                    "title": meta.get("title"),
-                    "jd_text": jd_text,
-                    "jd_url": jd_url,
-                    "source_type": "url",
-                    "company": meta.get("company"),
-                    "location": meta.get("city"),
-                },
-            )
-            try:
-                api_module._crawl_tasks.update_state(
-                    crawl_id, "classifying", stage="classifying"
-                )
-            except Exception:
-                pass
-            api_module._session_store.update(
-                session_id,
-                {
-                    "job": job,
-                    "status": "ready",
-                    "jd": {"profile": None, "status": "queued", "error": None},
-                },
-            )
-            api_module._session_store.emit(
-                session_id,
-                "crawl.status",
-                {
-                    "crawl_id": crawl_id,
-                    "status": "succeeded",
-                    "stage": "done",
-                    "job_id": job["job_id"],
-                },
-            )
-            api_module._session_store.emit(
-                session_id,
-                "job.stage",
-                {
-                    "stage": "created",
-                    "message": "Job created from URL",
-                    "job_id": job["job_id"],
-                },
-            )
+            return
 
         if job is None:
             api_module._session_store.emit(
@@ -786,46 +714,6 @@ def _run_session_pipeline(session_id: str) -> None:
                 "gap_report": gap_dict,
                 "status": gap_status,
                 "cache_hit": cache_hit,
-            },
-        )
-        try:
-            api_module._crawl_tasks.update_state(
-                crawl_id, "succeeded", stage="done"
-            )
-        except Exception:
-            pass
-    except api_module.CrawlError as exc:
-        try:
-            api_module._crawl_tasks.update_state(
-                crawl_id, "failed", error=str(exc)
-            )
-        except Exception:
-            pass
-        api_module._session_store.update(
-            session_id,
-            {
-                "status": "failed",
-                "crawl": {
-                    "crawl_id": session.get("crawl", {}).get("crawl_id"),
-                    "status": "failed",
-                    "stage": "crawl_failed",
-                    "error": str(exc),
-                },
-            },
-        )
-        api_module._session_store.emit(
-            session_id,
-            "job.error",
-            {"error": f"Failed to crawl JD: {exc}", "stage": "crawl"},
-        )
-        api_module._session_store.emit(
-            session_id,
-            "crawl.status",
-            {
-                "crawl_id": session.get("crawl", {}).get("crawl_id"),
-                "status": "failed",
-                "stage": "crawl_failed",
-                "error": str(exc),
             },
         )
     except api_module.LLMResponseError as exc:

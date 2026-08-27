@@ -5,7 +5,6 @@ import pytest
 
 from resualign.cli import _parse_args, main
 from resualign.config import _STORED_LLM_PROVIDER, build_config
-from resualign.crawler import CrawlError
 from resualign.models import Report, ResuAlignConfig
 
 
@@ -116,54 +115,24 @@ def test_build_config_provider_from_cli():
     assert cfg.provider == "openrouter"
 
 
-def test_main_jd_url_fetches_and_runs(tmp_path, capsys):
-    fixture = Path(__file__).parent / "fixtures" / "sample.txt"
-    jd_text = "JD text from URL"
-    with patch("resualign.cli.build_config") as mock_build, patch(
-        "resualign.crawler.crawl_jd"
-    ) as mock_crawl, patch("resualign.cli.run") as mock_run:
-        mock_build.return_value = ResuAlignConfig(
-            provider="deepseek", api_key="test-key", model="test-model"
-        )
-        mock_crawl.return_value = jd_text
-        mock_run.return_value = Report(
-            score=81, skills=["Python"], issues=[], model="test-model"
-        )
-
-        main(
-            [
-                str(fixture),
-                "--jd-url",
-                "https://example.com/job",
-                "--output-dir",
-                str(tmp_path),
-            ]
-        )
-
-    out = capsys.readouterr().out
-    assert f"[OK] JD: {len(jd_text)} chars from URL" in out
-    mock_crawl.assert_called_once_with("https://example.com/job")
-    mock_run.assert_called_once()
-    assert mock_run.call_args.args[2] == jd_text
-
-
-def test_main_jd_url_crawl_failure(tmp_path, capsys):
+def test_main_jd_url_retired_with_pointer(tmp_path, capsys):
+    """De-bloat: backend crawling retired; --jd-url exits with a pointer to
+    paste / userscript ingestion instead of fetching."""
     fixture = Path(__file__).parent / "fixtures" / "sample.txt"
     with patch("resualign.cli.build_config") as mock_build, patch(
-        "resualign.crawler.crawl_jd", side_effect=CrawlError("boom")
-    ), patch("resualign.cli.run") as mock_run:
+        "resualign.cli.run"
+    ) as mock_run:
         mock_build.return_value = ResuAlignConfig(
             provider="deepseek", api_key="test-key", model="test-model"
         )
 
         with pytest.raises(SystemExit):
-            main([str(fixture), "--jd-url", "https://example.com/bad"])
+            main([str(fixture), "--jd-url", "https://example.com/job"])
 
         mock_run.assert_not_called()
 
     err = capsys.readouterr().err
-    assert "Error fetching JD from URL" in err
-    assert "boom" in err
+    assert "--jd-url was retired" in err
 
 
 def test_main_prints_stage_progress_to_stderr(tmp_path, capsys):

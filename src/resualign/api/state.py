@@ -14,7 +14,6 @@ from typing import Any, Optional
 from ..batch import BatchAlignStore
 from ..cache import ContentCache
 from ..config import EnvSettings
-from ..job_library import CrawlTaskStore
 from ..jobs import JobRegistry, resolve_data_dir
 from ..llm_nodes import LLMNodeStore
 from ..llm_usage import LLMUsageStore
@@ -41,9 +40,7 @@ __all__ = [
     "_batch_store",
     "_cache",
     "_cache_db",
-    "_crawl_tasks",
     "_env_settings",
-    "_fetcher",
     "_import_batches",
     "_import_rate_limiter",
     "_jobs",
@@ -51,7 +48,6 @@ __all__ = [
     "_llm_usage",
     "_payloads",
     "_registry",
-    "_refresh_service",
     "_session_store",
     "_settings_store",
     "_users",
@@ -108,13 +104,9 @@ _applications = ApplicationStore(
     db_path=_env_settings.resualign_job_db or None
 )
 _jobs = JobLibraryStore(db_path=_env_settings.resualign_job_db or None)
-_crawl_tasks = CrawlTaskStore(db_path=_env_settings.resualign_job_db or None)
 _settings_store = SettingsStore(db_path=_env_settings.resualign_job_db or None)
 _llm_nodes = LLMNodeStore(db_path=_env_settings.resualign_job_db or None)
 _llm_usage = LLMUsageStore(db_path=_env_settings.resualign_job_db or None)
-from .services.job_refresh import JobRefreshService  # noqa: E402
-
-_refresh_service = JobRefreshService()
 _cache_db = resolve_data_dir() / "content-cache.db"
 _cache = ContentCache(db_path=_cache_db)
 
@@ -135,7 +127,3 @@ _payloads: dict[
 from .services import workbench as _workbench_service  # noqa: E402
 
 _session_store = _workbench_service.WorkstationSessionStore()
-
-from .services import fetcher as _fetcher_service  # noqa: E402
-
-_fetcher = _fetcher_service.JobFetcherService()

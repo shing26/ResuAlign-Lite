@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
-from resualign.job_library import CrawlTaskStore, JobLibraryStore
+from resualign.job_library import JobLibraryStore
 from resualign.jobs import JobRegistry
 from resualign.models import (
     DiffItem,
@@ -240,80 +240,6 @@ def test_kanban_bulk_status_limits_and_validates():
         headers=_auth_headers(),
     )
     assert bad_status.status_code == 422
-
-
-def test_crawl_task_state_machine_and_retry(tmp_path):
-    store = CrawlTaskStore(db_path=tmp_path / "crawl.db")
-    task = store.create(
-        "tenant-1", "https://example.com/jobs/1", job_id="job-1"
-    )
-    assert task["status"] == "queued"
-    assert store.update_state(task["crawl_id"], "fetching")["status"] == "fetching"
-    assert store.update_state(task["crawl_id"], "parsing")["status"] == "parsing"
-    assert (
-        store.update_state(task["crawl_id"], "classifying")["status"]
-        == "classifying"
-    )
-    done = store.update_state(task["crawl_id"], "succeeded", stage="done")
-    assert done["status"] == "succeeded"
-    assert done["finished_at"] is not None
-
-    with pytest.raises(api_module.UserStoreError, match="Invalid crawl"):
-        store.update_state(task["crawl_id"], "fetching")
-
-    # Failed tasks may be requeued for a retry.
-    retry_task = store.create("tenant-1", "https://example.com/jobs/2")
-    store.update_state(retry_task["crawl_id"], "failed", error="boom")
-    assert store.requeue_interrupted(retry_task["crawl_id"]) is True
-    assert store.get(retry_task["crawl_id"])["status"] == "queued"
-
-
-def test_crawl_task_restart_recovery(tmp_path):
-    store = CrawlTaskStore(db_path=tmp_path / "crawl.db")
-    first = store.create("tenant-1", "https://example.com/jobs/1")
-    second = store.create("tenant-1", "https://example.com/jobs/2")
-    store.update_state(first["crawl_id"], "fetching")
-    store.update_state(first["crawl_id"], "parsing")
-    store.update_state(second["crawl_id"], "fetching")
-    store.update_state(second["crawl_id"], "parsing")
-    store.update_state(second["crawl_id"], "classifying")
-    store.update_state(second["crawl_id"], "succeeded")
-
-    assert set(store.pending_crawl_ids()) == {first["crawl_id"]}
-    assert store.recover_interrupted() == 1
-    assert store.get(first["crawl_id"])["status"] == "queued"
-    assert store.get(second["crawl_id"])["status"] == "succeeded"
-
-
-def test_crawl_jd_on_stage_callback(monkeypatch):
-    from resualign import crawler
-
-    stages = []
-
-    class _FakeFetched:
-        content = b"<p>JD</p>"
-        encoding = "utf-8"
-        url = "https://example.com/jobs/1"
-        ip = None
-        cookies = {}
-
-    monkeypatch.setattr(
-        crawler,
-        "_static_fetch",
-        lambda *args, **kwargs: _FakeFetched(),
-    )
-    monkeypatch.setattr(
-        crawler,
-        "_parse_html",
-        lambda *args, **kwargs: "Parsed JD",
-    )
-
-    text = crawler.crawl_jd(
-        "https://example.com/jobs/1",
-        on_stage=lambda stage, message: stages.append(stage),
-    )
-    assert text == "Parsed JD"
-    assert stages == ["fetching", "parsing"]
 
 
 def test_workbench_success_persists_alignment():

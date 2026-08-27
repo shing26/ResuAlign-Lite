@@ -15,7 +15,6 @@ from ...config import (
 )
 from ...job_library import JOB_STATUSES
 from ...llm import _DEFAULT_PROVIDER_URLS
-from ...reminders import reminder_configuration
 from ...settings_store import default_settings
 from ..deps import get_current_user
 from ..schemas import SettingsTestConnectionRequest, SettingsUpdateRequest
@@ -278,8 +277,6 @@ def update_settings(req: SettingsUpdateRequest, user: dict[str, Any]=Depends(get
         # Keep only explicitly-set fields so omitted keys leave the stored
         # value untouched, while explicit nulls clear them.
         updates["llm"] = req.llm.model_dump(exclude_unset=True)
-    if req.reminder is not None:
-        updates["reminder"] = req.reminder.model_dump(exclude_unset=True)
     try:
         saved = api_module._settings_store.update_settings(
             user['user_id'], updates
@@ -298,10 +295,6 @@ def update_settings(req: SettingsUpdateRequest, user: dict[str, Any]=Depends(get
 def settings_status(user: dict[str, Any] = Depends(get_current_user)):
     """Return runtime status so the settings page is not just raw forms."""
     config = api_module.build_config()
-    reminder = api_module._settings_store.get_settings(
-        user["user_id"]
-    ).get("reminder") or {}
-    reminder_config = reminder_configuration(api_module._settings_store)
     env = EnvSettings()
     daily = api_module.llm_daily_status(user["user_id"])
     return {
@@ -318,18 +311,6 @@ def settings_status(user: dict[str, Any] = Depends(get_current_user)):
         "application_count": len(
             api_module._applications.list_applications(user["user_id"])
         ),
-        "reminder": {
-            "enabled": bool(reminder.get("enabled")),
-            "provider": reminder.get("provider") or "generic",
-            "webhook_url_configured": bool(
-                reminder_config.get("webhook_url")
-            ),
-            "webhook_secret_configured": bool(
-                reminder_config.get("webhook_secret")
-            ),
-            "smtp_configured": bool(reminder_config.get("smtp_host")),
-            "smtp_password_configured": bool(env.resualign_smtp_password),
-        },
         "daily": daily,
     }
 

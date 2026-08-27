@@ -16,19 +16,6 @@ def reset_shared_rate_limiters():
     yield
 
 
-@pytest.fixture(autouse=True)
-def isolated_crawl_task_store(tmp_path):
-    """Keep crawl task rows out of the real data directory during tests."""
-    import resualign.api as api_module
-
-    saved = api_module._crawl_tasks
-    api_module._crawl_tasks = api_module.CrawlTaskStore(
-        db_path=tmp_path / "crawl-tasks-test.db"
-    )
-    yield
-    api_module._crawl_tasks = saved
-
-
 class MockLLMClient:
     """Sequence-based fake LLM client for unit testing pipeline stages.
 

@@ -6,12 +6,12 @@ from .llm import LLMClient, _structured_or_json
 from .models import DiffItem, TailoredResume
 from .schema_registry import DiffItemSchema, TailoredResumeSchema
 
-# PROMPT_VERSION bump: bullet_rewrite/v1 -> v2（2026-08-25，对照 04b-PE §2.5-附）
+# PROMPT_VERSION bump: bullet_rewrite/v2 -> v3（2026-08-27，黄金核心 1：Few-Shot 强动词库）
 # 本次升级说明：
-# - 变更点 1：rewrite_bullet 内联 system 提取为常量 BULLET_REWRITE_PROMPT（可观测、语义一致）
-# - 变更点 2：proposed ≤ 250 字、reason ≤ 40 字长度约束；严禁新增事实
+# - 变更点 1：新增强动词库（构建/设计/落地/优化…）与禁止弱动词（负责/参与/协助…）
+# - 变更点 2：proposed 强制「强动词 + 具象机制 + 量化插槽」三件套，杜绝「负责系统优化」空话
 # - 缓存影响：版本常量随文本变更 bump，缓存键自动失效。
-BULLET_REWRITE_PROMPT_VERSION = "v2"
+BULLET_REWRITE_PROMPT_VERSION = "v3"
 # PROMPT_VERSION bump: tailor/v1 -> v2（2026-08-25，对照 04b-PE §2.5）
 # 本次升级说明：
 # - 变更点 1：14 条编号规则压缩为 7 条，去掉「用 JD 原话」重复堆砌
@@ -23,7 +23,7 @@ BULLET_REWRITE_PROMPT_VERSION = "v2"
 # - 缓存影响：版本常量随文本变更 bump，缓存键自动失效。
 TAILOR_PROMPT_VERSION = "v2"
 
-BULLET_REWRITE_PROMPT = """PROMPT_VERSION: bullet_rewrite/v2
+BULLET_REWRITE_PROMPT = """PROMPT_VERSION: bullet_rewrite/v3
 
 你是简历单条要点改写器。针对一条简历要点（bullet）按给定指令改写，用于投递指定 JD。
 
@@ -31,14 +31,21 @@ BULLET_REWRITE_PROMPT = """PROMPT_VERSION: bullet_rewrite/v2
 1. 保留原条目的每一个事实、技术、指标；禁止新增技能、经验、工具、公司或数字；
 2. 只应用给定指令到已有事实上，不得发明或推断。
 
+## 强动词库（Few-Shot：从下面的动词起步，绝不使用弱动词）
+优先使用：构建、设计、落地、优化、重构、驱动、支撑、主导、搭建、打通、调优、攻克、沉淀、推广、量化
+禁止使用：负责、参与、协助、了解、熟悉（这些是简历空话；出现即视为失败输出）
+每条 proposed 必须满足「强动词 + 具象机制（如联合索引/读写分离/本地缓存）+ 量化插槽 [X%]」三件套；
+若原文无数字，保留 [待人工确认：…] 占位符并由用户补齐，绝不编造具体数值。
+
 ## Output Contract（只能输出一个 JSON 对象，2 个字段）
 键名固定为：proposed / reason
 
-- proposed：改写后的新文本，≤ 250 字；保持与原文同语言；JD 技术短语（如 "production Kubernetes deployment"、"FastAPI async endpoints"）保留英文原文。
+- proposed：改写后的新文本，≤ 250 字；保持与原文同语言；JD 技术短语（如 "production Kubernetes deployment"、"FastAPI async endpoints"）保留英文原文；必须含强动词与具象机制。
 - reason：一句话理由，≤ 40 字。
 
 ## 提交前自查
 - proposed 中每个技术名词与数字都能在原文找到依据；无新增事实；长度在上限内；
+- proposed 不含「负责/参与/协助/了解/熟悉」等弱动词；
 - 只输出 JSON，无 markdown fence，无解释文字。"""
 METRIC_PLACEHOLDER = "[待人工确认：耗时降低 X% / 支撑 QPS 达 Y]"
 _METRIC_HINT_RE = re.compile(

@@ -118,9 +118,6 @@ async function mockFetch(path, options = {}) {
   if (method === "GET" && url.startsWith("/api/master-resumes")) {
     return jsonBody([]);
   }
-  if (method === "GET" && url.startsWith("/api/blockers")) {
-    return jsonBody([]);
-  }
   if (method === "GET" && url.startsWith("/api/llm/nodes")) {
     return jsonBody([]);
   }

@@ -8,7 +8,6 @@ succeeded).
 
 from __future__ import annotations
 
-from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -25,8 +24,6 @@ from ..schemas import (
 
 router = APIRouter()
 
-# Canonical statuses that still produce an active follow-up reminder.
-_ACTIVE_REMINDER_STATUSES = {"applied", "interview"}
 # Upper bound for the returned skill-gap ranking.
 _SKILL_GAP_LIMIT = 8
 
@@ -48,19 +45,6 @@ def _job_funnel_stage(job: dict[str, Any]) -> str:
     return stages[peak]
 
 
-def _due_date_key(value: str | None) -> str | None:
-    """Normalize a stored follow-up due value to a YYYY-MM-DD key.
-
-    ``next_step_due_at`` is stored as a full ISO timestamp (e.g.
-    ``2026-08-15T09:00:00Z``); only the date prefix participates in the
-    "not expired" comparison against today.
-    """
-    if not value:
-        return None
-    key = value.strip()[:10]
-    return key or None
-
-
 @router.get("/api/dashboard", response_model=DashboardResponse)
 def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
     """Return aggregated KPI, skill-gap, and quick-continue data.
@@ -69,8 +53,6 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
     - ``kpi.jobs`` counts the tenant's library jobs; applied/interview/offer
       use the historical peak stage (offer_at > applied_at > current status),
       while declined stays the current withdrawn count.
-    - ``kpi.active_followups`` counts jobs whose ``next_step_due_at`` is
-      non-empty and not in the past, restricted to applied/interview jobs.
     - ``skill_gaps`` ranks the frequencies of ``must_have_skills`` across
       all job JD profiles, descending (top 8).
     - ``quick_continue`` is the most recently updated job whose
@@ -85,8 +67,6 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
     interview = 0
     offer = 0
     declined = 0
-    active_followups = 0
-    today = date.today().isoformat()
     for job in jobs:
         canonical = job["status_canonical"]
         stage = _job_funnel_stage(job)
@@ -98,13 +78,6 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
             offer += 1
         if canonical == "withdrawn":
             declined += 1
-        due = _due_date_key(job["next_step_due_at"])
-        if (
-            canonical in _ACTIVE_REMINDER_STATUSES
-            and due is not None
-            and due >= today
-        ):
-            active_followups += 1
 
     skill_counts: dict[str, int] = {}
     for job in jobs:
@@ -151,7 +124,6 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
             interview=interview,
             offer=offer,
             declined=declined,
-            active_followups=active_followups,
         ),
         skill_gaps=skill_gaps,
         quick_continue=quick_continue,

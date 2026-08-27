@@ -53,18 +53,6 @@ class OptimizeApplyItem(BaseModel):
 class OptimizeApplyRequest(BaseModel):
     items: list[OptimizeApplyItem] = Field(default_factory=list, max_length=200)
 
-class ApplicationCreateRequest(BaseModel):
-    title: str = Field(max_length=_TITLE_MAX)
-    master_resume_id: str
-    jd_text: str | None = Field(default=None, max_length=_JD_TEXT_MAX)
-    jd_url: str | None = Field(default=None, max_length=_URL_MAX)
-
-class ApplicationUpdateRequest(BaseModel):
-    title: str | None = Field(default=None, max_length=_TITLE_MAX)
-    jd_text: str | None = Field(default=None, max_length=_JD_TEXT_MAX)
-    jd_url: str | None = Field(default=None, max_length=_URL_MAX)
-    status: str | None = None
-
 class JobCreateRequest(BaseModel):
     title: str | None = Field(default=None, max_length=_TITLE_MAX)
     jd_text: str | None = Field(default=None, max_length=_JD_TEXT_MAX)
@@ -143,7 +131,11 @@ class LLMSettingsUpdate(BaseModel):
 
 
 class ReminderSettingsUpdate(BaseModel):
-    """Editable reminder delivery settings (secrets stay environment-only)."""
+    """Editable reminder delivery settings.
+
+    De-bloat (2026-08-27): the reminder system was removed; this schema is
+    kept only so legacy PUT payloads still validate instead of 422ing.
+    """
 
     enabled: bool | None = None
     auto_followup_reminder: StrictBool | None = None
@@ -375,7 +367,6 @@ class DashboardKPI(BaseModel):
     interview: int = 0
     offer: int = 0
     declined: int = 0
-    active_followups: int = 0
 
 
 class SkillGapItem(BaseModel):
@@ -403,43 +394,6 @@ class DashboardResponse(BaseModel):
     quick_continue: DashboardQuickContinue | None = None
 
 
-class ReminderItem(BaseModel):
-    """One follow-up due today or overdue for the tenant."""
-
-    job_id: str
-    title: str
-    company: str | None = None
-    status_canonical: str = "applied"
-    next_step_due_at: str | None = None
-    interview_stage: str | None = None
-    next_step: str | None = None
-    overdue: bool = False
-    reminder_sent_at: float | None = None
-
-
-class ReminderListResponse(BaseModel):
-    items: list[ReminderItem] = Field(default_factory=list)
-
-
-class JobRefreshResponse(BaseModel):
-    """Result of queueing or running one URL job refresh."""
-
-    queued: bool = False
-    job_id: str
-    crawl_id: str | None = None
-    reason: str | None = None
-    title: str | None = None
-    status: str | None = None
-    changed: bool | None = None
-    changed_fields: list[str] = Field(default_factory=list)
-    error: str | None = None
-    job: dict[str, Any] | None = None
-
-
-class JobRefreshAllResponse(BaseModel):
-    items: list[JobRefreshResponse] = Field(default_factory=list)
-
-
 class AutomationRuleCreateRequest(BaseModel):
     """Create one automation rule for the fetch pipeline."""
 
@@ -455,18 +409,6 @@ class AutomationRuleUpdateRequest(BaseModel):
     value: str | None = Field(default=None, max_length=_RULE_VALUE_MAX)
     label: str | None = Field(default=None, max_length=_LABEL_MAX)
     enabled: bool | None = None
-
-
-class FetchUrlRequest(BaseModel):
-    """Submit one JD URL to the fetch pipeline."""
-
-    url: str = Field(max_length=_URL_MAX)
-
-
-class BlockerResolveRequest(BaseModel):
-    """Resolve a blocker by building a library job from pasted JD text."""
-
-    manual_text: str = Field(max_length=_JD_TEXT_MAX)
 
 
 class JobExportRequest(BaseModel):

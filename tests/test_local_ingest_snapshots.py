@@ -131,8 +131,10 @@ def test_local_ingest_creates_pending_job_with_deterministic_fields():
     assert job["title"] == "后端工程师"
     assert job["company"] == "Acme"
     assert job["location"] == "Shanghai"
-    assert job["salary_min"] == 20000
-    assert job["salary_max"] == 30000
+    # De-bloat: salary is no longer auto-extracted from salary_text/JD text;
+    # the field stays populated only when explicitly provided.
+    assert job["salary_min"] is None
+    assert job["salary_max"] is None
     assert job["status"] == "draft"  # Bug-12
     assert job["status_label"] == "未投递"  # display layer stays localized
     assert job["source_url"] == "https://www.shixiseng.com/intern/abc"

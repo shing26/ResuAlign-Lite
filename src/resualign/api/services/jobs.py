@@ -258,38 +258,32 @@ def _extract_company_location(
     return company, location
 
 def _crawl_jd_or_502(jd_url: str, meta: dict[str, Any] | None=None) -> str:
-    """Crawl a JD URL, mapping crawler failures to a stable 502 response."""
-    try:
-        return api_module.crawl_jd(jd_url, meta=meta)
-    except api_module.CrawlError as exc:
-        logger.warning('JD crawl failed for %s: %s', jd_url, exc)
-        raise HTTPException(status_code=502, detail=api_module._jd_parse_error_detail(exc)) from exc
+    """Crawl a JD URL, mapping crawler failures to a stable 502 response.
 
-def _jd_parse_error_detail(exc: api_module.CrawlError) -> dict[str, str]:
-    """Map a crawl failure to a user-actionable, non-leaking classification."""
-    message = str(exc.args[0]) if exc.args else str(exc)
-    lowered = message.lower()
-    if exc.category == 'url':
-        if 'private or local' in lowered or 'not globally routable' in lowered:
-            return {'code': 'blocked_by_policy', 'reason': '该链接被安全策略拦截，可能是内网地址或非公开招聘页', 'action': '请确认链接为公开职位页，或改用粘贴 JD'}
-        return {'code': 'invalid_url', 'reason': '链接格式无效，请输入有效的 https:// 招聘链接', 'action': '请检查链接后重试，或改用粘贴 JD'}
-    if exc.category == 'dns':
-        return {'code': 'network_error', 'reason': '无法解析目标站点，可能是网络问题或链接已失效', 'action': '请确认链接可访问，或改用粘贴 JD'}
-    if exc.category in ('empty', 'selector'):
-        return {'code': 'no_content', 'reason': '该站点无法直接读取正文，可能需要登录或动态加载', 'action': '请改用粘贴 JD 或更换链接重试'}
-    if exc.category == 'fetch':
-        if 'timeout' in lowered or 'timed out' in lowered:
-            return {'code': 'timeout', 'reason': '链接解析超时，站点可能暂时不可用', 'action': '请改用粘贴 JD 或稍后重试'}
-        return {'code': 'network_error', 'reason': '无法连接到目标站点，可能是网络问题或站点暂时不可用', 'action': '请改用粘贴 JD 或稍后重试'}
-    if exc.category == 'http':
-        if 'too many redirects' in lowered:
-            return {'code': 'site_error', 'reason': '站点重定向异常，无法完成解析', 'action': '请改用粘贴 JD 或更换链接重试'}
-        status_match = re.search('HTTP (\\d{3})', message)
-        status = int(status_match.group(1)) if status_match else None
-        if status in (401, 403):
-            return {'code': 'login_required', 'reason': '该站点需要登录或权限，无法直接读取正文', 'action': '请改用粘贴 JD 或更换链接重试'}
-        return {'code': 'site_error', 'reason': '目标站点返回错误，暂时无法解析正文', 'action': '请改用粘贴 JD 或稍后重试'}
-    return {'code': 'site_error', 'reason': '未能解析该岗位链接', 'action': '请改用粘贴 JD 或稍后重试'}
+    De-bloat (2026-08-27): backend crawling was fully retired; JD intake is
+    handled by the collector userscript (local-ingest) or pasted text. A
+    URL-only ingest without text is now rejected with a pointer to those
+    paths instead of hitting the network.
+    """
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            '后端已不再抓取 JD 链接：请用浏览器油猴插件一键抓取，'
+            '或改用「粘贴 JD」方式'
+        ),
+    )
+
+def _jd_parse_error_detail(exc: BaseException) -> dict[str, str]:
+    """Map a crawl failure to a user-actionable, non-leaking classification.
+
+    De-bloat (2026-08-27): backend crawling retired; only guard against
+    accidental use of the removed crawl path.
+    """
+    return {
+        'code': 'crawl_retired',
+        'reason': '后端已不再抓取 JD 链接，请使用油猴插件或粘贴 JD',
+        'action': '请改用粘贴 JD 或浏览器插件抓取',
+    }
 
 def _deterministic_job_fields(payload: dict[str, Any]) -> dict[str, Any]:
     """Resolve title/company/location/salary without any LLM round-trip."""
@@ -303,13 +297,6 @@ def _deterministic_job_fields(payload: dict[str, Any]) -> dict[str, Any]:
         location = location or extracted_location
     salary_min = payload.get('salary_min')
     salary_max = payload.get('salary_max')
-    if salary_min is None or salary_max is None:
-        salary_text = (payload.get('salary_text') or '').strip()
-        extracted_min, extracted_max = api_module.extract_salary_range(
-            salary_text or jd_text
-        )
-        salary_min = salary_min if salary_min is not None else extracted_min
-        salary_max = salary_max if salary_max is not None else extracted_max
     return {
         'title': title,
         'company': company,
@@ -320,12 +307,19 @@ def _deterministic_job_fields(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    """Crawl/derive/extract/classify one job and store it in the library."""
+    """Derive/extract/classify one job and store it in the library.
+
+    De-bloat (2026-08-27): backend crawling is retired. A URL-only payload
+    (``jd_url`` without ``jd_text``) is rejected with a pointer to the
+    collector userscript / paste flow instead of crawling the network.
+    """
     payload = dict(payload or {})
     jd_text = (payload.get('jd_text') or '').strip()
     jd_url = (payload.get('jd_url') or '').strip()
     if jd_url and (not jd_text):
-        jd_text = api_module.crawl_jd(jd_url)
+        raise api_module.UserStoreError(
+            '该岗位只有链接没有 JD 文本：请用浏览器油猴插件抓取，或用「粘贴 JD」方式录入'
+        )
     if not jd_text:
         raise api_module.UserStoreError('Job description text is required')
     payload['jd_text'] = jd_text
@@ -427,7 +421,7 @@ def _run_import(import_id: str) -> None:
             try:
                 api_module._create_job_from_source(user, row)
                 batch['created'] += 1
-            except (api_module.UserStoreError, api_module.CrawlError, api_module.LLMResponseError) as exc:
+            except (api_module.UserStoreError, api_module.LLMResponseError) as exc:
                 batch['skipped'] += 1
                 batch['errors'].append(f"{row.get('title') or 'Untitled'}: {exc}")
     except Exception as exc:
@@ -506,8 +500,14 @@ def _run_job(job_id: str) -> None:
                             },
                         )
             jd_text = (payload.get('jd_text') or '').strip()
+            # De-bloat: backend crawling retired; a URL-only queued job
+            # without JD text cannot be recovered and fails with a clear reason.
             if payload.get('jd_url') and (not jd_text):
-                jd_text = api_module.crawl_jd(payload['jd_url'])
+                api_module._registry.fail(
+                    job_id,
+                    '该岗位只有链接没有 JD 文本：请用浏览器油猴插件抓取，或用「粘贴 JD」方式重新录入',
+                )
+                return
             t0 = time.monotonic()
             if payload.get('optimize_resume'):
                 result = api_module._run_resume_optimize(
@@ -707,21 +707,13 @@ def _run_job(job_id: str) -> None:
                         application_id,
                         job_id,
                     )
-        except api_module.CrawlError as exc:
-            api_module._registry.fail(job_id, f'Failed to crawl JD from URL: {exc}')
-            if application_id:
-                try:
-                    api_module._applications.set_application_job(tenant_id, application_id, job_id, 'failed')
-                except Exception:
-                    logger.exception(
-                        'Failed to link application %s after crawl failure %s',
-                        application_id,
-                        job_id,
-                    )
         except Exception as exc:
+            # De-bloat: the CrawlError branch was removed with the crawler;
+            # every failure (including LLM/structure errors) now lands here
+            # and is classified into a user-readable reason below.
             logger.exception('Analysis job %s failed', job_id)
             # t0 is only bound once the try body reached the run phase; guard
-            # so crawls/claims that fail earlier never NameError here.
+            # so claims that fail earlier never NameError here.
             elapsed_secs = (
                 round(time.monotonic() - t0, 1)
                 if 't0' in locals() and t0 is not None

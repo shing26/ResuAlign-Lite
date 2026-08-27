@@ -27,12 +27,10 @@ from ..batch import BatchAlignStore
 from ..cache import ContentCache
 from ..classifier import classify_job
 from ..config import EnvSettings, build_config
-from ..crawler import CrawlError, crawl_jd
 from ..engine import run
 from ..gap_analyzer import analyze_gaps
 from ..jd_analysis import jd_profile_to_dict, proactive_jd_profile
 from ..jd_profiler import profile_jd
-from ..job_library import CrawlTaskStore
 from ..jobs import JobRegistry, resolve_data_dir
 from ..llm import LLMResponseError, OpenAIClient, register_daily_usage_recorder
 from ..match_scorer import compute_match_score, fallback_match_reason, snapshot_matches
@@ -51,9 +49,6 @@ from ..parser import (
     extract_text,
     structured_resume_sections,
 )
-from ..reminders import ReminderDeliveryWorker
-from ..salary import extract_salary_range
-from ..scheduler import ReminderScheduler
 from ..settings_store import SettingsStore
 from ..tailor import rewrite_bullet
 from ..workspace import (
@@ -70,13 +65,9 @@ from .deps import (
 )
 from .schemas import (
     AnalyzeRequest,
-    ApplicationCreateRequest,
-    ApplicationUpdateRequest,
     AutomationRuleCreateRequest,
     AutomationRuleUpdateRequest,
-    BlockerResolveRequest,
     BulkStatusRequest,
-    FetchUrlRequest,
     FinalDraftRequest,
     JDParseRequest,
     JobCreateRequest,
@@ -101,23 +92,16 @@ from .schemas import (
 __all__ = [
     "ApplicationStore",
     "AnalyzeRequest",
-    "ApplicationCreateRequest",
-    "ApplicationUpdateRequest",
     "AutomationRuleCreateRequest",
     "AutomationRuleUpdateRequest",
     "BatchAlignStore",
-    "BlockerResolveRequest",
     "BulkStatusRequest",
     "ContentCache",
-    "CrawlError",
-    "CrawlTaskStore",
     "EnvSettings",
-    "FetchUrlRequest",
     "FileParseError",
     "FinalDraftRequest",
     "JDParseRequest",
     "JobCreateRequest",
-    "JobFetcherService",
     "JobImportRequest",
     "JobLibraryStore",
     "JobRegistry",
@@ -150,17 +134,14 @@ __all__ = [
     "_bearer_token",
     "_cancel_batch_align",
     "_enforce_rate_limit",
-    "_fetcher",
     "_get_batch_align",
     "_queue_batch_align",
     "_run_resume_optimize",
     "apply_resume_optimize_items",
     "build_config",
     "classify_job",
-    "crawl_jd",
     "enforce_daily_llm_cap",
     "enforce_llm_task_entry",
-    "extract_salary_range",
     "extract_text",
     "get_current_user",
     "jd_profile_to_dict",
@@ -262,8 +243,6 @@ from .state import (  # noqa: F401, I001  (explicit bindings used below)
     _WORKER_CONCURRENCY,
     _WORKER_SEMAPHORE,
     _cache,
-    _crawl_tasks,
-    _fetcher,
     _jobs,
     _registry,
     _settings_store,
@@ -282,15 +261,12 @@ from .services.cost_guard import (
     record_daily_llm_usage,
 )
 
-from .services.fetcher import JobFetcherService  # noqa: E402
 from ..rules import RuleFilterEngine, RuleVerdict  # noqa: E402
 
 _settings_vocabulary = _jobs_service._settings_vocabulary
 _classify_job = _jobs_service._classify_job
 _derive_title = _jobs_service._derive_title
 _extract_company_location = _jobs_service._extract_company_location
-_crawl_jd_or_502 = _jobs_service._crawl_jd_or_502
-_jd_parse_error_detail = _jobs_service._jd_parse_error_detail
 _create_job_from_source = _jobs_service._create_job_from_source
 _deterministic_job_fields = _jobs_service._deterministic_job_fields
 _local_ingest_job = _jobs_service._local_ingest_job
@@ -359,9 +335,6 @@ def _recover_pending_jobs() -> None:
         _registry.requeue_interrupted(job_id)
         logger.info("Recovering interrupted analysis job %s", job_id)
         threading.Thread(target=_run_job, args=(job_id,), daemon=True).start()
-    recovered_crawls = _crawl_tasks.recover_interrupted()
-    if recovered_crawls:
-        logger.info("Recovered %s interrupted crawl tasks", recovered_crawls)
 
 
 @asynccontextmanager
@@ -381,15 +354,10 @@ async def lifespan(_: FastAPI):
     register_daily_usage_recorder(record_daily_llm_usage)
     _backfill_diagnosis_snapshots()
     _recover_pending_jobs()
-    reminder_scheduler = ReminderScheduler(_jobs)
-    reminder_scheduler.start()
-    reminder_delivery = ReminderDeliveryWorker(_jobs, _settings_store)
-    reminder_delivery.start()
     try:
         yield
     finally:
-        reminder_scheduler.stop()
-        reminder_delivery.stop()
+        pass
 
 
 app = FastAPI(title="ResuAlign API", version="0.3.0", lifespan=lifespan)
@@ -498,19 +466,10 @@ from .routers import (
     analyze as _analyze_router,
 )
 from .routers import (
-    applications as _applications_router,
-)
-from .routers import (
     auth as _auth_router,
 )
 from .routers import (
     batch as _batch_router_alias,
-)
-from .routers import (
-    blockers as _blockers_router,
-)
-from .routers import (
-    fetch as _fetch_router,
 )
 from .routers import (
     health as _health_router,
@@ -523,12 +482,6 @@ from .routers import (
 )
 from .routers import (
     nodes as _nodes_router,
-)
-from .routers import (
-    refresh as _refresh_router,
-)
-from .routers import (
-    reminders as _reminders_router,
 )
 from .routers import (
     resumes as _resumes_router,
@@ -578,12 +531,6 @@ diagnose_master_resume = _resumes_router.diagnose_master_resume
 update_master_resume = _resumes_router.update_master_resume
 rollback_master_resume = _resumes_router.rollback_master_resume
 delete_master_resume = _resumes_router.delete_master_resume
-create_application = _applications_router.create_application
-list_applications = _applications_router.list_applications
-get_application = _applications_router.get_application
-update_application = _applications_router.update_application
-delete_application = _applications_router.delete_application
-run_application = _applications_router.run_application
 get_settings = _settings_router.get_settings
 update_settings = _settings_router.update_settings
 create_batch_align = _batch_router_alias.create_batch_align
@@ -594,14 +541,10 @@ get_workbench_session = _workspace_router.get_workbench_session
 get_workspace_session = _workspace_router.get_workspace_session
 stream_workbench_events = _workspace_router.stream_workbench_events
 bulk_update_kanban_status = _kanban_router.bulk_update_kanban_status
-fetch_url = _fetch_router.fetch_url
 list_automation_rules = _rules_router.list_automation_rules
 create_automation_rule = _rules_router.create_automation_rule
 update_automation_rule = _rules_router.update_automation_rule
 delete_automation_rule = _rules_router.delete_automation_rule
-list_reminders = _reminders_router.list_reminders
-refresh_library_job = _refresh_router.refresh_library_job
-refresh_all_library_jobs = _refresh_router.refresh_all_library_jobs
 list_llm_nodes = _nodes_router.list_llm_nodes
 create_llm_node = _nodes_router.create_llm_node
 update_llm_node = _nodes_router.update_llm_node
@@ -610,9 +553,6 @@ activate_llm_node = _nodes_router.activate_llm_node
 test_llm_node = _nodes_router.test_llm_node
 optimize_master_resume = _optimize_router.optimize_master_resume
 apply_resume_optimize = _optimize_router.apply_resume_optimize
-list_blockers = _blockers_router.list_blockers
-ignore_blocker = _blockers_router.ignore_blocker
-resolve_blocker = _blockers_router.resolve_blocker
 
 
 # ---------------------------------------------------------------------------

@@ -256,6 +256,21 @@ test("diffCard renders actionable modify card with provenance", () => {
   assert.doesNotMatch(html, /diff-card--invalid/);
 });
 
+test("diffCard renders the inline edit button on valid modify cards", () => {
+  const html = diffCard(SAMPLE_DIFF, 0, "job-1");
+  assert.match(html, /data-action="toggle-bullet-edit"/);
+  assert.match(html, /✏️ 编辑/);
+});
+
+test("diffCard omits the inline edit button on invalid-gate cards", () => {
+  const html = diffCard(
+    { type: "add", proposed: "凭空新增" },
+    1,
+    "job-1",
+  );
+  assert.doesNotMatch(html, /data-action="toggle-bullet-edit"/);
+});
+
 test("diffCard flags add diffs without provenance as invalid gate", () => {
   const html = diffCard({ type: "add", proposed: "凭空新增" }, 1, "job-1");
   assert.match(html, /diff-card--invalid/);

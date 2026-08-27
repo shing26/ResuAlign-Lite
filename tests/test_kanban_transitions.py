@@ -14,7 +14,6 @@ batch can partially succeed. Frontend drag handlers must read
 
 from __future__ import annotations
 
-from datetime import date, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -140,34 +139,6 @@ def test_kanban_five_column_drag_chain():
 
     # 放弃 is the terminal column; no further transition should exist.
     assert DRAG_CHAIN[-1][1] == "withdrawn"
-
-
-def test_kanban_applied_creates_auto_followup():
-    job = _create_job()
-    body = _bulk([job["job_id"]], "applied", expected_status="draft")
-    assert body["updated"] == 1
-    item = body["results"][0]
-    updated_job = item["job"]
-    assert updated_job["status_canonical"] == "applied"
-    assert updated_job["next_step"] == "投递后跟进"
-    applied_date = date.fromisoformat(updated_job["applied_at"][:10])
-    expected_date = (applied_date + timedelta(days=3)).isoformat()
-    assert updated_job["next_step_due_at"].startswith(expected_date)
-
-
-def test_kanban_auto_followup_can_be_disabled_in_settings():
-    client.put(
-        "/api/settings",
-        json={"reminder": {"auto_followup_reminder": False}},
-        headers=_auth_headers(),
-    )
-    job = _create_job()
-    body = _bulk([job["job_id"]], "applied", expected_status="draft")
-    item = body["results"][0]
-    assert item["updated"] is True
-    assert item["job"]["status_canonical"] == "applied"
-    assert item["job"]["next_step"] is None
-    assert item["job"]["next_step_due_at"] is None
 
 
 def test_kanban_expected_status_mismatch_reports_per_row_conflict():

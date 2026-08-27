@@ -781,6 +781,7 @@ export function diffCard(diff, index, jobId) {
         ${invalid ? "" : `<button class="btn btn-primary btn-sm" data-action="accept-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_CHECK} 采纳</button>`}
         <button class="btn btn-ghost btn-sm" data-action="reject-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_X} 跳过</button>
         <button class="btn btn-secondary btn-sm" data-action="polish-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}" data-instruction="quantified">AI 润色</button>
+        ${invalid ? "" : `<button class="btn btn-ghost btn-sm" data-action="toggle-bullet-edit" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">✏️ 编辑</button>`}
       </div>
     </article>`;
 }
@@ -1742,11 +1743,11 @@ export function cmpLineHtml(lineIndex, className = "", prefix = "", content = ""
 }
 
 /* ------------------------------------------------------------------ */
-/* #11 New-user onboarding steps + next-step due reminders (pure)      */
+/* #11 New-user onboarding steps (pure)                                */
 /* ------------------------------------------------------------------ */
-/* DOM-free helpers for the three-step onboarding card (岗位库空态) and
- * the interview/follow-up reminders (岗位库 + 工作台). Callers in main.js
- * own the DOM mounting; these functions only derive state and build HTML.
+/* DOM-free helpers for the three-step onboarding card (岗位库空态)。
+ * Callers in main.js own the DOM mounting; these functions only derive
+ * state and build HTML.
  */
 
 /* 三步引导定义。isDone 接收 { resumes, jobs } 上下文，返回该步是否已完成。
@@ -1837,56 +1838,6 @@ export function parseNextStepDate(text) {
   return date;
 }
 
-export const REMINDER_WINDOW_MS = 48 * 60 * 60 * 1000; /* 48h */
-
-/* 到期提醒：优先读结构化的 next_step_due_at（时间线弹窗的 datetime-local
- * 字段），其次回退到 next_step 自由文本里的日期正则；均无日期则跳过。
- * 只对已投递/面试中生效：已拿Offer/放弃即使保留 next_step 也不再提醒。
- * 返回按紧迫度升序（最早到期在前）的列表：
- * { job, dueAt, overdue, hoursUntil, stage }——stage 为面试阶段（可能为空）。 */
-export function dueReminders(jobs, now = new Date()) {
-  const ref = now instanceof Date ? now : new Date(now);
-  const list = Array.isArray(jobs) ? jobs : [];
-  const reminders = [];
-  for (const job of list) {
-    if (!job || typeof job !== "object") continue;
-    const status = canonicalJobStatus(job.status);
-    if (status !== "applied" && status !== "interview") continue;
-    const structured = String(job.next_step_due_at || "").trim();
-    const text = String(job.next_step || "").trim();
-    if (!structured && !text) continue;
-    const dueAt = parseNextStepDate(structured || text);
-    if (!dueAt) continue;
-    const diffMs = dueAt.getTime() - ref.getTime();
-    if (diffMs > REMINDER_WINDOW_MS) continue;
-    reminders.push({
-      job,
-      dueAt,
-      overdue: diffMs < 0,
-      hoursUntil: Math.ceil(diffMs / (60 * 60 * 1000)),
-      stage: (job.interview_stage || "").trim() || null,
-    });
-  }
-  reminders.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
-  return reminders;
-}
-
-/* 提醒的“何时”文案：面试阶段徽章 + 本地到期时间，如“二面 · 8/10 15:00”。
- * 没有阶段或时间时返回空串（调用方回退到 next_step 原文）。 */
-export function reminderWhen(reminder) {
-  if (!reminder || !reminder.dueAt) return "";
-  const date = reminder.dueAt;
-  const pad = (n) => String(n).padStart(2, "0");
-  const when = `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  return reminder.stage ? `${reminder.stage} · ${when}` : when;
-}
-
-export function reminderDueLabel(reminder) {
-  if (!reminder) return "";
-  if (reminder.overdue) return `已过期 ${Math.abs(reminder.hoursUntil)}h`;
-  return reminder.hoursUntil <= 1 ? "1h 内到期" : `${reminder.hoursUntil}h 内到期`;
-}
-
 /* 引导卡 HTML；没有剩余步骤时返回空字符串（调用方不应挂载）。 */
 export function renderOnboardingCard(steps) {
   if (!steps || !steps.length) return "";
@@ -1916,187 +1867,6 @@ export function renderOnboardingCard(steps) {
         <span class="badge badge-amber badge-pending">新手引导</span>
       </div>
       <ol class="onboarding-steps">${items}</ol>
-    </section>`;
-}
-
-/* 岗位库顶部提醒条；无到期岗位返回空字符串。 */
-export function renderReminderStrip(reminders) {
-  if (!reminders || !reminders.length) return "";
-  const items = reminders
-    .map((reminder) => {
-      const job = reminder.job || {};
-      const when = reminderWhen(reminder);
-      return `<div class="reminder-strip__item">
-        <a class="badge badge-amber" href="#/workspace/${encodeURIComponent(job.job_id || "")}" title="${esc(job.next_step || "")}">${esc(job.title || job.job_id || "未命名岗位")} · ${esc(when || job.next_step || "")} · ${esc(reminderDueLabel(reminder))}</a>
-        <button class="btn btn-ghost btn-sm" type="button" data-action="open-job-followup" data-id="${esc(job.job_id || "")}">安排跟进</button>
-      </div>`;
-    })
-    .join("");
-  return `
-    <div class="reminder-strip" data-reminder-strip role="status" aria-label="面试跟进提醒">
-      <span class="reminder-strip__label">待跟进 ${reminders.length}</span>
-      ${items}
-    </div>`;
-}
-
-/* 工作台单岗位提醒横幅；无到期提醒返回空字符串。 */
-export function renderReminderBanner(reminder) {
-  if (!reminder) return "";
-  const job = reminder.job || {};
-  const when = reminderWhen(reminder);
-  return `
-    <div class="reminder-banner" data-reminder-banner role="status" aria-label="面试跟进提醒">
-      <span class="reminder-strip__label">面试跟进</span>
-      <span>「${esc(job.title || job.job_id || "该岗位")}」${esc(reminderDueLabel(reminder))}：${esc(when || job.next_step || "")}</span>
-      <button class="btn btn-ghost btn-sm" type="button" data-action="open-job-followup" data-id="${esc(job.job_id || "")}">安排跟进</button>
-    </div>`;
-}
-
-/* 今日待办视图：消费 GET /api/reminders?scope=today 的 ReminderItem 契约。
- * 每项展示岗位、状态、阶段、下一步与到期时间，提供工作台跳转和安排跟进
- * 入口；没有待办时渲染空状态，不影响其他模块。 */
-export function todayViewHtml(items = []) {
-  const list = Array.isArray(items) ? items : [];
-  const statusLabels = {
-    applied: "已投递",
-    interview: "面试中",
-    offer: "已拿 Offer",
-    withdrawn: "已放弃",
-  };
-  const rows = list.map((item) => {
-    const dueDate = parseNextStepDate(item.next_step_due_at);
-    const due = dueDate
-      ? `${dueDate.getMonth() + 1}/${dueDate.getDate()} ${String(dueDate.getHours()).padStart(2, "0")}:${String(dueDate.getMinutes()).padStart(2, "0")}`
-      : item.next_step_due_at
-        ? String(item.next_step_due_at)
-        : "";
-    const status = statusLabels[item.status_canonical]
-      || item.status_canonical
-      || "";
-    const stage = String(item.interview_stage || "").trim();
-    const nextStep = String(item.next_step || "").trim();
-    return `
-      <li class="today-row" data-today-item data-job-id="${esc(item.job_id || "")}">
-        <a class="today-row__main" href="#/workspace/${encodeURIComponent(item.job_id || "")}">
-          <strong>${esc(item.title || item.job_id || "未命名岗位")}</strong>
-          <span class="today-row__meta">
-            ${item.company ? `<span>${esc(item.company)}</span>` : ""}
-            ${status ? `<span class="pill">${esc(status)}</span>` : ""}
-            ${stage ? `<span class="pill pill-warn">${esc(stage)}</span>` : ""}
-          </span>
-          <span class="today-row__step">${esc(nextStep || "待安排下一步")}</span>
-        </a>
-        <span class="today-row__due ${item.overdue ? "is-overdue" : ""}" data-today-due>
-          ${item.overdue ? "已过期" : "今日"}${due ? ` · ${esc(due)}` : ""}
-        </span>
-        <button class="btn btn-ghost btn-sm" type="button"
-          data-action="open-job-followup" data-id="${esc(item.job_id || "")}">安排跟进</button>
-      </li>`;
-  }).join("");
-  return `
-    <div class="view view-scroll today-view">
-      <div class="today-head">
-        <div>
-          <h2>今日待办</h2>
-          <p>今天到期与已逾期的跟进，按到期时间升序</p>
-        </div>
-        <span class="badge badge-amber" data-today-count>${list.length} 条</span>
-      </div>
-      ${list.length
-        ? `<ul class="today-list" data-today-list>${rows}</ul>`
-        : `<div class="panel empty-state" data-today-empty>
-            <div class="big">今天没有到期的跟进</div>
-            <div>在岗位详情或工作台里安排下一步，这里会自动汇总。</div>
-            <a class="btn btn-primary" href="#/jobs">去岗位库</a>
-          </div>`}
-    </div>`;
-}
-
-/** 提醒与通知设置面板。status 来自 GET /api/settings/status.reminder，
- *  只展示脱敏的已配置状态；webhook URL/secret 与 SMTP 密码永不回显。 */
-export function reminderSettingsPanelHtml(settings, reminderStatus = {}) {
-  const s = settings && typeof settings === "object" ? settings : {};
-  const reminder = (s.reminder && typeof s.reminder === "object" ? s.reminder : {});
-  const status = reminderStatus && typeof reminderStatus === "object"
-    ? reminderStatus
-    : {};
-  const enabled = Boolean(reminder.enabled);
-  const autoFollowup = reminder.auto_followup_reminder !== false;
-  const provider = String(reminder.provider || "generic");
-  const webhookReady = Boolean(status.webhook_url_configured);
-  const smtpReady = Boolean(status.smtp_configured);
-  const providerLabels = {
-    generic: "通用 Webhook",
-    feishu: "飞书",
-    wecom: "企业微信",
-    telegram: "Telegram",
-  };
-  const providerOptions = Object.entries(providerLabels)
-    .map(
-      ([value, label]) =>
-        `<option value="${esc(value)}"${value === provider ? " selected" : ""}>${esc(label)}</option>`,
-    )
-    .join("");
-  return `
-    <section class="panel reminder-settings-panel" data-reminder-settings-panel>
-      <div class="panel-head">
-        <div>
-          <h2>提醒与通知</h2>
-          <p>今日待办、Webhook 与邮件发送配置</p>
-        </div>
-        <span class="badge ${enabled ? "badge-teal" : "badge-gray"}" data-reminder-enabled>
-          ${enabled ? "已开启" : "已关闭"}
-        </span>
-      </div>
-      <div class="panel-body">
-        <div class="reminder-channel-status" data-reminder-channel-status>
-          <div>
-            <span>Webhook</span>
-            <strong data-reminder-webhook-status>${webhookReady ? "已配置" : "未配置（环境变量）"}</strong>
-            <span class="small muted">Secret 仅通过环境变量配置</span>
-          </div>
-          <div>
-            <span>SMTP</span>
-            <strong data-reminder-smtp-status>${smtpReady ? "已配置" : "未配置"}</strong>
-            <span class="small muted">${status.smtp_password_configured ? "密码已配置" : "密码仅通过环境变量配置"}</span>
-          </div>
-        </div>
-        <form data-form="settings-reminder" class="reminder-settings-form">
-          <label class="check-row">
-            <input type="checkbox" name="enabled" ${enabled ? "checked" : ""}>
-            <span>开启到期提醒（每 ${status.interval_seconds || "60"} 秒扫描一次）</span>
-          </label>
-          <label class="check-row">
-            <input type="checkbox" name="auto_followup_reminder" ${autoFollowup ? "checked" : ""}>
-            <span>投递后自动创建 3 天跟进提醒</span>
-          </label>
-          <div class="form-grid">
-            <div class="field"><label>Webhook 类型</label>
-              <select name="provider" class="field-input">${providerOptions}</select>
-              <span class="small muted">Webhook URL 由 RESUALIGN_REMINDER_WEBHOOK_URL 配置</span>
-            </div>
-            <div class="field"><label>SMTP 主机</label>
-              <input type="text" name="smtp_host" value="${esc(reminder.smtp_host || "")}" placeholder="smtp.example.com">
-            </div>
-            <div class="field"><label>SMTP 端口</label>
-              <input type="number" name="smtp_port" min="1" max="65535" value="${esc(reminder.smtp_port == null ? "" : reminder.smtp_port)}" placeholder="587">
-            </div>
-            <div class="field"><label>SMTP 用户名</label>
-              <input type="text" name="smtp_user" value="${esc(reminder.smtp_user || "")}" autocomplete="off">
-            </div>
-            <div class="field"><label>发件人</label>
-              <input type="text" name="smtp_from" value="${esc(reminder.smtp_from || "")}" placeholder="name@example.com">
-            </div>
-            <div class="field"><label>收件人</label>
-              <input type="text" name="smtp_to" value="${esc(reminder.smtp_to || "")}" placeholder="me@example.com">
-              <span class="small muted">SMTP 密码由 RESUALIGN_SMTP_PASSWORD 配置，不会在此回显</span>
-            </div>
-          </div>
-          <div class="row" style="margin-top:10px">
-            <button class="btn btn-outline btn-sm" type="submit">保存提醒配置</button>
-          </div>
-        </form>
-      </div>
     </section>`;
 }
 
@@ -2731,32 +2501,30 @@ export function diffSectionBadge(diff) {
  * builder stays DOM-free so it can be unit-tested under Node.
  * Contract (shared with the backend agent):
  *   GET /api/dashboard -> {
- *     kpi: { resumes, jobs, applied, interview, offer, declined, active_followups },
+ *     kpi: { resumes, jobs, applied, interview, offer, declined },
  *     skill_gaps: [{ skill, count } ...],
  *     quick_continue: { job_id, title, company, alignment_status, updated_at } | null
  *   }
  */
 
-/* 4 大 KPI 卡。applied 卡带投递转化提示（占岗位比例）。 */
+/* 3 大 KPI 卡。applied 卡带投递转化提示（占岗位比例）。 */
 export function dashboardKpiHtml(kpi = {}) {
   const data = kpi && typeof kpi === "object" ? kpi : {};
   const resumes = Math.max(0, Number(data.resumes) || 0);
   const jobs = Math.max(0, Number(data.jobs) || 0);
   const applied = Math.max(0, Number(data.applied) || 0);
-  const followups = Math.max(0, Number(data.active_followups) || 0);
   const applyRate = jobs > 0 ? Math.round((applied / jobs) * 100) : null;
   const cards = [
     { key: "resumes", label: "主简历", value: resumes, tone: "info", hint: "可用的主简历底稿" },
     { key: "jobs", label: "岗位", value: jobs, tone: "teal", hint: "岗位库总数" },
     { key: "applied", label: "已投递", value: applied, tone: "success", hint: applyRate != null ? `占岗位 ${applyRate}%` : "暂无岗位可计算转化" },
-    { key: "followups", label: "待跟进", value: followups, tone: "warning", hint: "今日到期与逾期" },
   ];
   return `
     <div class="dashboard-kpi-grid" data-dashboard-kpis>
       ${cards
         .map(
           (card) => `
-        <div class="dashboard-kpi dashboard-kpi--${card.tone}" data-kpi="${card.key}"${card.key === "followups" ? ` data-action="goto-today" role="button" tabindex="0" title="查看今日待办"` : ""}>
+        <div class="dashboard-kpi dashboard-kpi--${card.tone}" data-kpi="${card.key}">
           <div class="dashboard-kpi__label">${esc(card.label)}</div>
           <div class="dashboard-kpi__value">${esc(card.value)}</div>
           <div class="dashboard-kpi__hint">${esc(card.hint)}</div>
@@ -3083,88 +2851,6 @@ export function highlightSkillGapHtml(gapItems, skill) {
     blocks.push(`<div class="small muted">尚未生成差距报告</div>`);
   }
   return blocks.join("");
-}
-
-/* ------------------------------------------------------------------ */
-/* Sprint 3: Pipeline + Blocker（抓取结果文案 / 阻断列表 / 微标）          */
-/* ------------------------------------------------------------------ */
-/* 与后端并行实现的契约（本模块保持 DOM-free，可在 Node 下单测）：
- *   POST /api/jobs/fetch-url {url}
- *     -> { status:'created'|'duplicate'|'blocked'|'rule_rejected',
- *          job_id?, blocker_id?, reason? }
- *   GET  /api/blockers?status=pending
- *     -> [{ blocker_id, job_id, url, title, reason, category, status, created_at }]
- */
-
-export const FETCH_URL_STATUS_MESSAGES = {
-  created: "岗位已抓取",
-  duplicate: "已存在相同岗位",
-  blocked: "已加入阻断队列",
-  rule_rejected: "规则拦截",
-};
-
-/** fetch-url 提交结果的 toast 文案。blocked / rule_rejected 会带上后端
- *  reason（若提供）；未知状态回退为「抓取结果：<status>」。 */
-export function fetchUrlResultMessage(status, reason) {
-  const key = String(status || "");
-  const reasonText = String(reason || "").trim();
-  if (key === "blocked" || key === "rule_rejected") {
-    return reasonText
-      ? `${FETCH_URL_STATUS_MESSAGES[key] || key}：${reasonText}`
-      : FETCH_URL_STATUS_MESSAGES[key] || key;
-  }
-  return FETCH_URL_STATUS_MESSAGES[key] || `抓取结果：${key || "未知"}`;
-}
-
-/** 阻断队列列表 HTML（showModal 内容）。每条含 URL / title / category /
- *  reason / created_at，以及「忽略」「手动补全」两个操作与补全表单；
- *  URL / title / reason / category / blocker_id 全部经 esc 转义。 */
-export function blockerListHtml(blockers) {
-  const list = Array.isArray(blockers) ? blockers : [];
-  if (!list.length) {
-    return `<div class="blocker-list" data-blocker-list><div class="muted small" data-blocker-empty>暂无待处理的阻断</div></div>`;
-  }
-  const items = list
-    .map((blocker) => {
-      const id = esc(blocker && blocker.blocker_id);
-      const url = esc(blocker && blocker.url);
-      const title = esc((blocker && blocker.title) || "未命名岗位");
-      const reason = esc(blocker && blocker.reason);
-      const category = esc(blocker && blocker.category);
-      const time = formatDate(blocker && blocker.created_at);
-      return `
-      <article class="blocker-item" data-blocker-item data-blocker-id="${id}">
-        <div class="blocker-item__head">
-          <span class="badge badge-amber">待处理</span>
-          <span class="small muted">${time}</span>
-        </div>
-        <div class="blocker-item__title">${title}</div>
-        <div class="blocker-item__meta">${url}${category ? ` · ${category}` : ""}</div>
-        ${reason ? `<div class="blocker-item__reason">${reason}</div>` : ""}
-        <div class="blocker-item__actions">
-          <button type="button" class="btn btn-outline btn-sm" data-action="ignore-blocker" data-id="${id}">${ICON_X} 跳过</button>
-          <button type="button" class="btn btn-secondary btn-sm" data-action="toggle-blocker-resolve" data-id="${id}">手动补全</button>
-        </div>
-        <form class="blocker-resolve" data-form="blocker-resolve" data-id="${id}" hidden>
-          <input type="hidden" name="blocker_id" value="${id}">
-          <textarea name="manual_text" rows="5" placeholder="粘贴该岗位 JD 文本，手动补全后入库存档"></textarea>
-          <div class="row" style="margin-top:8px">
-            <button class="btn btn-primary btn-sm" type="submit">提交补全</button>
-            <button class="btn btn-ghost btn-sm" type="button" data-action="cancel-blocker-resolve" data-id="${id}">取消</button>
-          </div>
-        </form>
-      </article>`;
-    })
-    .join("");
-  return `<div class="blocker-list" data-blocker-list>${items}</div>`;
-}
-
-/** 阻断微标 HTML（数字 badge + 闪烁动画由 CSS 提供）。pending 为 0 / 负数 /
- *  缺失时返回空串，调用方不挂载任何节点。 */
-export function blockerCountBadge(count) {
-  const n = Math.max(0, Number(count) || 0);
-  if (n <= 0) return "";
-  return `<button type="button" class="blocker-badge" data-action="open-blockers" title="有 ${n} 条抓取阻断待处理" aria-label="打开抓取阻断队列：${n} 条待处理">阻断 <span class="blocker-badge__count">${n}</span></button>`;
 }
 
 /* ------------------------------------------------------------------ */

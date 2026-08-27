@@ -27,7 +27,6 @@ export async function renderDashboard(container) {
       interview: 0,
       offer: 0,
       declined: 0,
-      active_followups: 0,
     },
     skill_gaps: [],
     quick_continue: null,
@@ -56,7 +55,6 @@ export async function renderDashboard(container) {
   const interview = toNumber(kpi.interview);
   const offer = toNumber(kpi.offer);
   const declined = toNumber(kpi.declined);
-  const followups = toNumber(kpi.active_followups);
   const resumeList = Array.isArray(resumes) ? resumes : [];
 
   const alignedCount = jobs.filter(
@@ -83,7 +81,7 @@ export async function renderDashboard(container) {
     Number.isFinite(rawScore) && rawScore >= 0
       ? Math.round(Math.min(100, rawScore))
       : null;
-  const emptyGuide = jobsTotal === 0 && resumeList.length === 0 && followups === 0
+  const emptyGuide = jobsTotal === 0 && resumeList.length === 0
     ? dashboardEmptyGuideHtml()
     : "";
 
@@ -102,11 +100,6 @@ export async function renderDashboard(container) {
       <div class="metric-label">主简历 ATS</div>
       <div class="metric-value">${atsScore == null ? "—" : escAttr(atsScore)}</div>
       <div class="metric-hint">${atsScore == null ? "未诊断" : `${escAttr(currentResume ? currentResume.title : "主简历")} · v${escAttr(currentResume ? currentResume.current_version : 1)}`}</div>
-    </div>
-    <div class="metric-cell" data-kpi="followups">
-      <div class="metric-label">待跟进</div>
-      <div class="metric-value">${escAttr(followups)} <span>条</span></div>
-      <div class="metric-hint">48h 内到期口径</div>
     </div>`;
 
   const quick = payload.quick_continue || null;

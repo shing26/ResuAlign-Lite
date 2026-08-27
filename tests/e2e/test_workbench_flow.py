@@ -136,8 +136,9 @@ def test_command_palette_preserves_multiline_jd(page, base_url, api_call):
         expect(job.get("title") == f"资深后端工程师（{tag}）", "title parsed")
         expect(job.get("company") == "星辰科技", "company parsed")
         expect(job.get("location") == "上海", "location parsed")
-        expect(job.get("salary_min") == 25000.0, "salary min parsed")
-        expect(job.get("salary_max") == 35000.0, "salary max parsed")
+        # De-bloat: salary is no longer auto-extracted from JD text.
+        expect(job.get("salary_min") is None, "salary min no longer auto-parsed")
+        expect(job.get("salary_max") is None, "salary max no longer auto-parsed")
     finally:
         if job_id:
             api_call("DELETE", f"/api/jobs/{job_id}")
@@ -448,15 +449,6 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
             followup_form.locator("button[type='submit']").click()
             followup_modal.wait_for(state="detached", timeout=10000)
 
-            strip = followup_page.locator("[data-reminder-strip]")
-            strip.wait_for(timeout=10000)
-            expect(
-                strip.locator(
-                    f'[data-action="open-job-followup"][data-id="{job_id}"]'
-                ).count()
-                >= 1,
-                "reminder strip should offer follow-up scheduling",
-            )
             followed = api_call("GET", f"/api/jobs/{job_id}")
             expect(
                 followed.get("status") in ("interview", "面试中"),

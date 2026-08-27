@@ -50,22 +50,19 @@ const kpi = {
   interview: 2,
   offer: 1,
   declined: 2,
-  active_followups: 5,
 };
 
-test("dashboardKpiHtml renders four KPI cards with values", () => {
+test("dashboardKpiHtml renders three KPI cards with values", () => {
   const body = bodyFrom(dashboardKpiHtml(kpi));
   const grid = body.querySelector("[data-dashboard-kpis]");
   assert.ok(grid, "kpi grid is rendered");
   const cards = [...grid.querySelectorAll(".dashboard-kpi")];
-  assert.equal(cards.length, 4);
+  assert.equal(cards.length, 3);
   assert.equal(cards[0].querySelector(".dashboard-kpi__value").textContent, "3");
   assert.equal(cards[1].querySelector(".dashboard-kpi__value").textContent, "8");
   assert.equal(cards[2].querySelector(".dashboard-kpi__value").textContent, "4");
-  assert.equal(cards[3].querySelector(".dashboard-kpi__value").textContent, "5");
   assert.match(cards[0].querySelector(".dashboard-kpi__label").textContent, /主简历/);
   assert.match(cards[2].querySelector(".dashboard-kpi__label").textContent, /已投递/);
-  assert.match(cards[3].querySelector(".dashboard-kpi__label").textContent, /待跟进/);
 });
 
 test("dashboardKpiHtml shows an applied conversion hint", () => {
@@ -77,7 +74,7 @@ test("dashboardKpiHtml shows an applied conversion hint", () => {
 test("dashboardKpiHtml handles missing kpi gracefully", () => {
   const body = bodyFrom(dashboardKpiHtml(null));
   const cards = [...body.querySelectorAll(".dashboard-kpi")];
-  assert.equal(cards.length, 4);
+  assert.equal(cards.length, 3);
   assert.equal(cards[0].querySelector(".dashboard-kpi__value").textContent, "0");
 });
 
