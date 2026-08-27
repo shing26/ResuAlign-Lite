@@ -1,0 +1,8 @@
+{
+  "name": "resualign-frontend-tests",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "happy-dom": "^15.11.7"
+  }
+}

@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-contract:
+    name: Stage 1 - unit + contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+      - name: Ruff lint gate
+        run: ruff check src/ tests/ benchmarks/ run.py
+      - name: Unit and contract tests with coverage (parallel)
+        run: python -m pytest -n auto --cov=resualign --cov-report=term-missing --cov-report=xml --cov-fail-under=85 --junitxml=test-results.xml tests/
+        env:
+          PYTHONPATH: src
+      - name: Upload unit and contract artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-contract-artifacts
+          path: |
+            coverage.xml
+            test-results.xml
+      - name: MCP tools registration smoke (Sprint 6)
+        run: |
+          python - <<'PY'
+          from resualign.agent.mcp_server import get_mcp_app
+          tools = get_mcp_app()._tool_manager.list_tools()
+          names = sorted(t.name for t in tools)
+          print("MCP tools:", names)
+          assert names == [
+              "auto_align_resume",
+              "fetch_and_evaluate_job",
+              "get_pending_blockers",
+              "resolve_blocker",
+          ], names
+          PY
+        env:
+          PYTHONPATH: src
+      - name: Frontend syntax check (ESM tolerant)
+        run: |
+          node --input-type=module --check < src/resualign/static/app.js
+          if ls src/resualign/static/app/*.js >/dev/null 2>&1; then
+            for file in src/resualign/static/app/*.js; do
+              node --input-type=module --check < "$file"
+            done
+          fi
+        shell: bash
+      - name: Frontend unit tests (node:test)
+        run: |
+          npm install --prefix tests/frontend --no-audit --no-fund
+          node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs
+        shell: bash
+      - name: Frontend ESM import graph check
+        run: node tests/frontend/imports-check.mjs
+        shell: bash
+
+  benchmark-gate:
+    name: Stage 2 - benchmark gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+      - name: Latency call-count and wallclock gate
+        run: python benchmarks/latency_benchmark.py
+        env:
+          PYTHONPATH: src
+      - name: Offline benchmark suite (15 cases)
+        run: python benchmarks/run_benchmark.py --offline
+        env:
+          PYTHONPATH: src
+
+  playwright-smoke:
+    name: Stage 3 - Playwright smoke
+    needs: benchmark-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies and Chromium
+        run: |
+          pip install -e ".[dev]"
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Phase 20 key-path smoke
+        run: python .scratch/phase-20/playwright_smoke.py
+        env:
+          PYTHONPATH: src
+      - name: E2E suite (settings / import / reclassify / workbench)
+        run: python -m pytest tests/e2e -v --e2e --tb=short
+        env:
+          PYTHONPATH: src
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: tests/e2e/artifacts/
+      - name: Upload Playwright artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-artifacts
+          path: .scratch/phase-20/shots/

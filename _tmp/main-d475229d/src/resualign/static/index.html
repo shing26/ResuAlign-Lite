@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ResuAlign - Career Studio</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css?v=28">
+</head>
+<body class="app-body app-shell bg-appbg text-white/90 h-screen flex overflow-hidden select-none text-[13px]">
+  <aside class="app-rail rail" aria-label="主导航栏">
+    <div class="rail-brand">
+      <div class="rail-mark brand-mark" aria-hidden="true">RA</div>
+      <div class="rail-brand__text">
+        <h1 class="brand-name">ResuAlign</h1>
+        <span class="rail-brand__tagline brand-tag">Career Studio v3</span>
+      </div>
+    </div>
+    <nav class="tabs tabs--rail nav" id="app-nav" aria-label="主导航">
+      <button type="button" class="nav-btn" data-route="dashboard" data-tab="dashboard" aria-selected="false" title="驾驶舱" aria-label="驾驶舱">
+        <span class="nav-index" aria-hidden="true">01</span>
+        <span class="rail-label">驾驶舱</span>
+      </button>
+      <button type="button" class="nav-btn" data-route="workspace" data-tab="workspace" aria-selected="false" title="对齐工作台" aria-label="对齐工作台">
+        <span class="nav-index" aria-hidden="true">02</span>
+        <span class="rail-label">工作台</span>
+      </button>
+      <button type="button" class="nav-btn" data-route="jobs" data-tab="jobs" aria-selected="false" title="岗位库" aria-label="岗位库">
+        <span class="nav-index" aria-hidden="true">03</span>
+        <span class="rail-label">岗位库</span>
+        <span class="rail-count" data-jobs-rail-count hidden></span>
+      </button>
+      <button type="button" class="nav-btn" data-route="today" data-tab="today" aria-selected="false" title="今日待办" aria-label="今日待办">
+        <span class="nav-index" aria-hidden="true">04</span>
+        <span class="rail-label">今日待办</span>
+      </button>
+      <button type="button" class="nav-btn" data-route="resume" data-tab="resume" aria-selected="true" title="简历中心" aria-label="简历中心">
+        <span class="nav-index" aria-hidden="true">05</span>
+        <span class="rail-label">简历中心</span>
+      </button>
+      <button type="button" class="nav-btn" data-route="settings" data-tab="settings" aria-selected="false" title="系统设置" aria-label="系统设置">
+        <span class="nav-index" aria-hidden="true">06</span>
+        <span class="rail-label">系统设置</span>
+      </button>
+    </nav>
+    <div class="rail-foot">
+      <span class="dot dot-success" aria-hidden="true"></span>
+      <span>本地 · 个人模式</span>
+      <span class="rail-tech">SQLite</span>
+    </div>
+  </aside>
+  <div class="app-main flex-1 flex flex-col overflow-hidden">
+    <header class="topbar">
+      <div class="topbar-title">
+        <h2 id="page-title">驾驶舱</h2>
+        <p id="page-subtitle">主简历与岗位对齐态势</p>
+      </div>
+      <div class="topbar-actions header-tools">
+        <button type="button" class="command-bar cmd-trigger header-search" data-action="open-command-panel" data-command-trigger aria-haspopup="dialog" aria-label="打开万能输入" title="打开万能输入">
+          <span class="command-glyph" aria-hidden="true">/</span>
+          <span class="truncate">搜索岗位或命令...</span>
+          <kbd>Ctrl K</kbd>
+        </button>
+        <button type="button" class="quick-jd-btn btn btn-primary" data-action="open-command-panel" aria-label="快速导入 JD" title="快速导入 JD">快速导入 JD</button>
+        <select class="header-job-select input input-sm" data-header-job-select aria-label="切换岗位" title="切换岗位">
+          <option value="">选择岗位...</option>
+        </select>
+        <div class="topbar-actions__right flex items-center space-x-3">
+          <button class="theme-toggle icon-btn" type="button" data-action="toggle-theme" data-theme-toggle aria-pressed="false" aria-label="切换明暗主题" title="切换明暗主题">
+            <span class="theme-toggle-icon" aria-hidden="true">◐</span>
+            <span data-theme-label>浅色</span>
+          </button>
+          <div class="model-status">
+            <span class="dot dot-success" aria-hidden="true"></span>
+            <span id="mode-label">个人模式</span>
+          </div>
+        </div>
+      </div>
+    </header>
+    <main id="app-router-view" class="flex-1 overflow-hidden relative" aria-live="polite"></main>
+  </div>
+  <div id="print-root" class="print-root" aria-hidden="true"></div>
+  <div id="toast-region" class="toast-region" aria-live="assertive"></div>
+  <div
+    class="command-palette overlay"
+    data-command-palette
+    role="presentation"
+    hidden
+  >
+    <div class="command-palette__dialog command-panel" role="dialog" aria-modal="true" aria-label="万能输入">
+      <form class="command-palette__form" data-form="command-panel">
+        <div class="command-palette__input-row command-search">
+          <span class="command-palette__glyph" aria-hidden="true">/</span>
+          <textarea
+            name="command"
+            data-command-input
+            rows="2"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="搜索岗位或命令"
+          ></textarea>
+          <kbd>Esc</kbd>
+        </div>
+        <div class="command-palette__suggestions command-groups" data-command-suggestions hidden></div>
+        <div class="command-palette__preview command-foot" data-command-preview role="status" aria-live="polite"></div>
+        <div class="command-palette__actions modal-actions">
+          <button type="button" class="btn btn-ghost" data-action="close-command-panel">取消</button>
+          <button type="submit" class="btn btn-primary" data-command-confirm disabled>确认</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <script type="module" src="/static/app/main.js?v=28"></script>
+</body>
+</html>

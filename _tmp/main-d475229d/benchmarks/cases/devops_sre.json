@@ -1,0 +1,12 @@
+{
+  "id": "devops-sre",
+  "resume_text": "SYNTHETIC RESUME - DevOps / SRE Engineer\n\nSummary\nSite reliability engineer with 6 years of experience operating Kubernetes clusters, building CI/CD pipelines, and improving observability.\n\nSkills\nKubernetes, Docker, Terraform, ArgoCD, GitHub Actions, Prometheus, Grafana, Python\n\nExperience\nSRE Engineer, Ecommerce Company (2021-present)\n- Operated Kubernetes clusters across multiple production regions.\n- Built CI/CD pipelines with GitHub Actions and ArgoCD.\n- Managed infrastructure as code with Terraform.\n- Created Prometheus and Grafana dashboards for latency and error budgets.\n- Led incident response and post-incident reviews.\n\nDevOps Engineer, SaaS Startup (2018-2021)\n- Containerized legacy services with Docker.\n- Automated deployment rollouts and rollbacks.\n- Improved monitoring alerts and on-call runbooks.",
+  "jd_text": "DevOps / SRE Engineer\n\nWe are hiring a DevOps or site reliability engineer to own production infrastructure and reliability.\n\nRequirements\n- Kubernetes and Docker operations at production scale.\n- CI/CD pipeline design and maintenance.\n- Infrastructure as code, ideally Terraform.\n- Observability: metrics, logs, and distributed tracing.\n- SLOs, error budgets, and incident response.\n- On-call rotation participation.",
+  "expected_direction": [
+    "emphasize Kubernetes and Docker production deployment",
+    "show observability and tracing implementation",
+    "highlight performance metrics and production evidence"
+  ],
+  "tags": ["devops", "sre", "english"],
+  "source_note": "Synthetic resume and JD authored for benchmark regression; not based on any real person or document."
+}

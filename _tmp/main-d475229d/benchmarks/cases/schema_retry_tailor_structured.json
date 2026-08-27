@@ -1,0 +1,19 @@
+{
+  "id": "schema-retry-tailor-structured",
+  "scenario": "schema_retry",
+  "tags": [
+    "schema-retry",
+    "structured-output",
+    "tailor"
+  ],
+  "schema_retry": true,
+  "expected_llm_calls": 5,
+  "resume_text": "SYNTHETIC RESUME - Python Backend Engineer\n\nSummary\nBackend engineer with 5 years of experience building Python services, REST APIs, and database-backed applications.\n\nSkills\nPython, FastAPI, PostgreSQL, Redis, Docker\n\nExperience\nSenior Backend Engineer, Example Corp (2021-present)\n- Built Python FastAPI services for account workflows.\n- Used Redis for cache storage and session management.\n- Deployed services with Docker.\n- Tuned PostgreSQL schemas and SQL queries.",
+  "jd_text": "Backend Engineer (High Concurrency Platform)\n\nHiring a backend engineer for a high-concurrency platform. Requirements: Python, FastAPI async endpoints, Redis caching for high concurrency, Docker and Kubernetes deployment, low latency performance metrics.",
+  "expected_direction": [
+    "highlight FastAPI async endpoints",
+    "emphasize Redis caching for high concurrency",
+    "show production Kubernetes deployment"
+  ],
+  "source_note": "Synthetic schema-retry regression case; no real person or document."
+}

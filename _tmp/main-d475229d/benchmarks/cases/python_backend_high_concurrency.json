@@ -1,0 +1,11 @@
+{
+  "id": "python-backend-high-concurrency",
+  "resume_text": "SYNTHETIC RESUME - Python Backend Engineer\n\nSummary\nBackend engineer with 5 years of experience building Python services, REST APIs, and database-backed applications.\n\nSkills\nPython, FastAPI, Flask, PostgreSQL, Redis, Docker, Kubernetes, AWS\n\nExperience\nSenior Backend Engineer, Fintech Startup (2021-present)\n- Built Python services for account and payment workflows.\n- Used Redis for cache storage and session management.\n- Deployed services with Docker and Kubernetes.\n- Worked with PostgreSQL schemas and SQL queries.\n\nBackend Developer, Ecommerce Company (2018-2021)\n- Developed Flask APIs consumed by mobile clients.\n- Maintained background jobs and monitoring scripts.\n- Improved API response times with query tuning.",
+  "jd_text": "Backend Engineer (High Concurrency Platform)\n\nWe are hiring a backend engineer for a high-concurrency platform serving millions of requests per day.\n\nRequirements\n- Strong Python programming.\n- Experience designing async FastAPI services.\n- Redis caching for hot data and rate limiting.\n- Production Kubernetes and Docker deployment.\n- PostgreSQL and performance tuning under load.\n- Ability to reason about latency budgets and graceful degradation.",
+  "expected_direction": [
+    "highlight Redis caching for high concurrency",
+    "emphasize FastAPI async endpoints",
+    "show production Kubernetes deployment experience"
+  ],
+  "source_note": "Synthetic resume and JD authored for benchmark regression; not based on any real person or document."
+}
