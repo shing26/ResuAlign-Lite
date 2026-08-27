@@ -780,7 +780,7 @@ export function diffCard(diff, index, jobId) {
       <div class="diff-card__actions" data-diff-actions>
         ${invalid ? "" : `<button class="btn btn-primary btn-sm" data-action="accept-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_CHECK} 采纳</button>`}
         <button class="btn btn-ghost btn-sm" data-action="reject-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_X} 跳过</button>
-        <button class="btn btn-secondary btn-sm" data-action="polish-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}" data-instruction="quantified">AI 润色</button>
+        <button class="btn btn-secondary btn-sm" data-action="polish-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}" data-instruction="quantified">${invalid ? "↻ 重试此条" : "AI 润色"}</button>
         ${invalid ? "" : `<button class="btn btn-ghost btn-sm" data-action="toggle-bullet-edit" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">✏️ 编辑</button>`}
       </div>
     </article>`;

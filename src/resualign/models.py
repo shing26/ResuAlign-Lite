@@ -82,6 +82,7 @@ class Report:
     issues: list[str] = field(default_factory=list)
     diffs: list[DiffItem] = field(default_factory=list)
     model: str = ""
+    fallback: str = ""
     jd_profile: Optional[JDProfile] = None
     gap_report: Optional[GapReport] = None
     tailored_resume: Optional[TailoredResume] = None

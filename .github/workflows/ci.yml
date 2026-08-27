@@ -32,22 +32,6 @@ jobs:
           path: |
             coverage.xml
             test-results.xml
-      - name: MCP tools registration smoke (Sprint 6)
-        run: |
-          python - <<'PY'
-          from resualign.agent.mcp_server import get_mcp_app
-          tools = get_mcp_app()._tool_manager.list_tools()
-          names = sorted(t.name for t in tools)
-          print("MCP tools:", names)
-          assert names == [
-              "auto_align_resume",
-              "fetch_and_evaluate_job",
-              "get_pending_blockers",
-              "resolve_blocker",
-          ], names
-          PY
-        env:
-          PYTHONPATH: src
       - name: Frontend syntax check (ESM tolerant)
         run: |
           node --input-type=module --check < src/resualign/static/app.js

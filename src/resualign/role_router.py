@@ -20,7 +20,7 @@ import logging
 import os
 from typing import Any
 
-from .llm import LLMResponseError, OpenAIClient
+from .llm import LLMResponseError, OpenAIClient, StreamConnectionError
 from .llm_nodes import LLMNodeStore
 
 logger = logging.getLogger(__name__)

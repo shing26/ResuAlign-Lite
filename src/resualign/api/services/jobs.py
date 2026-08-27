@@ -552,27 +552,15 @@ def _run_job(job_id: str) -> None:
                     '该岗位只有链接没有 JD 文本：请用浏览器油猴插件抓取，或用「粘贴 JD」方式重新录入',
                 )
                 return
-            t0 = time.monotonic()
             if payload.get('optimize_resume'):
                 result = api_module._run_resume_optimize(
                     payload, on_stage, tenant_id
                 )
                 api_module._registry.succeed(job_id, result)
                 return
-            report = api_module.run(
-                config,
-                payload['resume_text'],
-                jd_text,
-                run_eval=bool(payload.get('run_eval', False)),
-                granularity=payload.get('granularity', 'medium'),
-                prompt_focus=payload.get('prompt_focus', 'balanced'),
-                custom_prompt=payload.get('custom_prompt', ''),
-                diagnosis=payload.get('precomputed_diagnosis'),
-                on_stage=on_stage,
-                cache=api_module._cache,
-                tenant=tenant_id,
-                node_store=api_module._llm_nodes,
-                tenant_id=tenant_id,
+            use_local_fallback = (
+                not config.is_llm_configured
+                and api_module._llm_nodes.get_active_node(tenant_id) is None
             )
             t0 = time.monotonic()
             if use_local_fallback:

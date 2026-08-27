@@ -97,12 +97,85 @@ def _extract_balanced_json(text: str) -> str:
             elif ch == '"':
                 in_str = False
         else:
-            raise
-    if not isinstance(value, dict):
-        raise LLMResponseError(
-            "Structured response is not a JSON object", code="parse"
-        )
-    return value
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    balanced_end = i + 1
+        i += 1
+    if balanced_end > start:
+        return text[start:balanced_end]
+    return text[start:]
+
+
+def _repair_json(candidate: str) -> str | None:
+    """Best-effort repair of truncated JSON: close braces and drop trailing commas."""
+    candidate = (candidate or "").strip()
+    if not candidate:
+        return None
+    candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
+    stack: list[str] = []
+    in_str = False
+    esc = False
+    matching = {"}": "{", "]": "["}
+    closers = {"{": "}", "[": "]"}
+    for ch in candidate:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]" and stack and stack[-1] == matching[ch]:
+            stack.pop()
+    if stack:
+        candidate += "".join(closers[o] for o in reversed(stack))
+    return candidate
+
+
+def _parse_json_object(content: str) -> dict[str, Any]:
+    """Parse a provider JSON object with tolerance for real-world model noise.
+
+    Tries, in order: strict parse, balanced ``{...}`` extraction, then a
+    best-effort repair of truncation (unclosed braces, trailing commas). Only
+    when all three fail does it raise ``LLMResponseError``.
+    """
+    text = _strip_json_wrapping(content)
+    if not text:
+        raise LLMResponseError("Empty LLM response")
+
+    candidates: list[str] = [text]
+    try:
+        candidates.append(_extract_balanced_json(text))
+    except LLMResponseError:
+        pass
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+            if isinstance(value, dict):
+                return value
+        except json.JSONDecodeError:
+            pass
+        repaired = _repair_json(candidate)
+        if repaired is not None and repaired != candidate:
+            try:
+                value = json.loads(repaired)
+                if isinstance(value, dict):
+                    return value
+            except json.JSONDecodeError:
+                pass
+    raise LLMResponseError(
+        f"Unable to parse LLM JSON response: {text[:120]!r}"
+    )
 
 
 def _schema_feedback_prompt(user: str, exc: BaseException) -> str:
@@ -149,6 +222,12 @@ class LLMResponseError(Exception):
     def __init__(self, message: str, code: str = "other"):
         super().__init__(message)
         self.code = code if code in _KNOWN_CODES else "other"
+
+
+class StreamConnectionError(Exception):
+    """Raised when an SSE stream stalls without producing a new token."""
+
+    pass
 
 
 def _raise_network_timeout(kind: str, attempt: int, exc: BaseException) -> None:

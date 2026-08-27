@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Callable, Optional
 
 from .evaluator import evaluate
@@ -11,9 +12,9 @@ from .jd_profiler import profile_jd
 from .llm import LLMClient, LLMResponseError, OpenAIClient, diagnose_resume
 from .llm_nodes import LLMNodeStore
 from .models import GapReport, Report, ResuAlignConfig
-from .role_router import _role_timeout, call_with_role
+from .role_router import _role_timeout, call_with_role, is_parallel_safe
 from .rule_diagnose import diagnose_resume_local
-from .tailor import tailor_resume
+from .tailor import tailor_resume, tailor_resume_map_reduce
 
 logger = logging.getLogger(__name__)
 
