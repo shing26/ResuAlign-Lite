@@ -72,6 +72,58 @@ class ContentStore:
         self._lock = threading.RLock()
         self._initialized = False
         self._memory_connection: Optional[sqlite3.Connection] = None
+        # Per-thread pooled connections (see store_base._SqliteStore): the
+        # PRAGMA setup costs ~95 ms per fresh connection on Windows.
+        self._local = threading.local()
+        self._open_connections: list[sqlite3.Connection] = []
+        self._conn_guard = threading.Lock()
+
+    # -- connection pool -------------------------------------------------
+    def _acquire_connection(self) -> sqlite3.Connection:
+        """Return this thread's pooled connection, creating it on first use."""
+        connection: Optional[sqlite3.Connection] = getattr(
+            self._local, "conn", None
+        )
+        if connection is not None:
+            try:
+                connection.execute("SELECT 1").fetchone()
+                return connection
+            except sqlite3.Error:
+                self.close_thread_connection()
+        connection = sqlite3.connect(str(self.db_path), timeout=5.0)
+        connection.row_factory = sqlite3.Row
+        _apply_sqlite_pragmas(connection, in_memory=False)
+        self._local.conn = connection
+        with self._conn_guard:
+            self._open_connections.append(connection)
+        return connection
+
+    def close_thread_connection(self) -> None:
+        """Close the calling thread's pooled connection (no-op if none)."""
+        connection: Optional[sqlite3.Connection] = getattr(
+            self._local, "conn", None
+        )
+        if connection is None:
+            return
+        self._local.conn = None
+        with self._conn_guard:
+            if connection in self._open_connections:
+                self._open_connections.remove(connection)
+        try:
+            connection.close()
+        except sqlite3.Error:
+            pass
+
+    def close_all_connections(self) -> None:
+        """Close every pooled connection across all threads."""
+        with self._conn_guard:
+            connections = list(self._open_connections)
+            self._open_connections.clear()
+        for connection in connections:
+            try:
+                connection.close()
+            except sqlite3.Error:
+                pass
 
     def put(
         self,
@@ -255,19 +307,16 @@ class ContentStore:
                 self._memory_connection = sqlite3.connect(":memory:")
                 self._memory_connection.row_factory = sqlite3.Row
             connection = self._memory_connection
+            _apply_sqlite_pragmas(connection, in_memory=True)
         else:
-            connection = sqlite3.connect(str(self.db_path), timeout=5.0)
-            connection.row_factory = sqlite3.Row
-        _apply_sqlite_pragmas(connection, in_memory=in_memory)
+            connection = self._acquire_connection()
         try:
             yield connection
             connection.commit()
         except Exception:
             connection.rollback()
             raise
-        finally:
-            if not in_memory:
-                connection.close()
+        # Pooled connection intentionally left open (see _acquire_connection).
 
     @staticmethod
     def _payload(sha256: str, content: _Content) -> bytes:

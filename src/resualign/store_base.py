@@ -105,9 +105,68 @@ class _SqliteStore:
         self._lock = threading.RLock()
         self._initialized = False
         self._memory_connection: Optional[sqlite3.Connection] = None
+        # Per-thread pooled connections. Opening a SQLite file and applying
+        # the PRAGMA set costs ~95 ms on Windows (bare connect is 0.7 ms), so
+        # doing it per query made even an 11-row list_jobs take ~1.4 s.
+        self._local = threading.local()
+        self._open_connections: list[sqlite3.Connection] = []
+        self._conn_guard = threading.Lock()
         if db_path is None:
             db_path = default_job_db_path()
         self.db_path = Path(db_path).expanduser()
+
+    # -- connection pool -------------------------------------------------
+    def _acquire_connection(self) -> sqlite3.Connection:
+        """Return this thread's pooled connection, creating it on first use.
+
+        SQLite connections are bound to the creating thread by default, so
+        the pool is keyed by thread. A connection whose file was replaced or
+        closed behind our back is detected with a cheap ``SELECT 1`` probe
+        and recreated.
+        """
+        connection: Optional[sqlite3.Connection] = getattr(
+            self._local, "conn", None
+        )
+        if connection is not None:
+            try:
+                connection.execute("SELECT 1").fetchone()
+                return connection
+            except sqlite3.Error:
+                self.close_thread_connection()
+        connection = sqlite3.connect(str(self.db_path), timeout=5.0)
+        connection.row_factory = sqlite3.Row
+        _apply_sqlite_pragmas(connection, in_memory=False)
+        self._local.conn = connection
+        with self._conn_guard:
+            self._open_connections.append(connection)
+        return connection
+
+    def close_thread_connection(self) -> None:
+        """Close the calling thread's pooled connection (no-op if none)."""
+        connection: Optional[sqlite3.Connection] = getattr(
+            self._local, "conn", None
+        )
+        if connection is None:
+            return
+        self._local.conn = None
+        with self._conn_guard:
+            if connection in self._open_connections:
+                self._open_connections.remove(connection)
+        try:
+            connection.close()
+        except sqlite3.Error:
+            pass
+
+    def close_all_connections(self) -> None:
+        """Close every pooled connection across all threads."""
+        with self._conn_guard:
+            connections = list(self._open_connections)
+            self._open_connections.clear()
+        for connection in connections:
+            try:
+                connection.close()
+            except sqlite3.Error:
+                pass
 
     def _ensure_initialized(
         self,
@@ -199,16 +258,16 @@ class _SqliteStore:
                 self._memory_connection = sqlite3.connect(":memory:")
                 self._memory_connection.row_factory = sqlite3.Row
             connection = self._memory_connection
+            _apply_sqlite_pragmas(connection, in_memory=True)
         else:
-            connection = sqlite3.connect(str(self.db_path), timeout=5.0)
-            connection.row_factory = sqlite3.Row
-        _apply_sqlite_pragmas(connection, in_memory=in_memory)
+            # Pooled per thread: PRAGMAs are applied once, at creation.
+            connection = self._acquire_connection()
         try:
             yield connection
             connection.commit()
         except Exception:
             connection.rollback()
             raise
-        finally:
-            if not in_memory:
-                connection.close()
+        # NOTE: the pooled connection is intentionally left open; it is
+        # closed by close_thread_connection()/close_all_connections() or
+        # when the owning thread exits and the store is garbage collected.
