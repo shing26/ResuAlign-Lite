@@ -73,6 +73,15 @@ Structured extraction of a JD: must-have skills, nice-to-have skills, soft skill
 **Master Resume**
 The candidate's full, un-tailored resume. The single source of truth that all tailored versions derive from. The gap analysis and tailoring engine always reference back to this to prevent hallucination.
 
+**简历中心 (Resume Center)**
+The Master Resume management view. UI canonical routing semantics: the list
+view (all resumes) and the single-resume archive are different entries —
+`#/resume/list` and the legacy plural alias `#/resumes` BOTH open the list;
+only `#/resume/<id>` (or bare `#/resume`, which opens the newest resume's
+archive) enters a single archive page.
+_Avoid_: `#/resumes` opening a single archive (2026-08-28 UX walkthrough P1-A
+regression), list and archive sharing one route without a list sentinel.
+
 **Gap Report**
 Structured comparison between Master Resume and JD Profile. Lists missing keywords, misaligned descriptions (emphasis on wrong aspects), and strength matches (good alignment to keep).
 

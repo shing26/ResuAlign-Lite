@@ -88,6 +88,7 @@ import {
   offerCelebrationHtml,
   onboardingSteps,
   parseHashValue,
+  RESUME_LIST_SENTINEL,
   renderMarkdown,
   renderOnboardingCard,
   ruleFormHtml,
@@ -217,8 +218,11 @@ async function handleRoute(app) {
     case "resumes":
     case "resume":
       await renderResumeCenter(app, {
-        resumeId: state.route.resumeId === "list" ? null : state.route.resumeId,
-        showList: state.route.resumeId === "list",
+        resumeId:
+          state.route.resumeId === RESUME_LIST_SENTINEL
+            ? null
+            : state.route.resumeId,
+        showList: state.route.resumeId === RESUME_LIST_SENTINEL,
       });
       break;
     case "settings":

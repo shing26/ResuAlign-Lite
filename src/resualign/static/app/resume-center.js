@@ -17,6 +17,8 @@ import {
   esc,
   formatDate,
   renderMarkdown,
+  RESUME_LIST_SENTINEL,
+  resumeListPreview,
   versionTimelineHtml,
 } from "./format.js";
 
@@ -50,7 +52,7 @@ async function renderResumeListView(app) {
           </div>
           <span class="badge badge-teal">当前版本 v${resume.current_version}</span>
         </div>
-        <div class="pre" style="max-height:160px">${esc(resume.content)}</div>
+        <p class="small muted" data-resume-preview title="打开「查看档案」阅读全文">${esc(resumeListPreview(resume.content))}</p>
         <div class="row" style="margin-top:10px">
           <button class="btn btn-primary btn-sm" data-action="open-resume-archive" data-id="${resume.resume_id}">查看档案</button>
           <button class="btn btn-outline btn-sm" data-action="edit-resume" data-id="${resume.resume_id}">编辑</button>
@@ -266,8 +268,36 @@ export function openResumeCreator(prefill = {}) {
 /* 路由入口                                                             */
 /* ------------------------------------------------------------------ */
 
+/* UX 走查 P1-C（2026-08-28）：档案页取数 1.5s+ 期间只有一行「加载中...」，
+ * 改为与最终布局同构的骨架屏（band + 诊断横幅 + 版本/诊断面板占位）。 */
+function resumeDetailSkeletonHtml() {
+  return `
+    <div class="view view-fit resume-view" data-resume-detail-skeleton aria-busy="true" aria-label="简历档案加载中">
+      <div class="resume-band">
+        <div class="resume-band-main">
+          <div class="skeleton is-shimmer" style="width:220px;height:22px"></div>
+          <div class="skeleton is-shimmer" style="width:340px;height:14px;margin-top:10px"></div>
+        </div>
+        <div class="resume-band-actions">
+          <div class="skeleton is-shimmer" style="width:140px;height:28px"></div>
+          <div class="skeleton is-shimmer" style="width:110px;height:28px"></div>
+        </div>
+      </div>
+      <section class="panel diagnosis-panel">
+        <div class="skeleton is-shimmer" style="width:100%;height:110px"></div>
+      </section>
+      <section class="panel">
+        <div class="skeleton is-shimmer" style="width:100%;height:200px"></div>
+      </section>
+    </div>`;
+}
+
 export async function renderResumeCenter(app, { resumeId = null, showList = false } = {}) {
-  if (resumeId && resumeId !== "list") {
+  if (!showList) {
+    /* UX 走查 P1-C：档案路径先上骨架屏，替代一行「加载中...」。 */
+    app.innerHTML = resumeDetailSkeletonHtml();
+  }
+  if (resumeId && resumeId !== RESUME_LIST_SENTINEL) {
     await renderResumeDetailView(app, resumeId);
   } else if (showList) {
     await renderResumeListView(app);

@@ -11943,3 +11943,97 @@ select,
     scroll-padding-bottom: 76px;
   }
 }
+
+/* ==========================================================================
+   UX 走查修复（2026-08-28，ADR-0033「默认浅色」收尾）：
+   1) rail 导航在浅色毛玻璃底上仍用暗色 shell 的白色文字（.tabs--rail button
+      的 rgba(255,255,255,.6)、激活态 #fff），白底白字对比度 ~1.1:1；
+   2) 设置页 bento 卡标签被 v2 暗色块的 rgba(255,255,255,.4) 洗白；
+   3) 主题切换按钮被 .icon-btn 固定 38px 方盒压成圆形，胶囊内容竖排。
+   本块置于文件末尾以赢得级联；全部使用主题感知的 ra-* token，明暗两套自动正确。
+   ========================================================================== */
+
+.tabs--rail button {
+  color: var(--ra-text-secondary);
+}
+
+.tabs--rail button:hover {
+  background: var(--ra-surface-2);
+  color: var(--ra-text-primary);
+}
+
+.tabs--rail button[aria-selected="true"],
+.tabs--rail button.nav-btn.active {
+  background: var(--ra-surface-2);
+  color: var(--ra-text-primary);
+  box-shadow: inset 0 0 0 1px var(--ra-border-hairline);
+}
+
+.tabs--rail button .rail-count {
+  background: var(--ra-surface-2);
+  color: var(--ra-text-tertiary);
+}
+
+.rail-brand {
+  border-bottom: 1px solid var(--ra-border-hairline);
+}
+
+.rail-brand .rail-brand__tagline,
+.rail-brand .brand-tag {
+  color: var(--ra-text-tertiary);
+}
+
+.settings-bento__label {
+  color: var(--ra-text-secondary);
+}
+
+.settings-bento__value {
+  color: var(--ra-text-primary);
+}
+
+.settings-bento__hint {
+  color: var(--ra-text-tertiary);
+}
+
+.topbar .theme-toggle.icon-btn {
+  width: auto;
+  height: auto;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--ra-surface-2);
+  border: 1px solid var(--ra-border-hairline);
+  color: var(--ra-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.topbar .theme-toggle.icon-btn:hover {
+  color: var(--ra-text-primary);
+}
+
+.topbar .theme-toggle.icon-btn .theme-toggle-icon {
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ra-text-primary);
+}
+
+@media (max-width: 900px) {
+  .topbar .theme-toggle.icon-btn {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 6px 14px;
+  }
+}
+
+/* UX 走查 P2-E（2026-08-28）：岗位全部堆在「未投递」列时列体无限拉长页面，
+ * 给列体加视口高度上限，滚动收在列内部（board-col-body 本就 overflow-y:auto）。 */
+.board-col-body {
+  max-height: calc(100vh - 300px);
+  min-height: 120px;
+}
