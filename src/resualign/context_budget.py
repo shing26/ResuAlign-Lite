@@ -34,6 +34,22 @@ class ContextBudget:
         if budgets:
             self._budgets.update(budgets)
 
+    # CJK 表意文字 + 假名 + 谚文 + 中文标点 + 全角形式：这些码位在
+    # DeepSeek/GPT 系 tokenizer 下基本 1 字 = 1 token（或更贵），全部按 1.0
+    # 计入，保证 estimate 是保守上界。
+    _CJK_RANGES = (
+        ("\u3000", "\u30ff"),  # CJK 标点与假名（含速记符号 3000-303F）
+        ("\u3400", "\u4dbf"),  # CJK 扩展 A
+        ("\u4e00", "\u9fff"),  # CJK 基本区
+        ("\uac00", "\ud7af"),  # 谚文
+        ("\uff00", "\uffef"),  # 全角形式（，。（）等）
+    )
+
+    @staticmethod
+    def _is_cjk(ch: str) -> bool:
+        """Whether a single char belongs to a ~1-token-per-char CJK range."""
+        return any(lo <= ch <= hi for lo, hi in ContextBudget._CJK_RANGES)
+
     @staticmethod
     def estimate_tokens(text: str) -> int:
         """Rough token estimation: 1 token per CJK char, 4 chars per token otherwise.
@@ -45,13 +61,7 @@ class ContextBudget:
         """
         if not text:
             return 0
-        cjk = sum(
-            1
-            for ch in text
-            if "\u4e00" <= ch <= "\u9fff"
-            or "\u3040" <= ch <= "\u30ff"
-            or "\uac00" <= ch <= "\ud7af"
-        )
+        cjk = sum(1 for ch in text if ContextBudget._is_cjk(ch))
         other = len(text) - cjk
         return cjk + other // 4 + 1
 
