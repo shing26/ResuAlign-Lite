@@ -11036,15 +11036,21 @@ del {
   text-decoration: line-through;
 }
 
-/* ---- 4. 侧栏（230px 白底）与顶栏 ---- */
-.app-shell {
-  grid-template-columns: 230px minmax(0, 1fr);
-}
+/* ---- 4. 侧栏（230px 白底）与顶栏 ----
+   仅桌面：≤900px 时 .app-shell 是 flex-direction: column，这里的
+   `flex: 0 0 230px` 会作用在「高度」上，把侧栏撑成 230px 高的方块
+   （实测 390×844 下吃掉 27% 屏高，其中 95px 是空白）。响应式规则见
+   styles.css:2788 起的 @media (max-width: 900px)。 */
+@media (min-width: 901px) {
+  .app-shell {
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
 
-.app-rail.rail {
-  flex: 0 0 230px;
-  width: 230px;
-  padding: 16px 10px 14px;
+  .app-rail.rail {
+    flex: 0 0 230px;
+    width: 230px;
+    padding: 16px 10px 14px;
+  }
 }
 
 .rail-brand {
@@ -11061,7 +11067,10 @@ del {
   color: var(--ra-text-faint);
 }
 
-.tabs--rail button {
+/* 必须带 .nav-btn：`.tabs--rail button`（0,1,1）会被前面的
+   `.tabs--rail button.nav-btn { color: rgba(255,255,255,.6) }`（styles.css:7389，
+   0,2,1）压过，默认态仍是白底白字。 */
+.tabs--rail button.nav-btn {
   color: var(--ra-text-secondary);
 }
 
@@ -11953,7 +11962,8 @@ select,
    本块置于文件末尾以赢得级联；全部使用主题感知的 ra-* token，明暗两套自动正确。
    ========================================================================== */
 
-.tabs--rail button {
+/* 同样必须带 .nav-btn（同上，特异性需追平 styles.css:7389）。 */
+.tabs--rail button.nav-btn {
   color: var(--ra-text-secondary);
 }
 

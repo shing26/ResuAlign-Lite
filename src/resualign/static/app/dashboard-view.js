@@ -141,7 +141,7 @@ export async function renderDashboard(container) {
       <div class="quick-row${quickRowClass}" data-quick-continue>
         <div class="quick-main">
           <div class="quick-title">${escAttr(quick.title || "未命名岗位")}</div>
-          <div class="quick-meta">${escAttr(quick.company || "未识别公司")} · ${escAttr(alignmentStatusLabel(quick.alignment_status))}</div>
+          <div class="quick-meta">${escAttr(quick.company || "未知公司")} · ${escAttr(alignmentStatusLabel(quick.alignment_status))}</div>
         </div>
         <div class="quick-right">
           <span class="${quickBadgeClass}">${escAttr(quickBadgeLabel)}</span>

@@ -28,35 +28,83 @@ const STYLES = STYLES_RAW.replace(/\/\*[\s\S]*?\*\//g, "");
 
 /* ---------- 护栏 1：CSS 级联（P0-A / P1-D / P2-D 同根因） ---------- */
 
-function lastColorDecl(css, selector) {
-  // 通用规则块扫描：取与 selector 完全匹配的规则块中最后一段 color 声明
-  // （级联以"最后出现"取胜）。先剥离注释，避免注释里的选择器字样干扰。
-  let decl = null;
-  for (const m of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
-    const selList = m[1];
-    if (!selList.split(",").some((s) => s.trim() === selector)) continue;
-    const color = m[2].match(/(?:^|;)\s*color\s*:\s*([^;]+)/);
-    if (color) decl = color[1].trim();
-  }
-  return decl;
+/** CSS 特异性 (id, class/属性/伪类, 元素/伪元素)。 */
+function specificity(sel) {
+  const s = String(sel).trim();
+  const ids = (s.match(/#[\w-]+/g) || []).length;
+  const classes =
+    (s.match(/\.[\w-]+/g) || []).length +
+    (s.match(/\[[^\]]*\]/g) || []).length +
+    (s.match(/:(?!:)[\w-]+/g) || []).length;
+  const pseudoEls = (s.match(/::[\w-]+/g) || []).length;
+  const elements =
+    (s.replace(/::[\w-]+/g, " ").match(/(^|[\s>+~])[a-zA-Z][\w-]*/g) || [])
+      .length + pseudoEls;
+  return [ids, classes, elements];
 }
 
+/**
+ * 按真实级联裁定 color：先比特异性，特异性相同则取源码靠后者。
+ *
+ * 2026-08-29：原先的 lastColorDecl 只做"精确选择器字符串匹配 + 取最后一条"，
+ * 完全不建模特异性，所以它查 `.tabs--rail button` 时拿到的是文件末尾的
+ * token 声明，而浏览器实际生效的是更具体的
+ * `.tabs--rail button.nav-btn { color: rgba(255,255,255,.6) }`——
+ * 护栏 green，线上白底白字。这里改为显式列出会互相竞争的选择器集合，
+ * 让测试按浏览器同样的方式裁定胜者。
+ */
+function resolveColor(css, selectors) {
+  const wanted = new Set(selectors);
+  const decls = [];
+  let order = 0;
+  for (const m of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    for (const part of m[1].split(",")) {
+      const sel = part.trim();
+      if (!wanted.has(sel)) continue;
+      const color = m[2].match(/(?:^|;)\s*color\s*:\s*([^;]+)/);
+      if (color) {
+        decls.push({ sel, color: color[1].trim(), spec: specificity(sel), order: order++ });
+      }
+    }
+  }
+  if (!decls.length) return null;
+  decls.sort((a, b) => {
+    for (let i = 0; i < 3; i += 1) {
+      if (a.spec[i] !== b.spec[i]) return a.spec[i] - b.spec[i];
+    }
+    return a.order - b.order;
+  });
+  return decls[decls.length - 1];
+}
+
+/**
+ * rail 导航默认态 color 的竞争者集合。
+ * 新增/改动相关规则时，选择器必须同步加到这里，否则护栏会失明。
+ */
+const RAIL_NAV_SELECTORS = [
+  ".tabs--rail button",
+  ".tabs--rail button.nav-btn",
+];
+
 test("P0-A: rail 导航项最终 color 必须走主题感知 token，而不是暗色 shell 白字", () => {
-  const decl = lastColorDecl(STYLES, ".tabs--rail button");
-  assert.ok(decl, ".tabs--rail button 缺少 color 声明");
+  const winner = resolveColor(STYLES, RAIL_NAV_SELECTORS);
+  assert.ok(winner, "rail 导航默认态缺少 color 声明");
   assert.match(
-    decl,
+    winner.color,
     /--ra-text-secondary/,
-    "最终生效的 color 必须是 --ra-text-secondary（浅色=slate-600 / 暗色自动适配），" +
-      "否则白底白字回归（2026-08-28 走查 P0-A）",
+    `默认态胜出规则必须声明 --ra-text-secondary。` +
+      `实际胜出：${winner.sel} { color: ${winner.color} }` +
+      `（特异性 ${winner.spec.join(",")}）。` +
+      `若胜出者是更具体的暗色 shell 白字规则，说明修复选择器特异性不足` +
+      `（2026-08-28 走查 P0-A / 2026-08-29 复验：修复需带 .nav-btn）`,
   );
 });
 
 test("P1-D: 设置页 bento 卡标签最终 color 必须走主题感知 token", () => {
-  const decl = lastColorDecl(STYLES, ".settings-bento__label");
+  const decl = resolveColor(STYLES, [".settings-bento__label"]);
   assert.ok(decl, ".settings-bento__label 缺少 color 声明");
   assert.match(
-    decl,
+    decl.color,
     /--ra-text-secondary/,
     "bento 标签不能落在暗色块 rgba(255,255,255,.4) 上（2026-08-28 走查 P1-D）",
   );
