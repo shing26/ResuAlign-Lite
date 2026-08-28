@@ -64,3 +64,8 @@ _tmp/
 会话历史导出/
 .scratch/phase-20/screenshots/
 .scratch/phase-20/__pycache__/
+dev_null.txt
+_tmp_*.py
+step1_format.py
+upd_tests.py
+体验报告-*.md
