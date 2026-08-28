@@ -44,3 +44,14 @@ def test_budget_ascii_cut_ratio_unchanged():
     compressed = budget.apply("diagnose", long_ascii)
     body = compressed.rsplit("\n[TRUNCATED", 1)[0]
     assert len(body) <= 2000 * 4 + 1
+
+
+def test_estimate_tokens_covers_punctuation_and_fullwidth():
+    # 中文标点（，。）与全角形式此前落入 //4 桶被低估——现在按 1 字 1 token
+    text = "。，（）："
+    estimated = ContextBudget.estimate_tokens(text)
+    assert estimated == len(text) + 1
+    mixed = "简历（Java，5年）"
+    assert ContextBudget.estimate_tokens(mixed) >= sum(
+        1 for ch in mixed if ord(ch) > 0x2E7F
+    ) + 1

@@ -57,3 +57,10 @@ tests/frontend/node_modules/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 本地工作产物（2026-08-28 review 决定：保留磁盘文件、移出版本库）
+_tmp/
+.workbuddy/
+会话历史导出/
+.scratch/phase-20/screenshots/
+.scratch/phase-20/__pycache__/

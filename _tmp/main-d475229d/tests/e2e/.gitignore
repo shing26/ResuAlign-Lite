@@ -1,4 +1,0 @@
-# Local E2E run artifacts (screenshots / DOM snapshots / console dumps);
-# CI uploads them via actions/upload-artifact instead of committing them.
-artifacts/
-__pycache__/
