@@ -9,13 +9,22 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { diffList, parseHashValue } from "../../src/resualign/static/app/format.js";
+import {
+  diffList,
+  parseHashValue,
+  renderGap,
+  resumeListPreview,
+  shortenGapPhrase,
+  workbenchGuideHtml,
+} from "../../src/resualign/static/app/format.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const STYLES = readFileSync(
+const STYLES_RAW = readFileSync(
   join(here, "../../src/resualign/static/styles.css"),
   "utf8",
 );
+/* 注释剥离后的样式表：级联/token 解析统一用它，避免注释里的选择器字样干扰 */
+const STYLES = STYLES_RAW.replace(/\/\*[\s\S]*?\*\//g, "");
 
 /* ---------- 护栏 1：CSS 级联（P0-A / P1-D / P2-D 同根因） ---------- */
 
@@ -23,7 +32,7 @@ function lastColorDecl(css, selector) {
   // 通用规则块扫描：取与 selector 完全匹配的规则块中最后一段 color 声明
   // （级联以"最后出现"取胜）。先剥离注释，避免注释里的选择器字样干扰。
   let decl = null;
-  for (const m of css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+  for (const m of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
     const selList = m[1];
     if (!selList.split(",").some((s) => s.trim() === selector)) continue;
     const color = m[2].match(/(?:^|;)\s*color\s*:\s*([^;]+)/);
@@ -53,7 +62,7 @@ test("P1-D: 设置页 bento 卡标签最终 color 必须走主题感知 token", 
   );
 });
 
-test("护栏: 浅色 token 组合满足 WCAG AA（slate-600 on white ≥ 4.5:1）", () => {
+test("护栏: 浅色主题 --ra-text-secondary 实际值对白底满足 WCAG AA ≥ 4.5:1", () => {
   const lum = (hex) => {
     const [r, g, b] = [0, 2, 4].map((i) => {
       const v = parseInt(hex.slice(i, i + 2), 16) / 255;
@@ -65,10 +74,16 @@ test("护栏: 浅色 token 组合满足 WCAG AA（slate-600 on white ≥ 4.5:1�
     const [a, b] = [lum(fg), lum(bg)].sort((x, y) => y - x);
     return (a + 0.05) / (b + 0.05);
   };
-  // --ra-text-secondary 浅色值 #475569（styles.css 浅色 token 块）
+  // 浅色 ra 壳层 token 块以 --ra-canvas（浅色画布色）为标记；暗色主题由
+  // html.dark/[data-theme=dark] 高特异性块覆盖。解析该块里
+  // --ra-text-secondary 的真实色值——token 改坏时护栏直接报警。
+  const rootBlocks = [...STYLES.matchAll(/:root\s*{([^}]*)}/g)].map((m) => m[1]);
+  const lightBlock = [...rootBlocks].reverse().find((b) => b.includes("--ra-canvas")) || "";
+  const value = lightBlock.match(/--ra-text-secondary:\s*(#[0-9a-fA-F]{6})/);
+  assert.ok(value, "浅色 :root 块必须定义十六进制 --ra-text-secondary");
   assert.ok(
-    ratio("475569", "ffffff") >= 4.5,
-    "slate-600 对白底对比度必须 ≥ 4.5:1",
+    ratio(value[1].slice(1), "ffffff") >= 4.5,
+    `--ra-text-secondary=${value[1]} 对白底对比度必须 ≥ 4.5:1`,
   );
 });
 
@@ -120,13 +135,6 @@ test("P1-B: succeeded 且无任何 diffs 时渲染开始对齐空态", () => {
 });
 
 /* ---------- 遗留待办（P1-C / P2-A / P2-B / P2-C） ---------- */
-
-import {
-  renderGap,
-  resumeListPreview,
-  shortenGapPhrase,
-  workbenchGuideHtml,
-} from "../../src/resualign/static/app/format.js";
 
 test("P2-A: 列表卡预览跳过 Markdown 标题行、截断并附全文字数", () => {
   const longLine = "- 五年后端研发经验，主导过支付网关重构与性能优化，熟悉高并发场景，深入理解 JVM 调优与分布式事务一致性。".repeat(3);

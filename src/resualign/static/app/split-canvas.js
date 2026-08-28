@@ -186,7 +186,8 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const pendingCount = Math.max(0, diffs.length - acceptedCount);
   /* UX 走查 2026-08-28：provenance 硬门禁拦截的建议卡（invalid_diffs）也会
      渲染在建议面板里，但头部计数此前只统计有效 diffs——出现「0 条改写建议」
-     与面板里 N 张待复核卡的口径分裂。这里把待复核数并入同一行。 */
+     与面板里 N 张待复核卡的口径分裂。这里并入同一行，措辞与 provenance
+     pill 的「建议复核」保持同一叫法（ADR-0033 §7 术语统一）。 */
   const invalidCount = Array.isArray(alignment.invalid_diffs)
     ? alignment.invalid_diffs.length
     : 0;
@@ -241,7 +242,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <div class="wb-tags">${tagItems.map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}</div>
         </div>
         <div class="wb-context-actions">
-          <span class="status-line"><span class="dot dot-success" aria-hidden="true"></span>${esc(diffs.length)} 条改写建议${invalidCount ? ` · ${esc(invalidCount)} 条缺来源待复核` : ""} · ${esc(acceptedCount)} 已采纳 · ${esc(pendingCount)} 待采纳</span>
+          <span class="status-line"><span class="dot dot-success" aria-hidden="true"></span>${esc(diffs.length)} 条改写建议${invalidCount ? ` · ${esc(invalidCount)} 条建议复核` : ""} · ${esc(acceptedCount)} 已采纳 · ${esc(pendingCount)} 待采纳</span>
           <select class="input input-sm" data-job-switcher aria-label="切换岗位">
             ${jobs.map((item) => `<option value="${esc(item.job_id)}" ${item.job_id === jobId ? "selected" : ""}>${esc(item.title)}${item.company ? ` · ${esc(item.company)}` : ""}</option>`).join("")}
           </select>
@@ -1463,12 +1464,13 @@ export function setWbViewMode(mode) {
   state.wbViewMode = mode;
   const app = $("#app-router-view");
   if (!app || !state.route || state.route.name !== "workspace") return;
-  /* 已有活跃会话时只重排现有画布：renderOptimizerCanvas 会整画布重挂载并
-   * 经 stopOptimizerStreams 杀掉在跑对齐的轮询/SSE，再以 session store 的
-   * 旧终态重绘——对齐进行中切视图会让画布永远停在旧结果（2026-08-27 CI
-   * mobile 冒烟复现：草稿态 A4 挂载→切对照编辑→轮询被杀→旧「已采纳」卡）。 */
-  if (activeSession) {
-    renderSplitCanvas(app, activeSession, state.wbResumes || [], workbenchJobs);
+  /* 已有活跃会话且简历列表已加载时只重排现有画布：renderOptimizerCanvas 会
+   * 整画布重挂载并经 stopOptimizerStreams 杀掉在跑对齐的轮询/SSE，再以
+   * session store 的旧终态重绘——对齐进行中切视图会让画布永远停在旧结果
+   * （2026-08-27 CI mobile 冒烟复现）。wbResumes 未就绪时退回整挂载，
+   * 避免 workbenchPrimaryButtonHtml 拿到空列表渲染出错误的「无简历」态。 */
+  if (activeSession && state.wbResumes && state.wbResumes.length) {
+    renderSplitCanvas(app, activeSession, state.wbResumes, workbenchJobs);
     return;
   }
   renderOptimizerCanvas(app, activeJobId || (state.route && state.route.jobId) || "");

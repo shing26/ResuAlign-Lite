@@ -17,6 +17,7 @@ import {
   esc,
   formatDate,
   renderMarkdown,
+  RESUME_LIST_SENTINEL,
   resumeListPreview,
   versionTimelineHtml,
 } from "./format.js";
@@ -292,15 +293,17 @@ function resumeDetailSkeletonHtml() {
 }
 
 export async function renderResumeCenter(app, { resumeId = null, showList = false } = {}) {
-  if (resumeId && resumeId !== "list") {
+  if (!showList) {
+    /* UX 走查 P1-C：档案路径先上骨架屏，替代一行「加载中...」。 */
     app.innerHTML = resumeDetailSkeletonHtml();
+  }
+  if (resumeId && resumeId !== RESUME_LIST_SENTINEL) {
     await renderResumeDetailView(app, resumeId);
   } else if (showList) {
     await renderResumeListView(app);
   } else {
     /* v2.0 shell：默认直达最新主简历的 65/35 详情视图（preview.html 契约）；
      * 显式 #/resume/list 或无简历时才渲染列表/空态。 */
-    app.innerHTML = resumeDetailSkeletonHtml();
     state.resumes = await api("/api/master-resumes");
     /* Bug-05: 默认直达带诊断的主简历，避免最新“另存版”抢占入口。 */
     const first = Array.isArray(state.resumes)

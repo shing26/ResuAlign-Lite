@@ -12014,7 +12014,6 @@ select,
 }
 
 .topbar .theme-toggle.icon-btn:hover {
-  background: var(--ra-surface-2);
   color: var(--ra-text-primary);
 }
 

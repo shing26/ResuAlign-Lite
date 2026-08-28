@@ -260,6 +260,10 @@ export function buildDiagnosisMarkdownFrom(diagnosis, title, originalContent = "
 
 const ROUTE_NAMES = ["resume", "resumes", "jobs", "workspace", "settings", "dashboard", "today"];
 
+/* UX 走查 P1-A（2026-08-28）：裸 #/resumes 归一化为列表哨兵，与
+ * #/resume/list 等价出列表；#/resume/<id> 才进单份档案。 */
+export const RESUME_LIST_SENTINEL = "list";
+
 export function parseHashValue(hash) {
   const value = String(hash || "").replace(/^#\/?/, "");
   /* Query params let flows deep-link into a view with context, e.g.
@@ -292,14 +296,13 @@ export function parseHashValue(hash) {
     }
     return { name: "resume", jobId: null, resumeId };
   }
-  /* "resumes" 是 "resume" 的复数路由别名（蓝图契约 #/resumes）。
-     UX 走查 P1-A（2026-08-28）：裸 #/resumes 归一化为列表哨兵 "list"，
-     与 #/resume/list 等价出列表；#/resume/<id> 才进单份档案。 */
-  const name = ROUTE_NAMES.includes(parts[0]) ? parts[0] : "resume";
-  if (name === "resumes" && !parts[1]) {
-    return { name: "resume", jobId: null, resumeId: "list" };
+  /* "resumes" 是 "resume" 的复数路由别名（蓝图契约 #/resumes）：裸 #/resumes
+     归一化为列表哨兵（UX 走查 P1-A）。带 id 的路径已在上方分支返回。 */
+  if (parts[0] === "resumes") {
+    return { name: "resume", jobId: null, resumeId: RESUME_LIST_SENTINEL };
   }
-  return { name: name === "resumes" ? "resume" : name, jobId: null, resumeId: resumeFromQuery };
+  const name = ROUTE_NAMES.includes(parts[0]) ? parts[0] : "resume";
+  return { name, jobId: null, resumeId: resumeFromQuery };
 }
 
 /* ------------------------------------------------------------------ */
