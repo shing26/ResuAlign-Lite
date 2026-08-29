@@ -246,3 +246,42 @@ def test_job_list_sort_by_match_score(tmp_path):
         ).status_code == 422
     finally:
         _restore_api_state(saved)
+
+
+def test_keyword_coverage_score_ratio_and_missing():
+    from resualign.match_scorer import keyword_coverage_score
+
+    profile = {"must_have_skills": ["Python", "Redis", "Kubernetes"]}
+    resume = "熟练使用 Python 与 redis，无容器经验"
+    detail = keyword_coverage_score(profile, resume)
+    assert detail["required"] == 3
+    assert detail["matched"] == 2
+    assert detail["ratio"] == 0.667
+    assert detail["missing"] == ["Kubernetes"]
+
+
+def test_keyword_coverage_score_aliases_and_no_skills():
+    from resualign.match_scorer import keyword_coverage_score
+
+    # 字面子串匹配（与原 gate 实现一致）：Go 会命中 Golang，属已知局限；
+    # 未出现的关键词计入 missing
+    assert keyword_coverage_score(
+        {"required_skills": ["Go", "Kafka"]}, "Golang 微服务"
+    )["missing"] == ["Kafka"]
+    assert keyword_coverage_score({"skills": ["FastAPI"]}, "用 FastAPI 写服务")[
+        "matched"
+    ] == 1
+    assert keyword_coverage_score({}, "任意简历") is None
+    assert keyword_coverage_score(None, None) is None
+
+
+def test_compute_match_score_includes_keyword_coverage():
+    jd_text, profile, gap, eval_score, resume = _fixture_inputs()
+    detail = compute_match_score(jd_text, profile, gap, eval_score, resume, "r1")
+    # fixture 简历含 Python 不含 Redis（大小写不敏感命中其一）
+    assert detail["keyword_coverage"]["required"] == 2
+    assert detail["keyword_coverage"]["matched"] == 1
+    assert detail["keyword_coverage"]["missing"] == ["Redis"]
+    # 无技能画像时为 None，而不是伪装成零覆盖
+    empty = compute_match_score(jd_text, {}, gap, eval_score, resume, "r1")
+    assert empty["keyword_coverage"] is None
