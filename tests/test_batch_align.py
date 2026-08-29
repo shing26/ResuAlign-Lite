@@ -463,3 +463,106 @@ def test_batch_align_requires_api_key():
             headers=_auth_headers(),
         )
     assert r.status_code == 503
+
+
+def _set_alignment_status(job_id, status, workbench_job_id=None):
+    """用 store 直改 alignment_status，模拟历史遗留的各状态岗位。"""
+    jobs = client.get("/api/jobs", headers=_auth_headers()).json()
+    rows = jobs if isinstance(jobs, list) else jobs.get("jobs") or []
+    tenant = next(j["tenant_id"] for j in rows if j["job_id"] == job_id)
+    api_module._jobs.update_job(
+        tenant, job_id, alignment_status=status, workbench_job_id=workbench_job_id
+    )
+
+
+def test_batch_align_pending_queues_idle_and_failed_only():
+    resume = _create_resume()
+    job_ids = _create_library_jobs(3)
+    _set_alignment_status(job_ids[0], "succeeded")
+    _set_alignment_status(job_ids[1], "failed")
+    # job_ids[2] 保持 idle
+
+    queued = []
+    def fake_queue_job(user, payload, workbench=False):
+        queued.append((payload, workbench))
+        return f"analysis-{len(queued)}"
+
+    with patch(
+        "resualign.api._queue_job", side_effect=fake_queue_job
+    ), patch("resualign.api.build_config", return_value=_config()):
+        r = client.post(
+            "/api/batch-align",
+            json={"selector": "pending", "master_resume_id": resume["resume_id"], "job_ids": []},
+            headers=_auth_headers(),
+        )
+    assert r.status_code == 202
+    assert r.json()["total"] == 2
+    assert {payload["library_job_id"] for payload, _ in queued} == {
+        job_ids[1],
+        job_ids[2],
+    }
+
+
+def test_batch_align_pending_includes_stale_queued():
+    resume = _create_resume()
+    job_ids = _create_library_jobs(2)
+    # registry 中不存在 / 无注册任务 → 都是"卡死的 queued"
+    _set_alignment_status(job_ids[0], "queued", workbench_job_id="ghost-job")
+    _set_alignment_status(job_ids[1], "queued", workbench_job_id=None)
+
+    with patch("resualign.api._queue_job", return_value="analysis-x"), patch(
+        "resualign.api.build_config", return_value=_config()
+    ):
+        r = client.post(
+            "/api/batch-align",
+            json={"selector": "pending", "master_resume_id": resume["resume_id"], "job_ids": []},
+            headers=_auth_headers(),
+        )
+    assert r.status_code == 202
+    assert r.json()["total"] == 2
+
+
+def test_batch_align_pending_defaults_to_latest_resume():
+    _create_resume("first content")
+    latest = _create_resume("second content")
+    _create_library_jobs(1)
+
+    queued = []
+    def fake_queue_job(user, payload, workbench=False):
+        queued.append((payload, workbench))
+        return f"analysis-{len(queued)}"
+
+    with patch(
+        "resualign.api._queue_job", side_effect=fake_queue_job
+    ), patch("resualign.api.build_config", return_value=_config()):
+        r = client.post(
+            "/api/batch-align",
+            json={"selector": "pending", "master_resume_id": "", "job_ids": []},
+            headers=_auth_headers(),
+        )
+    assert r.status_code == 202
+    assert queued[0][0]["master_resume_id"] == latest["resume_id"]
+
+
+def test_batch_align_pending_without_pending_jobs_422():
+    _create_resume()
+    with patch("resualign.api.build_config", return_value=_config()):
+        r = client.post(
+            "/api/batch-align",
+            json={"selector": "pending", "master_resume_id": "", "job_ids": []},
+            headers=_auth_headers(),
+        )
+    assert r.status_code == 422
+    assert "待处理" in r.json()["detail"]
+
+
+def test_batch_align_pending_without_resume_422():
+    _create_library_jobs(1)
+    with patch("resualign.api.build_config", return_value=_config()):
+        r = client.post(
+            "/api/batch-align",
+            json={"selector": "pending", "master_resume_id": "", "job_ids": []},
+            headers=_auth_headers(),
+        )
+    assert r.status_code == 422
+    assert "主简历" in r.json()["detail"]

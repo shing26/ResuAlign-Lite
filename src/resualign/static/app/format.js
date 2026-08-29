@@ -1108,6 +1108,7 @@ export function batchPanelHtml(jobs, resumes) {
       </div>
       <div class="row">
         <button class="btn btn-primary" type="submit">开始批量对齐</button>
+        <button class="btn btn-ghost" type="button" data-action="batch-align-pending">分析全部待处理</button>
         <button class="btn btn-danger" type="button" data-action="cancel-batch-align" data-batch-cancel hidden>取消排队</button>
         <span class="small muted" data-batch-status></span>
       </div>

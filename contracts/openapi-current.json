@@ -3396,6 +3396,18 @@
             ],
             "title": "Jd Urls"
           },
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "pending"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selector"
+          },
           "granularity": {
             "type": "string",
             "enum": [
