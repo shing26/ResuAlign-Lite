@@ -49,7 +49,7 @@ test("source contracts keep the new UX gap fixes wired", () => {
 
   const dashboard = read("dashboard-view.js");
   assert.match(dashboard, /currentResume\.latest_diagnosis/, "dashboard reads persisted diagnosis");
-  assert.match(dashboard, /未识别公司/, "dashboard quick continue uses 未识别公司 fallback");
+  assert.match(dashboard, /未知公司/, "dashboard quick continue uses 未知公司 fallback (unified wording, 079e994)");
 
   const resumeCenter = read("resume-center.js");
   assert.match(resumeCenter, /data-resume-band-status-text/, "resume band status slot");
