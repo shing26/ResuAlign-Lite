@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import resualign.api as api_module
 
+from ...alignment_lifecycle import transition_alignment
 from ...llm_usage import llm_tenant_context
 from ...role_router import call_with_role
 from ..deps import get_current_user, get_local_ingest_user
@@ -249,6 +250,22 @@ def cancel_analysis_job(job_id: str, user: dict[str, Any]=Depends(get_current_us
     stored = api_module._registry.get_payload(job_id)
     if stored and stored[2]:
         api_module._applications.set_application_job(user['user_id'], stored[2], job_id, 'draft')
+    if stored and (stored[0] or {}).get('library_job_id'):
+        # 取消后把徽标从 queued 拉回 idle，避免看板出现永远排队的岗位。
+        try:
+            transition_alignment(
+                api_module._jobs,
+                user['user_id'],
+                stored[0]['library_job_id'],
+                'idle',
+            )
+        except Exception:
+            logging.getLogger(__name__).exception(
+                'Failed to reset alignment_status to idle for library job %s '
+                'after canceling analysis job %s',
+                stored[0].get('library_job_id'),
+                job_id,
+            )
     return {'job_id': job_id, 'status': 'canceled'}
 
 @router.post('/api/jobs/{job_id}/reclassify')
@@ -401,7 +418,17 @@ def run_workbench(job_id: str, req: WorkbenchRunRequest, request: Request, user:
     analysis_job_id = api_module._queue_job(user, payload, workbench=True)
     # 重跑时把 alignment_status 拉回 queued：否则上一轮的 succeeded 会残留，
     # 轮询方（前端/冒烟）会误判新任务已完成而读到旧的 diffs（2026-08-27 CI 复现）。
-    api_module._jobs.update_job(user['user_id'], job_id, workbench_job_id=analysis_job_id, workbench_resume_id=req.master_resume_id, tailor_granularity=req.granularity, tailor_focus=req.prompt_focus, custom_prompt=req.custom_prompt, alignment_status='queued')
+    transition_alignment(
+        api_module._jobs,
+        user['user_id'],
+        job_id,
+        'queued',
+        workbench_job_id=analysis_job_id,
+        workbench_resume_id=req.master_resume_id,
+        tailor_granularity=req.granularity,
+        tailor_focus=req.prompt_focus,
+        custom_prompt=req.custom_prompt,
+    )
     return {'job_id': analysis_job_id, 'status': 'queued', 'workbench': True}
 
 @router.post('/api/jobs/{job_id}/workbench/accept')
