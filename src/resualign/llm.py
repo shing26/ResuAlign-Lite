@@ -337,8 +337,13 @@ class OpenAIClient(LLMClient):
             or _DEFAULT_PROVIDER_URLS.get(config.provider, "https://api.openai.com/v1")
         )
         provider = str(getattr(config, "provider", "")).lower()
+        # Ollama's OpenAI-compatible endpoint implements json_schema
+        # structured outputs (>=0.5); without it small local models emit
+        # unparseable JSON and the pipeline silently loses all diffs. A
+        # 400 from an old Ollama falls back to JSON mode in
+        # _chat_structured_provider, so the optimistic opt-in is safe.
         self.supports_structured_outputs = (
-            provider in {"openai", "azure"}
+            provider in {"openai", "azure", "ollama"}
             or "api.openai.com" in self.base_url
         )
         self.provider = provider or "unknown"
