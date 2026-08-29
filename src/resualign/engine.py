@@ -14,7 +14,7 @@ from .llm_nodes import LLMNodeStore
 from .models import GapReport, Report, ResuAlignConfig
 from .role_router import _role_timeout, call_with_role
 from .rule_diagnose import diagnose_resume_local
-from .tailor import tailor_resume
+from .tailor import tailor_resume, tailor_resume_map_reduce
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,55 @@ def _bullet_editor_enabled(granularity: str) -> bool:
     if os.environ.get("RESUALIGN_BULLET_EDITOR", "1") != "1":
         return False
     return granularity in {"fine", "medium"}
+
+
+def _is_local_llm(provider: str, base_url: str | None) -> bool:
+    """Whether a provider/base_url pair points at a local inference node."""
+    if (provider or "").lower() == "ollama":
+        return True
+    base = (base_url or "").lower()
+    return "localhost" in base or "127.0.0.1" in base
+
+
+def _editor_call_plan(
+    node_store: "LLMNodeStore",
+    tenant_id: str,
+    granularity: str,
+    *,
+    resume_text: str,
+    gap_report_text: str,
+    prompt_focus: str,
+    custom_prompt: str,
+    jd_context: str,
+) -> tuple[Any, dict]:
+    """Choose the editor strategy for the role-resolved editor node.
+
+    Local nodes (Ollama/localhost) get the bullet-level map-reduce editor:
+    dozens of tiny per-bullet JSON calls fit a small local model far better
+    than one whole-document rewrite (measured 2026-08-30: a 7B model at
+    ~13 tok/s needs ~200s for the full-editor contract vs the 90s editor
+    role timeout, and tends to omit the diffs array entirely). Cloud nodes
+    keep the whole-document path for maximum rewrite quality. Coarse
+    restructuring always uses the whole-document editor.
+    """
+    base_kwargs = {
+        "resume_text": resume_text,
+        "gap_report_text": gap_report_text,
+        "granularity": granularity,
+        "prompt_focus": prompt_focus,
+        "custom_prompt": custom_prompt,
+    }
+    if _bullet_editor_enabled(granularity):
+        editor_node = node_store.resolve_node_for_role(tenant_id, "editor")
+        if LLMNodeStore._is_local_node(editor_node):
+            return tailor_resume_map_reduce, {
+                **base_kwargs,
+                "jd_context": jd_context,
+                # Local inference is serialized by the server anyway; keep
+                # one connection to avoid VRAM pressure from parallel runs.
+                "parallel": False,
+            }
+    return tailor_resume, base_kwargs
 
 
 def truncate_text(text: str, limit: int) -> str:
@@ -277,16 +326,24 @@ def run(
                 ),
             }, ensure_ascii=False)
             if use_roles:
+                editor_fn, editor_kwargs = _editor_call_plan(
+                    node_store,
+                    tenant_id,
+                    granularity,
+                    resume_text=resume_text,
+                    gap_report_text=gap_report_str,
+                    prompt_focus=prompt_focus,
+                    custom_prompt=custom_prompt,
+                    jd_context=truncate_text(
+                        filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
+                    ),
+                )
                 tailor_result, _ = call_with_role(
-                    "editor", tailor_resume,
-                    node_store, tenant_id,
-                    fn_kwargs={
-                        "resume_text": resume_text,
-                        "gap_report_text": gap_report_str,
-                        "granularity": granularity,
-                        "prompt_focus": prompt_focus,
-                        "custom_prompt": custom_prompt,
-                    },
+                    "editor",
+                    editor_fn,
+                    node_store,
+                    tenant_id,
+                    fn_kwargs=editor_kwargs,
                 )
                 report.tailored_resume = tailor_result
             else:
@@ -297,14 +354,30 @@ def run(
                         max_retries=TAILOR_MAX_RETRIES,
                     )
                     tailor_client_owned = True
-                report.tailored_resume = tailor_resume(
-                    tailor_client,
-                    resume_text,
-                    gap_report_str,
-                    granularity=granularity,
-                    prompt_focus=prompt_focus,
-                    custom_prompt=custom_prompt,
-                )
+                if _bullet_editor_enabled(granularity) and _is_local_llm(
+                    config.provider, config.base_url
+                ):
+                    report.tailored_resume = tailor_resume_map_reduce(
+                        tailor_client,
+                        resume_text,
+                        gap_report_str,
+                        granularity=granularity,
+                        prompt_focus=prompt_focus,
+                        custom_prompt=custom_prompt,
+                        jd_context=truncate_text(
+                            filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
+                        ),
+                        parallel=False,
+                    )
+                else:
+                    report.tailored_resume = tailor_resume(
+                        tailor_client,
+                        resume_text,
+                        gap_report_str,
+                        granularity=granularity,
+                        prompt_focus=prompt_focus,
+                        custom_prompt=custom_prompt,
+                    )
 
             # Diffs from tailor_resume replace the old legacy alignment diffs
             report.diffs = report.tailored_resume.diffs

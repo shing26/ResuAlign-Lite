@@ -451,6 +451,37 @@ def _gap_score(gap_report: Any) -> Optional[float]:
     return max(30.0, 100.0 - missing * 15.0)
 
 
+def alignment_notice(
+    diffs: Any, invalid_diffs: Any, draft: Any = None
+) -> Optional[str]:
+    """Banner text when an alignment "succeeded" with no actionable product.
+
+    Empty-diff successes previously rendered identically to real successes,
+    so users read them as "alignment never completes" (2026-08-30 diagnosis:
+    5 of 8 succeeded jobs had zero diffs). The notice names the two empty
+    shapes: gate-rejected suggestions vs a model that returned no structured
+    diffs at all.
+    """
+    try:
+        diff_count = len(diffs or [])
+        invalid_count = len(invalid_diffs or [])
+    except TypeError:
+        return None
+    if diff_count:
+        return None
+    if invalid_count:
+        return (
+            f"{invalid_count} 条改写建议因溯源未命中原文被硬门禁拦截："
+            "可在「建议复核」中逐条检查，或更换更强模型后重新对齐"
+        )
+    if str(draft or "").strip():
+        return (
+            "模型未产出结构化改写建议（仅返回了全文重写）。"
+            "建议在设置页更换更强模型后重新对齐，或基于 Live Sheet 手工定稿"
+        )
+    return "本次对齐未产出任何改写建议，建议更换更强模型后重新对齐"
+
+
 def _session_sections_from_job(
     job: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
@@ -488,6 +519,11 @@ def _session_sections_from_job(
             "invalid_diffs": job.get("invalid_diffs") or [],
             "draft": job.get("draft"),
             "eval_score": job.get("eval_score"),
+            "notice": alignment_notice(
+                job.get("diffs"),
+                job.get("invalid_diffs"),
+                job.get("draft"),
+            ),
         },
     }
 

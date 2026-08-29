@@ -331,6 +331,10 @@ class _FakeNodeStore:
     def get_active_node(self, tenant_id):
         return {"name": "fake-node"}
 
+    def resolve_node_for_role(self, tenant_id, role):
+        # Cloud-style node keeps the whole-document editor selection.
+        return {"name": "fake-node", "provider": "deepseek", "base_url": None}
+
 
 def _profile_obj():
     from resualign.models import JDProfile
@@ -413,3 +417,87 @@ def test_engine_eval_in_role_path_uses_real_signature(monkeypatch):
     )
     assert report.eval_score is not None
     assert report.eval_score.jd_match_score == 82
+
+
+# ---------------------------------------------------------------------------
+# Editor strategy selection (2026-08-30): local nodes get the bullet-level
+# map-reduce editor; cloud nodes keep the whole-document editor.
+# ---------------------------------------------------------------------------
+
+class _LocalNodeStore:
+    def get_active_node(self, tenant_id):
+        return {"name": "local", "provider": "ollama", "base_url": "http://localhost:11434/v1"}
+
+    def resolve_node_for_role(self, tenant_id, role):
+        return {
+            "name": "local",
+            "provider": "ollama",
+            "base_url": "http://localhost:11434/v1",
+            "model": "qwen2.5:7b",
+        }
+
+
+class _CloudNodeStore:
+    def get_active_node(self, tenant_id):
+        return {"name": "cloud", "provider": "deepseek", "base_url": None}
+
+    def resolve_node_for_role(self, tenant_id, role):
+        return {"name": "cloud", "provider": "deepseek", "base_url": None}
+
+
+def _plan_kwargs(**overrides):
+    base = {
+        "resume_text": "resume",
+        "gap_report_text": "{}",
+        "prompt_focus": "balanced",
+        "custom_prompt": "",
+        "jd_context": "jd",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_editor_call_plan_uses_map_reduce_for_local_node():
+    from resualign.engine import _editor_call_plan, tailor_resume_map_reduce
+
+    fn, kwargs = _editor_call_plan(
+        _LocalNodeStore(), "t", "medium", **_plan_kwargs()
+    )
+    assert fn is tailor_resume_map_reduce
+    assert kwargs["parallel"] is False
+    assert kwargs["jd_context"] == "jd"
+
+
+def test_editor_call_plan_keeps_whole_doc_for_cloud_node():
+    from resualign.engine import _editor_call_plan, tailor_resume
+
+    fn, kwargs = _editor_call_plan(
+        _CloudNodeStore(), "t", "medium", **_plan_kwargs()
+    )
+    assert fn is tailor_resume
+    assert "parallel" not in kwargs
+
+
+def test_editor_call_plan_coarse_granularity_stays_whole_doc(monkeypatch):
+    from resualign.engine import _editor_call_plan, tailor_resume
+
+    fn, _ = _editor_call_plan(_LocalNodeStore(), "t", "coarse", **_plan_kwargs())
+    assert fn is tailor_resume
+
+
+def test_editor_call_plan_env_kill_switch(monkeypatch):
+    from resualign.engine import _editor_call_plan, tailor_resume
+
+    monkeypatch.setenv("RESUALIGN_BULLET_EDITOR", "0")
+    fn, _ = _editor_call_plan(_LocalNodeStore(), "t", "fine", **_plan_kwargs())
+    assert fn is tailor_resume
+
+
+def test_is_local_llm_detection():
+    from resualign.engine import _is_local_llm
+
+    assert _is_local_llm("ollama", None) is True
+    assert _is_local_llm("openai", "http://127.0.0.1:8080/v1") is True
+    assert _is_local_llm("openai", "http://localhost:9999") is True
+    assert _is_local_llm("deepseek", "") is False
+    assert _is_local_llm("deepseek", "https://api.deepseek.com") is False

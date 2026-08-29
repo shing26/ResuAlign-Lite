@@ -227,3 +227,136 @@ def test_rewrite_bullet_does_not_append_placeholder_for_concise_instruction():
     mock = MockLLM(result={"proposed": "构建高吞吐后端服务", "reason": "精炼"})
     diff = rewrite_bullet(mock, "负责后端开发", "concise")
     assert METRIC_PLACEHOLDER not in diff.proposed
+
+
+# ---------------------------------------------------------------------------
+# Fuzzy provenance salvage (2026-08-30): misquoted quotes that clearly refer
+# to a real resume span are recovered instead of discarding the suggestion.
+# ---------------------------------------------------------------------------
+
+_FUZZY_RESUME = (
+    "陈振成 Java 全栈开发工程师\n"
+    "联系方式 132-0000-0000\n"
+    "## 工作经历\n"
+    "- AI 赋能研发效能: 擅长将 AI 辅助开发融入后端研发全流程，"
+    "通过提示词工程与自动化脚本提升需求拆解、代码生成、性能诊断与"
+    "全链路排错效率，实现人机协同开发。\n"
+    "- 主导订单中台建设，支撑日均 500 万订单。\n"
+    "## 专业技能\n"
+    "- 熟悉 Java 并发编程与 JVM 调优。\n"
+)
+
+
+def test_parse_diff_fuzzy_salvages_truncated_quote():
+    """模型截掉句尾（bcb5d7bb 实证形态）应命中并回填真实原文。"""
+    truncated = (
+        "AI 赋能研发效能: 擅长将 AI 辅助开发融入后端研发全流程，"
+        "通过提示词工程与自动化脚本提升需求拆解、代码生成、性能诊断与"
+        "全链路排错。"
+    )
+    diff, valid = parse_diff_with_provenance(
+        {
+            "type": "modify",
+            "section": "工作经历",
+            "original": truncated,
+            "proposed": "改写后的句子",
+            "reason": "贴合 JD",
+            "confidence": "high",
+            "provenance": truncated,
+        },
+        _FUZZY_RESUME,
+    )
+    assert valid is True
+    assert diff.provenance_state == "verified"
+    # provenance/original 回填为真实原文（含被截掉的尾巴）
+    actual_bullet = (
+        "AI 赋能研发效能: 擅长将 AI 辅助开发融入后端研发全流程，"
+        "通过提示词工程与自动化脚本提升需求拆解、代码生成、性能诊断与"
+        "全链路排错效率，实现人机协同开发。"
+    )
+    assert diff.original == actual_bullet
+    assert diff.provenance == actual_bullet
+    assert diff.source_span is not None
+    start, end = diff.source_span
+    assert _FUZZY_RESUME[start:end] == actual_bullet
+
+
+def test_parse_diff_fuzzy_salvages_small_edits():
+    """句中小幅改动（漏字/多字）走 difflib 路径命中。"""
+    actual_bullet = "主导订单中台建设，支撑日均 500 万订单。"
+    misquoted = "主导订单中台的建设，支撑日均 500 万订单。"  # 多一个「的」
+    diff, valid = parse_diff_with_provenance(
+        {
+            "type": "modify",
+            "section": "工作经历",
+            "original": misquoted,
+            "proposed": "重构订单中台，支撑日均 500 万订单。",
+            "reason": "强动词",
+            "confidence": "medium",
+            "provenance": misquoted,
+        },
+        _FUZZY_RESUME,
+    )
+    assert valid is True
+    assert diff.provenance_state == "verified"
+    assert diff.original == actual_bullet
+
+
+def test_parse_diff_fuzzy_rejects_unrelated_quote():
+    """与原文无关的引用不得被模糊命中（防编造铁律）。"""
+    diff, valid = parse_diff_with_provenance(
+        {
+            "type": "modify",
+            "section": "工作经历",
+            "original": "精通 Kubernetes 多集群治理与服务网格灰度发布",
+            "proposed": "精通 Kubernetes 多集群治理与 服务网格 灰度发布实践",
+            "reason": "JD 关键词",
+            "confidence": "high",
+            "provenance": "精通 Kubernetes 多集群治理与服务网格灰度发布",
+        },
+        _FUZZY_RESUME,
+    )
+    assert valid is False
+    assert diff.provenance_state == "missing"
+
+
+def test_tailor_resume_fuzzy_recovers_diff_end_to_end():
+    """整链：MockLLM 产出截断引用的 diff，tailor_resume 应保留为有效建议。"""
+    truncated = (
+        "AI 赋能研发效能: 擅长将 AI 辅助开发融入后端研发全流程，"
+        "通过提示词工程与自动化脚本提升需求拆解、代码生成、性能诊断与"
+        "全链路排错。"
+    )
+    mock = MockLLM(result={
+        "sections": {"工作经历": "改写后内容"},
+        "diffs": [{
+            "type": "modify",
+            "section": "工作经历",
+            "original": truncated,
+            "proposed": "重构研发效能工具链，将 AI 辅助开发融入后端全流程",
+            "reason": "贴合 JD",
+            "confidence": "high",
+            "provenance": truncated,
+        }],
+    })
+    result = tailor_resume(mock, _FUZZY_RESUME, "Gap report")
+    assert len(result.diffs) == 1
+    assert result.diffs[0].provenance_state == "verified"
+    assert "全链路排错效率" in result.diffs[0].original
+
+
+def test_parse_diff_fuzzy_prefix_short_quotes_still_rejected():
+    """过短引用（<12 字符归一化）不做模糊匹配，防误命中。"""
+    diff, valid = parse_diff_with_provenance(
+        {
+            "type": "modify",
+            "section": "工作经历",
+            "original": "熟悉 Java",
+            "proposed": "熟悉 Java 并发",
+            "reason": "短引用",
+            "confidence": "low",
+            "provenance": "熟悉 Java",
+        },
+        "熟练掌握 Java 并发编程\n",
+    )
+    assert valid is False

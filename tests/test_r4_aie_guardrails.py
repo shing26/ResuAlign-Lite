@@ -308,6 +308,10 @@ class _FakeNodeStore:
     def get_active_node(self, tenant_id):
         return {"name": "fake-node"}
 
+    def resolve_node_for_role(self, tenant_id, role):
+        # Cloud-style node keeps the whole-document editor selection.
+        return {"name": "fake-node", "provider": "deepseek", "base_url": None}
+
 
 def _profile_obj() -> "JDProfile":
     return JDProfile(

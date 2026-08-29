@@ -124,6 +124,20 @@ function workbenchAlignmentErrorBanner(alignment) {
   );
 }
 
+/* 空结果告警（2026-08-30 诊断 P0-C）：对齐 succeeded 但 0 条建议时，
+ * 此前与真正成功的渲染完全一致 —— 用户读到的是「跑完了却什么都没有」。
+ * 后端 alignment.notice 命名两种空形态（门禁拦截 / 模型未产出结构化建议）。 */
+function workbenchAlignmentNoticeBanner(alignment) {
+  const notice = alignment && alignment.notice;
+  if (!notice) return "";
+  return (
+    `<div class="align-error-banner align-notice-banner" role="status" data-align-notice-banner>` +
+    `<strong>对齐完成 · 无可用建议</strong>` +
+    `<span>${esc(notice)}</span>` +
+    `</div>`
+  );
+}
+
 
 export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   /* A workspace render started before a route change may resolve after the
@@ -254,6 +268,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
         </div>
       </div>
       ${workbenchAlignmentErrorBanner(alignment)}
+      ${workbenchAlignmentNoticeBanner(alignment)}
       ${workbenchGuideHtml(job, hasGuideDraft)}
       <div class="wb-grid" data-split-layout>
         <section class="wb-main ${state.wbMobilePane === "diff" ? "is-active" : ""}" data-wb-pane="diff" data-diff-pane data-resume-canvas>

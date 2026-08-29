@@ -11871,6 +11871,12 @@ select,
   opacity: 0.85;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
 }
+/* 空结果告警横幅（对齐 succeeded 但 0 条可用建议）：琥珀色，与失败横幅同构。 */
+.align-notice-banner {
+  border-color: var(--pending);
+  background: var(--pending-soft);
+  color: var(--pending-deep);
+}
 
 /* ================================================================
    R5 前端收尾（expert-team-20260825）

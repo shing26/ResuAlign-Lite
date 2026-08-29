@@ -208,6 +208,116 @@ def _resolve_span(
     return (start, end)
 
 
+# Fuzzy provenance recovery: models frequently misquote the resume by
+# truncating a sentence, dropping its tail, or paraphrasing punctuation.
+# A quote that misses verbatim matching but still clearly refers to an
+# existing resume span is salvaged instead of discarding a good suggestion
+# (2026-08-30: one deepseek run produced 8 suggestions, all rejected for
+# tail-only misquotes). The recovered provenance is always the ACTUAL
+# resume substring, so the anti-fabrication iron rule is preserved.
+_FUZZY_MIN_QUOTE_CHARS = 12
+_FUZZY_COVERAGE_THRESHOLD = 0.85
+
+
+def _fuzzy_locate_quote(
+    quote: str, resume_text: str
+) -> tuple[tuple[int, int] | None, str]:
+    """Locate a misquoted provenance quote inside the resume text.
+
+    Returns ``((start, end), actual_text)`` for the best matching resume
+    span, or ``(None, "")`` when nothing close enough exists. Matching is
+    whitespace-normalized first, then a bounded ``difflib`` scan anchored on
+    quote shingles (covers truncation and small in-sentence edits); prefix/
+    suffix trimming runs as the fallback when no shingle anchors exist. The
+    winning span is expanded to its full line (bullet) so the corrected
+    ``original`` replaces the complete source line on accept, never leaving
+    a dangling sentence tail.
+    """
+    import difflib
+
+    norm_text, char_map = _normalized_char_map(resume_text)
+    norm_quote = _normalize_whitespace(quote)
+    qlen = len(norm_quote)
+    if qlen < _FUZZY_MIN_QUOTE_CHARS or not norm_text:
+        return None, ""
+    text_len = len(norm_text)
+
+    def span_for(norm_start: int, norm_end: int) -> tuple[int, int]:
+        norm_start = max(0, min(norm_start, text_len - 1))
+        norm_end = max(norm_start + 1, min(norm_end, text_len))
+        return (char_map[norm_start], char_map[norm_end - 1] + 1)
+
+    candidates: list[tuple[float, tuple[int, int]]] = []
+
+    # Bounded fuzzy scan: anchor candidate windows on quote shingles.
+    head = norm_quote[:16]
+    anchors: list[int] = []
+    pos = norm_text.find(head)
+    while pos >= 0 and len(anchors) < 20:
+        anchors.append(pos)
+        pos = norm_text.find(head, pos + 1)
+    if not anchors:
+        mid = norm_quote[max(0, qlen // 2 - 8) : max(0, qlen // 2 - 8) + 16]
+        if len(mid) >= 8:
+            pos = norm_text.find(mid)
+            while pos >= 0 and len(anchors) < 20:
+                anchors.append(max(0, pos - qlen // 2))
+                pos = norm_text.find(mid, pos + 1)
+    pad = qlen // 5
+    for anchor in anchors:
+        window_start = max(0, anchor - pad)
+        window_end = min(text_len, anchor + qlen + pad)
+        candidate = norm_text[window_start:window_end]
+        if not candidate:
+            continue
+        matcher = difflib.SequenceMatcher(None, norm_quote, candidate)
+        blocks = [b for b in matcher.get_matching_blocks() if b.size]
+        matched = sum(b.size for b in blocks)
+        coverage = matched / qlen
+        if coverage >= _FUZZY_COVERAGE_THRESHOLD and blocks:
+            first, last = blocks[0], blocks[-1]
+            span = span_for(
+                window_start + first.b, window_start + last.b + last.size
+            )
+            candidates.append((coverage, span))
+
+    # Fallback when no shingle anchored: prefix/suffix trimming catches
+    # truncation-shaped misquotes whose head was also paraphrased.
+    if not candidates:
+        for fraction in (0.9, 0.8, 0.7, 0.6):
+            cut = int(qlen * fraction)
+            if cut < _FUZZY_MIN_QUOTE_CHARS:
+                break
+            prefix = norm_quote[:cut]
+            pos = norm_text.find(prefix)
+            if pos >= 0:
+                candidates.append((fraction, span_for(pos, pos + cut)))
+                break
+            suffix = norm_quote[qlen - cut :]
+            pos = norm_text.find(suffix)
+            if pos >= 0:
+                candidates.append((fraction, span_for(pos, pos + cut)))
+                break
+
+    if not candidates:
+        return None, ""
+    coverage, span = max(candidates, key=lambda item: item[0])
+
+    # Expand to the full source line (bullet), skipping the list marker, so
+    # accept/apply replaces the complete line rather than a mid-sentence
+    # fragment that would leave dangling text behind the proposed rewrite.
+    line_start = resume_text.rfind("\n", 0, span[0]) + 1
+    expanded_start = line_start
+    marker = re.match(r"\s*(?:[-•▪●○◦·∙‣]|\d+(?:[.、)]))\s+", resume_text[line_start:])
+    if marker:
+        expanded_start = line_start + marker.end()
+    line_end = resume_text.find("\n", span[1])
+    if line_end < 0:
+        line_end = len(resume_text)
+    expanded = (expanded_start, line_end)
+    return expanded, resume_text[expanded[0] : expanded[1]]
+
+
 def parse_diff_with_provenance(
     item: dict,
     resume_text: str,
@@ -244,7 +354,21 @@ def parse_diff_with_provenance(
         valid = True
         provenance_state = "verified"
     elif quote:
-        provenance_state = "missing"
+        # Fuzzy salvage: the quote clearly refers to a real resume span but
+        # was misquoted (truncation / punctuation / small edits). Recover
+        # the ACTUAL span and correct the quote/original to it, so the
+        # suggestion survives the strict gate AND later accept/apply
+        # (which string-replaces ``original``) still works.
+        fuzzy_span, actual_text = _fuzzy_locate_quote(quote, resume_text)
+        if fuzzy_span is not None:
+            source_span = fuzzy_span
+            quote = actual_text
+            if diff_type in ("modify", "remove") and actual_text:
+                original = actual_text
+            valid = True
+            provenance_state = "verified"
+        else:
+            provenance_state = "missing"
     elif diff_type == "add" and not str(original).strip():
         provenance_state = "missing"
     diff = DiffItem(

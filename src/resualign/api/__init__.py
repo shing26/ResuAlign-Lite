@@ -282,6 +282,7 @@ _build_diagnosis_section = _workbench_service._build_diagnosis_section
 _gap_match_score = _workbench_service._gap_match_score
 _read_timeline_extras = _workbench_service._read_timeline_extras
 _apply_diffs = _workbench_service._apply_diffs
+_alignment_notice = _workbench_service.alignment_notice
 _library_dedupe_key = _workbench_service._library_dedupe_key
 
 _content_sha256 = _resumes_service._content_sha256

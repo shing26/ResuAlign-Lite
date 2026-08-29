@@ -735,6 +735,13 @@ def _run_job(job_id: str) -> None:
                                 ),
                                 "draft": draft,
                                 "eval_score": eval_score,
+                                "notice": (
+                                    api_module._alignment_notice(
+                                        result.get("diffs") or [],
+                                        tailored.get("invalid_diffs") or [],
+                                        draft,
+                                    )
+                                ),
                             },
                         },
                     )
