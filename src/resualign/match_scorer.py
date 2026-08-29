@@ -29,6 +29,38 @@ def _content_sha256(text: str | None) -> str:
     return hashlib.sha256((text or "").strip().encode("utf-8")).hexdigest()
 
 
+def keyword_coverage_score(
+    jd_profile: dict[str, Any] | None,
+    resume_text: str | None,
+) -> dict[str, Any] | None:
+    """Deterministic ATS keyword-coverage proxy.
+
+    Ratio of the JD profile's hard skill keywords literally present in the
+    resume text (case-insensitive). Reads ``must_have_skills`` (the live
+    profiler's canonical key) with the ``required_skills``/``skills``
+    aliases accepted by the rule fallback. Returns ``None`` when the
+    profile lists no skills so callers can skip the metric instead of
+    mistaking "no requirements" for "zero coverage".
+    """
+    profile_skills = (jd_profile or {}).get("must_have_skills")
+    if not profile_skills:
+        for alias in ("required_skills", "skills", "required"):
+            profile_skills = (jd_profile or {}).get(alias)
+            if profile_skills:
+                break
+    required = [str(skill).strip() for skill in (profile_skills or []) if str(skill).strip()]
+    if not required:
+        return None
+    resume_lower = (resume_text or "").lower()
+    matched = [skill for skill in required if skill.lower() in resume_lower]
+    return {
+        "required": len(required),
+        "matched": len(matched),
+        "ratio": round(len(matched) / len(required), 3),
+        "missing": [skill for skill in required if skill.lower() not in resume_lower],
+    }
+
+
 def compute_match_score(
     jd_text: str | None,
     jd_profile: dict[str, Any] | None,
@@ -84,6 +116,7 @@ def compute_match_score(
         "experience": experience,
         "total": total,
         "version": MATCH_VERSION,
+        "keyword_coverage": keyword_coverage_score(profile, resume_text),
         "inputs_snapshot": {
             "jd_sha256": _content_sha256(jd_text),
             "resume_sha256": _content_sha256(resume_text),
