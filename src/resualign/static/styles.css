@@ -531,11 +531,12 @@ textarea {
 
 .resume-archive-grid {
   /* Sprint 4 T3: 简历详情左 65% 主 Sheet / 右 35% 侧栏；≤900px 单列堆叠
-     （@media max-width:900px 下方把 grid-template-columns 压成 1fr）。 */
+     （@media max-width:900px 下方把 grid-template-columns 压成 1fr）。
+     Phase 1: align-items 与行高约束已由下方 v3 合并规则（.resume-grid）接管，
+     本旧规则仅保留 gap 以兼容旧调用方。 */
   display: grid;
   grid-template-columns: minmax(0, 13fr) minmax(0, 7fr);
   gap: 16px;
-  align-items: start;
 }
 
 .resume-doc {
@@ -9071,7 +9072,13 @@ html {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 13fr 7fr;
+  /* Phase 1 (2026-08-30): 网格行按视口剩余高度约束（minmax(0,1fr)），
+     覆盖旧 .resume-archive-grid 残留的 align-items:start —— 否则网格项
+     按内容撑高（sheet 2520px）被 .resume-view 的 overflow:hidden 裁切。 */
+  grid-template-columns: minmax(0, 13fr) minmax(0, 7fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 16px;
 }
 
 .resume-sheet {
@@ -9084,6 +9091,8 @@ html {
   border-radius: 0;
   background: var(--ra-surface-2);
   box-shadow: none;
+  /* Phase 1: 高度由网格行约束，内部滚动交给 .resume-doc。 */
+  overflow: hidden;
 }
 
 .resume-sheet-head {
