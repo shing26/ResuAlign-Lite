@@ -2024,6 +2024,33 @@ const actions = {
     if (panel) panel.hidden = false;
     toast("已恢复最近一次批次结果", "success");
   },
+  /* 一键分析全部待处理岗位（idle/failed/卡死的 queued），后端 selector=pending 选岗。
+   * 主简历/粒度复用批量面板当前选择，主简历未选时后端回退到最近更新的主简历。 */
+  "batch-align-pending": async () => {
+    const form = $('[data-form="batch-align"]');
+    const data = form
+      ? Object.fromEntries(new FormData(form).entries())
+      : {};
+    const result = await api("/api/batch-align", {
+      method: "POST",
+      body: JSON.stringify({
+        selector: "pending",
+        master_resume_id: data.master_resume_id || "",
+        job_ids: [],
+        granularity: data.granularity || "fine",
+        prompt_focus: "balanced",
+        custom_prompt: data.custom_prompt || null,
+      }),
+    });
+    state.batchAlign = result;
+    const panel = $("[data-batch-wrap]");
+    if (panel) panel.hidden = false;
+    const cancel = $("[data-batch-cancel]");
+    if (cancel) cancel.hidden = false;
+    renderBatchResults(result);
+    startBatchPolling(result.batch_id);
+    toast(`已排队 ${result.queued} 个待处理岗位`, "success");
+  },
   "toggle-theme": () => toggleTheme(),
   "set-wb-tab": (button) => setWbMobilePane(button.dataset.wbTab),
   "set-wb-tab-v3": (button) => setWbAuxPane(button.dataset.wbTabV3),

@@ -23,6 +23,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
+from ..alignment_lifecycle import transition_alignment
 from ..batch import BatchAlignStore
 from ..cache import ContentCache
 from ..classifier import classify_job
@@ -314,10 +315,11 @@ def _recover_stale_alignments() -> None:
             ):
                 # Still in flight; the requeue path below owns it.
                 continue
-        _jobs.update_job(
+        transition_alignment(
+            _jobs,
             job['tenant_id'],
             job['job_id'],
-            alignment_status='failed',
+            'failed',
         )
         logger.info(
             'Marked library job %s alignment failed: registry job %s is '

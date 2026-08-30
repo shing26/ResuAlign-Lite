@@ -11,6 +11,7 @@ from typing import Any
 
 import resualign.api as api_module
 
+from ...alignment_lifecycle import transition_alignment
 from ...job_library import _normalize_source_url, _text_dedupe_key
 from ...llm_usage import reset_llm_tenant, set_llm_tenant
 from ..schemas import JobImportRequest
@@ -78,6 +79,30 @@ def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
     except Exception:
         # Non-blocking: never let a probe failure block a queued run.
         return True, ""
+
+
+def _sync_alignment_status(
+    tenant_id: str, payload: dict[str, Any], new_status: str
+) -> None:
+    """Mirror a registry state change into the library job's alignment_status.
+
+    Best-effort: a sync failure must never flip the analysis outcome; the
+    startup recovery sweep (``_recover_stale_alignments``) stays as the
+    backstop for anything that slips through.
+    """
+    library_job_id = payload.get('library_job_id')
+    if not library_job_id:
+        return
+    try:
+        transition_alignment(
+            api_module._jobs, tenant_id, library_job_id, new_status
+        )
+    except Exception:
+        logger.exception(
+            'Failed to sync alignment_status=%s for library job %s',
+            new_status,
+            library_job_id,
+        )
 
 
 def _run_local_fallback_report(resume_text: str, jd_text: str) -> "api_module.Report":
@@ -584,6 +609,7 @@ def _run_job(job_id: str) -> None:
             if not api_module._registry.claim_running(job_id):
                 # Another worker already claimed this job; do not double-run.
                 return
+            _sync_alignment_status(tenant_id, payload, 'running')
 
             failed_stage: str = ''
 
@@ -615,6 +641,7 @@ def _run_job(job_id: str) -> None:
                     job_id,
                     '该岗位只有链接没有 JD 文本：请用浏览器油猴插件抓取，或用「粘贴 JD」方式重新录入',
                 )
+                _sync_alignment_status(tenant_id, payload, 'failed')
                 return
             if payload.get('optimize_resume'):
                 result = api_module._run_resume_optimize(
@@ -874,9 +901,12 @@ def _run_job(job_id: str) -> None:
                     failed_stage, exc, elapsed_secs
                 )
             api_module._registry.fail(job_id, error, stage=failed_stage or None)
-            # Phase 3: persist the failure reason on the library job so a
-            # failed alignment stays diagnosable after the in-memory
-            # registry restarts (previously lost on restart).
+            # Phase 3 + A3: persist the failure reason on the library job so a
+            # failed alignment stays diagnosable after the in-memory registry
+            # restarts. Kept as a direct update_job (instead of
+            # _sync_alignment_status) because the sync helper does not carry
+            # last_alignment_error; transition legality is not at risk here —
+            # failed is a terminal state reachable from any live state.
             library_job_id = payload.get('library_job_id')
             if library_job_id:
                 try:

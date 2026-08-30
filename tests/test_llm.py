@@ -184,3 +184,55 @@ def test_structured_json_mode_corrects_schema_with_feedback(httpx_mock, client):
     assert len(bodies) == 2
     assert "Schema validation failed" in bodies[1]["messages"][1]["content"]
     assert "user" in bodies[1]["messages"][1]["content"]
+
+
+def test_ollama_provider_uses_schema_constrained_output(httpx_mock):
+    """Ollama supports json_schema structured outputs; small local models
+    emit broken JSON without it, which silently zeroed out all diffs."""
+    from resualign.schema_registry import AnalysisSchema
+
+    ollama_client = OpenAIClient(
+        ResuAlignConfig(
+            provider="ollama",
+            base_url="http://localhost:11434/v1",
+            model="qwen2.5:3b",
+        )
+    )
+    assert ollama_client.supports_structured_outputs
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {"message": {"content": '{"score": 70, "skills": ["SQL"]}'}}
+            ]
+        }
+    )
+    result = ollama_client.chat_structured("system", "user", AnalysisSchema)
+    assert result["score"] == 70
+    body = json.loads(httpx_mock.get_requests()[0].read())
+    assert body["response_format"]["type"] == "json_schema"
+    assert body["response_format"]["json_schema"]["strict"] is True
+
+
+def test_ollama_schema_rejection_falls_back_to_json_mode(httpx_mock):
+    """An old Ollama that rejects response_format=400 degrades to JSON
+    mode instead of failing the pipeline."""
+    from resualign.schema_registry import AnalysisSchema
+
+    ollama_client = OpenAIClient(
+        ResuAlignConfig(
+            provider="ollama",
+            base_url="http://localhost:11434/v1",
+            model="qwen2.5:3b",
+        )
+    )
+    httpx_mock.add_response(status_code=400)
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {"message": {"content": '{"score": 80, "skills": ["Go"]}'}}
+            ]
+        }
+    )
+    result = ollama_client.chat_structured("system", "user", AnalysisSchema)
+    assert result["score"] == 80
+    assert len(httpx_mock.get_requests()) == 2

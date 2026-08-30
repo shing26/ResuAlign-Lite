@@ -69,6 +69,33 @@ def _sync_batch(batch_id: str, tenant_id: str) -> None:
         store.update_rows(batch_id, tenant_id, rows)
 
 
+def _pending_library_jobs(tenant_id: str) -> list[dict[str, Any]]:
+    """Jobs waiting for an alignment run: idle/failed, plus stale queued.
+
+    A queued job counts as stale when its registered analysis job is gone
+    or already terminal — the badge says queued but nobody is working on
+    it (pre-state-machine leftovers).
+    """
+    jobs = api_module._jobs.list_jobs(tenant_id, limit=None)
+    pending = []
+    for job in jobs:
+        status = job.get('alignment_status') or 'idle'
+        if status in ('idle', 'failed'):
+            pending.append(job)
+        elif status == 'queued':
+            registered = api_module._registry.get(
+                job.get('workbench_job_id') or '',
+                tenant_id=tenant_id,
+            )
+            if registered is None or registered.status in (
+                'succeeded',
+                'failed',
+                'canceled',
+            ):
+                pending.append(job)
+    return pending
+
+
 def queue_batch_align(
     user: dict[str, Any],
     request: BatchAlignRequest,
@@ -82,30 +109,48 @@ def queue_batch_align(
     from fastapi import HTTPException
 
     tenant_id = user['user_id']
+    if request.selector == 'pending':
+        jobs = _pending_library_jobs(tenant_id)
+        if not jobs:
+            raise HTTPException(
+                status_code=422, detail='没有待处理的岗位'
+            )
+        master_resume_id = request.master_resume_id
+        if not master_resume_id:
+            resumes = api_module._resumes.list_master_resumes(tenant_id)
+            if not resumes:
+                raise HTTPException(
+                    status_code=422,
+                    detail='请先在简历中心创建主简历',
+                )
+            master_resume_id = resumes[0]['resume_id']
+    else:
+        master_resume_id = request.master_resume_id
+        jobs = []
     resume = api_module._resumes.get_master_resume(
-        tenant_id, request.master_resume_id
+        tenant_id, master_resume_id
     )
     if resume is None:
         raise HTTPException(status_code=404, detail='Master resume not found')
 
-    jobs: list[dict[str, Any]] = []
-    if request.jd_urls:
-        for jd_url in request.jd_urls:
-            try:
-                created = api_module._create_job_from_source(
-                    user, {'jd_url': jd_url, 'source_type': 'url'}
-                )
-            except api_module.UserStoreError as exc:
-                raise HTTPException(status_code=422, detail=str(exc)) from exc
-            jobs.append(created)
-    else:
-        for job_id in request.job_ids:
-            job = api_module._jobs.get_job(tenant_id, job_id)
-            if job is None:
-                raise HTTPException(
-                    status_code=404, detail=f'Job not found: {job_id}'
-                )
-            jobs.append(job)
+    if not request.selector:
+        if request.jd_urls:
+            for jd_url in request.jd_urls:
+                try:
+                    created = api_module._create_job_from_source(
+                        user, {'jd_url': jd_url, 'source_type': 'url'}
+                    )
+                except api_module.UserStoreError as exc:
+                    raise HTTPException(status_code=422, detail=str(exc)) from exc
+                jobs.append(created)
+        else:
+            for job_id in request.job_ids:
+                job = api_module._jobs.get_job(tenant_id, job_id)
+                if job is None:
+                    raise HTTPException(
+                        status_code=404, detail=f'Job not found: {job_id}'
+                    )
+                jobs.append(job)
 
     config = api_module.build_config()
     if not config.is_llm_configured:
@@ -133,7 +178,7 @@ def queue_batch_align(
     ]
     batch_id = api_module._batch_store.create(
         tenant_id,
-        request.master_resume_id,
+        master_resume_id,
         rows,
         granularity=request.granularity,
         prompt_focus=request.prompt_focus,
@@ -157,7 +202,7 @@ def queue_batch_align(
             'granularity': request.granularity,
             'prompt_focus': request.prompt_focus,
             'custom_prompt': request.custom_prompt,
-            'master_resume_id': request.master_resume_id,
+            'master_resume_id': master_resume_id,
             'library_job_id': job['job_id'],
         }
         if cached_diagnosis is not None:

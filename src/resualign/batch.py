@@ -20,6 +20,10 @@ class BatchAlignRequest(BaseModel):
     master_resume_id: str
     job_ids: list[str]
     jd_urls: list[str] | None = None
+    # 'pending'：忽略 job_ids（传空数组），自动选中岗位库里全部待处理岗位
+    # （idle/failed，以及 registry 已终态或缺失的陈旧 queued）；
+    # master_resume_id 传空串时回退到最近更新的主简历。
+    selector: Optional[Literal['pending']] = None
     granularity: Literal['fine', 'medium', 'coarse'] = 'fine'
     prompt_focus: Literal['balanced', 'quantified', 'skills'] = 'balanced'
     custom_prompt: str | None = None
@@ -27,6 +31,8 @@ class BatchAlignRequest(BaseModel):
 
     @model_validator(mode='after')
     def _validate_job_ids(self) -> 'BatchAlignRequest':
+        if self.selector == 'pending':
+            return self
         urls = self.jd_urls or []
         if urls:
             if self.job_ids:
