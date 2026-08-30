@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from .evaluator import evaluate
 from .extractor import extract_structured

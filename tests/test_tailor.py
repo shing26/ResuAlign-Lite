@@ -401,7 +401,7 @@ def test_parse_diff_original_fallback_still_rejects_invented():
 
 def test_derive_section_diffs_from_sections_when_diffs_empty():
     """Phase 3: 模型只回 sections 不回 diffs 时，推导章节级 diff（verified）。"""
-    from resualign.tailor import derive_section_diffs, _locate_section_span
+    from resualign.tailor import _locate_section_span, derive_section_diffs
 
     resume = (
         "# 项目经历\n1. ResuAlign-Lite 智能简历对齐与求职工作台\n"
