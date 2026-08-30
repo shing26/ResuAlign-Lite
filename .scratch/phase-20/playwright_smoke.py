@@ -590,11 +590,12 @@ def main() -> None:
         with sync_playwright() as pw:
             # Local env has playwright browsers at a different revision than
             # the wheel expects; pin to the installed chromium executable.
+            # CI sets RESUALIGN_SMOKE_CHROMIUM or uses Playwright auto-detect
+            # (python -m playwright install --with-deps chromium).
             browser = pw.chromium.launch(
                 headless=True,
                 executable_path=os.environ.get(
-                    "RESUALIGN_SMOKE_CHROMIUM",
-                    r"C:\Users\Shing\AppData\Local\ms-playwright\chromium-1234\chrome-win64\chrome.exe",
+                    "RESUALIGN_SMOKE_CHROMIUM", None
                 ),
             )
             try:

@@ -393,6 +393,8 @@ def test_workbench_probe_402_blocks_with_actionable_message():
     with patch(
         "resualign.api._probe_active_llm_quick",
         return_value=(False, "模型账户欠费或余额不足，请充值后重试"),
+    ), patch(
+        "resualign.api.build_config", return_value=_config()
     ):
         resp = client.post(
             f"/api/jobs/{job['job_id']}/workbench",
@@ -411,6 +413,8 @@ def test_workbench_probe_network_error_is_non_blocking():
     with patch(
         "resualign.api._probe_active_llm_quick",
         return_value=(True, ""),
+    ), patch(
+        "resualign.api.build_config", return_value=_config()
     ), patch("resualign.api._queue_job", return_value="job-abc"):
         resp = client.post(
             f"/api/jobs/{job['job_id']}/workbench",
