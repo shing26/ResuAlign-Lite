@@ -15,7 +15,6 @@ import {
   PROVENANCE_LABELS,
   alignProgressPercent,
   alignmentControls,
-  crawlStatusLine,
   diffCard,
   diffList,
   exportDock,
@@ -240,7 +239,6 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
     ["failed", "canceled", "expired"].includes(alignment.status);
   app.innerHTML = `
     <div class="view view-fit workbench-view" data-surface-mode="optimizer"${barActive ? ' data-mobile-action-bar="true"' : ""}>
-      ${crawlStatusLine(session)}
       <div class="wb-mobile-tabs" role="tablist" aria-label="工作台面板">
         <button type="button" class="segmented-button seg" data-action="set-wb-tab" data-wb-tab="controls" aria-selected="${state.wbMobilePane === "controls"}">调优</button>
         <button type="button" class="segmented-button seg" data-action="set-wb-tab" data-wb-tab="diff" aria-selected="${state.wbMobilePane === "diff"}">结果</button>
@@ -1028,12 +1026,7 @@ function stopEventStream() {
 function handleEvent(eventName, data) {
   if (!activeSession) return;
   if (eventName === "heartbeat") return;
-  if (eventName === "crawl.status") {
-    activeSession.crawl = { ...(activeSession.crawl || {}), ...data };
-    if (data.job_id) {
-      activeSession.job = { ...(activeSession.job || {}), job_id: data.job_id };
-    }
-  } else if (eventName === "job.stage") {
+  if (eventName === "job.stage") {
     if (data.job_id && (!activeSession.job || !activeSession.job.job_id)) {
       activeSession.job = { ...(activeSession.job || {}), job_id: data.job_id };
     }

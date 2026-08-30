@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ResuAlign Local Collector
-// @namespace    https://127.0.0.1:8011/
+// @namespace    https://127.0.0.1:8000/
 // @version      0.1.0
 // @description  划词 / 实习僧岗位详情一键摄入 ResuAlign（本地工作台）
 // @author       ResuAlign
@@ -20,7 +20,7 @@
 (function () {
   "use strict";
 
-  const DEFAULT_SERVER = "http://127.0.0.1:8011";
+  const DEFAULT_SERVER = "http://127.0.0.1:8000";
   const SERVER_KEY = "ra_server";
   const TOKEN_KEY = "ra_token";
   const MAX_JD_LENGTH = 100000;

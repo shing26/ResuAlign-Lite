@@ -17,7 +17,6 @@ from ..deps import get_current_user, get_local_ingest_user
 from ..schemas import (
     BulkStatusRequest,
     FinalDraftRequest,
-    JDParseRequest,
     JobCreateRequest,
     JobExportRequest,
     JobExportResponse,
@@ -113,27 +112,6 @@ def create_library_job(req: JobCreateRequest, request: Request, user: dict[str, 
         if 'Duplicate job' in str(exc):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-@router.post('/api/jobs/parse-jd')
-def parse_jd_preview(req: JDParseRequest, request: Request, user: dict[str, Any]=Depends(get_current_user)):
-    """Preview a JD URL.
-
-    De-bloat (2026-08-27): backend crawling is retired; JD intake goes
-    through the collector userscript (local-ingest) or pasted text. URL-only
-    previews are rejected with a pointer to those flows.
-    """
-    api_module._enforce_rate_limit(request, api_module._import_rate_limiter)
-    jd_url = req.jd_url.strip()
-    if not jd_url:
-        raise HTTPException(status_code=422, detail='jd_url is required')
-    raise HTTPException(
-        status_code=422,
-        detail=(
-            '后端已不再抓取 JD 链接：请用浏览器油猴插件一键抓取岗位，'
-            '或改用「粘贴 JD」方式'
-        ),
-    )
-
 
 @router.post('/api/jobs/local-ingest')
 def local_ingest(

@@ -270,55 +270,6 @@
         }
       }
     },
-    "/api/jobs/parse-jd": {
-      "post": {
-        "summary": "Parse Jd Preview",
-        "description": "Preview a JD URL.\n\nDe-bloat (2026-08-27): backend crawling is retired; JD intake goes\nthrough the collector userscript (local-ingest) or pasted text. URL-only\npreviews are rejected with a pointer to those flows.",
-        "operationId": "parse_jd_preview_api_jobs_parse_jd_post",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/JDParseRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/jobs/local-ingest": {
       "post": {
         "summary": "Local Ingest",
@@ -2777,7 +2728,7 @@
     "/api/workbench/session/init": {
       "post": {
         "summary": "Init Workbench Session",
-        "description": "Create a workstation session from a pasted JD or JD URL.\n\nReturns immediately with a WorkstationState; crawling, classification,\nand JD profiling run on a background worker and stream through SSE.",
+        "description": "Create a workstation session from a pasted JD.\n\nReturns immediately with a WorkstationState; classification and JD\nprofiling run on a background worker and stream through SSE.",
         "operationId": "init_workbench_session_api_workbench_session_init_post",
         "parameters": [
           {
@@ -3606,20 +3557,6 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
-      },
-      "JDParseRequest": {
-        "properties": {
-          "jd_url": {
-            "type": "string",
-            "maxLength": 2000,
-            "title": "Jd Url"
-          }
-        },
-        "type": "object",
-        "required": [
-          "jd_url"
-        ],
-        "title": "JDParseRequest"
       },
       "JobCreateRequest": {
         "properties": {
@@ -5668,53 +5605,6 @@
         "type": "object",
         "title": "WorkstationAlignmentSection"
       },
-      "WorkstationCrawlSection": {
-        "properties": {
-          "crawl_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Crawl Id"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "idle",
-              "queued",
-              "fetching",
-              "parsing",
-              "classifying",
-              "succeeded",
-              "failed"
-            ],
-            "title": "Status",
-            "default": "idle"
-          },
-          "stage": {
-            "type": "string",
-            "title": "Stage",
-            "default": ""
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          }
-        },
-        "type": "object",
-        "title": "WorkstationCrawlSection"
-      },
       "WorkstationGapSection": {
         "properties": {
           "status": {
@@ -5907,9 +5797,6 @@
           },
           "alignment": {
             "$ref": "#/components/schemas/WorkstationAlignmentSection"
-          },
-          "crawl": {
-            "$ref": "#/components/schemas/WorkstationCrawlSection"
           },
           "meta": {
             "$ref": "#/components/schemas/WorkstationMeta"

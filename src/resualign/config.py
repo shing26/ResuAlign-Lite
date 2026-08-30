@@ -89,10 +89,6 @@ class EnvSettings(BaseSettings):
     # String type on purpose: invalid values are clamped by the worker
     # concurrency resolver instead of failing EnvSettings validation.
     resualign_worker_concurrency: str = "1"
-    resualign_crawl_min_interval: float = 1.0
-    resualign_crawl_ua_pool: str = ""
-    resualign_crawl_proxy: str = ""
-    resualign_crawl_playwright: str = "0"
 
     # Reminder delivery (non-secret fields may be mirrored in settings store;
     # webhook URL/secret and SMTP password always stay environment-only).

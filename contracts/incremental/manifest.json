@@ -60,7 +60,6 @@
     "WorkbenchRewriteResponse",
     "WorkbenchSessionInitRequest",
     "WorkstationAlignmentSection",
-    "WorkstationCrawlSection",
     "WorkstationGapSection",
     "WorkstationJDSection",
     "WorkstationMeta",
@@ -79,7 +78,8 @@
     "/api/jobs/{job_id}/appraisal",
     "/api/applications",
     "/api/applications/{application_id}",
-    "/api/applications/{application_id}/run"
+    "/api/applications/{application_id}/run",
+    "/api/jobs/parse-jd"
   ],
   "removed_schema_properties": {
     "SettingsUpdateRequest": [
@@ -138,10 +138,21 @@
       "type": "remove_schema",
       "schema": "ApplicationUpdateRequest",
       "reason": "dormant applications retired in de-bloat (2026-08-27)"
+    },
+    {
+      "type": "remove_path",
+      "path": "/api/jobs/parse-jd",
+      "reason": "backend JD crawling retired in de-bloat (2026-08-27); intake via userscript or paste"
+    },
+    {
+      "type": "remove_schema",
+      "schema": "JDParseRequest",
+      "reason": "backend JD crawling retired in de-bloat (2026-08-27)"
     }
   ],
   "removed_schemas": [
     "ApplicationCreateRequest",
-    "ApplicationUpdateRequest"
+    "ApplicationUpdateRequest",
+    "JDParseRequest"
   ]
 }

@@ -4696,49 +4696,6 @@ body.command-palette-open {
   background: var(--success);
 }
 
-.crawl-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 8px 12px;
-  border-radius: var(--radius-6);
-  background: var(--surface-pending);
-  border: 1px solid rgba(180, 83, 9, 0.2);
-  color: var(--pending-deep);
-  font-size: var(--text-13);
-}
-
-.crawl-status--succeeded {
-  background: var(--surface-success);
-  border-color: rgba(22, 163, 74, 0.22);
-  color: var(--success-deep);
-}
-
-.crawl-status--failed {
-  background: var(--surface-error);
-  border-color: rgba(180, 35, 24, 0.24);
-  color: var(--error-deep);
-}
-
-.crawl-status__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--pending);
-  animation: pulse-dot 1.2s ease-in-out infinite;
-}
-
-.crawl-status--succeeded .crawl-status__dot,
-.crawl-status--failed .crawl-status__dot {
-  animation: none;
-  background: var(--success);
-}
-
-.crawl-status--failed .crawl-status__dot {
-  background: var(--error);
-}
-
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
@@ -5320,8 +5277,7 @@ body.command-palette-open {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .split-step.is-active .split-step__dot,
-  .crawl-status__dot {
+  .split-step.is-active .split-step__dot {
     animation: none;
   }
 }

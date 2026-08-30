@@ -69,7 +69,6 @@ from .schemas import (
     AutomationRuleUpdateRequest,
     BulkStatusRequest,
     FinalDraftRequest,
-    JDParseRequest,
     JobCreateRequest,
     JobImportRequest,
     JobUpdateRequest,
@@ -100,7 +99,6 @@ __all__ = [
     "EnvSettings",
     "FileParseError",
     "FinalDraftRequest",
-    "JDParseRequest",
     "JobCreateRequest",
     "JobImportRequest",
     "JobLibraryStore",
@@ -504,7 +502,6 @@ index = _health_router.index
 health = _health_router.health
 analyze = _analyze_router.analyze
 create_library_job = _jobs_router.create_library_job
-parse_jd_preview = _jobs_router.parse_jd_preview
 import_library_jobs = _jobs_router.import_library_jobs
 import_status = _jobs_router.import_status
 list_library_jobs = _jobs_router.list_library_jobs

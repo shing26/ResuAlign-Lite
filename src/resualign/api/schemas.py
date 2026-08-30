@@ -70,9 +70,6 @@ class JobCreateRequest(BaseModel):
     status: str | None = None
     posting_date: str | None = None
 
-class JDParseRequest(BaseModel):
-    jd_url: str = Field(max_length=_URL_MAX)
-
 class JobUpdateRequest(BaseModel):
     title: str | None = Field(default=None, max_length=_TITLE_MAX)
     jd_text: str | None = Field(default=None, max_length=_JD_TEXT_MAX)
@@ -258,21 +255,6 @@ class WorkstationAlignmentSection(BaseModel):
     eval_score: dict[str, Any] | None = None
 
 
-class WorkstationCrawlSection(BaseModel):
-    crawl_id: str | None = None
-    status: Literal[
-        "idle",
-        "queued",
-        "fetching",
-        "parsing",
-        "classifying",
-        "succeeded",
-        "failed",
-    ] = "idle"
-    stage: str = ""
-    error: str | None = None
-
-
 class WorkstationMeta(BaseModel):
     etag: str = ""
     updated_at: str = ""
@@ -289,7 +271,6 @@ class WorkstationState(BaseModel):
     alignment: WorkstationAlignmentSection = Field(
         default_factory=WorkstationAlignmentSection
     )
-    crawl: WorkstationCrawlSection = Field(default_factory=WorkstationCrawlSection)
     meta: WorkstationMeta = Field(default_factory=WorkstationMeta)
 
 

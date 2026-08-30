@@ -123,7 +123,10 @@ def test_init_raw_jd_returns_202_state():
     assert state["meta"]["etag"]
 
 
-def test_init_url_queues_crawl_without_blocking():
+def test_init_url_only_rejected_with_pointer():
+    """Crawl retirement (2026-08-30): URL-only sessions must fail at the
+    door with guidance toward paste / userscript ingestion, instead of
+    creating a doomed session that fails over SSE."""
     with patch(
         "resualign.api.services.workbench._run_session_pipeline"
     ) as pipeline_mock:
@@ -132,14 +135,10 @@ def test_init_url_queues_crawl_without_blocking():
             json={"jd_url": "https://example.com/jobs/123"},
             headers=_auth_headers(),
         )
-    assert r.status_code == 202
-    state = r.json()
-    assert state["status"] == "initializing"
-    assert state["job"] is None
-    assert state["jd"]["status"] == "queued"
-    assert state["crawl"]["status"] == "queued"
-    assert state["crawl"]["crawl_id"]
-    pipeline_mock.assert_called_once()
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert "油猴插件" in detail or "粘贴" in detail
+    pipeline_mock.assert_not_called()
 
 
 def test_init_requires_raw_jd_or_url():

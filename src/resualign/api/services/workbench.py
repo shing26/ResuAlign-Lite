@@ -146,7 +146,6 @@ def _etag_for(session: dict[str, Any]) -> str:
             "resume",
             "gap",
             "alignment",
-            "crawl",
         )
     }
     payload = json.dumps(
@@ -165,7 +164,6 @@ def public_state(session: dict[str, Any]) -> dict[str, Any]:
         "resume": session.get("resume"),
         "gap": session.get("gap"),
         "alignment": session.get("alignment"),
-        "crawl": session.get("crawl"),
         "meta": {
             "etag": session.get("_etag") or _etag_for(session),
             "updated_at": session.get("_updated_at") or "",
@@ -259,12 +257,6 @@ class WorkstationSessionStore:
                     "invalid_diffs": [],
                     "draft": None,
                     "eval_score": None,
-                },
-                "crawl": {
-                    "crawl_id": None,
-                    "status": "idle",
-                    "stage": "",
-                    "error": None,
                 },
                 "events": [],
                 "subscribers": [],
@@ -543,10 +535,10 @@ def _profile_cache_hit(jd_text: str) -> bool:
 
 
 def _run_session_pipeline(session_id: str) -> None:
-    """Run the session's background crawl/classify/profile pipeline.
+    """Run the session's background classify/profile pipeline.
 
-    Emits crawl.status, job.stage, job.gap_ready, and job.error events into
-    the in-memory event bus. Tailor/eval remain explicitly user-triggered.
+    Emits job.stage, job.gap_ready, and job.error events into the in-memory
+    event bus. Tailor/eval remain explicitly user-triggered.
     """
     session = api_module._session_store.get(session_id)
     if session is None:
@@ -554,35 +546,10 @@ def _run_session_pipeline(session_id: str) -> None:
     tenant_id = session["tenant_id"]
     _llm_tenant_token = set_llm_tenant(tenant_id)
     job = session.get("job")
-    jd_url = (session.get("jd_url") or "").strip()
     try:
-        if job is None and jd_url:
-            # De-bloat (2026-08-27): backend crawling retired; a session that
-            # only carries a URL (no JD text) cannot be ingested server-side
-            # and fails with a pointer to the paste / userscript flows.
-            api_module._session_store.update(
-                session_id,
-                {
-                    "status": "failed",
-                    "crawl": {
-                        "crawl_id": None,
-                        "status": "failed",
-                        "stage": "crawl_retired",
-                        "error": (
-                            "该岗位只有链接没有 JD 文本：请用浏览器油猴插件抓取，"
-                            "或用「粘贴 JD」方式录入"
-                        ),
-                    },
-                },
-            )
-            api_module._session_store.emit(
-                session_id,
-                "job.error",
-                {"error": "后端已不再抓取 JD 链接，请使用油猴插件或粘贴 JD", "stage": "crawl"},
-            )
-            return
-
         if job is None:
+            # Crawl retirement (2026-08-30): URL-only sessions are rejected
+            # at session/init, so a jobless session here is an anomaly.
             api_module._session_store.emit(
                 session_id, "job.error", {"error": "Job could not be created"}
             )

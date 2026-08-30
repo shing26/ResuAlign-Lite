@@ -28,7 +28,6 @@ CRITICAL_ROUTES = {
     "/health",
     "/api/analyze",
     "/api/jobs",
-    "/api/jobs/parse-jd",
     "/api/jobs/import",
     "/api/jobs/{job_id}",
     "/api/jobs/{job_id}/workbench",

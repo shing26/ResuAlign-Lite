@@ -50,7 +50,6 @@ CRITICAL_ROUTES = {
     "/health",
     "/api/analyze",
     "/api/jobs",
-    "/api/jobs/parse-jd",
     "/api/jobs/import",
     "/api/jobs/{job_id}",
     "/api/jobs/{job_id}/workbench",
@@ -345,15 +344,8 @@ def test_critical_route_success_bodies_validate():
     assert r.status_code == 200
     _validate(r.json(), JOB_ITEM_SCHEMA, "GET /api/jobs/{job_id}")
 
-    # POST /api/jobs/parse-jd (de-bloat: backend crawling retired; the route
-    # returns a pointer to paste / userscript ingestion instead of a preview).
-    r = client.post(
-        "/api/jobs/parse-jd",
-        json={"jd_url": "https://example.com/jobs/1"},
-        headers=headers,
-    )
-    assert r.status_code == 422
-    assert "粘贴" in r.json()["detail"] or "油猴插件" in r.json()["detail"]
+    # POST /api/jobs/parse-jd removed with the crawler (2026-08-30);
+    # JD intake is paste / userscript only.
 
     # POST /api/jobs/import (classification patched for the worker thread).
     with patch("resualign.api._classify_job", return_value={}):

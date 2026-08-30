@@ -301,34 +301,6 @@ def _extract_company_location(
             break
     return company, location
 
-def _crawl_jd_or_502(jd_url: str, meta: dict[str, Any] | None=None) -> str:
-    """Crawl a JD URL, mapping crawler failures to a stable 502 response.
-
-    De-bloat (2026-08-27): backend crawling was fully retired; JD intake is
-    handled by the collector userscript (local-ingest) or pasted text. A
-    URL-only ingest without text is now rejected with a pointer to those
-    paths instead of hitting the network.
-    """
-    raise HTTPException(
-        status_code=422,
-        detail=(
-            '后端已不再抓取 JD 链接：请用浏览器油猴插件一键抓取，'
-            '或改用「粘贴 JD」方式'
-        ),
-    )
-
-def _jd_parse_error_detail(exc: BaseException) -> dict[str, str]:
-    """Map a crawl failure to a user-actionable, non-leaking classification.
-
-    De-bloat (2026-08-27): backend crawling retired; only guard against
-    accidental use of the removed crawl path.
-    """
-    return {
-        'code': 'crawl_retired',
-        'reason': '后端已不再抓取 JD 链接，请使用油猴插件或粘贴 JD',
-        'action': '请改用粘贴 JD 或浏览器插件抓取',
-    }
-
 def _deterministic_job_fields(payload: dict[str, Any]) -> dict[str, Any]:
     """Resolve title/company/location/salary without any LLM round-trip."""
     jd_text = (payload.get('jd_text') or '').strip()

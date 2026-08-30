@@ -1273,11 +1273,6 @@ const actions = {
     const status = $("[data-jd-parse-status]");
     if (status) clearJdParseStatus(status);
   },
-  "retry-parse-jd": (button) => {
-    const form = button.closest('[data-form="job-create"]');
-    const parseButton = form && form.querySelector('[data-action="parse-jd-link"]');
-    if (parseButton) parseButton.click();
-  },
   "show-import": () => {
     $('[data-form="job-import"]').hidden = false;
     $('[data-form="job-create"]').hidden = true;

@@ -6,7 +6,6 @@ import {
   boardCard,
   buildCmpSideHtml,
   buildLiveCompareHtml,
-  crawlStatusLine,
   diffCard,
   diffList,
   diffSectionBadge,
@@ -24,7 +23,6 @@ import {
 const EMPTY_SESSION = {};
 
 const READY_SESSION = {
-  crawl: { status: "succeeded" },
   jd: { status: "ready", profile: { job_title: "后端工程师" } },
   gap: { status: "ready" },
   alignment: { status: "succeeded" },
@@ -79,10 +77,10 @@ test("jdProfileSummary falls back through alternate fields", () => {
 
 test("stageProgress marks no steps for an empty session", () => {
   const steps = stageProgress(EMPTY_SESSION);
-  assert.equal(steps.length, 5);
+  assert.equal(steps.length, 4);
   assert.deepEqual(
     steps.map((s) => s.key),
-    ["crawl", "classify", "profile", "gap", "align"],
+    ["classify", "profile", "gap", "align"],
   );
   for (const step of steps) {
     assert.equal(step.done, false);
@@ -93,29 +91,25 @@ test("stageProgress marks no steps for an empty session", () => {
 test("stageProgress marks completed stages for a ready session", () => {
   const steps = stageProgress(READY_SESSION);
   const done = steps.filter((s) => s.done).map((s) => s.key);
-  assert.deepEqual(done, ["crawl", "classify", "profile", "gap", "align"]);
+  assert.deepEqual(done, ["classify", "profile", "gap", "align"]);
 });
 
-test("stageProgress marks crawl active while queued", () => {
+test("stageProgress marks queued jd as active classify+profile", () => {
   const steps = stageProgress({
-    crawl: { status: "queued" },
-    jd: {},
+    jd: { status: "queued" },
     gap: {},
     alignment: {},
   });
-  const crawl = steps.find((s) => s.key === "crawl");
-  assert.equal(crawl.active, true);
-  assert.equal(crawl.done, false);
+  assert.equal(steps.find((s) => s.key === "classify").active, true);
+  assert.equal(steps.find((s) => s.key === "profile").active, true);
 });
 
-test("stageProgress treats idle crawl as done and blocked gap as done", () => {
+test("stageProgress treats blocked gap as done", () => {
   const steps = stageProgress({
-    crawl: { status: "idle" },
     jd: { status: "ready" },
     gap: { status: "blocked" },
     alignment: {},
   });
-  assert.equal(steps.find((s) => s.key === "crawl").done, true);
   assert.equal(steps.find((s) => s.key === "gap").done, true);
   assert.equal(steps.find((s) => s.key === "align").done, false);
 });
@@ -124,7 +118,6 @@ test("stageStepper renders step labels with done/active classes", () => {
   const html = stageStepper(READY_SESSION);
   assert.match(html, /data-split-stepper/);
   assert.match(html, /split-step is-done/);
-  assert.match(html, />抓取<\/span>/);
   assert.match(html, />对齐<\/span>/);
   const emptyHtml = stageStepper(EMPTY_SESSION);
   assert.doesNotMatch(emptyHtml, /is-done/);
@@ -156,23 +149,6 @@ test("workbenchProgressPipelineHtml escapes the live message", () => {
   });
   assert.match(html, /检查 &lt;真实性与指标&gt;/);
   assert.doesNotMatch(html, /<真实性与指标>/);
-});
-
-/* ------------------------------------------------------------------ */
-/* crawlStatusLine                                                     */
-/* ------------------------------------------------------------------ */
-
-test("crawlStatusLine returns empty for idle", () => {
-  assert.equal(crawlStatusLine({}), "");
-  assert.equal(crawlStatusLine({ crawl: { status: "idle" } }), "");
-});
-
-test("crawlStatusLine renders status text and escaped error", () => {
-  const queued = crawlStatusLine({ crawl: { status: "queued" } });
-  assert.match(queued, /排队抓取中\.\.\./);
-  const failed = crawlStatusLine({ crawl: { status: "failed", error: "超时<x>" } });
-  assert.match(failed, /抓取失败/);
-  assert.match(failed, /&lt;x&gt;/);
 });
 
 /* ------------------------------------------------------------------ */

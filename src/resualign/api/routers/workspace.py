@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -36,10 +35,10 @@ def init_workbench_session(
     request: Request,
     user: dict[str, Any] = Depends(get_current_user),
 ):
-    """Create a workstation session from a pasted JD or JD URL.
+    """Create a workstation session from a pasted JD.
 
-    Returns immediately with a WorkstationState; crawling, classification,
-    and JD profiling run on a background worker and stream through SSE.
+    Returns immediately with a WorkstationState; classification and JD
+    profiling run on a background worker and stream through SSE.
     """
     api_module._enforce_rate_limit(request, api_module._analyze_rate_limiter)
     raw_jd = (req.raw_jd or "").strip()
@@ -47,6 +46,18 @@ def init_workbench_session(
     if not raw_jd and not jd_url:
         raise HTTPException(
             status_code=422, detail="Either raw_jd or jd_url is required"
+        )
+    if jd_url and not raw_jd:
+        # Crawl retirement (2026-08-30): a URL-only session can never be
+        # ingested server-side; fail fast at the door with a pointer to the
+        # supported flows instead of creating a doomed session that fails
+        # over SSE later.
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "该岗位只有链接没有 JD 文本：请用浏览器油猴插件一键抓取入库，"
+                "或用「粘贴 JD」方式录入"
+            ),
         )
     existing = api_module._session_store.find_by_idempotency(
         user["user_id"], req.idempotency_key
@@ -108,12 +119,6 @@ def init_workbench_session(
                             },
                             gap=sections["gap"],
                             alignment=sections["alignment"],
-                            crawl={
-                                "crawl_id": None,
-                                "status": "idle",
-                                "stage": "",
-                                "error": None,
-                            },
                         )
                     )
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -129,12 +134,6 @@ def init_workbench_session(
             if req.master_resume_id
             else f"paste:{len((req.resume_text or '').strip())}"
         ),
-    }
-    crawl_section = {
-        "crawl_id": uuid.uuid4().hex if jd_url else None,
-        "status": "queued" if jd_url else "idle",
-        "stage": "queued" if jd_url else "",
-        "error": None,
     }
     session = api_module._session_store.create(
         user["user_id"],
@@ -153,7 +152,6 @@ def init_workbench_session(
             "cache_hit": False,
             "error": None,
         },
-        crawl=crawl_section,
         raw_jd=raw_jd,
         jd_url=jd_url,
         master_resume_id=req.master_resume_id,
@@ -170,12 +168,11 @@ def init_workbench_session(
             {"stage": "created", "message": "Job created", "job_id": job["job_id"]},
         )
 
-    start_pipeline = bool(jd_url)
-    if not start_pipeline:
-        try:
-            start_pipeline = api_module.build_config().is_llm_configured
-        except Exception:
-            start_pipeline = False
+    start_pipeline = False
+    try:
+        start_pipeline = api_module.build_config().is_llm_configured
+    except Exception:
+        start_pipeline = False
     if start_pipeline:
         api_module.enforce_daily_llm_cap(user["user_id"])
         threading.Thread(
@@ -236,12 +233,6 @@ def get_workspace_session(
             },
             gap=sections["gap"],
             alignment=sections["alignment"],
-            crawl={
-                "crawl_id": None,
-                "status": "idle",
-                "stage": "",
-                "error": None,
-            },
         )
     state = api_module._workbench_service.public_state(session)
     if request.headers.get("If-None-Match") == state["meta"]["etag"]:
