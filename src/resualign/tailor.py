@@ -215,8 +215,13 @@ def _resolve_span(
 # (2026-08-30: one deepseek run produced 8 suggestions, all rejected for
 # tail-only misquotes). The recovered provenance is always the ACTUAL
 # resume substring, so the anti-fabrication iron rule is preserved.
+# Phase 3 (2026-08-30): thresholds are adaptive — short quotes keep a tight
+# bar, long quotes (models tend to paraphrase more) relax the coverage bar;
+# the minimum quote length scales with the quote itself.
 _FUZZY_MIN_QUOTE_CHARS = 12
 _FUZZY_COVERAGE_THRESHOLD = 0.85
+_FUZZY_LONG_QUOTE_CHARS = 60
+_FUZZY_LONG_COVERAGE_THRESHOLD = 0.75
 
 
 def _fuzzy_locate_quote(
@@ -238,7 +243,15 @@ def _fuzzy_locate_quote(
     norm_text, char_map = _normalized_char_map(resume_text)
     norm_quote = _normalize_whitespace(quote)
     qlen = len(norm_quote)
-    if qlen < _FUZZY_MIN_QUOTE_CHARS or not norm_text:
+    # Adaptive minimum: short quotes need ~60% of their length; long quotes
+    # need at least the fixed floor. Models rarely misquote below 12 chars.
+    min_chars = max(_FUZZY_MIN_QUOTE_CHARS, int(qlen * 0.25))
+    coverage_bar = (
+        _FUZZY_LONG_COVERAGE_THRESHOLD
+        if qlen >= _FUZZY_LONG_QUOTE_CHARS
+        else _FUZZY_COVERAGE_THRESHOLD
+    )
+    if qlen < min_chars or not norm_text:
         return None, ""
     text_len = len(norm_text)
 
@@ -274,7 +287,7 @@ def _fuzzy_locate_quote(
         blocks = [b for b in matcher.get_matching_blocks() if b.size]
         matched = sum(b.size for b in blocks)
         coverage = matched / qlen
-        if coverage >= _FUZZY_COVERAGE_THRESHOLD and blocks:
+        if coverage >= coverage_bar and blocks:
             first, last = blocks[0], blocks[-1]
             span = span_for(
                 window_start + first.b, window_start + last.b + last.size
@@ -331,6 +344,13 @@ def parse_diff_with_provenance(
         confidence = "medium"
     original = item.get("original", "")
     quote = str(item.get("provenance_quote") or item.get("provenance") or "").strip()
+    # Phase 3: models often omit provenance entirely but keep a verbatim
+    # ``original``. Fall back to matching ``original`` as the quote so such
+    # suggestions are not silently gated out — the iron rule (only rewrite
+    # existing facts) is preserved because we verify against the actual
+    # resume span.
+    if not quote and diff_type in ("modify", "remove") and str(original).strip():
+        quote = str(original).strip()
     source_span = None
     valid = False
     provenance_state = "pending_review"
@@ -387,6 +407,90 @@ def parse_diff_with_provenance(
     if diff.type in {"modify", "add"} and diff.proposed:
         diff.proposed = _ensure_metric_placeholder(diff.proposed)
     return diff, valid
+
+
+_SECTION_SPAN_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?(?:个人(?:信息|简介)|教育(?:背景|经历)|工作经历|"
+    r"项目(?:经历|经验)|专业技能|技能清单|证书|荣誉|自我评价|"
+    r"summary|education|work\s+experience|projects?|skills|"
+    r"certifications?|awards?)\s*[:：]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _locate_section_span(
+    heading: str, resume_text: str
+) -> tuple[int, int] | None:
+    """Return the [start, end) span of a section's CONTENT in the resume.
+
+    Finds the heading line (exact match, ignoring markdown markers and
+    trailing colon), then returns the span of everything AFTER that heading
+    line up to the next heading (or the end of the document). The heading
+    line itself is excluded so a section-level accept replaces content only
+    and never deletes the heading. Returns None when the heading is absent.
+    """
+    target = heading.strip().lstrip("#").strip().rstrip(":：").strip()
+    if not target:
+        return None
+    lines = (resume_text or "").splitlines()
+    start_line = -1
+    for index, raw in enumerate(lines):
+        candidate = raw.strip().lstrip("#").strip().rstrip(":：").strip()
+        if candidate == target:
+            start_line = index
+            break
+    if start_line < 0:
+        return None
+    start = sum(len(line) + 1 for line in lines[: start_line + 1])
+    end = len(resume_text)
+    for index in range(start_line + 1, len(lines)):
+        raw = lines[index].strip()
+        if _SECTION_SPAN_RE.match(raw):
+            end = sum(len(line) + 1 for line in lines[:index])
+            break
+    return (start, end)
+
+
+def derive_section_diffs(
+    tailored: TailoredResume,
+    resume_text: str,
+) -> list[DiffItem]:
+    """Build coarse section-level diffs when the model returned no bullet diffs.
+
+    Whole-document editors sometimes return ``sections`` (a full rewrite of
+    changed chapters) but omit the ``diffs`` array entirely — previously
+    that rendered as a "succeeded" alignment with zero actionable advice
+    (2026-08-30 diagnosis: 大模型应用开发工程师 diffs=0/invalid=0 with a
+    draft). This converts each changed section into one accept-able modify
+    diff, provenance-verified against the actual resume span.
+    """
+    if tailored.diffs:
+        return tailored.diffs
+    derived: list[DiffItem] = []
+    for heading, new_text in (tailored.sections or {}).items():
+        span = _locate_section_span(heading, resume_text)
+        if span is None:
+            continue
+        original = resume_text[span[0] : span[1]].strip()
+        proposed = str(new_text or "").strip()
+        if not original or not proposed or original == proposed:
+            continue
+        derived.append(
+            DiffItem(
+                diff_id=uuid.uuid4().hex,
+                section=heading,
+                type="modify",
+                original=original,
+                proposed=proposed,
+                reason="按差距报告整体改写该章节",
+                confidence="medium",
+                provenance=original,
+                provenance_quote=original,
+                source_span=span,
+                provenance_state="verified",
+            )
+        )
+    return derived
 
 
 def tailor_resume(

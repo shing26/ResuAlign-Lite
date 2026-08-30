@@ -170,8 +170,18 @@ def test_diff_provenance_states_and_span_lookup():
         {"type": "modify", "original": "Python developer.", "proposed": "X."},
         resume,
     )
+    # Phase 3: a modify diff whose ``original`` is verbatim in the resume no
+    # longer needs a separate provenance quote — the source span is
+    # satisfied by construction (the model may only rewrite the original).
+    assert ok is True
+    assert pending.provenance_state == "verified"
+
+    invented, ok = parse_diff_with_provenance(
+        {"type": "modify", "original": "Led a 500-person team.", "proposed": "X."},
+        resume,
+    )
     assert ok is False
-    assert pending.provenance_state == "pending_review"
+    assert invented.provenance_state == "missing"
 
 
 def test_tailor_add_without_source_goes_to_invalid_diffs():

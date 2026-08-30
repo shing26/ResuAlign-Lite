@@ -35,7 +35,10 @@ def _bullet_editor_enabled(granularity: str) -> bool:
 
     Enabled for fine/medium granularity by default; override with
     ``RESUALIGN_BULLET_EDITOR=0``. Coarse restructuring always keeps the
-    whole-document path.
+    whole-document path. ``RESUALIGN_BULLET_EDITOR_CLOUD=1`` extends the
+    map-reduce editor to cloud nodes (Phase 3): small per-bullet JSON calls
+    are more reliable for models that tend to omit the diffs array on a
+    whole-document rewrite.
     """
     if os.environ.get("RESUALIGN_BULLET_EDITOR", "1") != "1":
         return False
@@ -80,13 +83,20 @@ def _editor_call_plan(
     }
     if _bullet_editor_enabled(granularity):
         editor_node = node_store.resolve_node_for_role(tenant_id, "editor")
-        if LLMNodeStore._is_local_node(editor_node):
+        use_map_reduce = LLMNodeStore._is_local_node(editor_node)
+        if not use_map_reduce and os.environ.get(
+            "RESUALIGN_BULLET_EDITOR_CLOUD", "0"
+        ) == "1":
+            # Phase 3: opt-in map-reduce for cloud nodes whose whole-document
+            # output tends to omit the diffs array.
+            use_map_reduce = True
+        if use_map_reduce:
             return tailor_resume_map_reduce, {
                 **base_kwargs,
                 "jd_context": jd_context,
                 # Local inference is serialized by the server anyway; keep
                 # one connection to avoid VRAM pressure from parallel runs.
-                "parallel": False,
+                "parallel": not LLMNodeStore._is_local_node(editor_node),
             }
     return tailor_resume, base_kwargs
 
@@ -381,6 +391,21 @@ def run(
 
             # Diffs from tailor_resume replace the old legacy alignment diffs
             report.diffs = report.tailored_resume.diffs
+            # Phase 3: whole-document editors sometimes return sections but
+            # no diffs array. Derive section-level diffs so a "succeeded"
+            # alignment is never empty of actionable advice.
+            if not report.diffs:
+                from .tailor import derive_section_diffs
+
+                derived = derive_section_diffs(
+                    report.tailored_resume, resume_text
+                )
+                if derived:
+                    report.tailored_resume.diffs = derived
+                    report.tailored_resume.invalid_diffs = (
+                        report.tailored_resume.invalid_diffs or []
+                    )
+                    report.diffs = derived
 
             # Optional evaluation
             if run_eval and report.tailored_resume:

@@ -6,6 +6,7 @@ import logging
 import re
 import threading
 import time
+import uuid
 from typing import Any
 
 from fastapi import HTTPException
@@ -58,6 +59,37 @@ def _run_local_fallback_report(resume_text: str, jd_text: str) -> "api_module.Re
             hallucination_detected=False,
             hallucination_details=[],
             gap_coverage=float(ats.get("score", 0.0)),
+        )
+        # Phase 3: offline path must still yield actionable advice. Build
+        # clearly-marked placeholder diffs for the top missing keywords —
+        # they never claim facts (provenance_state=pending_review), so the
+        # anti-fabrication iron rule holds; the user fills in real content.
+        from ...models import DiffItem, TailoredResume
+
+        missing = list((report.gap_report.missing_keywords or []))[:5]
+        placeholder_diffs = [
+            DiffItem(
+                diff_id=uuid.uuid4().hex,
+                section="项目经历",
+                type="add",
+                original="",
+                proposed=(
+                    f"[离线兜底占位] 补充与「{keyword}」相关的经历与量化结果，"
+                    "请人工核对简历后填写"
+                ),
+                reason="离线兜底模式：未配置 LLM，生成占位建议",
+                confidence="low",
+                provenance="",
+                provenance_quote="",
+                source_span=None,
+                provenance_state="pending_review",
+            )
+            for keyword in missing
+        ]
+        report.tailored_resume = TailoredResume(
+            sections={},
+            diffs=[],
+            invalid_diffs=placeholder_diffs,
         )
     return report
 
@@ -766,6 +798,23 @@ def _run_job(job_id: str) -> None:
                     failed_stage, exc, elapsed_secs
                 )
             api_module._registry.fail(job_id, error, stage=failed_stage or None)
+            # Phase 3: persist the failure reason on the library job so a
+            # failed alignment stays diagnosable after the in-memory
+            # registry restarts (previously lost on restart).
+            library_job_id = payload.get('library_job_id')
+            if library_job_id:
+                try:
+                    api_module._jobs.update_job(
+                        tenant_id,
+                        library_job_id,
+                        alignment_status='failed',
+                        last_alignment_error=error,
+                    )
+                except Exception:
+                    logger.exception(
+                        'Failed to persist alignment error for library job %s',
+                        library_job_id,
+                    )
             if application_id:
                 try:
                     api_module._applications.set_application_job(tenant_id, application_id, job_id, 'failed')

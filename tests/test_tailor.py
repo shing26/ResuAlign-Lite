@@ -360,3 +360,94 @@ def test_parse_diff_fuzzy_prefix_short_quotes_still_rejected():
         "熟练掌握 Java 并发编程\n",
     )
     assert valid is False
+
+
+def test_parse_diff_original_fallback_when_provenance_missing():
+    """Phase 3: 模型省略 provenance 但 original 逐字在原文时，用 original 回退匹配。"""
+    resume = "# 项目经历\n1. ResuAlign-Lite 智能简历对齐与求职工作台\n技术栈: Python / FastAPI\n"
+    diff, valid = parse_diff_with_provenance(
+        {
+            "type": "modify",
+            "section": "项目经历",
+            "original": "1. ResuAlign-Lite 智能简历对齐与求职工作台",
+            "proposed": "重构 ResuAlign-Lite 工作台",
+            "reason": "测试回退",
+            "confidence": "high",
+        },
+        resume,
+    )
+    assert valid is True
+    assert diff.provenance_state == "verified"
+    assert diff.provenance_quote == diff.original
+
+
+def test_parse_diff_original_fallback_still_rejects_invented():
+    """Phase 3: original 不在原文时，回退匹配仍失败（不编造原则不变）。"""
+    resume = "# 项目经历\n1. ResuAlign-Lite 智能简历对齐与求职工作台\n"
+    diff, valid = parse_diff_with_provenance(
+        {
+            "type": "modify",
+            "section": "项目经历",
+            "original": "主导了 500 人团队",
+            "proposed": "主导 500 人团队",
+            "reason": "测试",
+            "confidence": "high",
+        },
+        resume,
+    )
+    assert valid is False
+    assert diff.provenance_state == "missing"
+
+
+def test_derive_section_diffs_from_sections_when_diffs_empty():
+    """Phase 3: 模型只回 sections 不回 diffs 时，推导章节级 diff（verified）。"""
+    from resualign.tailor import derive_section_diffs, _locate_section_span
+
+    resume = (
+        "# 项目经历\n1. ResuAlign-Lite 智能简历对齐与求职工作台\n"
+        "技术栈: Python / FastAPI\n\n# 技能清单\nLLM 应用\n"
+    )
+    span = _locate_section_span("项目经历", resume)
+    assert span is not None
+    tailored = TailoredResume(
+        sections={
+            "项目经历": (
+                "1. ResuAlign-Lite 智能简历对齐与求职工作台\n"
+                "技术栈: Python / FastAPI / SQLite (WAL)\n重写后的描述"
+            )
+        },
+        diffs=[],
+        invalid_diffs=[],
+    )
+    derived = derive_section_diffs(tailored, resume)
+    assert len(derived) == 1
+    assert derived[0].type == "modify"
+    assert derived[0].provenance_state == "verified"
+    assert derived[0].original.startswith("1. ResuAlign-Lite")
+    assert "SQLite (WAL)" in derived[0].proposed
+
+
+def test_derive_section_diffs_noop_when_sections_match():
+    """Phase 3: 章节与原文一致时不应产出假 diff。"""
+    from resualign.tailor import derive_section_diffs
+
+    resume = "# 项目经历\n1. 现有项目描述\n"
+    tailored = TailoredResume(
+        sections={"项目经历": "1. 现有项目描述"},
+        diffs=[],
+        invalid_diffs=[],
+    )
+    assert derive_section_diffs(tailored, resume) == []
+
+
+def test_derive_section_diffs_keeps_existing_bullet_diffs():
+    """Phase 3: 已有 bullet diffs 时不覆盖。"""
+    from resualign.tailor import derive_section_diffs
+
+    resume = "# 项目经历\n1. 现有项目描述\n"
+    tailored = TailoredResume(
+        sections={"项目经历": "1. 改写后的项目描述"},
+        diffs=[{"diff_id": "x"}],
+        invalid_diffs=[],
+    )
+    assert derive_section_diffs(tailored, resume) == tailored.diffs

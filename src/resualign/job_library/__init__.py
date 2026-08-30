@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS library_jobs (
     match_reason TEXT,
     match_updated_at REAL,
     alignment_status TEXT NOT NULL DEFAULT 'idle',
+    last_alignment_error TEXT,
     diffs_json TEXT NOT NULL DEFAULT '[]',
     invalid_diffs_json TEXT NOT NULL DEFAULT '[]',
     draft TEXT,
@@ -287,6 +288,14 @@ class JobLibraryStore(_SqliteStore):
         (37, "ALTER TABLE library_jobs ADD COLUMN match_score_detail_json TEXT"),
         (38, "ALTER TABLE library_jobs ADD COLUMN match_reason TEXT"),
         (39, "ALTER TABLE library_jobs ADD COLUMN match_updated_at REAL"),
+        # Phase 3 (2026-08-30): durable failure reason so a failed alignment
+        # stays diagnosable after the in-memory registry restarts. Version 42
+        # (40/41 were used by removed refresh/reminder migrations already
+        # applied to existing databases).
+        (
+            42,
+            "ALTER TABLE library_jobs ADD COLUMN last_alignment_error TEXT",
+        ),
     )
 
     def validate_status(self, status: str) -> str:
@@ -826,6 +835,7 @@ class JobLibraryStore(_SqliteStore):
         custom_prompt: str | None = None,
         allowed_job_functions: Sequence[str] | None = None,
         allowed_seniorities: Sequence[str] | None = None,
+        last_alignment_error: str | None = None,
     ) -> Optional[dict[str, Any]]:
         """Update editable fields. None-valued fields are left unchanged.
 
@@ -1086,6 +1096,9 @@ class JobLibraryStore(_SqliteStore):
         if generated_at is not None:
             sets.append("generated_at = ?")
             values.append(generated_at)
+        if last_alignment_error is not None:
+            sets.append("last_alignment_error = ?")
+            values.append(last_alignment_error)
         if workbench_job_id is not None:
             sets.append("workbench_job_id = ?")
             values.append(workbench_job_id)
@@ -1710,6 +1723,7 @@ class JobLibraryStore(_SqliteStore):
             "match_reason": row["match_reason"] or None,
             "match_updated_at": row["match_updated_at"],
             "alignment_status": alignment_status,
+            "last_alignment_error": row["last_alignment_error"] or None,
             "diffs": json.loads(row["diffs_json"] or "[]"),
             "invalid_diffs": json.loads(row["invalid_diffs_json"] or "[]"),
             "draft": row["draft"],
