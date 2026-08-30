@@ -182,7 +182,7 @@ python benchmarks/run_benchmark.py --online
 前端回归护栏集中在 `tests/frontend/`：`ux-regression.test.mjs`（导航对比度
 WCAG AA、路由矩阵、硬门禁建议卡渲染契约）与 `css-structure.test.mjs`
 （花括号平衡、关键布局选择器 v3 定义存活、简历网格行高约束）。
-当前基线：**805 个 pytest + 473 个前端 node 测试**（2026-08-30 阶段 A-C 重构 + 远程 alignment-lifecycle 合入后实测）。
+当前基线：**815 个 pytest + 486 个前端 node 测试**（2026-08-31 阶段 E 对齐收口后实测）。
 
 ## CI
 

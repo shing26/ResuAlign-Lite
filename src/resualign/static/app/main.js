@@ -1699,50 +1699,34 @@ const actions = {
     }
   },
   "open-optimizer": (button) => navigate("workspace", button.dataset.id),
-  /* Phase A5: 岗位库「批量对齐」——对 idle/failed 岗位逐个排队工作台对齐，
-   * 使用最近创建的主简历。点击后即时反馈进度，完成自动刷新看板。 */
-  "batch-align-pending": async () => {
-    const pending = (state.jobs || []).filter(
-      (job) => job && (job.alignment_status === "idle" || job.alignment_status === "failed"),
-    );
-    if (!pending.length) {
-      toast("没有待对齐的岗位（idle / 失败）", "info");
-      return;
-    }
+  /* Phase E: 看板卡片单岗对齐。idle/failed/零 diff succeeded 由卡片按钮触发，
+   * 使用最近创建的主简历 + medium 粒度，与工作台默认一致。 */
+  "align-job": async (button) => {
+    const jobId = button && button.dataset.id;
+    if (!jobId) return;
     const resumes = await api("/api/master-resumes?limit=1");
     const resume = (resumes && resumes[0]) || null;
     if (!resume) {
-      toast("请先创建一份主简历，再批量对齐", "error");
+      toast("请先创建一份主简历，再开始对齐", "error");
       return;
     }
     const resumeId = resume.resume_id || resume.id;
-    const button = $("[data-action='batch-align-pending']");
-    if (button) button.disabled = true;
-    let queuedCount = 0;
-    let skipped = 0;
+    const target = button;
+    if (target) target.disabled = true;
     try {
-      for (const job of pending) {
-        try {
-          await api(`/api/jobs/${encodeURIComponent(job.job_id)}/workbench`, {
-            method: "POST",
-            body: JSON.stringify({
-              master_resume_id: resumeId,
-              granularity: "medium",
-            }),
-          });
-          queuedCount += 1;
-        } catch (error) {
-          skipped += 1;
-          toast(`「${job.title}」排队失败：${error.message || "未知错误"}`, "error");
-        }
-      }
-      toast(
-        `已排队 ${queuedCount} 个岗位的对齐${skipped ? `，${skipped} 个失败` : ""}，完成后可刷新查看`,
-        queuedCount ? "success" : "error",
-      );
+      await api(`/api/jobs/${encodeURIComponent(jobId)}/workbench`, {
+        method: "POST",
+        body: JSON.stringify({
+          master_resume_id: resumeId,
+          granularity: "medium",
+        }),
+      });
+      toast("已排队对齐，完成后可刷新查看", "success");
+    } catch (error) {
+      toast(error.message || "对齐排队失败", "error");
     } finally {
-      if (button) button.disabled = false;
-      setTimeout(() => renderKanban($("#app-router-view")), 1500);
+      if (target) target.disabled = false;
+      setTimeout(() => renderKanban($("#app-router-view")), 1200);
     }
   },
   /* #17: live 工作台「对比视图」——复用 buildLiveCompareHtml 的文档润色

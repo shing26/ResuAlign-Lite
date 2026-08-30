@@ -199,3 +199,107 @@ test("match dimensions tolerate missing or invalid values", () => {
   assert.equal(dims[2].querySelector("b").textContent, "—");
   assert.equal(dims[3].querySelector("b").textContent, "100");
 });
+
+/* ------------------------------------------------------------------ */
+/* Phase E: card align button by alignment_status                     */
+/* ------------------------------------------------------------------ */
+
+function makeAlignJob(overrides = {}) {
+  return {
+    job_id: "j-align",
+    title: "Align Test",
+    company: "TestCo",
+    location: "北京",
+    status: "draft",
+    alignment_status: "idle",
+    diffs: [],
+    ...overrides,
+  };
+}
+
+test("boardCard idle alignment_status shows 开始对齐 button", () => {
+  const body = bodyFrom(boardCard(makeAlignJob()));
+  const btn = body.querySelector(".board-card__align");
+  assert.ok(btn, "idle job must have an align button");
+  assert.equal(btn.textContent, "开始对齐");
+  assert.equal(btn.dataset.action, "align-job");
+});
+
+test("boardCard failed alignment_status shows 重新对齐 button", () => {
+  const body = bodyFrom(boardCard(makeAlignJob({ alignment_status: "failed" })));
+  const btn = body.querySelector(".board-card__align");
+  assert.ok(btn, "failed job must have an align button");
+  assert.equal(btn.textContent, "重新对齐");
+});
+
+test("boardCard succeeded with zero diffs shows 重新对齐 button", () => {
+  const body = bodyFrom(
+    boardCard(makeAlignJob({ alignment_status: "succeeded", diffs: [] })),
+  );
+  const btn = body.querySelector(".board-card__align");
+  assert.ok(btn, "succeeded+0 diff job must have an align button");
+  assert.equal(btn.textContent, "重新对齐");
+});
+
+test("boardCard succeeded with diffs shows no align button", () => {
+  const body = bodyFrom(
+    boardCard(
+      makeAlignJob({
+        alignment_status: "succeeded",
+        diffs: [{ original: "a", proposed: "b" }],
+      }),
+    ),
+  );
+  const btn = body.querySelector(".board-card__align");
+  assert.equal(btn, null, "succeeded with diffs must have NO align button");
+});
+
+test("boardCard succeeded with zero diffs shows 无建议 badge", () => {
+  const body = bodyFrom(
+    boardCard(makeAlignJob({ alignment_status: "succeeded", diffs: [] })),
+  );
+  const badge = [...body.querySelectorAll(".badge-amber")].find((node) =>
+    node.textContent.includes("无建议"),
+  );
+  assert.ok(badge, "succeeded+0 diff must show 无建议 badge");
+});
+
+test("renderBoardCard idle alignment_status shows 开始对齐 button", () => {
+  const body = bodyFrom(renderBoardCard(makeAlignJob()));
+  const btn = body.querySelector(".board-card__align");
+  assert.ok(btn, "idle job must have an align button on renderBoardCard");
+  assert.equal(btn.textContent, "开始对齐");
+});
+
+test("renderBoardCard failed alignment_status shows 重新对齐 button", () => {
+  const body = bodyFrom(renderBoardCard(makeAlignJob({ alignment_status: "failed" })));
+  const btn = body.querySelector(".board-card__align");
+  assert.ok(btn, "failed job must have an align button on renderBoardCard");
+  assert.equal(btn.textContent, "重新对齐");
+});
+
+test("renderBoardCard succeeded with zero diffs shows 重新对齐 button", () => {
+  const body = bodyFrom(
+    renderBoardCard(makeAlignJob({ alignment_status: "succeeded", diffs: [] })),
+  );
+  const btn = body.querySelector(".board-card__align");
+  assert.ok(btn, "succeeded+0 diff job must have an align button on renderBoardCard");
+  assert.equal(btn.textContent, "重新对齐");
+});
+
+test("renderBoardCard succeeded with diffs shows no align button", () => {
+  const body = bodyFrom(
+    renderBoardCard(
+      makeAlignJob({
+        alignment_status: "succeeded",
+        diffs: [{ original: "a", proposed: "b" }],
+      }),
+    ),
+  );
+  const btn = body.querySelector(".board-card__align");
+  assert.equal(
+    btn,
+    null,
+    "succeeded with diffs must have NO align button on renderBoardCard",
+  );
+});

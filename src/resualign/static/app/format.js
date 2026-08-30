@@ -1001,12 +1001,28 @@ export function boardCard(job, statuses = null) {
       ${jobSourceUrl(job) ? `<div class="board-card__links">${jobApplyLinkHtml(job)}</div>` : ""}
       <div class="row" style="margin-top:8px">
         <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
+        ${boardAlignButton(job)}
         <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-optimizer" data-id="${job.job_id}">工作台</button>
       </div>
     </article>`;
 }
 
 /* ------------------------------------------------------------------ */
+
+function boardAlignButton(job) {
+  /* Phase E: per-card align button by alignment_status.
+   * idle -> 开始对齐; failed or succeeded+0 diffs -> 重新对齐; others -> none. */
+  const alignStatus = job.alignment_status || "idle";
+  const zeroDiff = alignStatus === "succeeded" && !(job.diffs || []).length;
+  if (alignStatus === "idle") {
+    return `<button type="button" class="btn btn-outline btn-sm board-card__align" data-action="align-job" data-id="${esc(job.job_id)}">开始对齐</button>`;
+  }
+  if (alignStatus === "failed" || zeroDiff) {
+    return `<button type="button" class="btn btn-outline btn-sm board-card__align" data-action="align-job" data-id="${esc(job.job_id)}">重新对齐</button>`;
+  }
+  return "";
+}
+
 /* Workbench board card (jobs view)                                    */
 /* ------------------------------------------------------------------ */
 
@@ -1039,12 +1055,14 @@ export function renderBoardCard(job, statuses = null) {
       ${jobSourceUrl(job) ? `<div class="board-card__links">${jobApplyLinkHtml(job)}</div>` : ""}
       <div class="row" style="margin-top:8px">
         <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${statusOptions}</select>
+        ${boardAlignButton(job)}
         <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-workspace" data-id="${job.job_id}">工作台</button>
       </div>
     </article>`;
 }
 
 /* ------------------------------------------------------------------ */
+
 /* Batch alignment panel + result matrix                               */
 /* ------------------------------------------------------------------ */
 
@@ -1357,6 +1375,7 @@ export function buildInlineSuggestionHtml(originalText, optimizedText, diffs) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* Command panel: URL detection / preview HTML                         */
 /* ------------------------------------------------------------------ */
 
@@ -1394,6 +1413,7 @@ export function previewFor(value) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* Job library stats + CSV export + whole-library backup (DOM-tested)  */
 /* ------------------------------------------------------------------ */
 
@@ -1572,6 +1592,7 @@ export function buildJobsBackup(jobs) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* Inline (token/character-level) diff                                 */
 /* ------------------------------------------------------------------ */
 
@@ -1678,8 +1699,10 @@ export function cmpLineHtml(lineIndex, className = "", prefix = "", content = ""
 }
 
 /* ------------------------------------------------------------------ */
+
 /* #11 New-user onboarding steps (pure)                                */
 /* ------------------------------------------------------------------ */
+
 /* DOM-free helpers for the three-step onboarding card (岗位库空态)。
  * Callers in main.js own the DOM mounting; these functions only derive
  * state and build HTML.
@@ -1904,8 +1927,10 @@ export function offerCelebrationHtml(job) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* U7 采纳语义：diff 应用纯函数（split-canvas 单条采纳 / 应用已采纳）    */
 /* ------------------------------------------------------------------ */
+
 /* 应用单条 diff 到草稿。与后端 _apply_diffs 的语义保持一致：
  * modify 全量替换 original -> proposed；add 追加行；remove 移除行。 */
 
@@ -1943,8 +1968,10 @@ export function applyAcceptedDiffsToDraft(draft, diffs, acceptedIds) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* F10/U11 匹配度来源标注（纯）                                        */
 /* ------------------------------------------------------------------ */
+
 /* 工作台徽章取分优先级：对齐评估（eval_score.jd_match_score）→ 差距分析
  * （gap.score）→ 岗位持久化匹配分（job.match_score，后端写自最近一次
  * 工作台 eval）。来源文案随徽章 title + 旁注展示。 */
@@ -1972,6 +1999,7 @@ export function renderMatchBadge(session, job) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* F6/U10 时间线弹窗与编辑弹窗表单 HTML（纯，供 main.js 挂到 modal）     */
 /* ------------------------------------------------------------------ */
 
@@ -2328,6 +2356,7 @@ export function jobEditFormHtml(job, vocabulary = {}) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* B7 采集数据完整性 + U5 耗时格式化（纯）                              */
 /* ------------------------------------------------------------------ */
 
@@ -2402,8 +2431,10 @@ export function runEvalFromForm(data) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* #17 Live workbench: side-by-side compare from a live session        */
 /* ------------------------------------------------------------------ */
+
 /* The live canvas keeps the per-card 采纳/忽略/润色 interactions in
  * diffList(); this builds the read-only 对比视图 view with buildCmpSideHtml
  * from the session's alignment draft + diffs. */
@@ -2416,8 +2447,10 @@ export function buildLiveCompareHtml(session, originalContent) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* T3: diff section badge（与后端 DiffItem.section 契约，字符串，可空）  */
 /* ------------------------------------------------------------------ */
+
 /* 后端将为 DiffItem 增加可选 `section` 字段（如「工作经历」「项目经历」）
  * 标识该条建议所属的简历区块。section 为空时不渲染任何节点；非空时在
  * diffCard 头部 type 徽章旁渲染一个小徽章（.diff-card__section），
@@ -2429,8 +2462,10 @@ export function diffSectionBadge(diff) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* Sprint 1 Dashboard: KPI cards / skill-gap heat bars / quick continue */
 /* ------------------------------------------------------------------ */
+
 /* Pure HTML builders for the `#/dashboard` view. Callers in main.js own
  * the GET /api/dashboard fetch and mount these strings into #app; every
  * builder stays DOM-free so it can be unit-tested under Node.
@@ -2618,6 +2653,7 @@ export function quickContinueHtml(qc) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* Sprint 1 Header job quick selector + ⌘K job search (pure)           */
 /* ------------------------------------------------------------------ */
 
@@ -2670,8 +2706,10 @@ export function renderJobSuggestionsHtml(jobs, query) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* Sprint 2: 三栏工作台 Live Sheet（右栏定稿实时预览，纯函数）            */
 /* ------------------------------------------------------------------ */
+
 /* 供 split-canvas.js（并行 Agent A）消费的三个纯函数 + 占位文案常量：
  *  - renderLiveSheetHtml(draft)        挂载初始渲染：纸张容器 + renderMarkdown
  *  - liveSheetPatch(prevDraft, newDraft)  增量 patch：行级 rows + addedLines + html
@@ -2789,8 +2827,10 @@ export function highlightSkillGapHtml(gapItems, skill) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* Sprint 4: Resume Center（ATS 健康度卡 + 版本时间线，纯函数）           */
 /* ------------------------------------------------------------------ */
+
 /* 数据源契约（与 events.js renderDiagnosisResult / recoverDiagnosis 对齐）：
  *   state.diagnosis = { job_id, status, result: { diagnosis } }
  *   diagnosis 对象含 score / skills / issues / suggestions / model。
@@ -2920,8 +2960,10 @@ export function versionTimelineHtml(versions, currentVersion, resumeId = "") {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* Resume optimizer: overview + modular polish (xzjobs 式)              */
 /* ------------------------------------------------------------------ */
+
 /* 简历中心「AI 优化」面板的纯函数构造器（DOM-free，Node 可单测）。
  * 数据契约与后端 run_resume_optimize / build_overview 对齐：
  *   overview = {score, verdict, skills, issues, highlights,
@@ -3089,8 +3131,10 @@ export function collectAcceptedOptimizeItems(modules, accepted) {
 }
 
 /* ------------------------------------------------------------------ */
+
 /* Sprint 5: 系统设置全量升级 —— Bento 概览 / LLM 节点 / 自动化规则（纯）   */
 /* ------------------------------------------------------------------ */
+
 /* 本模块保持 DOM-free，可在 Node 下单测。契约（与后端 agent 并行对齐）：
  *   GET  /api/llm/nodes -> [{node_id, name, provider, base_url, model,
  *                            api_key(masked), is_active, created_at}]

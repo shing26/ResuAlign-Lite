@@ -6,6 +6,7 @@ import logging
 import re
 import threading
 import time
+import urllib.parse
 import uuid
 from typing import Any
 
@@ -35,6 +36,30 @@ def _is_noop_diff(diff: dict[str, Any]) -> bool:
     return bool(original) and original == proposed
 
 
+_LOCAL_HOST_PATTERN = re.compile(
+    r'^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)$'
+)
+
+
+def _is_local_node(provider: str, base_url: str | None) -> bool:
+    """Return True when a node is local-first (Ollama or localhost URL).
+
+    Phase E: local nodes fast-fail on connectivity errors; remote providers
+    tolerate transient network blips (see ``_probe_active_llm_quick``).
+    """
+    if provider == 'ollama':
+        # Ollama defaults to localhost; even a LAN Ollama is close enough
+        # that fast-fail is the right behavior.
+        return True
+    if not base_url:
+        return False
+    try:
+        host = urllib.parse.urlparse(base_url).hostname or ''
+    except Exception:
+        return False
+    return bool(_LOCAL_HOST_PATTERN.match(host))
+
+
 def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
     """Pre-flight probe of the node that would actually serve the run.
 
@@ -45,14 +70,21 @@ def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
     network errors / timeouts are non-blocking so the job can still be
     queued and its failure surfaced via ``last_alignment_error`` (A3).
 
+    Phase E (2026-08-30): local nodes (Ollama or localhost base_url) also
+    fast-fail on network_error/timeout because a down local provider is a
+    definitive failure, not a transient blip. Remote providers stay
+    non-blocking so a cloud flake never blocks a queued run.
+
     Returns ``(ok, message)``; ok=True means "proceed".
     """
     try:
         node = api_module._llm_nodes.get_active_node(tenant_id)
+        provider = ''
+        base_url = None
         if node is not None:
-            provider = node.get("provider", "")
+            provider = node.get("provider", '')
             api_key = node.get("api_key")
-            model = node.get("model", "")
+            model = node.get("model", '')
             base_url = node.get("base_url")
         else:
             config = api_module.build_config()
@@ -60,10 +92,10 @@ def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
             api_key = config.api_key
             model = config.model
             base_url = config.base_url
-        if not api_key and provider != "ollama":
+        if not api_key and provider != 'ollama':
             # Missing key is caught upstream by is_llm_configured (503).
-            return True, ""
-        from .routers.settings import probe_llm_connection
+            return True, ''
+        from ..routers.settings import probe_llm_connection
 
         probe = probe_llm_connection(
             provider=provider,
@@ -72,13 +104,37 @@ def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
             base_url=base_url,
             timeout=5.0,
         )
-        status = probe.get("status", "")
-        if status in ("http_401", "http_402", "http_403"):
-            return False, probe.get("message", "模型服务鉴权失败，请检查设置")
-        return True, ""
+        status = probe.get('status', '')
+        if status in ('http_401', 'http_402', 'http_403'):
+            return False, probe.get('message', '模型服务鉴权失败，请检查设置')
+        if (
+            status in ('network_error', 'timeout')
+            and _is_local_node(provider, base_url)
+        ):
+            return False, probe.get(
+                'message', '本地模型服务未就绪，请检查服务是否启动'
+            )
+        return True, ''
     except Exception:
         # Non-blocking: never let a probe failure block a queued run.
-        return True, ""
+        return True, ''
+
+
+_tenant_run_gates: dict[str, threading.Lock] = {}
+_tenant_gates_lock = threading.Lock()
+
+
+def _get_tenant_run_gate(tenant_id: str) -> threading.Lock:
+    """Return the per-tenant gate that serializes that tenant's runs.
+
+    Phase E: at most one analysis run per tenant executes at a time so a
+    slow local node (Ollama qwen2.5:7b) is never thrashed by concurrent
+    alignments from the same account.
+    """
+    with _tenant_gates_lock:
+        if tenant_id not in _tenant_run_gates:
+            _tenant_run_gates[tenant_id] = threading.Lock()
+        return _tenant_run_gates[tenant_id]
 
 
 def _sync_alignment_status(
@@ -590,7 +646,31 @@ def _queue_job(user: dict[str, Any], payload: dict[str, Any], application_id: st
     return job.job_id
 
 def _run_job(job_id: str) -> None:
-    """Execute one queued analysis job on a bounded worker thread."""
+    """Execute one queued analysis job on a bounded worker thread.
+
+    Phase E (2026-08-30): a per-tenant gate guarantees at most one run per
+    tenant at a time (an Ollama 7B node must not be thrashed). The gate is
+    acquired before the global worker semaphore so a flooded tenant cannot
+    occupy every global slot.
+    """
+    entry = api_module._payloads.get(job_id)
+    if entry is not None:
+        tenant_id = entry[3]
+    else:
+        stored = api_module._registry.get_payload(job_id)
+        if stored is None:
+            return
+        tenant_id = stored[1]
+    gate = _get_tenant_run_gate(tenant_id)
+    gate.acquire()
+    try:
+        _run_job_holding_gate(job_id)
+    finally:
+        gate.release()
+
+
+def _run_job_holding_gate(job_id: str) -> None:
+    """Run one queued analysis job; caller already holds the tenant gate."""
     with api_module._WORKER_SEMAPHORE:
         entry = api_module._payloads.get(job_id)
         if entry is not None:

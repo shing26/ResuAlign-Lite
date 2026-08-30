@@ -69,3 +69,10 @@ _tmp_*.py
 step1_format.py
 upd_tests.py
 体验报告-*.md
+
+# 本地工作产物（不进入 GitHub 仓库）
+.zcode/
+产品体验报告/
+docs/demo/
+# 根目录重复副本（规范版在 docs/upcv-clawjob-decomposition-2026-08-21.md）
+/upcv-clawjob-decomposition-2026-08-21.md

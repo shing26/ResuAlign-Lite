@@ -382,10 +382,11 @@ def run_workbench(job_id: str, req: WorkbenchRunRequest, request: Request, user:
     config = api_module.build_config()
     if not config.is_llm_configured:
         raise HTTPException(status_code=503, detail='LLM 未配置。请设置 API Key（远程供应商）或激活 Ollama 本地节点。')
-    # Phase A1: pre-flight probe of the serving node. Only definitive
-    # auth/quota failures (401/402/403) block with an actionable message
-    # instead of a 90s timeout then a failed job. Network/timeout states
-    # are non-blocking — the run proceeds and failures surface via
+    # Phase A1/E: pre-flight probe of the serving node. Definitive
+    # auth/quota failures (401/402/403) and local-node connectivity
+    # failures block with an actionable message instead of a 90s timeout
+    # then a failed job. Remote network/timeout states stay non-blocking
+    # so a cloud flake never blocks queueing; failures still surface via
     # last_alignment_error (A3).
     probe_ok, probe_message = api_module._probe_active_llm_quick(
         user['user_id']

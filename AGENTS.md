@@ -43,15 +43,17 @@ Do not run `git branch -D` on the affected branch before rebuilding the ref.
 Short hashes in the ref file are rejected as broken refs — always write the
 full 40-char object name.
 
-### Regression baselines (2026-08-30)
+### Regression baselines (2026-08-31)
 
-- Backend: `PYTHONPATH=src python -m pytest tests/ -q` → **792 passed / 7 skipped**
+- Backend: `PYTHONPATH=src python -m pytest tests/ -q` → **815 passed / 7 skipped**
 - Frontend: `node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs`
-  → **473 passed**
+  → **486 passed**
 - Page probe: 8 pages, 0 console error (`.scratch/ra_probe_v2.py`, Playwright
   chromium-1234). DeepSeek .env key is **402 unpaid** — the active LLM node is
   Ollama qwen2.5:7b; the workbench pre-flight probe (Phase A1) blocks
-  definitive auth/quota failures with an actionable message before queueing.
+  definitive auth/quota failures and local-node connectivity failures with an
+  actionable message before queueing (Phase E: local fast-fail, remote
+  network/timeout non-blocking).
 
 ### Phase A-C invariants (2026-08-30)
 

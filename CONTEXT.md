@@ -32,6 +32,14 @@
 - **Phase C 标题去重**：简历列表页/设置页视图内重复 h2 移除（顶栏
   PAGE_META 已渲染页标题）；移动端顶栏瘦身（副标题隐藏 + 间距压缩，
   165→145px）；css-structure 护栏新增单 h2 不变式。
+- **Phase E 对齐收口（2026-08-31）**：批量对齐统一到矩阵接口
+  `/api/batch-align`（`selector="pending"` 覆盖 idle/failed/卡死 queued），
+  删除看板旧的逐条 POST workbench 轻量循环；看板卡片按 alignment_status
+  显示单岗对齐按钮（idle→「开始对齐」，failed/零 diff succeeded→「重新对齐」，
+  直接走 `/api/jobs/{id}/workbench` + medium 粒度 + 最近主简历）；A1 预检按
+  节点类型区分快速失败（本地网络错误/超时硬拦截 422，远程保持非阻塞）；
+  A2 全 noop 保持 succeeded + 0 有效 diff；对齐运行每租户单线程排队
+  （防止 Ollama 7B 被并发拖垮）。
 
 ## Implementation Status (2026-08-03)
 
@@ -150,6 +158,30 @@ _Avoid_: 对齐快照, 对齐成功当状态流转用
 
 **Diff**
 A single atomic edit suggestion. Carries a type (add/modify/remove), the original sentence, proposed sentence, reason, confidence, and a **provenance field** linking back to the exact source sentence in the Master Resume. Never invents.
+
+**无效建议 / noop Diff**
+对齐产出的 modify/remove diff 中 `original` 与 `proposed` 逐字相同者
+（如模型自述"无可用改动"却仍生成一条 modify）。这类 diff 不计入有效建议：
+移入 `invalid_diffs`，`diffs` 只含真实改动。
+
+**无建议（badge）**
+`alignment_status === "succeeded"` 但 `diffs` 为空时的琥珀徽章文案，含义是
+"本次对齐未产出可用的修改建议"。全 noop 语义下 alignment 仍保持 succeeded，
+不自动触发章节级兜底重跑；用户可通过卡片「重新对齐」主动发起。
+
+**节点预检（LLM pre-flight probe）**
+对齐排队前对实际服务节点（激活节点，否则 .env/默认配置）做的一次 5s 最小
+连通 + 鉴权探测。确定性 HTTP 失败（401/402/403）对所有节点硬拦截为
+422 + 引导；本地节点（Ollama 或 localhost base_url）的网络错误/超时同样
+硬拦截（本地服务未起是确定性失败）；远程节点的网络错误/超时保持非阻塞，
+由 `last_alignment_error` 延迟透出，避免云服务瞬时抖动误伤。
+
+**单岗对齐 / 批量对齐 / 批量对比矩阵**
+单岗对齐 = 看板卡片按 alignment_status 显示的「开始对齐 / 重新对齐」按钮，
+直接 POST `/api/jobs/{id}/workbench`，默认 medium 粒度 + 最近创建主简历。
+批量对齐 = 看板「批量对齐」按钮，走 `/api/batch-align`（`selector="pending"`，
+覆盖 idle/failed/卡死 queued），结果在「批量对比矩阵」面板展示。两者共用
+同一后端排队与并发上限（每租户同时最多 1 个运行）。
 
 **Report** *(current)*
 Combined output: diagnosis + alignment diffs + metadata. Printed to terminal and optionally written to JSON.
