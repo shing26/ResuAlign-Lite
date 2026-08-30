@@ -21,6 +21,17 @@
   结构不变式（括号平衡、关键选择器 v3 存活、网格行高约束）。
 - 壳层选择器自动合并验证发现会破坏 @media 移动端级联，已回滚留待
   按媒体上下文逐属性合并。
+- **Phase A 对齐运行时收口**：workbench 排队前节点预检
+  （`_probe_active_llm_quick`，5s 探测；401/402/403 确定性失败拦截为
+  422+引导，网络/超时非阻塞）；noop diff 过滤（original==proposed 移入
+  invalid_diffs）；last_alignment_error 透出到 API 与岗位卡片徽章
+  （对齐失败/无建议）；岗位库「批量对齐」入口（idle/失败逐个排队）。
+- **Phase B 爬虫残留清理**：自动化规则移除「城市白名单」死选项
+  （rules.py 标记 deprecated，DB 兼容保留）；油猴占位符 8011→8000；
+  「抓取失败，可重试」徽章改「JD 文本异常」；设置页措辞收口。
+- **Phase C 标题去重**：简历列表页/设置页视图内重复 h2 移除（顶栏
+  PAGE_META 已渲染页标题）；移动端顶栏瘦身（副标题隐藏 + 间距压缩，
+  165→145px）；css-structure 护栏新增单 h2 不变式。
 
 ## Implementation Status (2026-08-03)
 
