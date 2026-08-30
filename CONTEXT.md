@@ -4,6 +4,24 @@
 > CLI 只是前端之一，未来会扩展 Web UI / API 层。
 > 核心引擎前端无关，多阶段 pipeline 可组合，铁律：不捏造事实。
 
+## Recovery (2026-08-30, 分阶段重构)
+
+- **Phase 0 基线**：爬虫退役收尾固化提交；契约同步（manifest 声明
+  parse-jd/JDParseRequest 移除，清除 WorkstationCrawlSection 残留）→
+  3 个契约测试转绿；油猴插件端口 8011→8000。
+- **Phase 1 布局**：简历详情 65/35 网格行高约束（`align-items:stretch` +
+  `grid-template-rows:minmax(0,1fr)`），正文不再被 overflow:hidden 裁切。
+- **Phase 2 摄入收口**：UI 移除「JD 链接」模式与命令面板 jd_url 发送；
+  批量导入 jd_url 行明确报错；crawl 措辞全库清理。
+- **Phase 3 对齐可靠性**：溯源兜底（original 回退 + 自适应阈值）；
+  sections 推导章节级 diff（模型只回全文时不再 0 建议）；云节点可选
+  map-reduce（`RESUALIGN_BULLET_EDITOR_CLOUD=1`）；失败持久化
+  （library_jobs.last_alignment_error，迁移 42）；离线占位 diffs。
+- **Phase 4 护栏**：`tests/frontend/css-structure.test.mjs` 锁定 CSS
+  结构不变式（括号平衡、关键选择器 v3 存活、网格行高约束）。
+- 壳层选择器自动合并验证发现会破坏 @media 移动端级联，已回滚留待
+  按媒体上下文逐属性合并。
+
 ## Implementation Status (2026-08-03)
 
 - Core pipeline stages (diagnose, JD profile, gap analysis, tailor, evaluate)
