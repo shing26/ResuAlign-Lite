@@ -1,4 +1,4 @@
-"""Small shared observability helpers for crawl and pipeline requests."""
+"""Small shared observability helpers for pipeline and API requests."""
 
 from __future__ import annotations
 

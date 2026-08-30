@@ -227,12 +227,19 @@ export async function confirmCommandPanel() {
     confirm.textContent = "正在创建会话...";
   }
   try {
-    const body = isJdUrl(value)
-      ? { jd_url: value }
-      : { raw_jd: value };
+    /* 后端已不再抓取 JD 链接（crawler 退役，Phase 2 收口）：URL 输入不再
+     * 发送 jd_url（会撞 422），改为引导用户用油猴插件或粘贴 JD 文本。 */
+    if (isJdUrl(value)) {
+      closeCommandPanel();
+      toast(
+        "岗位链接需用浏览器油猴插件一键入库，或直接粘贴 JD 文本",
+        "info",
+      );
+      return null;
+    }
     const session = await api("/api/workbench/session/init", {
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify({ raw_jd: value }),
     });
     closeCommandPanel();
     toast("岗位已入库，正在预分析", "success");

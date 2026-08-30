@@ -1558,7 +1558,7 @@ class JobLibraryStore(_SqliteStore):
     def delete_job(
         self, tenant_id: str, job_id: str
     ) -> tuple[bool, str | None]:
-        """Delete a library job and its crawl tasks.
+        """Delete a library job and its pinned analysis job.
 
         Returns ``(deleted, workbench_job_id)`` so callers can also clean up
         the pinned analysis job. ``workbench_job_id`` is the analysis job id

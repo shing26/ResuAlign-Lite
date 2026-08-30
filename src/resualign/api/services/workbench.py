@@ -214,7 +214,7 @@ class WorkstationSessionStore:
 
     Running sessions, partial profiles, tentative diffs, and event fanout are
     intentionally ephemeral (TTL 30 minutes). Terminal alignment products and
-    job/crawl envelopes live in SQLite (see ADR-0021).
+    job envelopes live in SQLite (see ADR-0021).
     """
 
     def __init__(self, ttl_seconds: float = SESSION_TTL_SECONDS) -> None:

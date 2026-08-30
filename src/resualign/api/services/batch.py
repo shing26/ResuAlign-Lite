@@ -73,7 +73,12 @@ def queue_batch_align(
     user: dict[str, Any],
     request: BatchAlignRequest,
 ) -> dict[str, Any]:
-    """Validate inputs and queue one workbench analysis per target."""
+    """Validate inputs and queue one workbench analysis per target.
+
+    ``jd_urls`` is a legacy field kept for API compatibility only: backend
+    crawling is retired (de-bloat 2026-08-27), so a URL-only target is
+    rejected below with a pointer to the collector userscript / paste flow.
+    """
     from fastapi import HTTPException
 
     tenant_id = user['user_id']

@@ -322,7 +322,7 @@
     "/api/jobs/import": {
       "post": {
         "summary": "Import Library Jobs",
-        "description": "Queue a batch import so crawl/classification never blocks the API.",
+        "description": "Queue a batch import so LLM classification never blocks the API.",
         "operationId": "import_library_jobs_api_jobs_import_post",
         "parameters": [
           {
@@ -521,7 +521,7 @@
       },
       "delete": {
         "summary": "Delete Library Job",
-        "description": "Delete a library job, its crawl tasks, and any pinned analysis job.",
+        "description": "Delete a library job and any pinned analysis job.",
         "operationId": "delete_library_job_api_jobs__job_id__delete",
         "parameters": [
           {

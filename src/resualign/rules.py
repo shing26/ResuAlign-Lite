@@ -56,10 +56,12 @@ class RuleFilterEngine:
         (unknown location rejects when a whitelist exists) and min_salary
         (unknown salary skips the check).
 
-        ``preflight=True`` is used before a crawl when only the URL is known:
-        city-whitelist and min-salary constraints are skipped because their
-        inputs (location/salary) are not available until the page is parsed,
-        so evaluating them would reject every candidate regardless of content.
+        ``preflight=True`` is used before JD intake when only a link is
+        known (legacy): city-whitelist and min-salary constraints are
+        skipped because their inputs (location/salary) are not available
+        until the page is parsed, so evaluating them would reject every
+        candidate regardless of content. Backend crawling is retired; JD
+        intake goes through the collector userscript or pasted text.
         """
         rules = self._store.list_rules(tenant_id, enabled_only=True)
         if not rules:

@@ -412,10 +412,7 @@ function openJobEditor(job) {
 const JOB_CREATE_FORM_HTML = `
     <form class="panel panel-card" data-form="job-create" hidden>
       <h3>添加岗位</h3>
-      <div class="segmented segmented-card" role="group" aria-label="输入方式">
-        <button type="button" class="segmented-button" data-mode="paste" aria-pressed="true">粘贴 JD</button>
-        <button type="button" class="segmented-button" data-mode="url" aria-pressed="false">JD 链接</button>
-      </div>
+      <p class="small muted" style="margin:0 0 10px">岗位链接请用浏览器油猴插件一键入库，或用「粘贴 JD」方式录入（后端已不再抓取 JD 链接）</p>
       <div class="form-grid" style="margin-top:10px">
         <div class="field"><label>标题</label><input type="text" name="title" placeholder="留空则从 JD 首行提取"></div>
         <div class="field"><label>公司</label><input type="text" name="company"></div>
@@ -425,13 +422,6 @@ const JOB_CREATE_FORM_HTML = `
         <div class="field"><label>最高薪资（月，元）</label><input type="number" name="salary_max" min="0" step="100"></div>
         <div class="field"><label>薪资币种</label><input type="text" name="salary_currency" placeholder="CNY"></div>
         <div class="field wide"><label>JD 文本</label><textarea name="jd_text" rows="8"></textarea></div>
-        <div class="field wide" data-url-field hidden><label>JD 链接</label>
-          <div class="row">
-            <input type="url" name="jd_url" placeholder="https://..." style="flex:1;min-width:0">
-            <button class="btn btn-secondary" type="button" data-action="parse-jd-link">解析 JD 链接</button>
-          </div>
-        </div>
-        <div class="jd-parse-status" data-jd-parse-status role="status" aria-live="polite"></div>
       </div>
       <div class="row"><button class="btn btn-primary" type="submit">保存岗位</button>
         <button class="btn btn-ghost" type="button" data-action="cancel-add-job">取消</button></div>
@@ -440,7 +430,7 @@ const JOB_CREATE_FORM_HTML = `
 const JOB_IMPORT_FORM_HTML = `
     <form class="panel panel-card" data-form="job-import" hidden>
       <h3>批量导入</h3>
-      <div class="field"><label>粘贴 CSV 或 JSON 数组（字段含 title / jd_text / jd_url / company / location）</label>
+      <div class="field"><label>粘贴 CSV 或 JSON 数组（字段含 title / jd_text / company / location；jd_url 需同时提供 jd_text，否则该行会被跳过）</label>
         <textarea name="import_text" rows="6" placeholder='title,jd_text,location&#10;后端工程师,要求 Python 和 FastAPI,上海'></textarea></div>
       <div class="field"><label>或选择文件（.csv / .json）</label><input type="file" name="import_file" accept=".csv,.json,text/csv,application/json"></div>
       <div class="row"><button class="btn btn-primary" type="submit">开始导入</button>
@@ -1249,29 +1239,13 @@ const actions = {
   "cancel-add-job": () => {
     $('[data-form="job-create"]').hidden = true;
   },
-  /* 后端已移除 JD 链接抓取（crawler 下线）：按钮保留以提示改用油猴插件
-   * 一键抓取或直接粘贴 JD 文本，不再调用 /api/jobs/parse-jd。 */
-  "parse-jd-link": (button) => {
+  /* 后端已移除 JD 链接抓取（crawler 下线）：表单不再提供 JD 链接模式，
+   * 保留该动作仅作兜底提示，防止历史遗留按钮误触。 */
+  "parse-jd-link": () => {
     toast(
       "后端已不再抓取 JD 链接：请用油猴插件一键抓取，或粘贴 JD 文本",
       "info",
     );
-  },
-  "use-paste-mode": () => {
-    const form = $('[data-form="job-create"]');
-    const urlInput = form && form.querySelector('input[name="jd_url"]');
-    const sourceInput = form && form.querySelector('input[name="source_url"]');
-    if (
-      urlInput &&
-      sourceInput &&
-      (urlInput.value || "").trim() &&
-      !(sourceInput.value || "").trim()
-    ) {
-      sourceInput.value = urlInput.value.trim();
-    }
-    setJdInputMode("paste");
-    const status = $("[data-jd-parse-status]");
-    if (status) clearJdParseStatus(status);
   },
   "show-import": () => {
     $('[data-form="job-import"]').hidden = false;
@@ -2203,31 +2177,6 @@ const actions = {
   },
 };
 
-function setJdInputMode(mode) {
-  $$("[data-mode]").forEach((button) =>
-    button.setAttribute("aria-pressed", String(button.dataset.mode === mode)),
-  );
-  const urlField = $("[data-url-field]");
-  const jdText = $('[name="jd_text"]');
-  if (mode === "url") {
-    if (urlField) urlField.hidden = false;
-    if (jdText) jdText.closest(".field").hidden = true;
-  } else {
-    if (urlField) urlField.hidden = true;
-    if (jdText) jdText.closest(".field").hidden = false;
-  }
-  const status = $("[data-jd-parse-status]");
-  if (status && status.classList.contains("form-error")) {
-    clearJdParseStatus(status);
-  }
-}
-
-function clearJdParseStatus(status) {
-  status.className = "jd-parse-status";
-  status.removeAttribute("role");
-  status.textContent = "";
-}
-
 function setSegmented(selector, active) {
   $$(selector).forEach((button) =>
     button.setAttribute("aria-pressed", String(button === active)),
@@ -2246,8 +2195,6 @@ document.addEventListener("click", async (event) => {
   if (granularityButton) setSegmented("[data-granularity]", granularityButton);
   const focusButton = event.target.closest("[data-focus]");
   if (focusButton) setSegmented("[data-focus]", focusButton);
-  const modeButton = event.target.closest("[data-mode]");
-  if (modeButton) setJdInputMode(modeButton.dataset.mode);
   const button = event.target.closest("button[data-action]");
   if (!button) return;
   const action = actions[button.dataset.action];
@@ -2273,9 +2220,6 @@ function updateBatchSelection() {
 
 document.addEventListener("change", (event) => {
   const target = event.target;
-  if (target.matches("[data-mode]")) {
-    setJdInputMode(target.dataset.mode);
-  }
   if (target.matches("[data-granularity]")) {
     setSegmented("[data-granularity]", target);
   }

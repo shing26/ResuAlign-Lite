@@ -141,7 +141,7 @@ def local_ingest(
 
 @router.post('/api/jobs/import')
 def import_library_jobs(req: JobImportRequest, request: Request, user: dict[str, Any]=Depends(get_current_user)):
-    """Queue a batch import so crawl/classification never blocks the API."""
+    """Queue a batch import so LLM classification never blocks the API."""
     api_module._enforce_rate_limit(request, api_module._import_rate_limiter)
     api_module.enforce_daily_llm_cap(user['user_id'])
     rows = api_module._collect_import_rows(req)
@@ -341,7 +341,7 @@ def bulk_update_job_status(req: BulkStatusRequest, user: dict[str, Any]=Depends(
 
 @router.delete('/api/jobs/{job_id}', status_code=204)
 def delete_library_job(job_id: str, user: dict[str, Any]=Depends(get_current_user)):
-    """Delete a library job, its crawl tasks, and any pinned analysis job."""
+    """Delete a library job and any pinned analysis job."""
     deleted, workbench_job_id = api_module._jobs.delete_job(
         user['user_id'], job_id
     )

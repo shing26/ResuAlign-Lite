@@ -40,7 +40,11 @@
 ## Pipeline Stages (long-term vision)
 
 **Stage 1 — JD Ingestion**
-Crawl job descriptions from career sites (Playwright/Selenium). Handle anti-scraping, varying page structures. Raw text → LLM structured extraction → standard JSON.
+Client-side capture via the collector userscript (划词 / 实习僧 Specific 模式)
+or pasted JD text into `POST /api/jobs/local-ingest` / `POST /api/jobs`.
+Backend crawling was retired (2026-08-27 de-bloat): raw text → LLM structured
+extraction → standard JSON; JD links are captured by the userscript, never
+fetched server-side.
 
 **Stage 2 — JD Profiling**
 Deep analysis of a JD: extract must-have vs nice-to-have, hard skills vs soft skills, business scenarios (high-concurrency, low-latency, etc.). Produces a \JDProfile\.
