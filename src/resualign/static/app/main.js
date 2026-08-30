@@ -565,7 +565,6 @@ async function renderSettingsView(app) {
     <div class="view view-scroll settings-view">
       <div class="settings-head">
         <div>
-          <h2>系统设置</h2>
           <p>配置多个 LLM API 节点、超时护杠与粗筛规则引擎</p>
         </div>
         <div class="settings-head-actions">
@@ -631,7 +630,7 @@ async function renderSettingsView(app) {
           <div class="panel-head">
             <div>
               <h2>自动化规则</h2>
-              <p>抓取与导入前置拦截</p>
+              <p>导入前置拦截</p>
             </div>
             <button class="btn btn-outline btn-sm" type="button" data-action="automation-rule-add">新增规则</button>
           </div>
@@ -1700,6 +1699,52 @@ const actions = {
     }
   },
   "open-optimizer": (button) => navigate("workspace", button.dataset.id),
+  /* Phase A5: 岗位库「批量对齐」——对 idle/failed 岗位逐个排队工作台对齐，
+   * 使用最近创建的主简历。点击后即时反馈进度，完成自动刷新看板。 */
+  "batch-align-pending": async () => {
+    const pending = (state.jobs || []).filter(
+      (job) => job && (job.alignment_status === "idle" || job.alignment_status === "failed"),
+    );
+    if (!pending.length) {
+      toast("没有待对齐的岗位（idle / 失败）", "info");
+      return;
+    }
+    const resumes = await api("/api/master-resumes?limit=1");
+    const resume = (resumes && resumes[0]) || null;
+    if (!resume) {
+      toast("请先创建一份主简历，再批量对齐", "error");
+      return;
+    }
+    const resumeId = resume.resume_id || resume.id;
+    const button = $("[data-action='batch-align-pending']");
+    if (button) button.disabled = true;
+    let queuedCount = 0;
+    let skipped = 0;
+    try {
+      for (const job of pending) {
+        try {
+          await api(`/api/jobs/${encodeURIComponent(job.job_id)}/workbench`, {
+            method: "POST",
+            body: JSON.stringify({
+              master_resume_id: resumeId,
+              granularity: "medium",
+            }),
+          });
+          queuedCount += 1;
+        } catch (error) {
+          skipped += 1;
+          toast(`「${job.title}」排队失败：${error.message || "未知错误"}`, "error");
+        }
+      }
+      toast(
+        `已排队 ${queuedCount} 个岗位的对齐${skipped ? `，${skipped} 个失败` : ""}，完成后可刷新查看`,
+        queuedCount ? "success" : "error",
+      );
+    } finally {
+      if (button) button.disabled = false;
+      setTimeout(() => renderKanban($("#app-router-view")), 1500);
+    }
+  },
   /* #17: live 工作台「对比视图」——复用 buildLiveCompareHtml 的文档润色
    * 内联建议流，只读弹窗展示，不动卡片的逐条采纳交互。 */
   "toggle-live-compare": async () => {

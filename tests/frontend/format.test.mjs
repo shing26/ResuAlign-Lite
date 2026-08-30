@@ -841,13 +841,13 @@ test("jobCompletenessBadge shows 待补全 with missing detail on title", () => 
   assert.match(html2, /title="缺少：薪资"/);
 });
 
-test("jobCompletenessBadge prefers 抓取失败 for junk JD", () => {
+test("jobCompletenessBadge flags junk JD as 文本异常", () => {
   const html = jobCompletenessBadge({
     title: "后端",
     company: "Acme",
     jd_text: '{"pageConfig":{}}',
   });
-  assert.match(html, />抓取失败，可重试</);
+  assert.match(html, />JD 文本异常</);
   assert.doesNotMatch(html, />待补全</);
 });
 

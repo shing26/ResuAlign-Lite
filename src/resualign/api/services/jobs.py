@@ -9,8 +9,6 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import HTTPException
-
 import resualign.api as api_module
 
 from ...job_library import _normalize_source_url, _text_dedupe_key
@@ -18,6 +16,68 @@ from ...llm_usage import reset_llm_tenant, set_llm_tenant
 from ..schemas import JobImportRequest
 
 logger = logging.getLogger(__name__)
+
+
+def _is_noop_diff(diff: dict[str, Any]) -> bool:
+    """Return True when a modify/remove diff changes nothing.
+
+    Phase A2 (2026-08-30): whole-document editors occasionally emit a
+    ``modify`` diff whose ``proposed`` equals ``original`` (model states
+    "no measurable outcomes... remains unchanged" yet still returns a
+    diff). Such no-op suggestions consume UI slots without adding value;
+    they are moved to ``invalid_diffs`` instead of counting as advice.
+    """
+    if diff.get("type") not in ("modify", "remove"):
+        return False
+    original = (diff.get("original") or "").strip()
+    proposed = (diff.get("proposed") or "").strip()
+    return bool(original) and original == proposed
+
+
+def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
+    """Pre-flight probe of the node that would actually serve the run.
+
+    Phase A1 (2026-08-30): before queueing a workbench run, probe the
+    resolved node (persisted active node, else .env/default config) with a
+    minimal one-token request. Only *definitive* auth/quota failures
+    (HTTP 401/402/403) block the request with an actionable message;
+    network errors / timeouts are non-blocking so the job can still be
+    queued and its failure surfaced via ``last_alignment_error`` (A3).
+
+    Returns ``(ok, message)``; ok=True means "proceed".
+    """
+    try:
+        node = api_module._llm_nodes.get_active_node(tenant_id)
+        if node is not None:
+            provider = node.get("provider", "")
+            api_key = node.get("api_key")
+            model = node.get("model", "")
+            base_url = node.get("base_url")
+        else:
+            config = api_module.build_config()
+            provider = config.provider
+            api_key = config.api_key
+            model = config.model
+            base_url = config.base_url
+        if not api_key and provider != "ollama":
+            # Missing key is caught upstream by is_llm_configured (503).
+            return True, ""
+        from .routers.settings import probe_llm_connection
+
+        probe = probe_llm_connection(
+            provider=provider,
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            timeout=5.0,
+        )
+        status = probe.get("status", "")
+        if status in ("http_401", "http_402", "http_403"):
+            return False, probe.get("message", "模型服务鉴权失败，请检查设置")
+        return True, ""
+    except Exception:
+        # Non-blocking: never let a probe failure block a queued run.
+        return True, ""
 
 
 def _run_local_fallback_report(resume_text: str, jd_text: str) -> "api_module.Report":
@@ -691,6 +751,22 @@ def _run_job(job_id: str) -> None:
                 from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
                 from resualign.llm import DIAG_PROMPT_VERSION
                 from resualign.tailor import TAILOR_PROMPT_VERSION
+                # Phase A2: drop no-op diffs (original == proposed) from the
+                # accepted advice; fold them into invalid_diffs so the UI can
+                # explain "the model returned no actionable edits".
+                raw_diffs = list(result.get("diffs") or [])
+                noop_diffs = [d for d in raw_diffs if _is_noop_diff(d)]
+                kept_diffs = [d for d in raw_diffs if not _is_noop_diff(d)]
+                if noop_diffs:
+                    logger.info(
+                        "library job %s: filtered %d no-op diff(s) out of %d",
+                        library_job_id, len(noop_diffs), len(raw_diffs),
+                    )
+                    invalid = list(tailored.get("invalid_diffs") or [])
+                    invalid.extend(noop_diffs)
+                else:
+                    invalid = list(tailored.get("invalid_diffs") or [])
+                result["diffs"] = kept_diffs
                 try:
                     api_module._jobs.save_alignment(
                         tenant_id,
@@ -701,8 +777,8 @@ def _run_job(job_id: str) -> None:
                         match_score_detail=match_detail,
                         match_reason=match_reason,
                         match_updated_at=match_updated_at,
-                        diffs=result.get('diffs') or [],
-                        invalid_diffs=tailored.get('invalid_diffs') or [],
+                        diffs=kept_diffs,
+                        invalid_diffs=invalid,
                         draft=draft,
                         eval_score=eval_score,
                         model=result.get('model') or '',

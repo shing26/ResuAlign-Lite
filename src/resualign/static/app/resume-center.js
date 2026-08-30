@@ -65,7 +65,6 @@ async function renderResumeListView(app) {
   app.innerHTML = `
     <div class="page-header page-header--resume flex items-center justify-between">
       <div>
-        <h2>简历中心</h2>
         <div class="sub">维护主简历与版本历史，工作台始终基于当前版本生成对齐稿</div>
       </div>
       <div class="row">

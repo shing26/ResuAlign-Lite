@@ -1,13 +1,18 @@
-"""Zero-LLM rule-based job filtering for the fetch pipeline (Sprint 3).
+"""Zero-LLM rule-based job filtering for the intake pipeline (Sprint 3).
 
 The engine is intentionally pure rule matching: it never calls an LLM. It
 reads enabled ``automation_rules`` from the tenant's job library store and
 evaluates a small job metadata dict (``title``/``jd_text``/``location``/
-``salary_min``/``salary_max``/``url``) against three rule types:
+``salary_min``/``salary_max``/``url``) against the rule types:
 
 - ``blacklist``      reject when any keyword appears in title/JD text/URL
-- ``city_whitelist`` reject when the job location is outside the list
 - ``min_salary``     reject when either salary bound sits below the floor
+
+``city_whitelist`` is **deprecated** (2026-08-30, Phase B): it was written
+for the retired backend crawler ("仅抓取这些城市") and has no intake entry
+point anymore. The matcher is kept for database compatibility with rules
+created before de-bloat, but the UI no longer offers it and new rules
+cannot be created for it.
 
 Rule values are plain comma/space separated tokens (keywords or cities); a
 ``min_salary`` value is a monthly-yuan number.

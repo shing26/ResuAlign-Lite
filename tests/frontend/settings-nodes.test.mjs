@@ -385,7 +385,8 @@ test("ruleFormHtml renders type dropdown, value/label inputs and actions", () =>
   const form = body.querySelector("[data-form='automation-rule-form']");
   assert.ok(form);
   const typeOptions = [...form.querySelectorAll('select[name="rule_type"] option')].map((o) => o.value);
-  assert.deepEqual(typeOptions, ["blacklist", "city_whitelist", "min_salary"]);
+  /* Phase B: 城市白名单随爬虫退役从表单移除（DB 兼容保留，UI 不再暴露）。 */
+  assert.deepEqual(typeOptions, ["blacklist", "min_salary"]);
   const value = form.querySelector('input[name="rule_value"]');
   assert.ok(value);
   assert.equal(value.hasAttribute("required"), true);

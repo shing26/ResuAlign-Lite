@@ -383,3 +383,96 @@ def test_workspace_session_hydrates_persisted_results_after_restart():
         "Python developer with Redis caching."
     )
     assert state["alignment"]["draft"] == "Built FastAPI with Redis caching"
+
+
+def test_workbench_probe_402_blocks_with_actionable_message():
+    """Phase A1: a definitive quota failure (402) blocks queueing with an
+    actionable message instead of a 90s timeout then a failed job."""
+    job = _create_job()
+    resume = _create_resume()
+    with patch(
+        "resualign.api._probe_active_llm_quick",
+        return_value=(False, "模型账户欠费或余额不足，请充值后重试"),
+    ):
+        resp = client.post(
+            f"/api/jobs/{job['job_id']}/workbench",
+            json={"master_resume_id": resume["resume_id"]},
+            headers=_auth_headers(),
+        )
+    assert resp.status_code == 422
+    assert "欠费" in resp.json()["detail"]
+
+
+def test_workbench_probe_network_error_is_non_blocking():
+    """Phase A1: network/timeout probe states must NOT block queueing; the
+    run proceeds and its failure surfaces via last_alignment_error."""
+    job = _create_job()
+    resume = _create_resume()
+    with patch(
+        "resualign.api._probe_active_llm_quick",
+        return_value=(True, ""),
+    ), patch("resualign.api._queue_job", return_value="job-abc"):
+        resp = client.post(
+            f"/api/jobs/{job['job_id']}/workbench",
+            json={"master_resume_id": resume["resume_id"]},
+            headers=_auth_headers(),
+        )
+    assert resp.status_code == 202
+
+
+def test_noop_diffs_filtered_into_invalid():
+    """Phase A2: modify diffs whose proposed == original are no-ops; they
+    must not count as accepted advice and land in invalid_diffs."""
+    job = _create_job()
+    resume = _create_resume()
+    noop = DiffItem(
+        type="modify",
+        original="Python developer.",
+        proposed="Python developer.",
+        reason="no measurable outcomes",
+        confidence="high",
+        provenance="Python developer.",
+    )
+    real = DiffItem(
+        type="modify",
+        original="Python developer.",
+        proposed="Python developer with Redis caching.",
+        reason="JD match",
+        confidence="high",
+        provenance="Python developer.",
+    )
+    report = Report(
+        score=84,
+        skills=["Python"],
+        model="test-model",
+        jd_profile=JDProfile(must_have_skills=["Python"]),
+        gap_report=GapReport(missing_keywords=["Redis"]),
+        tailored_resume=TailoredResume(
+            sections={"experience": "Built FastAPI"},
+            diffs=[noop, real],
+        ),
+        diffs=[noop, real],
+    )
+    with patch("resualign.api._run_job"), patch(
+        "resualign.api.build_config", return_value=_config()
+    ):
+        queued = client.post(
+            f"/api/jobs/{job['job_id']}/workbench",
+            json={"master_resume_id": resume["resume_id"]},
+            headers=_auth_headers(),
+        )
+    assert queued.status_code == 202
+    analysis_job_id = queued.json()["job_id"]
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api.run", return_value=report
+    ):
+        api_module._run_job(analysis_job_id)
+    persisted = client.get(
+        f"/api/jobs/{job['job_id']}", headers=_auth_headers()
+    ).json()
+    assert len(persisted["diffs"]) == 1
+    assert persisted["diffs"][0]["proposed"] == (
+        "Python developer with Redis caching."
+    )
+    assert len(persisted["invalid_diffs"]) == 1
+    assert persisted["invalid_diffs"][0]["original"] == "Python developer."

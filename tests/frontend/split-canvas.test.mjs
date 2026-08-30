@@ -776,7 +776,7 @@ test("boardCard shows 待补全 badge when company/salary missing", () => {
   assert.match(html, /title="缺少：公司、薪资"/);
 });
 
-test("boardCard shows 抓取失败 for junk JD even when fields complete", () => {
+test("boardCard flags junk JD as 文本异常 even when fields complete", () => {
   const html = boardCard({
     job_id: "j1",
     title: "后端",
@@ -785,7 +785,7 @@ test("boardCard shows 抓取失败 for junk JD even when fields complete", () =>
     status: "applied",
     jd_text: '{"pageConfig":{}}',
   });
-  assert.match(html, />抓取失败，可重试</);
+  assert.match(html, />JD 文本异常</);
   assert.doesNotMatch(html, />待补全</);
 });
 

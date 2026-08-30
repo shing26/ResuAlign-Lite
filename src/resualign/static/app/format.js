@@ -990,6 +990,8 @@ export function boardCard(job, statuses = null) {
         ${jobCompletenessBadge(job)}
         ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
         ${job.alignment_status === "succeeded" ? '<span class="badge badge-green">已对齐</span>' : ""}
+        ${job.alignment_status === "failed" ? `<span class="badge badge-red" title="${esc(job.last_alignment_error || "对齐失败，请到工作台重新运行")}">对齐失败</span>` : ""}
+        ${job.alignment_status === "succeeded" && !(job.diffs || []).length ? '<span class="badge badge-amber" title="本次对齐未产出修改建议，可到工作台重新运行">无建议</span>' : ""}
       </div>
       <div class="board-card__timeline">
         ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}
@@ -2359,11 +2361,11 @@ export function isJunkJd(jdText) {
   return false;
 }
 
-/** 岗位卡片完整性徽章：抓取失败优先显示「抓取失败，可重试」，
- *  缺关键字段显示「待补全」（title 说明缺什么）。完整返回空串。 */
+/** 岗位卡片完整性徽章：JD 文本疑似整页 HTML/JSON（历史抓取残留）显示
+ *  「JD 文本异常」，缺关键字段显示「待补全」（title 说明缺什么）。完整返回空串。 */
 export function jobCompletenessBadge(job) {
   if (isJunkJd(job && job.jd_text)) {
-    return '<span class="badge badge-amber" title="JD 文本疑似整页 HTML/JSON，抓取可能失败">抓取失败，可重试</span>';
+    return '<span class="badge badge-amber" title="JD 文本疑似整页 HTML/JSON，可到工作台编辑修正">JD 文本异常</span>';
   }
   const missing = jobCompleteness(job);
   if (!missing.length) return "";
@@ -3369,7 +3371,6 @@ export function ruleFormHtml() {
         <div class="field"><label>规则类型</label>
           <select name="rule_type">
             <option value="blacklist">黑名单（拦截公司名/关键词）</option>
-            <option value="city_whitelist">城市白名单（仅抓取这些城市）</option>
             <option value="min_salary">最低薪资（低于则拦截，单位：千元/月）</option>
           </select></div>
         <div class="field"><label>规则值</label>

@@ -7257,8 +7257,16 @@ select option {
     height: auto;
     min-height: 64px;
     margin-bottom: 14px;
-    padding: 10px 14px;
+    padding: 8px 14px;
+    gap: 6px;
     border-bottom: 1px solid var(--border);
+  }
+
+  /* Phase C: 移动端顶栏瘦身 —— 副标题在窄屏隐藏（顶栏标题即页面标题，
+     副标题把顶栏撑到 165px）；标题行与命令搜索行紧凑排布。 */
+  .topbar-title #page-subtitle,
+  .header-title #page-subtitle {
+    display: none;
   }
 
   .header-title {

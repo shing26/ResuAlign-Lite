@@ -16,6 +16,26 @@ def reset_shared_rate_limiters():
     yield
 
 
+@pytest.fixture(autouse=True)
+def stub_workbench_llm_probe(monkeypatch):
+    """Never hit the network for the workbench pre-flight probe in tests.
+
+    Phase A1 added a real one-token probe before queueing a workbench run.
+    Tests build synthetic jobs/resumes and must not depend on connectivity
+    or real credentials; the probe is stubbed as healthy by default, and
+    individual tests that exercise A1's blocking branch re-stub it.
+    """
+    import resualign.api as api_module
+
+    def _healthy_probe(tenant_id: str) -> tuple[bool, str]:
+        return True, ""
+
+    monkeypatch.setattr(
+        api_module, "_probe_active_llm_quick", _healthy_probe
+    )
+    yield
+
+
 class MockLLMClient:
     """Sequence-based fake LLM client for unit testing pipeline stages.
 

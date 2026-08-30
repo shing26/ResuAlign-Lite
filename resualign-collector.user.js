@@ -295,7 +295,7 @@
       '<input id="ra-server" value="' +
       escapeAttr(config.server || DEFAULT_SERVER) +
       '" style="width:100%;padding:7px;box-sizing:border-box" ' +
-      'placeholder="http://127.0.0.1:8011">' +
+      'placeholder="http://127.0.0.1:8000">' +
       '<label style="display:block;margin:8px 0 4px">Local Ingest Token</label>' +
       '<input id="ra-token" type="password" value="' +
       escapeAttr(config.token) +

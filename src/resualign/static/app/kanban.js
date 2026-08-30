@@ -129,6 +129,7 @@ export async function renderKanban(app) {
             </select>
           </label>
           <div class="jobs-tools" data-jobs-tools>
+            <button type="button" class="btn btn-outline btn-sm" data-action="batch-align-pending" data-batch-align>批量对齐</button>
             <button type="button" class="btn btn-primary btn-sm" data-action="show-add-job">添加岗位</button>
             <details class="toolbar-more" data-jobs-data-menu>
               <summary class="btn btn-secondary btn-sm toolbar-more__trigger">数据 ▾</summary>

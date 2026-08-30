@@ -90,3 +90,38 @@ test("resume detail grid keeps viewport-constrained rows", () => {
     "缺失 grid-template-rows: minmax(0, 1fr)（Phase 1 高度约束被移除）",
   );
 });
+
+/* Phase C (2026-08-30): 标题去重不变式 —— 顶栏 refreshHeaderMeta 已按
+ * PAGE_META 渲染页标题，resume 列表页与设置页的视图内 header 不得再渲染
+ * 重复的 h2（实测 #/resumes 与 #/settings 曾出现双重「简历中心/系统设置」）。
+ * 源码级断言：列表页 page-header 只保留副标题；settings-head 无 h2。 */
+const RESUME_CENTER = readFileSync(
+  join(here, "../../src/resualign/static/app/resume-center.js"),
+  "utf8",
+);
+const MAIN_JS = readFileSync(
+  join(here, "../../src/resualign/static/app/main.js"),
+  "utf8",
+);
+
+test("resume list page-header has no duplicated h2 title", () => {
+  const header = RESUME_CENTER.match(
+    /page-header page-header--resume[\s\S]{0,220}?<div class="sub">/,
+  );
+  assert.ok(header, "简历列表页 page-header 结构缺失（sub 副标题被移除）");
+  assert.doesNotMatch(
+    header[0],
+    /<h2>/,
+    "简历列表页 page-header 不得再渲染 h2（顶栏已有「简历中心」）",
+  );
+});
+
+test("settings head has no duplicated h2 title", () => {
+  const head = MAIN_JS.match(/class="settings-head"[\s\S]{0,260}/);
+  assert.ok(head, "settings-head 结构缺失");
+  assert.doesNotMatch(
+    head[0],
+    /<h2>/,
+    "设置页 settings-head 不得再渲染 h2（顶栏已有「系统设置」）",
+  );
+});
