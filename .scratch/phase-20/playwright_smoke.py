@@ -227,7 +227,11 @@ class FakeLLMServer:
                     f"{self.base_url}/health", timeout=1
                 ).read()
                 return
-            except urllib.error.URLError:
+            except (urllib.error.URLError, TimeoutError, OSError):
+                # Windows quirk: urlopen(timeout=1) can raise a raw
+                # TimeoutError (not URLError) when the first response is
+                # slow to start; treat it as "not healthy yet" and keep
+                # retrying within the deadline.
                 time.sleep(0.2)
         raise RuntimeError("fake LLM server did not become healthy in time")
 
@@ -310,7 +314,10 @@ class AppServer:
                     f"{self.base_url}/health", timeout=1
                 ).read()
                 return
-            except urllib.error.URLError:
+            except (urllib.error.URLError, TimeoutError, OSError):
+                # Windows quirk: urlopen(timeout=1) can raise a raw
+                # TimeoutError (not URLError) when the first response is
+                # slow to start; keep retrying within the deadline.
                 time.sleep(0.2)
         raise RuntimeError("app server did not become healthy in time")
 
@@ -581,7 +588,15 @@ def main() -> None:
     SHOTS.mkdir(parents=True, exist_ok=True)
     try:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
+            # Local env has playwright browsers at a different revision than
+            # the wheel expects; pin to the installed chromium executable.
+            browser = pw.chromium.launch(
+                headless=True,
+                executable_path=os.environ.get(
+                    "RESUALIGN_SMOKE_CHROMIUM",
+                    r"C:\Users\Shing\AppData\Local\ms-playwright\chromium-1234\chrome-win64\chrome.exe",
+                ),
+            )
             try:
                 desktop = browser.new_context(
                     viewport={"width": 1440, "height": 900},
