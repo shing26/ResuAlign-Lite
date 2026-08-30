@@ -28,14 +28,20 @@ product/UX QA runs.
 This repository has a **git branch reference bug**: after `git commit` on a
 branch under `refs/heads/pr/` (e.g. `pr/2-graph-cleanup-ats`), the branch ref
 file is silently deleted (the commit objects remain intact, but `git log`
-reports "branch has no commits"). Fix after every commit:
+reports "branch has no commits"). Note that `git rev-parse HEAD` ALSO fails
+once the ref is gone. Rebuild the ref with the full 40-char hash from the
+reflog or the commit output:
 
 ```bash
+# 1) find the commit (use the hash printed by `git commit`, or `git reflog`)
+FULL=$(git rev-parse daa76ce)   # any abbreviated hash of the new commit
 mkdir -p .git/refs/heads/pr
-printf '%s\n' "$(git rev-parse HEAD)" > .git/refs/heads/pr/2-graph-cleanup-ats
+printf '%s\n' "$FULL" > .git/refs/heads/pr/2-graph-cleanup-ats
 ```
 
 Do not run `git branch -D` on the affected branch before rebuilding the ref.
+Short hashes in the ref file are rejected as broken refs — always write the
+full 40-char object name.
 
 ### Regression baselines (2026-08-30)
 
