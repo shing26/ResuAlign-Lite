@@ -384,3 +384,18 @@ test("dashboard source contract wires quality adoption card", () => {
   assert.match(source, /采纳率/, "adoption card exists");
   assert.match(source, /data-kpi="quality"/, "quality card is tagged");
 });
+
+test("quick-eval is wired through command palette (source contract)", () => {
+  const palette = read("../index.html");
+  assert.match(palette, /data-action="quick-eval"/, "palette has the eval button");
+  assert.match(palette, /data-command-preview/, "preview node renders the result");
+  const panel = read("command-panel.js");
+  assert.match(panel, /\/api\/quick-eval/, "panel calls the eval endpoint");
+  assert.match(panel, /state\.quickEval/, "panel stashes eval state for the CTA");
+  assert.match(panel, /existing_job_id/, "duplicate JD deep-links instead of duplicating");
+  const main = read("main.js");
+  assert.match(main, /"quick-eval-adopt"/, "adopt action exists");
+  assert.match(main, /runQuickEval/, "action wired to command-panel");
+  const events = read("events.js");
+  assert.match(events, /quickEval/, "state carries quickEval");
+});

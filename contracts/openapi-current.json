@@ -2764,6 +2764,55 @@
         }
       }
     },
+    "/api/quick-eval": {
+      "post": {
+        "summary": "Quick Eval",
+        "description": "Score a pasted JD against a master resume with deterministic rules.\n\nNo LLM is touched: the decision scenario needs a 3-second read, not a\n4-minute pipeline. When the JD already exists in the library the\nresponse says so and carries the existing job_id so the client can\ndeep-link instead of duplicating a row.",
+        "operationId": "quick_eval_api_quick_eval_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuickEvalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workbench/session/init": {
       "post": {
         "summary": "Init Workbench Session",
@@ -5072,6 +5121,32 @@
         },
         "type": "object",
         "title": "OptimizeRequest"
+      },
+      "QuickEvalRequest": {
+        "properties": {
+          "jd_text": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 30,
+            "title": "Jd Text"
+          },
+          "master_resume_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Master Resume Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jd_text"
+        ],
+        "title": "QuickEvalRequest"
       },
       "ReminderSettingsUpdate": {
         "properties": {
