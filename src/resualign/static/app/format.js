@@ -3309,10 +3309,31 @@ export function llmNodeCardHtml(node, lastTest) {
   const baseUrl = String(n.base_url || "").trim();
   const maskedKey = maskApiKey(n.api_key);
   const testResult = lastTest ? nodeTestResultHtml(lastTest) : "";
+  /* 持久化健康徽标：test 端点结果落库后的回显（无本会话新鲜结果时）。
+   * status 语义与 probe_llm_connection 一致：ok 之外都是具体失败原因。 */
+  const lastStatus = String(n.last_test_status || "").trim();
+  const lastAt = Number(n.last_test_at);
+  const lastLatency = Number(n.last_test_latency_ms);
+  const healthBadge =
+    !lastTest && lastStatus
+      ? (() => {
+          const when = Number.isFinite(lastAt)
+            ? ` · ${new Date(lastAt * 1000).toLocaleString()}`
+            : "";
+          const latency =
+            Number.isFinite(lastLatency) && lastLatency >= 0
+              ? ` · ${Math.round(lastLatency)} ms`
+              : "";
+          return lastStatus === "ok"
+            ? `<span class="badge badge-green" title="上次连通性测试通过${when}">连通正常</span>`
+            : `<span class="badge badge-red" title="上次测试：${esc(lastStatus)}${when}${latency}">上次异常</span>`;
+        })()
+      : "";
   return `
     <article class="llm-node-card${active ? " is-active" : ""}" data-llm-node-card data-node-id="${esc(nodeId)}">
       <div class="llm-node-card__head">
         <div class="llm-node-card__title">${esc(name)}</div>
+        ${healthBadge}
         ${active ? '<span class="badge badge-green" data-node-active-badge>当前生效</span>' : ""}
       </div>
       <dl class="llm-node-card__meta">

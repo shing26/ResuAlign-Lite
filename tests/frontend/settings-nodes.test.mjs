@@ -471,3 +471,29 @@ test("validateAutomationRule requires a value and positive min_salary", () => {
   assert.equal(validateAutomationRule({ rule_type: "min_salary", value: "-5" }).ok, false);
   assert.equal(validateAutomationRule({ rule_type: "min_salary", value: "20" }).ok, true);
 });
+
+test("llmNodeCardHtml shows persisted health badge without fresh test result", () => {
+  const healthy = llmNodeCardHtml(
+    { ...NODE, is_active: false, last_test_status: "ok", last_test_at: 1788000000, last_test_latency_ms: 820 },
+    null,
+  );
+  const okBody = bodyFrom(healthy);
+  const okBadge = okBody.querySelector(".llm-node-card__head .badge-green:not([data-node-active-badge])");
+  assert.ok(okBadge, "ok health renders a green badge");
+  assert.match(okBadge.textContent, /连通正常/);
+
+  const broken = bodyFrom(
+    llmNodeCardHtml(
+      { ...NODE, last_test_status: "http_402", last_test_at: 1788000000, last_test_latency_ms: 1200 },
+      null,
+    ),
+  );
+  const badBadge = broken.querySelector(".llm-node-card__head .badge-red");
+  assert.ok(badBadge, "failure status renders a red badge");
+  assert.match(badBadge.textContent, /上次异常/);
+  assert.match(badBadge.title, /http_402/);
+
+  /* 有本会话新鲜测试结果时不重复渲染持久徽标 */
+  const fresh = bodyFrom(llmNodeCardHtml({ ...NODE, last_test_status: "ok" }, { ok: true, status: "ok", latency_ms: 5 }));
+  assert.equal(fresh.querySelector(".llm-node-card__head .badge-red"), null);
+});

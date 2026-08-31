@@ -586,3 +586,44 @@ def test_default_timeout_tuned_to_40s_in_sprint5():
         assert inst._client.timeout.connect == 30.0
     finally:
         inst.close()
+
+
+def test_node_test_persists_health():
+    """test 端点结果落库：list_nodes 返回健康三字段，供徽标与失败横幅。"""
+    headers = _auth_headers()
+    node = client.post(
+        "/api/llm/nodes",
+        json=_node_payload(api_key="sk-health-key-1234567890"),
+        headers=headers,
+    ).json()
+    with patch("httpx.post") as mock_post:
+        mock_post.return_value.raise_for_status.return_value = None
+        client.post(f"/api/llm/nodes/{node['node_id']}/test", headers=headers)
+    listed = client.get("/api/llm/nodes", headers=headers).json()
+    target = next(n for n in listed if n["node_id"] == node["node_id"])
+    assert target["last_test_status"] == "ok"
+    assert isinstance(target["last_test_latency_ms"], (int, float))
+    assert target["last_test_at"] > 0
+
+
+def test_test_all_probes_every_node_and_persists():
+    headers = _auth_headers()
+    n1 = client.post(
+        "/api/llm/nodes", json=_node_payload(), headers=headers
+    ).json()
+    n2 = client.post(
+        "/api/llm/nodes",
+        json=_node_payload(model="deepseek-chat-v2"),
+        headers=headers,
+    ).json()
+    with patch("httpx.post") as mock_post:
+        mock_post.return_value.raise_for_status.return_value = None
+        r = client.post("/api/llm/nodes/test-all", headers=headers)
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert {item["node_id"] for item in results} >= {n1["node_id"], n2["node_id"]}
+    assert all(item["ok"] for item in results)
+    assert all("name" in item and "is_active" in item for item in results)
+    # 全部落库
+    listed = client.get("/api/llm/nodes", headers=headers).json()
+    assert all(n["last_test_status"] == "ok" for n in listed)
