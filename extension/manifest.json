@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "ResuAlign 网申回填",
+  "version": "0.1.0",
+  "description": "用 ResuAlign 对齐定稿的结构化档案一键填写网申表单——数据全程本地，不过第三方服务器。",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "ResuAlign 网申回填" },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    { "resources": ["fill-core.js", "sidebar.css"], "matches": ["http://*/*", "https://*/*"] }
+  ]
+}
