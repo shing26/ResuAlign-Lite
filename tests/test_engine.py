@@ -501,3 +501,45 @@ def test_is_local_llm_detection():
     assert _is_local_llm("openai", "http://localhost:9999") is True
     assert _is_local_llm("deepseek", "") is False
     assert _is_local_llm("deepseek", "https://api.deepseek.com") is False
+
+
+def test_engine_tailor_degrades_on_editor_failure(monkeypatch):
+    """editor 阶段结构/超时类失败 → 空改写 + tailor_degraded，任务继续而非
+    整体 failed（诊断/画像/缺口照常保存）。"""
+    from resualign.llm import LLMResponseError
+
+    def boom(*args, **kwargs):
+        raise LLMResponseError("模型响应超时", code="timeout")
+
+    monkeypatch.setattr("resualign.engine.tailor_resume", boom)
+    mock = MockLLMClient([_diag(), _jd_profile_only(), _gap_only()])
+    report = run(
+        ResuAlignConfig(model="m"),
+        "Python dev resume",
+        jd_text="Java backend",
+        llm_client=mock,
+    )
+    assert report.tailor_degraded is True
+    assert report.tailored_resume is not None
+    assert report.diffs == []
+    # 前三个阶段照常产出
+    assert report.jd_profile is not None
+    assert report.gap_report is not None
+
+
+def test_engine_tailor_reraises_account_failures(monkeypatch):
+    """quota/auth 等账户类失败不降级：静默空结果会掩盖后续岗位同样失败。"""
+    from resualign.llm import LLMResponseError
+
+    def boom(*args, **kwargs):
+        raise LLMResponseError("Insufficient Balance", code="quota")
+
+    monkeypatch.setattr("resualign.engine.tailor_resume", boom)
+    mock = MockLLMClient([_diag(), _jd_profile_only(), _gap_only()])
+    with pytest.raises(LLMResponseError):
+        run(
+            ResuAlignConfig(model="m"),
+            "Python dev resume",
+            jd_text="Java backend",
+            llm_client=mock,
+        )

@@ -94,6 +94,10 @@ class Report:
     # R4 P0-5（03-AIE §③）：gap 结构失败时降级为空 GapReport 并置位本标记，
     # 任务继续而非整体 fail；随 asdict(report) 流入 API 结果（落库标记）。
     gap_degraded: bool = False
+    # editor 阶段反复失败时降级为空改写并置位本标记：诊断/画像/缺口照常
+    # 保存（重试改写有 precomputed_diagnosis + profiler 缓存兜底），任务
+    # succeeded 而非 failed；随 asdict(report) 流入 API 结果（落库标记）。
+    tailor_degraded: bool = False
 
 
 @dataclass

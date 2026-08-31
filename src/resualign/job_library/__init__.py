@@ -1279,8 +1279,15 @@ class JobLibraryStore(_SqliteStore):
         model: str | None = None,
         prompt_version: str | None = None,
         alignment_status: str = "succeeded",
+        last_alignment_error: str | None = None,
     ) -> Optional[dict[str, Any]]:
-        """Persist a terminal alignment product for one library job."""
+        """Persist a terminal alignment product for one library job.
+
+        ``last_alignment_error`` doubles as a hint field on succeeded runs:
+        a degraded tailor pass writes the reason here so the UI can show
+        "诊断完成 · 改写未产出" instead of a bare zero-diff success. Pass
+        None on normal runs to clear any stale hint.
+        """
         if alignment_status not in (
             "idle",
             "queued",
@@ -1305,7 +1312,7 @@ class JobLibraryStore(_SqliteStore):
                     "jd_profile_json = ?, gap_report_json = ?, "
                     "match_score = ?, match_score_detail_json = ?, "
                     "match_reason = ?, match_updated_at = ?, "
-                    "alignment_status = ?, "
+                    "alignment_status = ?, last_alignment_error = ?, "
                     "diffs_json = ?, invalid_diffs_json = ?, draft = ?, "
                     "eval_score_json = ?, model = ?, prompt_version = ?, "
                     "generated_at = ?, updated_at = ? "
@@ -1330,6 +1337,7 @@ class JobLibraryStore(_SqliteStore):
                         match_reason,
                         match_updated_at,
                         alignment_status,
+                        last_alignment_error,
                         json.dumps(diffs or [], ensure_ascii=False),
                         json.dumps(invalid_diffs or [], ensure_ascii=False),
                         draft,

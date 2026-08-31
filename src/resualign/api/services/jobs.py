@@ -897,6 +897,13 @@ def _run_job_holding_gate(job_id: str) -> None:
                             f"eval:{EVALUATOR_PROMPT_VERSION}"
                         ),
                         alignment_status='succeeded',
+                        # tailor 降级（succeeded + 零 diffs）时把原因写进
+                        # 提示字段：前端橙色徽标与工作台说明都读这里。
+                        last_alignment_error=(
+                            '改写阶段多次失败，本轮只产出诊断与缺口分析；'
+                            '点击「重新运行对齐」补齐改写建议（已缓存阶段会跳过）'
+                            if result.get('tailor_degraded') else None
+                        ),
                     )
                 except Exception:
                     logger.exception(

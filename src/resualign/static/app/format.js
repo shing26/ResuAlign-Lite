@@ -991,7 +991,11 @@ export function boardCard(job, statuses = null) {
         ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
         ${job.alignment_status === "succeeded" ? '<span class="badge badge-green">已对齐</span>' : ""}
         ${job.alignment_status === "failed" ? `<span class="badge badge-red" title="${esc(job.last_alignment_error || "对齐失败，请到工作台重新运行")}">对齐失败</span>` : ""}
-        ${job.alignment_status === "succeeded" && !(job.diffs || []).length ? '<span class="badge badge-amber" title="本次对齐未产出修改建议，可到工作台重新运行">无建议</span>' : ""}
+        ${job.alignment_status === "succeeded" && !(job.diffs || []).length
+          ? (job.last_alignment_error
+              ? `<span class="badge badge-amber" title="${esc(job.last_alignment_error)}">诊断完成 · 改写未产出</span>`
+              : '<span class="badge badge-amber" title="本次对齐未产出修改建议，可到工作台重新运行">无建议</span>')
+          : ""}
       </div>
       <div class="board-card__timeline">
         ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}

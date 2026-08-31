@@ -480,3 +480,23 @@ def test_noop_diffs_filtered_into_invalid():
     )
     assert len(persisted["invalid_diffs"]) == 1
     assert persisted["invalid_diffs"][0]["original"] == "Python developer."
+
+
+def test_save_alignment_hint_field_roundtrip(tmp_path):
+    """tailor 降级时 last_alignment_error 作为 succeeded 运行的提示字段
+    持久化；正常成功用 None 清掉旧提示。"""
+    store = JobLibraryStore(db_path=tmp_path / "jobs.db")
+    job_id = store.create_job("t1", title="提示字段", jd_text="JD")["job_id"]
+    store.update_job("t1", job_id, alignment_status="queued")
+
+    store.save_alignment(
+        "t1", job_id, alignment_status="succeeded",
+        last_alignment_error="改写阶段多次失败，本轮只产出诊断与缺口分析",
+    )
+    degraded = store.get_job("t1", job_id)
+    assert degraded["alignment_status"] == "succeeded"
+    assert "改写阶段多次失败" in (degraded["last_alignment_error"] or "")
+
+    store.save_alignment("t1", job_id, alignment_status="succeeded")
+    retried = store.get_job("t1", job_id)
+    assert retried["last_alignment_error"] is None

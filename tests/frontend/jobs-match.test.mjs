@@ -303,3 +303,30 @@ test("renderBoardCard succeeded with diffs shows no align button", () => {
     "succeeded with diffs must have NO align button on renderBoardCard",
   );
 });
+
+test("boardCard distinguishes degraded tailor from plain empty diffs", () => {
+  const degraded = bodyFrom(
+    boardCard({
+      ...DETAIL_JOB,
+      alignment_status: "succeeded",
+      diffs: [],
+      last_alignment_error: "改写阶段多次失败，本轮只产出诊断与缺口分析",
+    }),
+  );
+  const amberTexts = (body) =>
+    [...body.querySelectorAll(".board-card__tags .badge-amber")].map(
+      (el) => el.textContent,
+    );
+  assert.ok(
+    amberTexts(degraded).some((text) => /诊断完成 · 改写未产出/.test(text)),
+    `degraded run shows the degraded badge, got: ${amberTexts(degraded)}`,
+  );
+
+  const plain = bodyFrom(
+    boardCard({ ...DETAIL_JOB, alignment_status: "succeeded", diffs: [] }),
+  );
+  assert.ok(
+    amberTexts(plain).some((text) => /无建议/.test(text)),
+    "plain empty run still shows the generic badge",
+  );
+});

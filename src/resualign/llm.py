@@ -699,6 +699,7 @@ class OpenAIClient(LLMClient):
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         schema = schema_model.model_json_schema()
+        max_tokens = self.max_tokens
         body = {
             "model": model or self.model,
             "messages": [
@@ -707,7 +708,7 @@ class OpenAIClient(LLMClient):
             ],
             "temperature": self.DEFAULT_TEMPERATURE,
             **self._provider_extras(),
-            "max_tokens": self.max_tokens,
+            "max_tokens": max_tokens,
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
@@ -737,12 +738,14 @@ class OpenAIClient(LLMClient):
 
             for attempt in range(self.max_retries + 1):
                 attempts += 1
+                finish_reason = None
                 try:
                     r = _post()
                     r.raise_for_status()
                     response = r.json()
                     message = response["choices"][0]["message"]
                     content = message.get("content") or ""
+                    finish_reason = response["choices"][0].get("finish_reason")
                     result = schema_model.model_validate(
                         _parse_json_object(content)
                     ).model_dump()
@@ -762,24 +765,35 @@ class OpenAIClient(LLMClient):
                     time.sleep(1)
                 except ValidationError as exc:
                     if attempt == self.max_retries:
-                        raise LLMResponseError(
-                            "Structured response failed schema validation after "
-                            f"{self.max_retries + 1} attempts: {exc}",
-                            code="schema",
-                        ) from exc
+                        # Grammar-constrained output that validates wrong still
+                        # gets one shot in plain JSON mode, where the repair
+                        # parser and feedback retries are more forgiving.
+                        return self._chat_structured_json_mode(
+                            system, user, schema_model, model=model
+                        )
                     # One corrective retry (Bug-01): feed validation
                     # errors back so the model can repair the structure.
                     body["messages"][1]["content"] = _schema_feedback_prompt(
                         user, exc
                     )
                     time.sleep(1)
-                except (json.JSONDecodeError, LLMResponseError) as exc:
+                except (json.JSONDecodeError, LLMResponseError):
+                    # Grammar-constrained decoding is slower and denser than
+                    # plain JSON mode, so long prompts routinely hit
+                    # max_tokens mid-JSON (observed with small local models
+                    # on the editor role). Double the budget like chat_json
+                    # does; on exhaustion degrade to JSON mode instead of
+                    # failing the whole pipeline run.
+                    if (
+                        finish_reason == "length"
+                        and max_tokens < self._token_cap
+                    ):
+                        max_tokens = min(max_tokens * 2, self._token_cap)
+                        body["max_tokens"] = max_tokens
                     if attempt == self.max_retries:
-                        raise LLMResponseError(
-                            "Structured response failed validation after "
-                            f"{self.max_retries + 1} attempts: {exc}",
-                            code=getattr(exc, "code", "parse"),
-                        ) from exc
+                        return self._chat_structured_json_mode(
+                            system, user, schema_model, model=model
+                        )
                     time.sleep(1)
                 except httpx.TransportError as exc:
                     # R4 P0-4：短角色条件性 1 次重试；deadline 触发绝不重试。
