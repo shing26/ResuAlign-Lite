@@ -41,6 +41,7 @@ import { renderReviewView } from "./review-view.js";
 import {
   openResumeCreator,
   openResumeEditor,
+  profileEditFormHtml,
   renderResumeCenter,
 } from "./resume-center.js";
 import {
@@ -2076,6 +2077,27 @@ const actions = {
     toast(`已排队 ${result.queued} 个待处理岗位`, "success");
   },
   "toggle-theme": () => toggleTheme(),
+  /* 网申结构化档案：生成 / 编辑（简历中心档案页侧栏卡）。 */
+  "profile-extract": async (button) => {
+    const resumeId = button.dataset.id;
+    button.disabled = true;
+    button.textContent = "抽取中...";
+    try {
+      await api(`/api/master-resumes/${encodeURIComponent(resumeId)}/profile/extract`, {
+        method: "POST",
+      });
+      toast("档案已生成", "success");
+      render();
+    } finally {
+      button.disabled = false;
+    }
+  },
+  "profile-edit": (button) => {
+    const resumeId = button.dataset.id;
+    const resume = (state.resumes || []).find((r) => r.resume_id === resumeId);
+    const profile = resume && resume.profile;
+    showModal("编辑网申档案", profileEditFormHtml(resumeId, profile));
+  },
   /* Ctrl+K 快速评估：规则打分渲染在 palette preview 区（command-panel.js）。 */
   "quick-eval": () => runQuickEval(),
   /* 评估结果 CTA：入库（JD 已在评估时查过重）+ 用评估所选主简历直接排队对齐。 */
@@ -2724,6 +2746,36 @@ async function handleForm(formName, data, form) {
         return;
       }
       await saveJob();
+      break;
+    }
+    case "profile-edit": {
+      const basic = {
+        name: data.basic_name || "",
+        phone: data.basic_phone || "",
+        email: data.basic_email || "",
+        gender: "",
+        birth: "",
+        location: data.basic_location || "",
+        id_number: data.basic_id_number || "",
+      };
+      const existing = (state.resumes || []).find(
+        (r) => r.resume_id === data.resume_id,
+      );
+      const prev = (existing && existing.profile && existing.profile.data) || {};
+      await api(`/api/master-resumes/${encodeURIComponent(data.resume_id)}/profile`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          profile: {
+            ...prev,
+            basic,
+            skills: (data.skills || "").split(/[,，]/).map((x) => x.trim()).filter(Boolean),
+            summary: data.summary || "",
+          },
+        }),
+      });
+      closeModal();
+      toast("档案已保存", "success");
+      render();
       break;
     }
     case "job-detail-edit": {

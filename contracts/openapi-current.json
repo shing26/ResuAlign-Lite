@@ -1863,6 +1863,158 @@
         }
       }
     },
+    "/api/master-resumes/{resume_id}/profile/extract": {
+      "post": {
+        "summary": "Extract Resume Profile Endpoint",
+        "description": "LLM-extract the structured profile (网申回填数据源）。\n\n与 diagnosis 不同：这是同步调用（单次结构化抽取），任务小且前端\n需要立即拿到结果渲染档案面板。",
+        "operationId": "extract_resume_profile_endpoint_api_master_resumes__resume_id__profile_extract_post",
+        "parameters": [
+          {
+            "name": "resume_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resume Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/master-resumes/{resume_id}/profile": {
+      "get": {
+        "summary": "Get Resume Profile",
+        "description": "Return the stored structured profile plus staleness flag.",
+        "operationId": "get_resume_profile_api_master_resumes__resume_id__profile_get",
+        "parameters": [
+          {
+            "name": "resume_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resume Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Edit Resume Profile",
+        "description": "Manually edit the structured profile (model 标 manual-edit）。",
+        "operationId": "edit_resume_profile_api_master_resumes__resume_id__profile_patch",
+        "parameters": [
+          {
+            "name": "resume_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resume Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeProfileEditRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/master-resumes/{resume_id}/rollback": {
       "post": {
         "summary": "Rollback Master Resume",
@@ -5306,6 +5458,199 @@
         "type": "object",
         "title": "ReminderSettingsUpdate",
         "description": "Editable reminder delivery settings.\n\nDe-bloat (2026-08-27): the reminder system was removed; this schema is\nkept only so legacy PUT payloads still validate instead of 422ing."
+      },
+      "ResumeProfileBasic": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "default": ""
+          },
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "default": ""
+          },
+          "gender": {
+            "type": "string",
+            "title": "Gender",
+            "default": ""
+          },
+          "birth": {
+            "type": "string",
+            "title": "Birth",
+            "default": ""
+          },
+          "location": {
+            "type": "string",
+            "title": "Location",
+            "default": ""
+          },
+          "id_number": {
+            "type": "string",
+            "title": "Id Number",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "ResumeProfileBasic",
+        "description": "网申表单的基本信息字段（与 Moka/北森等 ATS 字段清单对齐）。"
+      },
+      "ResumeProfileData": {
+        "properties": {
+          "basic": {
+            "$ref": "#/components/schemas/ResumeProfileBasic"
+          },
+          "education": {
+            "items": {
+              "$ref": "#/components/schemas/ResumeProfileEducation"
+            },
+            "type": "array",
+            "title": "Education"
+          },
+          "work": {
+            "items": {
+              "$ref": "#/components/schemas/ResumeProfileWork"
+            },
+            "type": "array",
+            "title": "Work"
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/ResumeProfileProject"
+            },
+            "type": "array",
+            "title": "Projects"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skills"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "ResumeProfileData",
+        "description": "主简历的结构化档案——网申自动回填的数据源（#61 预研方案 A）。"
+      },
+      "ResumeProfileEditRequest": {
+        "properties": {
+          "profile": {
+            "$ref": "#/components/schemas/ResumeProfileData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile"
+        ],
+        "title": "ResumeProfileEditRequest",
+        "description": "手动编辑结构化档案（PATCH 覆盖存储，model 标 manual-edit）。"
+      },
+      "ResumeProfileEducation": {
+        "properties": {
+          "school": {
+            "type": "string",
+            "title": "School",
+            "default": ""
+          },
+          "major": {
+            "type": "string",
+            "title": "Major",
+            "default": ""
+          },
+          "degree": {
+            "type": "string",
+            "title": "Degree",
+            "default": ""
+          },
+          "start": {
+            "type": "string",
+            "title": "Start",
+            "default": ""
+          },
+          "end": {
+            "type": "string",
+            "title": "End",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "ResumeProfileEducation"
+      },
+      "ResumeProfileProject": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": ""
+          },
+          "start": {
+            "type": "string",
+            "title": "Start",
+            "default": ""
+          },
+          "end": {
+            "type": "string",
+            "title": "End",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "ResumeProfileProject"
+      },
+      "ResumeProfileWork": {
+        "properties": {
+          "company": {
+            "type": "string",
+            "title": "Company",
+            "default": ""
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
+          "start": {
+            "type": "string",
+            "title": "Start",
+            "default": ""
+          },
+          "end": {
+            "type": "string",
+            "title": "End",
+            "default": ""
+          },
+          "highlights": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Highlights"
+          }
+        },
+        "type": "object",
+        "title": "ResumeProfileWork"
       },
       "ReviewActions": {
         "properties": {

@@ -43,7 +43,10 @@ CREATE TABLE IF NOT EXISTS master_resumes (
     updated_at REAL NOT NULL,
     latest_diagnosis_job_id TEXT,
     latest_diagnosis_json TEXT,
-    latest_diagnosis_source_hash TEXT
+    latest_diagnosis_source_hash TEXT,
+    profile_json TEXT,
+    profile_source_sha256 TEXT,
+    profile_model TEXT
 );
 CREATE TABLE IF NOT EXISTS resume_versions (
     version_id TEXT PRIMARY KEY,
@@ -296,6 +299,17 @@ class MasterResumeStore(_SqliteStore):
             "ALTER TABLE master_resumes "
             "ADD COLUMN latest_diagnosis_source_hash TEXT",
         ),
+        # 4: 结构化档案（网申回填的数据源）。与 diagnosis 同款三件套：
+        # JSON + 内容 sha（内容变更即过期）+ 抽取所用模型。
+        (
+            4,
+            "ALTER TABLE master_resumes "
+            "ADD COLUMN profile_json TEXT; "
+            "ALTER TABLE master_resumes "
+            "ADD COLUMN profile_source_sha256 TEXT; "
+            "ALTER TABLE master_resumes "
+            "ADD COLUMN profile_model TEXT",
+        ),
     )
 
     def create_master_resume(
@@ -338,7 +352,8 @@ class MasterResumeStore(_SqliteStore):
                 row = conn.execute(
                     "SELECT resume_id, tenant_id, title, current_version, "
                     "created_at, updated_at, latest_diagnosis_job_id, "
-                    "latest_diagnosis_json, latest_diagnosis_source_hash "
+                    "latest_diagnosis_json, latest_diagnosis_source_hash, "
+                    "profile_json, profile_source_sha256, profile_model "
                     "FROM master_resumes "
                     "WHERE resume_id = ? AND tenant_id = ?",
                     (resume_id, tenant_id),
@@ -380,6 +395,9 @@ class MasterResumeStore(_SqliteStore):
                     "latest_diagnosis": self._latest_diagnosis_for_row(
                         row, current["content"] if current else ""
                     ),
+                    "profile": self._profile_for_row(
+                        row, current["content"] if current else ""
+                    ),
                     "versions": versions,
                 }
 
@@ -390,7 +408,8 @@ class MasterResumeStore(_SqliteStore):
                 rows = conn.execute(
                     "SELECT resume_id, tenant_id, title, current_version, "
                     "created_at, updated_at, latest_diagnosis_job_id, "
-                    "latest_diagnosis_json, latest_diagnosis_source_hash "
+                    "latest_diagnosis_json, latest_diagnosis_source_hash, "
+                    "profile_json, profile_source_sha256, profile_model "
                     "FROM master_resumes "
                     "WHERE tenant_id = ? ORDER BY updated_at DESC",
                     (tenant_id,),
@@ -604,6 +623,60 @@ class MasterResumeStore(_SqliteStore):
                     }
                     for row in rows
                 ]
+
+    def _profile_for_row(
+        self, row: sqlite3.Row, content: str
+    ) -> Optional[dict[str, Any]]:
+        """Return the stored structured profile plus a staleness flag.
+
+        ``stale`` 为 True 表示简历内容在抽取后发生过变化——网申回填消费前
+        应提示重抽（与 diagnosis 的 source_hash 机制同款）。
+        """
+        import hashlib as _hashlib
+        import json as _json
+
+        if not row["profile_json"]:
+            return None
+        try:
+            profile = _json.loads(row["profile_json"])
+        except (TypeError, ValueError):
+            return None
+        sha = _hashlib.sha256((content or "").encode("utf-8")).hexdigest()
+        return {
+            "data": profile,
+            "model": row["profile_model"],
+            "stale": row["profile_source_sha256"] != sha,
+        }
+
+    def save_resume_profile(
+        self,
+        tenant_id: str,
+        resume_id: str,
+        profile: dict[str, Any],
+        source_sha256: str,
+        model: str,
+    ) -> Optional[dict[str, Any]]:
+        """Persist the structured profile for one master resume."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "UPDATE master_resumes SET profile_json = ?, "
+                    "profile_source_sha256 = ?, profile_model = ?, "
+                    "updated_at = ? "
+                    "WHERE resume_id = ? AND tenant_id = ?",
+                    (
+                        json.dumps(profile, ensure_ascii=False),
+                        source_sha256,
+                        model,
+                        time.time(),
+                        resume_id,
+                        tenant_id,
+                    ),
+                )
+                if cursor.rowcount == 0:
+                    return None
+        return self.get_master_resume(tenant_id, resume_id)
 
     def _latest_diagnosis_for_row(
         self,

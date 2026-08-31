@@ -344,6 +344,59 @@ class WorkbenchRewriteResponse(BaseModel):
     provenance_state: str = "verified"
 
 
+class ResumeProfileBasic(BaseModel):
+    """网申表单的基本信息字段（与 Moka/北森等 ATS 字段清单对齐）。"""
+
+    name: str = ""
+    phone: str = ""
+    email: str = ""
+    gender: str = ""
+    birth: str = ""
+    location: str = ""
+    id_number: str = ""
+
+
+class ResumeProfileEducation(BaseModel):
+    school: str = ""
+    major: str = ""
+    degree: str = ""
+    start: str = ""
+    end: str = ""
+
+
+class ResumeProfileWork(BaseModel):
+    company: str = ""
+    title: str = ""
+    start: str = ""
+    end: str = ""
+    highlights: list[str] = Field(default_factory=list)
+
+
+class ResumeProfileProject(BaseModel):
+    name: str = ""
+    role: str = ""
+    start: str = ""
+    end: str = ""
+    description: str = ""
+
+
+class ResumeProfileData(BaseModel):
+    """主简历的结构化档案——网申自动回填的数据源（#61 预研方案 A）。"""
+
+    basic: ResumeProfileBasic = Field(default_factory=ResumeProfileBasic)
+    education: list[ResumeProfileEducation] = Field(default_factory=list)
+    work: list[ResumeProfileWork] = Field(default_factory=list)
+    projects: list[ResumeProfileProject] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+
+class ResumeProfileEditRequest(BaseModel):
+    """手动编辑结构化档案（PATCH 覆盖存储，model 标 manual-edit）。"""
+
+    profile: ResumeProfileData
+
+
 class DashboardKPI(BaseModel):
     """Aggregated counters for the dashboard header."""
 

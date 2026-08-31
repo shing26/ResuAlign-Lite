@@ -1,0 +1,2 @@
+/* 侧边栏样式在 content.js 中以 Shadow DOM 内联注入（sidebar.css 作为
+ * web_accessible_resources 预留，供后续主题化时切换）。 */
