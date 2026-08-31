@@ -2648,6 +2648,47 @@
         }
       }
     },
+    "/api/review": {
+      "get": {
+        "summary": "Get Review",
+        "description": "Return the weekly delivery review payload (deterministic, zero LLM).",
+        "operationId": "get_review_api_review_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/master-resumes/{resume_id}/optimize": {
       "post": {
         "summary": "Optimize Master Resume",
@@ -4492,6 +4533,17 @@
               }
             ],
             "title": "Application Result"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
           }
         },
         "type": "object",
@@ -5254,6 +5306,206 @@
         "type": "object",
         "title": "ReminderSettingsUpdate",
         "description": "Editable reminder delivery settings.\n\nDe-bloat (2026-08-27): the reminder system was removed; this schema is\nkept only so legacy PUT payloads still validate instead of 422ing."
+      },
+      "ReviewActions": {
+        "properties": {
+          "overdue_next_steps": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewJobCard"
+            },
+            "type": "array",
+            "title": "Overdue Next Steps"
+          },
+          "stale_jobs": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewJobCard"
+            },
+            "type": "array",
+            "title": "Stale Jobs"
+          },
+          "due_soon": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewJobCard"
+            },
+            "type": "array",
+            "title": "Due Soon"
+          }
+        },
+        "type": "object",
+        "title": "ReviewActions"
+      },
+      "ReviewAttribution": {
+        "properties": {
+          "min_sample": {
+            "type": "integer",
+            "title": "Min Sample",
+            "default": 3
+          },
+          "aligned_total": {
+            "type": "integer",
+            "title": "Aligned Total",
+            "default": 0
+          },
+          "aligned_pass": {
+            "type": "integer",
+            "title": "Aligned Pass",
+            "default": 0
+          },
+          "aligned_pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aligned Pass Rate"
+          },
+          "unaligned_total": {
+            "type": "integer",
+            "title": "Unaligned Total",
+            "default": 0
+          },
+          "unaligned_pass": {
+            "type": "integer",
+            "title": "Unaligned Pass",
+            "default": 0
+          },
+          "unaligned_pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unaligned Pass Rate"
+          }
+        },
+        "type": "object",
+        "title": "ReviewAttribution",
+        "description": "投递结果归因对比：对齐 vs 未对齐的过筛率。\n\n任一组样本 < min_sample 时对应比率为 None——小样本不展示比率，\n只展示计数（避免 1/1=100% 的误导）。"
+      },
+      "ReviewJobCard": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "draft"
+          },
+          "alignment_status": {
+            "type": "string",
+            "title": "Alignment Status",
+            "default": "idle"
+          },
+          "application_result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Result"
+          },
+          "next_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Step"
+          },
+          "next_step_due_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Step Due At"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "title"
+        ],
+        "title": "ReviewJobCard",
+        "description": "复盘行动清单里的岗位瘦卡（不携带 JD 全文）。"
+      },
+      "ReviewResponse": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          },
+          "week_pace": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Week Pace"
+          },
+          "stage_distribution": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Stage Distribution"
+          },
+          "actions": {
+            "$ref": "#/components/schemas/ReviewActions"
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/ReviewAttribution"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at"
+        ],
+        "title": "ReviewResponse",
+        "description": "Aggregated data for GET /api/review（每周投递复盘）。"
       },
       "SettingsTestConnectionRequest": {
         "properties": {

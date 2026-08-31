@@ -12026,3 +12026,118 @@ select,
   max-height: calc(100vh - 300px);
   min-height: 120px;
 }
+
+/* ------------------------------------------------------------------ */
+/* 投递复盘 (#/review)                                                  */
+/* ------------------------------------------------------------------ */
+
+.review-pace {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 120px;
+  margin-bottom: 16px;
+}
+.review-pace__col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  height: 100%;
+}
+.review-pace__bar {
+  width: 100%;
+  max-width: 42px;
+  min-height: 4px;
+  border-radius: 6px 6px 2px 2px;
+  background: var(--ra-accent, #6366f1);
+  transition: height 0.2s ease;
+}
+.review-pace__bar.is-empty {
+  background: var(--ra-border, #e2e8f0);
+}
+.review-pace__count {
+  font-size: 12px;
+  color: var(--ra-text-secondary, #475569);
+}
+.review-pace__day {
+  font-size: 11px;
+  color: var(--ra-text-muted, #94a3b8);
+}
+
+.review-stages {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.review-stage__item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--ra-border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--ra-surface, #fff);
+}
+.review-stage__item.is-zero {
+  opacity: 0.55;
+}
+.review-stage__count {
+  font-size: 18px;
+  font-weight: 600;
+}
+.review-stage__label {
+  font-size: 12px;
+  color: var(--ra-text-secondary, #475569);
+}
+
+.review-action {
+  margin-bottom: 16px;
+}
+.review-action__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.review-action__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--ra-accent, #6366f1);
+  border-radius: 6px;
+  background: var(--ra-surface-soft, #f8fafc);
+  margin-bottom: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+.review-action__row:hover {
+  background: var(--ra-surface-soft-hover, #eef2ff);
+}
+.review-action__empty {
+  padding: 6px 0;
+}
+
+.review-attr {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.review-attr__cell {
+  flex: 1;
+  min-width: 160px;
+  padding: 12px 14px;
+  border: 1px solid var(--ra-border, #e2e8f0);
+  border-radius: 10px;
+}
+.review-attr__rate {
+  font-size: 26px;
+  font-weight: 600;
+}
+.review-attr__empty {
+  padding: 8px 0;
+}

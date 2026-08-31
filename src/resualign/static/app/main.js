@@ -37,6 +37,7 @@ import {
 } from "./events.js";
 import { initTheme, toggleTheme } from "./theme.js";
 import { renderDashboard } from "./dashboard-view.js";
+import { renderReviewView } from "./review-view.js";
 import {
   openResumeCreator,
   openResumeEditor,
@@ -130,11 +131,13 @@ const ROUTE_LABELS = {
   workspace: "对齐工作台",
   settings: "系统设置",
   dashboard: "驾驶舱",
+  review: "投递复盘",
 };
 
 /* v3 shell: 顶栏标题/副标题随路由联动。 */
 const PAGE_META = {
   dashboard: ["驾驶舱", "主简历与岗位对齐态势"],
+  review: ["投递复盘", "每周投递节奏、停滞预警与归因对比"],
   workspace: ["对齐工作台", "岗位上下文、Diff 画布与 JD/Live Sheet 辅助舱"],
   jobs: ["岗位库", "Pipeline 看板与 JD 粘贴建库"],
   resume: ["简历中心", "Markdown 双态编辑、ATS 健康度与版本时间线"],
@@ -216,6 +219,9 @@ async function handleRoute(app) {
       await renderKanban(app);
       break;
     }
+    case "review":
+      await renderReviewView(app);
+      break;
     case "resumes":
     case "resume":
       await renderResumeCenter(app, {
@@ -2735,6 +2741,7 @@ async function handleForm(formName, data, form) {
         interview_stage: data.interview_stage || null,
         /* 投递结果归因：空串经 `|| null` 以 null 发送，清除语义同上。 */
         application_result: data.application_result || null,
+        deadline: data.deadline || null,
       };
       let job = (state.jobs || []).find(
         (item) => item.job_id === data.job_id,
@@ -2820,6 +2827,7 @@ async function handleForm(formName, data, form) {
         interview_stage: data.interview_stage || null,
         /* 投递结果归因：空串经 `|| null` 以 null 发送，清除语义同上。 */
         application_result: data.application_result || null,
+        deadline: data.deadline || null,
       };
       let job = (state.jobs || []).find(
         (item) => item.job_id === data.job_id,

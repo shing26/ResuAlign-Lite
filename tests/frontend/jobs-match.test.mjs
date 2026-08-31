@@ -385,6 +385,52 @@ test("dashboard source contract wires quality adoption card", () => {
   assert.match(source, /data-kpi="quality"/, "quality card is tagged");
 });
 
+test("boardCard renders deadline badge states", () => {
+  const soon = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+  const past = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+  const later = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+
+  const soonBody = bodyFrom(boardCard({ ...DETAIL_JOB, deadline: soon }));
+  const soonBadge = [...soonBody.querySelectorAll(".board-card__timeline .badge")].find((el) =>
+    /7 天内截止/.test(el.textContent),
+  );
+  assert.ok(soonBadge, "due-soon deadline renders amber badge");
+
+  const pastBody = bodyFrom(boardCard({ ...DETAIL_JOB, deadline: past }));
+  const pastBadge = [...pastBody.querySelectorAll(".board-card__timeline .badge")].find((el) =>
+    /已截止/.test(el.textContent),
+  );
+  assert.ok(pastBadge, "expired deadline renders red badge");
+
+  const laterBody = bodyFrom(boardCard({ ...DETAIL_JOB, deadline: later }));
+  assert.equal(
+    [...laterBody.querySelectorAll(".board-card__timeline .badge")].some((el) =>
+      /7 天内截止|已截止/.test(el.textContent),
+    ),
+    false,
+    "far-future deadline shows plain date badge, not warning",
+  );
+
+  const none = bodyFrom(boardCard(DETAIL_JOB));
+  assert.equal(
+    none.querySelector('[title^="截止"]'),
+    null,
+    "no deadline badge without deadline",
+  );
+});
+
+test("review route and page are wired (source contract)", () => {
+  const nav = read("../index.html");
+  assert.match(nav, /data-route="review"/, "rail has review entry");
+  const main = read("main.js");
+  assert.match(main, /case "review":/, "route dispatch handles review");
+  assert.match(main, /renderReviewView/, "review view is imported");
+  const view = read("review-view.js");
+  assert.match(view, /\/api\/review/, "review view consumes the endpoint");
+  assert.match(view, /对齐有效性/, "attribution card exists");
+  assert.match(view, /暂不展示比率/, "small-sample guard surfaced in UI");
+});
+
 test("quick-eval is wired through command palette (source contract)", () => {
   const palette = read("../index.html");
   assert.match(palette, /data-action="quick-eval"/, "palette has the eval button");

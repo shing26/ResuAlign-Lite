@@ -1000,6 +1000,7 @@ export function boardCard(job, statuses = null) {
       <div class="board-card__timeline">
         ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}
         ${applicationResultBadge(job)}
+        ${deadlineBadge(job)}
         ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
         ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
       </div>
@@ -1055,6 +1056,7 @@ export function renderBoardCard(job, statuses = null) {
       <div class="board-card__timeline">
         ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}
         ${applicationResultBadge(job)}
+        ${deadlineBadge(job)}
         ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
         ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
       </div>
@@ -2246,6 +2248,22 @@ export const APPLICATION_RESULT_LABELS = {
   other: "其他",
 };
 
+/* 截止日期徽章：近 7 天内到期为琥珀，已过期红色。无 deadline 不占位。 */
+function deadlineBadge(job) {
+  const deadline = job && job.deadline ? String(job.deadline).slice(0, 10) : "";
+  if (!deadline) return "";
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const in7 = new Date(today.getTime() + 7 * 86400000).toISOString().slice(0, 10);
+  if (deadline < todayStr) {
+    return `<span class="badge badge-red" title="截止 ${deadline} 已过期">已截止</span>`;
+  }
+  if (deadline <= in7) {
+    return `<span class="badge badge-amber" title="截止 ${deadline}">7 天内截止</span>`;
+  }
+  return `<span class="badge badge-gray" title="截止 ${deadline}">截止 ${deadline}</span>`;
+}
+
 export function applicationResultBadge(job) {
   const result = job && job.application_result;
   if (!result || !APPLICATION_RESULT_LABELS[result]) return "";
@@ -2284,6 +2302,7 @@ export function jobTimelineFormHtml(job, snapshots = []) {
         <div class="field"><label>到期时间</label><input type="datetime-local" name="next_step_due_at" value="${esc(toDateTimeInputValue(job.next_step_due_at))}"></div>
         <div class="field"><label>面试阶段</label><select name="interview_stage">${stageOptions}</select></div>
         <div class="field"><label>投递结果归因</label><select name="application_result">${resultOptions}</select></div>
+        <div class="field"><label>岗位截止日期</label><input type="date" name="deadline" value="${esc((job.deadline || "").slice(0, 10))}"></div>
         <div class="field"><label>Offer 时间</label><input type="datetime-local" name="offer_at" value="${esc(toDateTimeInputValue(job.offer_at))}"></div>
         <div class="field"><label>放弃日期</label><input type="datetime-local" name="rejected_at" value="${esc(toDateTimeInputValue(job.rejected_at))}"></div>
         <div class="field wide"><label>备注</label><textarea name="notes" rows="3">${esc(job.notes || "")}</textarea></div>
