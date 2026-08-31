@@ -288,6 +288,7 @@ _library_dedupe_key = _workbench_service._library_dedupe_key
 _content_sha256 = _resumes_service._content_sha256
 _cached_diagnosis = _resumes_service._cached_diagnosis
 _backfill_diagnosis_snapshots = _resumes_service.backfill_diagnosis_snapshots
+extract_resume_profile = _resumes_service.extract_resume_profile
 
 _run_resume_optimize = _resume_optimize_service.run_resume_optimize
 apply_resume_optimize_items = _resume_optimize_service.apply_resume_optimize_items

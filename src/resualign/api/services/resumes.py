@@ -3,6 +3,8 @@ import hashlib
 import logging
 from typing import Any, Optional
 
+from pydantic import BaseModel, Field
+
 import resualign.api as api_module
 
 logger = logging.getLogger(__name__)
@@ -74,3 +76,104 @@ def backfill_diagnosis_snapshots() -> int:
         logger.info('Backfilled %s persisted resume diagnosis snapshots', written)
     return written
 
+
+
+# ---------------------------------------------------------------------------
+# 结构化档案抽取（网申回填数据源，#61 预研方案 A）
+# ---------------------------------------------------------------------------
+
+PROFILE_PROMPT_VERSION = "resume-profile:v1"
+
+
+class ResumeProfileOut(BaseModel):
+    """chat_structured 的目标形状（与 ResumeProfileData 对齐）。"""
+
+    basic: dict[str, Any] = Field(default_factory=dict)
+    education: list[dict[str, Any]] = Field(default_factory=list)
+    work: list[dict[str, Any]] = Field(default_factory=list)
+    projects: list[dict[str, Any]] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+_PROFILE_SYSTEM = (
+    "你是简历结构化引擎。从主简历 Markdown 中抽取原子字段供网申表单自动填充。"
+    "只抽取简历中明确存在的事实，缺失字段留空字符串或空数组，绝不编造。"
+    "日期统一为 YYYY-MM 或 YYYY 格式（以简历原文为准）。"
+)
+
+
+class _ProfileSchema(BaseModel):
+    """LLM structured output 的目标形状（与 ResumeProfileData 对齐）。"""
+
+    basic: dict[str, Any] = Field(default_factory=dict)
+    education: list[dict[str, Any]] = Field(default_factory=list)
+    work: list[dict[str, Any]] = Field(default_factory=list)
+    projects: list[dict[str, Any]] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+
+def extract_resume_profile(user: dict[str, Any], resume_id: str) -> dict[str, Any]:
+    """Extract (and persist) the structured profile for one master resume."""
+    tenant_id = user["user_id"]
+    resume = api_module._resumes.get_master_resume(tenant_id, resume_id)
+    if resume is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Master resume not found")
+    content = resume.get("content") or ""
+    if not content.strip():
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=422, detail="主简历内容为空，无法抽取")
+
+    config = api_module.build_config()
+    if not config.is_llm_configured:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=503,
+            detail="LLM 未配置。结构化抽取需要模型，请先在设置页配置节点。",
+        )
+
+    from ...llm import OpenAIClient
+
+    client = OpenAIClient(config, timeout=45.0, max_tokens=2048)
+    try:
+        result = client.chat_structured(
+            _PROFILE_SYSTEM,
+            content[:12000],
+            ResumeProfileOut,
+        )
+    finally:
+        client.close()
+
+    profile = {
+        "basic": {
+            "name": str((result.get("basic") or {}).get("name", "")),
+            "phone": str((result.get("basic") or {}).get("phone", "")),
+            "email": str((result.get("basic") or {}).get("email", "")),
+            "gender": str((result.get("basic") or {}).get("gender", "")),
+            "birth": str((result.get("basic") or {}).get("birth", "")),
+            "location": str((result.get("basic") or {}).get("location", "")),
+            "id_number": "",
+        },
+        "education": result.get("education") or [],
+        "work": result.get("work") or [],
+        "projects": result.get("projects") or [],
+        "skills": result.get("skills") or [],
+        "summary": str(result.get("summary", "")),
+    }
+    # 证件号绝不自动抽取（敏感字段，用户在编辑 UI 自行补充）
+    saved = api_module._resumes.save_resume_profile(
+        tenant_id,
+        resume_id,
+        profile,
+        _content_sha256(content),
+        config.model,
+    )
+    if saved is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Master resume not found")
+    return {"profile": saved["profile"], "extracted_with": config.model}

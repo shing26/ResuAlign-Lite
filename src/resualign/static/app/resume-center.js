@@ -204,6 +204,13 @@ async function renderResumeDetailView(app, resumeId) {
             </div>
             ${versionTimelineHtml(versions, resume.current_version, resume.resume_id)}
           </section>
+          <section class="rail-section" data-profile-card>
+            <div class="rail-section-head">
+              <h3>网申档案</h3>
+              ${profileBadgeHtml(resume.profile)}
+            </div>
+            <div data-profile-mount>${resumeProfileHtml(resume.resume_id, resume.profile)}</div>
+          </section>
         </aside>
       </div>
     </div>`;
@@ -289,6 +296,61 @@ function resumeDetailSkeletonHtml() {
         <div class="skeleton is-shimmer" style="width:100%;height:200px"></div>
       </section>
     </div>`;
+}
+
+/* 网申结构化档案：抽取 → 查看（分组只读）→ 手动编辑（模态 JSON 表单）。
+ * 数据消费方是回填扩展（期一），此处保证用户可看可改可重抽。 */
+function profileBadgeHtml(profile) {
+  if (!profile) return '<span class="pill pill-neutral">未抽取</span>';
+  return profile.stale
+    ? '<span class="pill pill-warn" title="简历内容在抽取后有改动，建议重抽">已过期</span>'
+    : '<span class="pill pill-success">已生成</span>';
+}
+
+function resumeProfileHtml(resumeId, profile) {
+  if (!profile) {
+    return `
+      <p class="small muted">抽取姓名/教育/经历等原子字段，供浏览器回填扩展一键填网申表单。</p>
+      <button class="btn btn-outline btn-sm" type="button" data-action="profile-extract" data-id="${esc(resumeId)}">生成档案</button>`;
+  }
+  const data = profile.data || {};
+  const basic = data.basic || {};
+  const rows = [
+    ["姓名", basic.name], ["电话", basic.phone], ["邮箱", basic.email],
+    ["地点", basic.location], ["证件号", basic.id_number],
+  ].filter(([, v]) => v);
+  const edu = (data.education || []).map((e) => `${e.school || ""} ${e.major || ""} ${e.degree || ""}`).filter(Boolean);
+  const work = (data.work || []).map((w) => `${w.company || ""} · ${w.title || ""}`).filter(Boolean);
+  return `
+    ${rows.length ? `<dl class="profile-basic">${rows.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>` : '<p class="small muted">基本字段为空</p>'}
+    ${edu.length ? `<p class="small">教育：${esc(edu.join("；"))}</p>` : ""}
+    ${work.length ? `<p class="small">工作：${esc(work.join("；"))}</p>` : ""}
+    ${profile.stale ? '<p class="small" style="color:#b45309">简历在抽取后有改动，建议重新生成。</p>' : ""}
+    <div class="row" style="margin-top:8px">
+      <button class="btn btn-outline btn-sm" type="button" data-action="profile-extract" data-id="${esc(resumeId)}">${profile.stale ? "重新生成" : "重新抽取"}</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-action="profile-edit" data-id="${esc(resumeId)}">编辑</button>
+    </div>`;
+}
+
+export function profileEditFormHtml(resumeId, profile) {
+  const data = (profile && profile.data) || {};
+  return `<form data-form="profile-edit">
+    <input type="hidden" name="resume_id" value="${esc(resumeId)}">
+    <div class="form-grid">
+      <div class="field"><label>姓名</label><input name="basic_name" value="${esc((data.basic || {}).name || "")}"></div>
+      <div class="field"><label>电话</label><input name="basic_phone" value="${esc((data.basic || {}).phone || "")}"></div>
+      <div class="field"><label>邮箱</label><input name="basic_email" value="${esc((data.basic || {}).email || "")}"></div>
+      <div class="field"><label>地点</label><input name="basic_location" value="${esc((data.basic || {}).location || "")}"></div>
+      <div class="field"><label>证件号（敏感，仅本地保存）</label><input name="basic_id_number" value="${esc((data.basic || {}).id_number || "")}"></div>
+      <div class="field wide"><label>技能（逗号分隔）</label><input name="skills" value="${esc((data.skills || []).join(", "))}"></div>
+      <div class="field wide"><label>个人总结</label><textarea name="summary" rows="2">${esc(data.summary || "")}</textarea></div>
+    </div>
+    <p class="small muted" style="margin-top:6px">教育/工作/项目明细暂以抽取结果为准，可在生成后按需重抽。</p>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn btn-primary btn-sm" type="submit">保存档案</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-action="close-modal">取消</button>
+    </div>
+  </form>`;
 }
 
 export async function renderResumeCenter(app, { resumeId = null, showList = false } = {}) {

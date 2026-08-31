@@ -14,6 +14,7 @@ from ..schemas import (
     MasterResumeCreateRequest,
     MasterResumeRollbackRequest,
     MasterResumeUpdateRequest,
+    ResumeProfileEditRequest,
 )
 
 router = APIRouter()
@@ -98,6 +99,61 @@ def diagnose_master_resume(resume_id: str, request: Request, user: dict[str, Any
     job_id = api_module._queue_job(user, payload)
     api_module._resumes.set_latest_diagnosis_job(user['user_id'], resume_id, job_id)
     return {'job_id': job_id, 'status': 'queued'}
+
+@router.post('/api/master-resumes/{resume_id}/profile/extract')
+def extract_resume_profile_endpoint(
+    resume_id: str, user: dict[str, Any] = Depends(get_current_user)
+):
+    """LLM-extract the structured profile (网申回填数据源）。
+
+    与 diagnosis 不同：这是同步调用（单次结构化抽取），任务小且前端
+    需要立即拿到结果渲染档案面板。
+    """
+    api_module.enforce_daily_llm_cap(user['user_id'])
+    return api_module.extract_resume_profile(user, resume_id)
+
+
+@router.get('/api/master-resumes/{resume_id}/profile')
+def get_resume_profile(
+    resume_id: str, user: dict[str, Any] = Depends(get_current_user)
+):
+    """Return the stored structured profile plus staleness flag."""
+    resume = api_module._resumes.get_master_resume(user['user_id'], resume_id)
+    if resume is None:
+        raise HTTPException(status_code=404, detail='Master resume not found')
+    profile = resume.get('profile')
+    return {
+        'profile': profile,
+        'resume_updated_at': resume.get('updated_at'),
+    }
+
+
+@router.patch('/api/master-resumes/{resume_id}/profile')
+def edit_resume_profile(
+    resume_id: str,
+    req: ResumeProfileEditRequest,
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Manually edit the structured profile (model 标 manual-edit）。"""
+    resume = api_module._resumes.get_master_resume(user['user_id'], resume_id)
+    if resume is None:
+        raise HTTPException(status_code=404, detail='Master resume not found')
+    import hashlib as _hashlib
+
+    content = resume.get('content') or ''
+    saved = api_module._resumes.save_resume_profile(
+        user['user_id'],
+        resume_id,
+        req.profile.model_dump(),
+        # 手动编辑基于当前内容：保持与内容的绑定关系（sha 照内容算），
+        # 内容未变则不 stale，变了照常提示重抽。
+        _hashlib.sha256(content.strip().encode('utf-8')).hexdigest(),
+        'manual-edit',
+    )
+    if saved is None:
+        raise HTTPException(status_code=404, detail='Master resume not found')
+    return {'profile': saved['profile']}
+
 
 @router.patch('/api/master-resumes/{resume_id}')
 def update_master_resume(resume_id: str, req: MasterResumeUpdateRequest, user: dict[str, Any]=Depends(get_current_user)):
