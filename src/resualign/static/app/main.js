@@ -48,6 +48,7 @@ import {
   confirmCommandPanel,
   initializeCommandPanel,
   openCommandPanel,
+  runQuickEval,
 } from "./command-panel.js";
 import {
   analyzeActiveJd,
@@ -2075,6 +2076,54 @@ const actions = {
     toast(`已排队 ${result.queued} 个待处理岗位`, "success");
   },
   "toggle-theme": () => toggleTheme(),
+  /* Ctrl+K 快速评估：规则打分渲染在 palette preview 区（command-panel.js）。 */
+  "quick-eval": () => runQuickEval(),
+  /* 评估结果 CTA：入库（JD 已在评估时查过重）+ 用评估所选主简历直接排队对齐。 */
+  "quick-eval-adopt": async () => {
+    const quick = state.quickEval;
+    if (!quick || !quick.jd_text) {
+      toast("请先运行快速评估", "error");
+      return;
+    }
+    const title =
+      quick.jd_text.split("\n").map((l) => l.trim()).find(Boolean) ||
+      "快速录入岗位";
+    let job;
+    try {
+      job = await api("/api/jobs", {
+        method: "POST",
+        body: JSON.stringify({
+          title: title.slice(0, 80),
+          jd_text: quick.jd_text,
+          source_type: "paste",
+        }),
+      });
+    } catch (error) {
+      if (String(error.message).includes("Duplicate")) {
+        toast("该岗位已在库中，去岗位库查看", "info");
+        closeCommandPanel();
+        return;
+      }
+      throw error;
+    }
+    const jobId = job.job_id;
+    if (quick.master_resume_id) {
+      try {
+        await api(`/api/jobs/${encodeURIComponent(jobId)}/workbench`, {
+          method: "POST",
+          body: JSON.stringify({ master_resume_id: quick.master_resume_id }),
+        });
+        toast("已入库并排队对齐", "success");
+      } catch {
+        toast("已入库；对齐排队失败，可在工作台手动运行", "info");
+      }
+    } else {
+      toast("已入库（未选主简历，可在工作台补选后对齐）", "info");
+    }
+    state.quickEval = null;
+    closeCommandPanel();
+    navigate("workspace", jobId);
+  },
   /* 失败横幅的节点状态条：点「换节点重试」展开——逐个探测全部节点，
    * 通过的节点给「用此节点重试」按钮（active 节点除外）。 */
   "show-node-picker": async (button) => {

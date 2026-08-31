@@ -103,6 +103,9 @@ export const state = {
   /* U7: 工作台工作草稿——采纳/应用基于当前草稿增量合并，连续采纳不丢前一条。
    * wbWorkingDraft = { jobId, draft }；wbAcceptedBullets = { [jobId]: [diffId] } */
   wbWorkingDraft: null,
+  /* 快速评估（Ctrl+K）：JD 文本/主简历/已有岗位，跨 action 传递 */
+  quickEval: null,
+  quickEvalResumeId: null,
   wbAcceptedBullets: {},
   diagnosis: null,
   diagnosisPolling: null,

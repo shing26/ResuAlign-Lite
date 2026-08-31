@@ -430,3 +430,18 @@ test("review route and page are wired (source contract)", () => {
   assert.match(view, /对齐有效性/, "attribution card exists");
   assert.match(view, /暂不展示比率/, "small-sample guard surfaced in UI");
 });
+
+test("quick-eval is wired through command palette (source contract)", () => {
+  const palette = read("../index.html");
+  assert.match(palette, /data-action="quick-eval"/, "palette has the eval button");
+  assert.match(palette, /data-command-preview/, "preview node renders the result");
+  const panel = read("command-panel.js");
+  assert.match(panel, /\/api\/quick-eval/, "panel calls the eval endpoint");
+  assert.match(panel, /state\.quickEval/, "panel stashes eval state for the CTA");
+  assert.match(panel, /existing_job_id/, "duplicate JD deep-links instead of duplicating");
+  const main = read("main.js");
+  assert.match(main, /"quick-eval-adopt"/, "adopt action exists");
+  assert.match(main, /runQuickEval/, "action wired to command-panel");
+  const events = read("events.js");
+  assert.match(events, /quickEval/, "state carries quickEval");
+});
