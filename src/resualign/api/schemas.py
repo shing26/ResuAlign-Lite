@@ -90,6 +90,9 @@ class JobUpdateRequest(BaseModel):
     tailor_granularity: Literal['fine', 'medium', 'coarse'] | None = None
     tailor_focus: Literal['balanced', 'quantified', 'skills'] | None = None
     custom_prompt: str | None = Field(default=None, max_length=_CUSTOM_PROMPT_MAX)
+    # 投递结果归因（screen_pass/ats_reject/no_response/other）；枚举校验在
+    # store 层（APPLICATION_RESULTS），空串按 clear-on-empty 清除。
+    application_result: str | None = None
 
 class BulkStatusRequest(BaseModel):
     job_ids: list[str]
@@ -367,12 +370,28 @@ class DashboardQuickContinue(BaseModel):
     updated_at: float | None = None
 
 
+class AlignmentQuality(BaseModel):
+    """近 7 天对齐质量聚合（采纳率 = 已采纳 diffs / 保存定稿时的 diffs 总数）。
+
+    adoption_ratio 为 None 表示窗口内没有保存过带 diffs 的定稿——
+    零分母如实呈现，不伪装成 100%。
+    """
+
+    window_days: int = 7
+    runs: int = 0
+    saves: int = 0
+    diffs_total: int = 0
+    diffs_accepted: int = 0
+    adoption_ratio: float | None = None
+
+
 class DashboardResponse(BaseModel):
     """Aggregated data for GET /api/dashboard."""
 
     kpi: DashboardKPI
     skill_gaps: list[SkillGapItem] = Field(default_factory=list)
     quick_continue: DashboardQuickContinue | None = None
+    quality: AlignmentQuality | None = None
 
 
 class AutomationRuleCreateRequest(BaseModel):

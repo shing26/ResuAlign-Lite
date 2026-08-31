@@ -3212,6 +3212,49 @@
   },
   "components": {
     "schemas": {
+      "AlignmentQuality": {
+        "properties": {
+          "window_days": {
+            "type": "integer",
+            "title": "Window Days",
+            "default": 7
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs",
+            "default": 0
+          },
+          "saves": {
+            "type": "integer",
+            "title": "Saves",
+            "default": 0
+          },
+          "diffs_total": {
+            "type": "integer",
+            "title": "Diffs Total",
+            "default": 0
+          },
+          "diffs_accepted": {
+            "type": "integer",
+            "title": "Diffs Accepted",
+            "default": 0
+          },
+          "adoption_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adoption Ratio"
+          }
+        },
+        "type": "object",
+        "title": "AlignmentQuality",
+        "description": "近 7 天对齐质量聚合（采纳率 = 已采纳 diffs / 保存定稿时的 diffs 总数）。\n\nadoption_ratio 为 None 表示窗口内没有保存过带 diffs 的定稿——\n零分母如实呈现，不伪装成 100%。"
+      },
       "AnalyzeRequest": {
         "properties": {
           "resume_text": {
@@ -3561,6 +3604,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/DashboardQuickContinue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AlignmentQuality"
               },
               {
                 "type": "null"
@@ -4379,6 +4432,17 @@
               }
             ],
             "title": "Custom Prompt"
+          },
+          "application_result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Result"
           }
         },
         "type": "object",

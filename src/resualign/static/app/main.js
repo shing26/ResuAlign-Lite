@@ -2684,6 +2684,8 @@ async function handleForm(formName, data, form) {
          * null/"" 统一转成 NULL 写入（清除语义，无需前端特判）。 */
         next_step_due_at: data.next_step_due_at || null,
         interview_stage: data.interview_stage || null,
+        /* 投递结果归因：空串经 `|| null` 以 null 发送，清除语义同上。 */
+        application_result: data.application_result || null,
       };
       let job = (state.jobs || []).find(
         (item) => item.job_id === data.job_id,
@@ -2767,6 +2769,8 @@ async function handleForm(formName, data, form) {
         next_step: data.next_step || null,
         next_step_due_at: data.next_step_due_at || null,
         interview_stage: data.interview_stage || null,
+        /* 投递结果归因：空串经 `|| null` 以 null 发送，清除语义同上。 */
+        application_result: data.application_result || null,
       };
       let job = (state.jobs || []).find(
         (item) => item.job_id === data.job_id,

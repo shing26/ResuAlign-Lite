@@ -30,6 +30,7 @@ export async function renderDashboard(container) {
     },
     skill_gaps: [],
     quick_continue: null,
+    quality: null,
   };
   let payload = defaults;
   let jobs = [];
@@ -85,6 +86,7 @@ export async function renderDashboard(container) {
     ? dashboardEmptyGuideHtml()
     : "";
 
+  const quality = payload.quality || null;
   const kpiCards = `
     <div class="metric-cell" data-kpi="jobs">
       <div class="metric-label">跟踪岗位</div>
@@ -100,6 +102,11 @@ export async function renderDashboard(container) {
       <div class="metric-label">主简历 ATS</div>
       <div class="metric-value">${atsScore == null ? "—" : escAttr(atsScore)}</div>
       <div class="metric-hint">${atsScore == null ? "未诊断" : `${escAttr(currentResume ? currentResume.title : "主简历")} · v${escAttr(currentResume ? currentResume.current_version : 1)}`}</div>
+    </div>
+    <div class="metric-cell" data-kpi="quality" ${quality ? "" : "hidden"}>
+      <div class="metric-label">建议采纳率</div>
+      <div class="metric-value">${quality && quality.adoption_ratio != null ? `${Math.round(quality.adoption_ratio * 100)}<span>%</span>` : "—"}</div>
+      <div class="metric-hint">${quality ? `近 ${escAttr(quality.window_days)} 天 · 定稿 ${escAttr(quality.saves)} 次 · 采纳 ${escAttr(quality.diffs_accepted)}/${escAttr(quality.diffs_total)} 条建议` : ""}</div>
     </div>`;
 
   const quick = payload.quick_continue || null;

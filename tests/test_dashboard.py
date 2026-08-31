@@ -347,3 +347,33 @@ def test_dashboard_is_tenant_scoped():
     }
     assert body["skill_gaps"] == []
     assert body["quick_continue"] is None
+
+
+def test_dashboard_quality_summary_in_response():
+    """DashboardResponse.quality：窗口采纳率聚合随响应返回，零分母为 None。"""
+    tenant = _tenant_id()
+    api_module._resumes.create_master_resume(
+        tenant, "Master", "# Experience\nPython backend engineer."
+    )
+    job_id = _create_job(tenant, title="Q", jd_text="Q role text.")["job_id"]
+    api_module._jobs.record_alignment_run(tenant)
+    diffs = [
+        {"diff_id": f"d{i}", "type": "modify", "original": "x",
+         "provenance_state": "verified"}
+        for i in range(4)
+    ]
+    api_module._jobs.save_alignment(
+        tenant, job_id, diffs=diffs, alignment_status="succeeded"
+    )
+    api_module._jobs.save_final_draft(
+        tenant, job_id, "定稿", accepted_diff_ids=["d0", "d1"]
+    )
+
+    r = client.get("/api/dashboard", headers=_auth_headers())
+    assert r.status_code == 200
+    quality = r.json()["quality"]
+    assert quality["runs"] == 1
+    assert quality["saves"] == 1
+    assert quality["diffs_total"] == 4
+    assert quality["diffs_accepted"] == 2
+    assert quality["adoption_ratio"] == 0.5

@@ -913,6 +913,8 @@ def _run_job_holding_gate(job_id: str) -> None:
                         job_id,
                     )
                     raise
+                # 度量 A：一次产出结果的运行（含 tailor 降级）计一次 run。
+                api_module._jobs.record_alignment_run(tenant_id)
                 if session is not None:
                     api_module._session_store.update(
                         session["session_id"],

@@ -45,6 +45,10 @@ __all__ = [
     "status_lifecycle_fields",
 ]
 
+# 投递结果归因枚举：记录"这份定稿投出去的结局"，用于验证对齐质量
+# （对齐 vs 未对齐简历的通过率）。空串清除（ADR-0027 clear-on-empty）。
+APPLICATION_RESULTS = ("screen_pass", "ats_reject", "no_response", "other")
+
 _JOB_LIBRARY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS library_jobs (
     job_id TEXT PRIMARY KEY,
@@ -73,6 +77,7 @@ CREATE TABLE IF NOT EXISTS library_jobs (
     offer_at TEXT,
     rejected_at TEXT,
     next_step_due_at TEXT,
+    application_result TEXT,
     interview_stage TEXT,
     match_stale INTEGER NOT NULL DEFAULT 0,
     workbench_job_id TEXT,
@@ -295,6 +300,19 @@ class JobLibraryStore(_SqliteStore):
         (
             42,
             "ALTER TABLE library_jobs ADD COLUMN last_alignment_error TEXT",
+        ),
+        # 43: 对齐质量度量（采纳率）+ 投递结果归因（验证对齐是否有效的
+        # 闭环数据）。metrics 按 tenant+日聚合，模仿 llm_daily_usage 的
+        # 原子 upsert 模式；归因枚举见 APPLICATION_RESULTS。
+        (
+            43,
+            "CREATE TABLE IF NOT EXISTS alignment_metrics ("
+            "tenant_id TEXT NOT NULL, metric_date TEXT NOT NULL, "
+            "runs INTEGER NOT NULL DEFAULT 0, saves INTEGER NOT NULL DEFAULT 0, "
+            "diffs_total INTEGER NOT NULL DEFAULT 0, "
+            "diffs_accepted INTEGER NOT NULL DEFAULT 0, "
+            "updated_at REAL NOT NULL, PRIMARY KEY (tenant_id, metric_date)); "
+            "ALTER TABLE library_jobs ADD COLUMN application_result TEXT;",
         ),
     )
 
@@ -836,6 +854,7 @@ class JobLibraryStore(_SqliteStore):
         allowed_job_functions: Sequence[str] | None = None,
         allowed_seniorities: Sequence[str] | None = None,
         last_alignment_error: str | None = None,
+        application_result: str | None = None,
     ) -> Optional[dict[str, Any]]:
         """Update editable fields. None-valued fields are left unchanged.
 
@@ -875,6 +894,14 @@ class JobLibraryStore(_SqliteStore):
             custom_prompt = custom_prompt.strip()
         if match_stale is not None and match_stale not in (0, 1):
             raise UserStoreError("match_stale must be 0 or 1")
+        if (
+            application_result is not None
+            and application_result != ""
+            and application_result not in APPLICATION_RESULTS
+        ):
+            raise UserStoreError(
+                f"Invalid application_result: {application_result}"
+            )
         if jd_text is not None and not jd_text.strip():
             raise UserStoreError("Job description text cannot be empty")
 
@@ -1035,6 +1062,12 @@ class JobLibraryStore(_SqliteStore):
             else:
                 sets.append("interview_stage = ?")
                 values.append(interview_stage)
+        if application_result is not None:
+            if application_result == "":
+                sets.append("application_result = NULL")
+            else:
+                sets.append("application_result = ?")
+                values.append(application_result)
         if match_stale is not None:
             sets.append("match_stale = ?")
             values.append(match_stale)
@@ -1207,6 +1240,82 @@ class JobLibraryStore(_SqliteStore):
                         )
         return self.get_job(tenant_id, job_id)
 
+    @staticmethod
+    def _bump_alignment_metrics(
+        conn: sqlite3.Connection,
+        tenant_id: str,
+        runs: int = 0,
+        saves: int = 0,
+        diffs_total: int = 0,
+        diffs_accepted: int = 0,
+    ) -> None:
+        """Atomically upsert today's alignment quality counters."""
+        metric_date = time.strftime("%Y-%m-%d")
+        conn.execute(
+            "INSERT INTO alignment_metrics ("
+            "tenant_id, metric_date, runs, saves, diffs_total, "
+            "diffs_accepted, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(tenant_id, metric_date) DO UPDATE SET "
+            "runs = runs + excluded.runs, "
+            "saves = saves + excluded.saves, "
+            "diffs_total = diffs_total + excluded.diffs_total, "
+            "diffs_accepted = diffs_accepted + excluded.diffs_accepted, "
+            "updated_at = excluded.updated_at",
+            (
+                tenant_id,
+                metric_date,
+                runs,
+                saves,
+                diffs_total,
+                diffs_accepted,
+                time.time(),
+            ),
+        )
+
+    def record_alignment_run(self, tenant_id: str) -> None:
+        """Count one alignment run that produced a result (metric A)."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                self._bump_alignment_metrics(conn, tenant_id, runs=1)
+
+    def alignment_quality_summary(
+        self, tenant_id: str, days: int = 7
+    ) -> dict[str, Any]:
+        """Aggregate the last ``days`` days of adoption metrics.
+
+        ``adoption_ratio`` is accepted/total over saved drafts; None when no
+        diffs were saved in the window (zero denominators are reported, not
+        faked as 100%).
+        """
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT runs, saves, diffs_total, diffs_accepted "
+                    "FROM alignment_metrics WHERE tenant_id = ? "
+                    "AND metric_date >= ?",
+                    (
+                        tenant_id,
+                        time.strftime(
+                            "%Y-%m-%d", time.localtime(time.time() - days * 86400)
+                        ),
+                    ),
+                ).fetchall()
+        totals = {
+            "runs": sum(int(r["runs"] or 0) for r in rows),
+            "saves": sum(int(r["saves"] or 0) for r in rows),
+            "diffs_total": sum(int(r["diffs_total"] or 0) for r in rows),
+            "diffs_accepted": sum(int(r["diffs_accepted"] or 0) for r in rows),
+        }
+        totals["window_days"] = days
+        totals["adoption_ratio"] = (
+            round(totals["diffs_accepted"] / totals["diffs_total"], 3)
+            if totals["diffs_total"]
+            else None
+        )
+        return totals
+
     def save_final_draft(
         self,
         tenant_id: str,
@@ -1238,6 +1347,18 @@ class JobLibraryStore(_SqliteStore):
                     ):
                         diff["provenance_state"] = "accepted"
                         changed = True
+                # 采纳率埋点：save_final_draft 是唯一同时拿得到分子（accepted）
+                # 与分母（diffs 总数）的持久化点；与定稿写入同事务。
+                self._bump_alignment_metrics(
+                    conn,
+                    tenant_id,
+                    saves=1,
+                    diffs_total=len(diffs),
+                    diffs_accepted=sum(
+                        1 for diff in diffs
+                        if diff.get("provenance_state") == "accepted"
+                    ),
+                )
                 if changed:
                     conn.execute(
                         "UPDATE library_jobs SET diffs_json = ? "
@@ -1710,6 +1831,7 @@ class JobLibraryStore(_SqliteStore):
             "rejected_at": row["rejected_at"] or None,
             "next_step_due_at": row["next_step_due_at"] or None,
             "interview_stage": row["interview_stage"] or None,
+            "application_result": row["application_result"] or None,
             "match_stale": bool(row["match_stale"]),
             "workbench_job_id": row["workbench_job_id"],
             "workbench_resume_id": row["workbench_resume_id"],

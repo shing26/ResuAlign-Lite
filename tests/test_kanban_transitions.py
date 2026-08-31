@@ -212,3 +212,32 @@ def test_kanban_idempotency_key_replay_returns_cached_result():
     divergent = _bulk([job_id], "offer", idempotency_key=key)
     assert divergent == first
     assert _stored_status(job_id) == "applied"
+
+
+def test_job_detail_update_accepts_application_result():
+    """PATCH /api/jobs/{id} 归因字段：合法写入、非法 422、行投影透出。"""
+    r = client.post(
+        "/api/jobs",
+        json={"title": "归因岗位", "jd_text": "JD text"},
+        headers=_auth_headers(),
+    )
+    job_id = r.json()["job_id"]
+
+    r = client.patch(
+        f"/api/jobs/{job_id}",
+        json={"application_result": "screen_pass"},
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 200
+    assert r.json()["application_result"] == "screen_pass"
+
+    r = client.patch(
+        f"/api/jobs/{job_id}",
+        json={"application_result": "hired_ceo"},
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 422
+
+    r = client.get("/api/jobs", headers=_auth_headers())
+    row = next(j for j in r.json() if j["job_id"] == job_id)
+    assert row["application_result"] == "screen_pass"

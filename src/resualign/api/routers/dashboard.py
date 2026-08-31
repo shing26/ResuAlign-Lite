@@ -16,6 +16,7 @@ import resualign.api as api_module
 
 from ..deps import get_current_user
 from ..schemas import (
+    AlignmentQuality,
     DashboardKPI,
     DashboardQuickContinue,
     DashboardResponse,
@@ -127,4 +128,7 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
         ),
         skill_gaps=skill_gaps,
         quick_continue=quick_continue,
+        quality=AlignmentQuality(**api_module._jobs.alignment_quality_summary(
+            user["user_id"]
+        )),
     )
