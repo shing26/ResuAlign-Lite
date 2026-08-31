@@ -991,10 +991,15 @@ export function boardCard(job, statuses = null) {
         ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
         ${job.alignment_status === "succeeded" ? '<span class="badge badge-green">已对齐</span>' : ""}
         ${job.alignment_status === "failed" ? `<span class="badge badge-red" title="${esc(job.last_alignment_error || "对齐失败，请到工作台重新运行")}">对齐失败</span>` : ""}
-        ${job.alignment_status === "succeeded" && !(job.diffs || []).length ? '<span class="badge badge-amber" title="本次对齐未产出修改建议，可到工作台重新运行">无建议</span>' : ""}
+        ${job.alignment_status === "succeeded" && !(job.diffs || []).length
+          ? (job.last_alignment_error
+              ? `<span class="badge badge-amber" title="${esc(job.last_alignment_error)}">诊断完成 · 改写未产出</span>`
+              : '<span class="badge badge-amber" title="本次对齐未产出修改建议，可到工作台重新运行">无建议</span>')
+          : ""}
       </div>
       <div class="board-card__timeline">
         ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}
+        ${applicationResultBadge(job)}
         ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
         ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
       </div>
@@ -1049,6 +1054,7 @@ export function renderBoardCard(job, statuses = null) {
       </div>
       <div class="board-card__timeline">
         ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}
+        ${applicationResultBadge(job)}
         ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
         ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
       </div>
@@ -2231,6 +2237,21 @@ function toDateTimeInputValue(value) {
 
 /* 岗位详情/时间线弹窗表单。next_step_due_at 为 datetime-local（本地时间，
  * 无时区，与 parseNextStepDate 语义一致）；interview_stage 值域含“无”。 */
+/* 投递结果归因徽章（看板卡 timeline 区）。APPLICATION_RESULT_LABELS 与
+ * 后端 APPLICATION_RESULTS 枚举一一对应；无归因不占位。 */
+export const APPLICATION_RESULT_LABELS = {
+  screen_pass: "过筛通过",
+  ats_reject: "简历挂筛",
+  no_response: "暂无回音",
+  other: "其他",
+};
+
+export function applicationResultBadge(job) {
+  const result = job && job.application_result;
+  if (!result || !APPLICATION_RESULT_LABELS[result]) return "";
+  return `<span class="badge badge-blue" title="投递结果归因">${esc(APPLICATION_RESULT_LABELS[result])}</span>`;
+}
+
 export function jobTimelineFormHtml(job, snapshots = []) {
   const statusOptions = JOB_STATUS_CANONICAL.map(
     (value) =>
@@ -2240,6 +2261,14 @@ export function jobTimelineFormHtml(job, snapshots = []) {
     (stage) =>
       `<option value="${esc(stage)}" ${job.interview_stage === stage ? "selected" : ""}>${esc(stage)}</option>`,
   ).join("")}`;
+  const resultOptions = `<option value="" ${job.application_result ? "" : "selected"}>未记录</option>${Object.entries(
+    APPLICATION_RESULT_LABELS,
+  )
+    .map(
+      ([value, label]) =>
+        `<option value="${esc(value)}" ${job.application_result === value ? "selected" : ""}>${esc(label)}</option>`,
+    )
+    .join("")}`;
   return `<form data-form="job-detail-edit">
       <input type="hidden" name="job_id" value="${esc(job.job_id)}">
       <div class="form-grid">
@@ -2254,6 +2283,7 @@ export function jobTimelineFormHtml(job, snapshots = []) {
         <div class="field"><label>下一步</label><input type="text" name="next_step" value="${esc(job.next_step || "")}"></div>
         <div class="field"><label>到期时间</label><input type="datetime-local" name="next_step_due_at" value="${esc(toDateTimeInputValue(job.next_step_due_at))}"></div>
         <div class="field"><label>面试阶段</label><select name="interview_stage">${stageOptions}</select></div>
+        <div class="field"><label>投递结果归因</label><select name="application_result">${resultOptions}</select></div>
         <div class="field"><label>Offer 时间</label><input type="datetime-local" name="offer_at" value="${esc(toDateTimeInputValue(job.offer_at))}"></div>
         <div class="field"><label>放弃日期</label><input type="datetime-local" name="rejected_at" value="${esc(toDateTimeInputValue(job.rejected_at))}"></div>
         <div class="field wide"><label>备注</label><textarea name="notes" rows="3">${esc(job.notes || "")}</textarea></div>
@@ -3305,10 +3335,31 @@ export function llmNodeCardHtml(node, lastTest) {
   const baseUrl = String(n.base_url || "").trim();
   const maskedKey = maskApiKey(n.api_key);
   const testResult = lastTest ? nodeTestResultHtml(lastTest) : "";
+  /* 持久化健康徽标：test 端点结果落库后的回显（无本会话新鲜结果时）。
+   * status 语义与 probe_llm_connection 一致：ok 之外都是具体失败原因。 */
+  const lastStatus = String(n.last_test_status || "").trim();
+  const lastAt = Number(n.last_test_at);
+  const lastLatency = Number(n.last_test_latency_ms);
+  const healthBadge =
+    !lastTest && lastStatus
+      ? (() => {
+          const when = Number.isFinite(lastAt)
+            ? ` · ${new Date(lastAt * 1000).toLocaleString()}`
+            : "";
+          const latency =
+            Number.isFinite(lastLatency) && lastLatency >= 0
+              ? ` · ${Math.round(lastLatency)} ms`
+              : "";
+          return lastStatus === "ok"
+            ? `<span class="badge badge-green" title="上次连通性测试通过${when}">连通正常</span>`
+            : `<span class="badge badge-red" title="上次测试：${esc(lastStatus)}${when}${latency}">上次异常</span>`;
+        })()
+      : "";
   return `
     <article class="llm-node-card${active ? " is-active" : ""}" data-llm-node-card data-node-id="${esc(nodeId)}">
       <div class="llm-node-card__head">
         <div class="llm-node-card__title">${esc(name)}</div>
+        ${healthBadge}
         ${active ? '<span class="badge badge-green" data-node-active-badge>当前生效</span>' : ""}
       </div>
       <dl class="llm-node-card__meta">

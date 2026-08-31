@@ -597,7 +597,10 @@ async function renderSettingsView(app) {
               <h2>LLM 节点</h2>
               <p>主节点与备用节点</p>
             </div>
-            <button class="btn btn-primary btn-sm" type="button" data-action="llm-node-add">新增节点</button>
+            <div class="row">
+              <button class="btn btn-outline btn-sm" type="button" data-action="llm-nodes-test-all">测试全部节点</button>
+              <button class="btn btn-primary btn-sm" type="button" data-action="llm-node-add">新增节点</button>
+            </div>
           </div>
           <div class="panel-body">
             <div class="llm-node-grid node-grid" data-llm-node-grid>
@@ -1635,6 +1638,36 @@ const actions = {
     toast("已切换为当前生效节点", "success");
     render();
   },
+  /* 逐个探测全部节点并持久化结果：节点卡健康徽标的数据源。串行走
+   * test-all 端点（每节点 10s 上限），期间禁用按钮防重复触发。 */
+  "llm-nodes-test-all": async (button) => {
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = "探测中...";
+    try {
+      const body = await api("/api/llm/nodes/test-all", { method: "POST" });
+      const results = body.results || [];
+      state.llmNodes = (state.llmNodes || []).map((node) => {
+        const hit = results.find((r) => r.node_id === node.node_id);
+        if (!hit) return node;
+        return {
+          ...node,
+          last_test_status: hit.status,
+          last_test_latency_ms: hit.latency_ms,
+          last_test_at: Date.now() / 1000,
+        };
+      });
+      render();
+      const okCount = results.filter((r) => r.ok).length;
+      toast(
+        `探测完成：${okCount}/${results.length} 个节点连通`,
+        okCount ? "success" : "error",
+      );
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  },
   "llm-node-delete": (button) => {
     const node = (state.llmNodes || []).find(
       (item) => item.node_id === button.dataset.id,
@@ -2036,10 +2069,67 @@ const actions = {
     toast(`已排队 ${result.queued} 个待处理岗位`, "success");
   },
   "toggle-theme": () => toggleTheme(),
+  /* 失败横幅的节点状态条：点「换节点重试」展开——逐个探测全部节点，
+   * 通过的节点给「用此节点重试」按钮（active 节点除外）。 */
+  "show-node-picker": async (button) => {
+    const mount = $("[data-wb-node-picker]");
+    if (!mount) return;
+    button.disabled = true;
+    mount.innerHTML =
+      '<div class="align-error-banner align-notice-banner" role="status">正在探测各节点连通性…</div>';
+    try {
+      const body = await api("/api/llm/nodes/test-all", { method: "POST" });
+      const results = body.results || [];
+      if (!results.length) {
+        mount.innerHTML =
+          '<div class="align-error-banner align-notice-banner" role="status">尚无已配置节点，请先到设置页添加。</div>';
+        return;
+      }
+      const rows = results
+        .map((node) => {
+          const health = node.ok
+            ? '<span class="badge badge-green">连通正常</span>'
+            : `<span class="badge badge-red" title="${esc(node.message || "")}">异常</span>`;
+          const switchable =
+            node.ok && !node.is_active
+              ? `<button class="btn btn-outline btn-sm" type="button" data-action="rerun-with-node" data-node-id="${esc(node.node_id)}">用此节点重试</button>`
+              : "";
+          return `<div class="row" style="gap:8px;align-items:center"><strong>${esc(node.name)}</strong>${health}<span class="small muted">${esc(node.model || "")}</span>${switchable}</div>`;
+        })
+        .join("");
+      mount.innerHTML = `<div class="align-error-banner align-notice-banner" role="status"><strong>节点状态</strong>${rows}</div>`;
+    } finally {
+      button.disabled = false;
+    }
+  },
   "set-wb-tab": (button) => setWbMobilePane(button.dataset.wbTab),
   "set-wb-tab-v3": (button) => setWbAuxPane(button.dataset.wbTabV3),
   "set-wb-view-mode": (button) => setWbViewMode(button.dataset.wbViewMode),
   "cancel-workbench": () => cancelActiveAlignment(),
+  /* 失败横幅「换节点重试」：activate 目标节点（热切换）后立即重跑当前
+   * 岗位对齐。节点健康来自 test-all 的持久化结果，按钮只在探测通过的
+   * 非 active 节点上渲染。 */
+  "rerun-with-node": async (button) => {
+    const nodeId = button.dataset.nodeId;
+    if (!nodeId) return;
+    button.disabled = true;
+    button.textContent = "切换中...";
+    try {
+      await api(`/api/llm/nodes/${encodeURIComponent(nodeId)}/activate`, {
+        method: "POST",
+      });
+      toast("已切换节点，正在重新排队对齐…", "success");
+      const form = $('[data-form="split-align"]') || $('[data-form="wb-run"]');
+      if (!form) {
+        toast("当前工作台无法重新运行", "error");
+        return;
+      }
+      form.dispatchEvent(new Event("submit", { cancelable: true }));
+    } finally {
+      button.disabled = false;
+      button.textContent = "用此节点重试";
+    }
+  },
   "retry-workbench": () => {
     const form = $('[data-form="split-align"]') || $('[data-form="wb-run"]');
     if (form) form.dispatchEvent(new Event("submit", { cancelable: true }));
@@ -2594,6 +2684,8 @@ async function handleForm(formName, data, form) {
          * null/"" 统一转成 NULL 写入（清除语义，无需前端特判）。 */
         next_step_due_at: data.next_step_due_at || null,
         interview_stage: data.interview_stage || null,
+        /* 投递结果归因：空串经 `|| null` 以 null 发送，清除语义同上。 */
+        application_result: data.application_result || null,
       };
       let job = (state.jobs || []).find(
         (item) => item.job_id === data.job_id,
@@ -2677,6 +2769,8 @@ async function handleForm(formName, data, form) {
         next_step: data.next_step || null,
         next_step_due_at: data.next_step_due_at || null,
         interview_stage: data.interview_stage || null,
+        /* 投递结果归因：空串经 `|| null` 以 null 发送，清除语义同上。 */
+        application_result: data.application_result || null,
       };
       let job = (state.jobs || []).find(
         (item) => item.job_id === data.job_id,

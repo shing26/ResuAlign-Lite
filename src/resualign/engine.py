@@ -11,7 +11,7 @@ from .jd_analysis import jd_profile_to_dict
 from .jd_profiler import profile_jd
 from .llm import LLMClient, LLMResponseError, OpenAIClient, diagnose_resume
 from .llm_nodes import LLMNodeStore
-from .models import GapReport, Report, ResuAlignConfig
+from .models import GapReport, Report, ResuAlignConfig, TailoredResume
 from .role_router import _role_timeout, call_with_role
 from .rule_diagnose import diagnose_resume_local
 from .tailor import tailor_resume, tailor_resume_map_reduce
@@ -23,6 +23,11 @@ MAX_JD_CONTEXT_CHARS = 6000
 # Tailoring is the longest single stage. Two attempts keep a degraded
 # provider from multiplying a slow response into a six-minute failure.
 TAILOR_MAX_RETRIES = 1
+# editor 降级码集合：结构/解析类失败与超时触发空改写降级（对齐 gap 的
+# schema/parse/empty 先例并纳入 timeout——慢模型的等待成本已经付过，
+# 再吃一个 failed 只会逼用户手动重跑整条管线）。quota/auth/rate_limit
+# 等账户类失败仍冒泡：那种情况下后续岗位同样会失败，静默降级会掩盖问题。
+_DEGRADED_EDITOR_CODES = frozenset({"schema", "parse", "empty", "timeout"})
 
 # Defensive cap on resume input so an exceptionally long resume cannot
 # blow out prompt size and slow the LLM calls. Typical resumes (2-3k
@@ -348,14 +353,37 @@ def run(
                         filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
                     ),
                 )
-                tailor_result, _ = call_with_role(
-                    "editor",
-                    editor_fn,
+            if use_roles:
+                editor_fn, editor_kwargs = _editor_call_plan(
                     node_store,
                     tenant_id,
-                    fn_kwargs=editor_kwargs,
+                    granularity,
+                    resume_text=resume_text,
+                    gap_report_text=gap_report_str,
+                    prompt_focus=prompt_focus,
+                    custom_prompt=custom_prompt,
+                    jd_context=truncate_text(
+                        filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
+                    ),
                 )
-                report.tailored_resume = tailor_result
+                try:
+                    tailor_result, _ = call_with_role(
+                        "editor",
+                        editor_fn,
+                        node_store,
+                        tenant_id,
+                        fn_kwargs=editor_kwargs,
+                    )
+                    report.tailored_resume = tailor_result
+                except LLMResponseError as exc:
+                    if getattr(exc, "code", "") in _DEGRADED_EDITOR_CODES:
+                        logger.warning(
+                            "tailor degraded, continuing with empty resume: %s", exc
+                        )
+                        report.tailored_resume = TailoredResume()
+                        report.tailor_degraded = True
+                    else:
+                        raise
             else:
                 if llm_client is None:
                     tailor_client = OpenAIClient(
@@ -364,30 +392,44 @@ def run(
                         max_retries=TAILOR_MAX_RETRIES,
                     )
                     tailor_client_owned = True
-                if _bullet_editor_enabled(granularity) and _is_local_llm(
-                    config.provider, config.base_url
-                ):
-                    report.tailored_resume = tailor_resume_map_reduce(
-                        tailor_client,
-                        resume_text,
-                        gap_report_str,
-                        granularity=granularity,
-                        prompt_focus=prompt_focus,
-                        custom_prompt=custom_prompt,
-                        jd_context=truncate_text(
-                            filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
-                        ),
-                        parallel=False,
-                    )
-                else:
-                    report.tailored_resume = tailor_resume(
-                        tailor_client,
-                        resume_text,
-                        gap_report_str,
-                        granularity=granularity,
-                        prompt_focus=prompt_focus,
-                        custom_prompt=custom_prompt,
-                    )
+                try:
+                    if _bullet_editor_enabled(granularity) and _is_local_llm(
+                        config.provider, config.base_url
+                    ):
+                        report.tailored_resume = tailor_resume_map_reduce(
+                            tailor_client,
+                            resume_text,
+                            gap_report_str,
+                            granularity=granularity,
+                            prompt_focus=prompt_focus,
+                            custom_prompt=custom_prompt,
+                            jd_context=truncate_text(
+                                filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
+                            ),
+                            parallel=False,
+                        )
+                    else:
+                        report.tailored_resume = tailor_resume(
+                            tailor_client,
+                            resume_text,
+                            gap_report_str,
+                            granularity=granularity,
+                            prompt_focus=prompt_focus,
+                            custom_prompt=custom_prompt,
+                        )
+                except LLMResponseError as exc:
+                    if getattr(exc, "code", "") in _DEGRADED_EDITOR_CODES:
+                        logger.warning(
+                            "tailor degraded, continuing with empty resume: %s", exc
+                        )
+                        report.tailored_resume = TailoredResume()
+                        report.tailor_degraded = True
+                    else:
+                        raise
+            # editor 与 gap 同款降级：schema/parse/empty/timeout 反复失败时
+            # 产出空改写并置 tailor_degraded，任务继续而非整体 fail——诊断/
+            # 画像/缺口照常保存（重试改写有 precomputed_diagnosis + profiler
+            # 缓存兜底），用户等了整个管线不该因最后一个阶段颗粒无收。
 
             # Diffs from tailor_resume replace the old legacy alignment diffs
             report.diffs = report.tailored_resume.diffs

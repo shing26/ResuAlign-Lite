@@ -14,6 +14,7 @@
     "/api/jobs/{job_id}/workbench/rewrite",
     "/api/kanban/bulk-status",
     "/api/llm/nodes",
+    "/api/llm/nodes/test-all",
     "/api/llm/nodes/{node_id}",
     "/api/llm/nodes/{node_id}/activate",
     "/api/llm/nodes/{node_id}/test",
@@ -33,6 +34,7 @@
   ],
   "operations": [],
   "schemas": [
+    "AlignmentQuality",
     "AutomationRuleCreateRequest",
     "AutomationRuleUpdateRequest",
     "DashboardKPI",

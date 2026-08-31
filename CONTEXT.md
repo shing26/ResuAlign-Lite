@@ -129,6 +129,19 @@ Structured comparison between Master Resume and JD Profile. Lists missing keywor
 **Tailored Resume**
 A version of the Master Resume rewritten for a specific JD. Every change traces back to a source sentence in the Master Resume. No invented content.
 
+**采纳率 (Adoption Ratio)**
+近 7 天窗口内，保存定稿时被标记为 accepted 的 diff 数 / 定稿时的 diff 总数
+（`alignment_metrics` 按 tenant+日聚合）。零分母如实显示「—」，不伪装成
+100%。它度量"模型建议里有多少被用户认为值得保留"，是对齐质量的核心信号。
+_Avoid_: 把 runs（运行次数）当作分母；把单个岗位的历史采纳状态当作窗口采纳率。
+
+**投递结果归因 (Application Result)**
+用户对一份已投递定稿的结局标注：过筛通过 (screen_pass) / 简历挂筛
+(ats_reject) / 暂无回音 (no_response) / 其他 (other)。可选字段，不改变
+投递状态机的任何行为（ADR-0027 时间线照旧）；它是验证"对齐是否有效"
+（对齐 vs 未对齐简历通过率）的原始数据。
+_Avoid_: 把归因当作第六种投递状态；用归因自动推导 Alignment 或看板列。
+
 **Eval Score**
 Quality metric from LLM-as-Judge: how well the tailored resume matches the JD, whether any hallucination was detected, and what fraction of gaps were addressed.
 UI 中称「对齐评估」，区别于「投递评估」（Worth Appraisal）。默认关闭，可在设置页设全局默认、工作台按次勾选。

@@ -480,3 +480,89 @@ def test_noop_diffs_filtered_into_invalid():
     )
     assert len(persisted["invalid_diffs"]) == 1
     assert persisted["invalid_diffs"][0]["original"] == "Python developer."
+
+
+def test_save_alignment_hint_field_roundtrip(tmp_path):
+    """tailor 降级时 last_alignment_error 作为 succeeded 运行的提示字段
+    持久化；正常成功用 None 清掉旧提示。"""
+    store = JobLibraryStore(db_path=tmp_path / "jobs.db")
+    job_id = store.create_job("t1", title="提示字段", jd_text="JD")["job_id"]
+    store.update_job("t1", job_id, alignment_status="queued")
+
+    store.save_alignment(
+        "t1", job_id, alignment_status="succeeded",
+        last_alignment_error="改写阶段多次失败，本轮只产出诊断与缺口分析",
+    )
+    degraded = store.get_job("t1", job_id)
+    assert degraded["alignment_status"] == "succeeded"
+    assert "改写阶段多次失败" in (degraded["last_alignment_error"] or "")
+
+    store.save_alignment("t1", job_id, alignment_status="succeeded")
+    retried = store.get_job("t1", job_id)
+    assert retried["last_alignment_error"] is None
+
+
+def test_alignment_metrics_run_and_adoption(tmp_path):
+    """度量表：run 计数、定稿埋点（saves + 采纳分子分母）、窗口聚合与
+    零分母语义（adoption_ratio=None 而非伪装 100%）。"""
+    store = JobLibraryStore(db_path=tmp_path / "jobs.db")
+    job_id = store.create_job("t1", title="度量", jd_text="JD")["job_id"]
+
+    store.record_alignment_run("t1")
+    store.record_alignment_run("t1")
+    store.update_job("t1", job_id, alignment_status="queued")
+    store.save_alignment("t1", job_id, alignment_status="succeeded")
+    # 定稿：8 条 diffs 采纳 3 条（provenance_state 由 accepted_diff_ids 驱动）
+    diffs = [
+        {
+            "diff_id": f"d{i}",
+            "type": "modify",
+            "original": "x",
+            "provenance_state": "verified",
+        }
+        for i in range(8)
+    ]
+    store.save_alignment("t1", job_id, diffs=diffs, alignment_status="succeeded")
+    store.save_final_draft(
+        "t1", job_id, "定稿内容", accepted_diff_ids=["d0", "d3", "d7"]
+    )
+
+    summary = store.alignment_quality_summary("t1")
+    assert summary["runs"] == 2
+    assert summary["saves"] == 1
+    assert summary["diffs_total"] == 8
+    assert summary["diffs_accepted"] == 3
+    assert summary["adoption_ratio"] == 0.375
+
+    empty = store.alignment_quality_summary("no-such-tenant")
+    assert empty["saves"] == 0
+    assert empty["adoption_ratio"] is None
+
+
+def test_application_result_roundtrip_and_validation(tmp_path):
+    """归因：合法枚举写入并透出、非法值 422、空串清除（clear-on-empty）。"""
+    from resualign.job_library import APPLICATION_RESULTS, UserStoreError
+
+    assert set(APPLICATION_RESULTS) == {
+        "screen_pass",
+        "ats_reject",
+        "no_response",
+        "other",
+    }
+    store = JobLibraryStore(db_path=tmp_path / "jobs.db")
+    job_id = store.create_job("t1", title="归因", jd_text="JD")["job_id"]
+
+    updated = store.update_job("t1", job_id, application_result="screen_pass")
+    assert updated["application_result"] == "screen_pass"
+    row = store.get_job("t1", job_id)
+    assert row["application_result"] == "screen_pass"
+
+    with pytest.raises(UserStoreError):
+        store.update_job("t1", job_id, application_result="hired_ceo")
+
+    store.update_job("t1", job_id, application_result="")
+    assert store.get_job("t1", job_id)["application_result"] is None
+    # None 不变更
+    store.update_job("t1", job_id, application_result="ats_reject")
+    store.update_job("t1", job_id, application_result=None)
+    assert store.get_job("t1", job_id)["application_result"] == "ats_reject"

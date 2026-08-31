@@ -236,3 +236,87 @@ def test_ollama_schema_rejection_falls_back_to_json_mode(httpx_mock):
     result = ollama_client.chat_structured("system", "user", AnalysisSchema)
     assert result["score"] == 80
     assert len(httpx_mock.get_requests()) == 2
+
+
+def test_provider_schema_doubles_tokens_on_truncation(httpx_mock):
+    """Grammar-constrained decoding hits max_tokens mid-JSON on small local
+    models (observed: editor role, qwen2.5:3b, 3072 budget). The provider
+    path must double the budget like chat_json does instead of failing."""
+    from resualign.schema_registry import AnalysisSchema
+
+    client = OpenAIClient(
+        ResuAlignConfig(
+            provider="ollama",
+            base_url="http://localhost:11434/v1",
+            model="qwen2.5:3b",
+        ),
+        max_tokens=3072,
+        token_cap=6144,
+    )
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {
+                    "message": {"content": "sorry, I cannot answer"},
+                    "finish_reason": "length",
+                }
+            ]
+        }
+    )
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {
+                    "message": {"content": '{"score": 75, "skills": ["SQL"]}'},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+    )
+    result = client.chat_structured("system", "user", AnalysisSchema)
+    assert result["score"] == 75
+    bodies = [json.loads(r.read()) for r in httpx_mock.get_requests()]
+    assert bodies[0]["max_tokens"] == 3072
+    assert bodies[1]["max_tokens"] == 6144
+
+
+def test_provider_schema_parse_exhaustion_falls_back_to_json_mode(httpx_mock):
+    """When grammar-constrained attempts stay unparseable, degrade to the
+    forgiving JSON mode (repair parser + feedback retries) instead of
+    raising — the pipeline run keeps going."""
+    from resualign.schema_registry import AnalysisSchema
+
+    client = OpenAIClient(
+        ResuAlignConfig(
+            provider="ollama",
+            base_url="http://localhost:11434/v1",
+            model="qwen2.5:3b",
+        )
+    )
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {"message": {"content": "totally not json"}, "finish_reason": "stop"}
+            ]
+        }
+    )
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {"message": {"content": "still not json"}, "finish_reason": "stop"}
+            ]
+        }
+    )
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {"message": {"content": '{"score": 66, "skills": ["Go"]}'}}
+            ]
+        }
+    )
+    result = client.chat_structured("system", "user", AnalysisSchema)
+    assert result["score"] == 66
+    bodies = [json.loads(r.read()) for r in httpx_mock.get_requests()]
+    # 前两次是 json_schema 约束，降级后回退到宽松的 json_object 模式
+    assert bodies[0]["response_format"]["type"] == "json_schema"
+    assert bodies[-1]["response_format"]["type"] == "json_object"

@@ -9,6 +9,7 @@ the SQLite ``llm_nodes`` table is authoritative.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -158,6 +159,31 @@ def activate_llm_node(
     return _public_node(node)
 
 
+def _probe_and_record(
+    tenant_id: str, node: dict[str, Any]
+) -> dict[str, Any]:
+    """Probe one node and persist the outcome for the health badge."""
+    result = probe_llm_connection(
+        provider=node["provider"],
+        api_key=node.get("api_key"),
+        model=node["model"],
+        base_url=node.get("base_url"),
+        timeout=_NODE_TEST_TIMEOUT,
+    )
+    try:
+        _nodes_store().record_node_health(
+            tenant_id,
+            node["node_id"],
+            str(result.get("status") or ("ok" if result.get("ok") else "unknown")),
+            result.get("latency_ms"),
+        )
+    except Exception:  # pragma: no cover - telemetry must never fail the test
+        logging.getLogger(__name__).exception(
+            "Failed to persist node health for %s", node.get("node_id")
+        )
+    return result
+
+
 @router.post("/api/llm/nodes/{node_id}/test")
 def test_llm_node(
     node_id: str, user: dict[str, Any] = Depends(get_current_user)
@@ -165,13 +191,32 @@ def test_llm_node(
     """Probe the node's provider with a minimal one-token chat request.
 
     Returns ``{ok, status, latency_ms, message}`` with a readable failure
-    reason (auth, model missing, timeout, network).
+    reason (auth, model missing, timeout, network). The outcome is persisted
+    so the settings page badge and the workbench failure banner can show
+    staleness-aware health without re-probing.
     """
     node = _get_node_or_404(user["user_id"], node_id)
-    return probe_llm_connection(
-        provider=node["provider"],
-        api_key=node.get("api_key"),
-        model=node["model"],
-        base_url=node.get("base_url"),
-        timeout=_NODE_TEST_TIMEOUT,
-    )
+    return _probe_and_record(user["user_id"], node)
+
+
+@router.post("/api/llm/nodes/test-all")
+def test_all_llm_nodes(user: dict[str, Any] = Depends(get_current_user)):
+    """Probe every node of the tenant, worst-case ~10s per node serially.
+
+    Node counts are single digits in practice, so serial probing keeps the
+    probe semantics identical to the single-node test (no concurrent
+    one-token requests to a struggling provider).
+    """
+    tenant_id = user["user_id"]
+    results = []
+    for node in _nodes_store().list_nodes(tenant_id):
+        result = _probe_and_record(tenant_id, node)
+        results.append(
+            {
+                "node_id": node["node_id"],
+                "name": node["name"],
+                "is_active": bool(node.get("is_active")),
+                **result,
+            }
+        )
+    return {"results": results}

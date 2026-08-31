@@ -31,7 +31,10 @@ CREATE TABLE IF NOT EXISTS llm_nodes (
     model TEXT,
     is_active INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL,
-    updated_at REAL NOT NULL
+    updated_at REAL NOT NULL,
+    last_test_status TEXT,
+    last_test_latency_ms REAL,
+    last_test_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_llm_nodes_tenant
     ON llm_nodes(tenant_id);
@@ -51,6 +54,9 @@ _NODE_FIELDS = (
     "is_active",
     "created_at",
     "updated_at",
+    "last_test_status",
+    "last_test_latency_ms",
+    "last_test_at",
 )
 
 _EDITABLE_FIELDS = ("name", "provider", "base_url", "api_key", "model", "is_active")
@@ -93,6 +99,14 @@ class LLMNodeStore(_SqliteStore):
             "tenant_id TEXT NOT NULL, role TEXT NOT NULL, "
             "node_id TEXT NOT NULL, updated_at REAL NOT NULL, "
             "PRIMARY KEY (tenant_id, role));",
+        ),
+        # 3: 节点健康——test 端点结果持久化，供设置页徽标与失败横幅
+        # 「切节点重跑」展示（此前测试结果仅存前端内存，刷新即丢）。
+        (
+            3,
+            "ALTER TABLE llm_nodes ADD COLUMN last_test_status TEXT; "
+            "ALTER TABLE llm_nodes ADD COLUMN last_test_latency_ms REAL; "
+            "ALTER TABLE llm_nodes ADD COLUMN last_test_at REAL;",
         ),
     )
 
@@ -235,6 +249,29 @@ class LLMNodeStore(_SqliteStore):
                     (tenant_id,),
                 ).fetchone()
         return self._row_to_dict(row) if row is not None else None
+
+    def record_node_health(
+        self,
+        tenant_id: str,
+        node_id: str,
+        status: str,
+        latency_ms: float | None,
+    ) -> None:
+        """Persist a connectivity-test outcome for the health badge.
+
+        Best-effort telemetry: a failed write must never fail the test
+        request itself.
+        """
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE llm_nodes SET last_test_status = ?, "
+                    "last_test_latency_ms = ?, last_test_at = ?, "
+                    "updated_at = updated_at "
+                    "WHERE tenant_id = ? AND node_id = ?",
+                    (status, latency_ms, time.time(), tenant_id, node_id),
+                )
 
     def count_nodes(self, tenant_id: str) -> int:
         with self._lock:
@@ -466,4 +503,7 @@ class LLMNodeStore(_SqliteStore):
             "is_active": bool(row["is_active"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "last_test_status": row["last_test_status"],
+            "last_test_latency_ms": row["last_test_latency_ms"],
+            "last_test_at": row["last_test_at"],
         }

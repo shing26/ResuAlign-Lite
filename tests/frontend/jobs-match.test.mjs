@@ -2,10 +2,27 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Window } from "happy-dom";
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import {
+  APPLICATION_RESULT_LABELS,
   boardCard,
+  jobTimelineFormHtml,
   renderBoardCard,
 } from "../../src/resualign/static/app/format.js";
+
+const appDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "src/resualign/static/app",
+);
+
+function read(name) {
+  return readFileSync(join(appDir, name), "utf8");
+}
 
 function bodyFrom(html) {
   const window = new Window();
@@ -302,4 +319,68 @@ test("renderBoardCard succeeded with diffs shows no align button", () => {
     null,
     "succeeded with diffs must have NO align button on renderBoardCard",
   );
+});
+
+test("boardCard distinguishes degraded tailor from plain empty diffs", () => {
+  const degraded = bodyFrom(
+    boardCard({
+      ...DETAIL_JOB,
+      alignment_status: "succeeded",
+      diffs: [],
+      last_alignment_error: "改写阶段多次失败，本轮只产出诊断与缺口分析",
+    }),
+  );
+  const amberTexts = (body) =>
+    [...body.querySelectorAll(".board-card__tags .badge-amber")].map(
+      (el) => el.textContent,
+    );
+  assert.ok(
+    amberTexts(degraded).some((text) => /诊断完成 · 改写未产出/.test(text)),
+    `degraded run shows the degraded badge, got: ${amberTexts(degraded)}`,
+  );
+
+  const plain = bodyFrom(
+    boardCard({ ...DETAIL_JOB, alignment_status: "succeeded", diffs: [] }),
+  );
+  assert.ok(
+    amberTexts(plain).some((text) => /无建议/.test(text)),
+    "plain empty run still shows the generic badge",
+  );
+});
+
+
+test("boardCard renders application result badge in timeline", () => {
+  const body = bodyFrom(
+    boardCard({ ...DETAIL_JOB, application_result: "screen_pass" }),
+  );
+  const badge = body.querySelector('.board-card__timeline .badge[title="投递结果归因"]');
+  assert.ok(badge, "result badge renders in timeline");
+  assert.equal(badge.textContent, APPLICATION_RESULT_LABELS.screen_pass);
+
+  const none = bodyFrom(boardCard(DETAIL_JOB));
+  assert.equal(
+    none.querySelector('.board-card__timeline .badge[title="投递结果归因"]'),
+    null,
+    "no badge without attribution",
+  );
+});
+
+test("jobTimelineFormHtml offers attribution select with current value", () => {
+  const body = bodyFrom(jobTimelineFormHtml({ ...DETAIL_JOB, application_result: "ats_reject" }, []));
+  const select = body.querySelector('select[name="application_result"]');
+  assert.ok(select, "attribution select renders in detail form");
+  const selected = [...select.options].find((o) => o.hasAttribute("selected"));
+  assert.equal(selected.value, "ats_reject");
+  assert.equal(selected.textContent, APPLICATION_RESULT_LABELS.ats_reject);
+  assert.ok(
+    [...select.options].some((o) => o.textContent === "暂无回音"),
+    "all four attribution labels present",
+  );
+});
+
+test("dashboard source contract wires quality adoption card", () => {
+  const source = read("dashboard-view.js");
+  assert.match(source, /payload\.quality/, "dashboard consumes quality payload");
+  assert.match(source, /采纳率/, "adoption card exists");
+  assert.match(source, /data-kpi="quality"/, "quality card is tagged");
 });

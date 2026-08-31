@@ -119,6 +119,7 @@ function workbenchAlignmentErrorBanner(alignment) {
     `<strong>对齐失败 · ${esc(ALIGN_FAILURE_KINDS[kind] || "任务失败")}</strong>` +
     `<span>${esc(errorText)}</span>` +
     (meta.length ? `<span class="align-error-meta">${esc(meta.join(" · "))}</span>` : "") +
+    `<button class="btn btn-outline btn-sm" type="button" data-action="show-node-picker">换节点重试</button>` +
     `</div>`
   );
 }
@@ -266,6 +267,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
         </div>
       </div>
       ${workbenchAlignmentErrorBanner(alignment)}
+      <div data-wb-node-picker></div>
       ${workbenchAlignmentNoticeBanner(alignment)}
       ${workbenchGuideHtml(job, hasGuideDraft)}
       <div class="wb-grid" data-split-layout>
