@@ -6,7 +6,7 @@
  * paste-JD/URL flow is unchanged — when suggestions are hidden, Enter still
  * submits the form and creates an analysis session. */
 
-import { $, $$, api, esc, toast } from "./events.js";
+import { $, $$, api, esc, state, toast } from "./events.js";
 import { isJdUrl, previewFor, renderJobSuggestionsHtml } from "./format.js";
 
 let jobsCache = null;
@@ -214,6 +214,69 @@ export function initializeCommandPanel() {
       openCommandPanel();
     }
   });
+}
+
+/* 快速评估：粘贴 JD → 规则打分（零 LLM，秒出）。结果渲染在 palette 的
+ * preview 区，附「一键入库并对齐」CTA（main.js 的 quick-eval-adopt）。
+ * 状态存 state.quickEval，CTA 从那里取 JD 与简历 id（JD 文本不放 data 属性）。 */
+export async function runQuickEval() {
+  const input = $("[data-command-input]");
+  const jdText = input ? String(input.value || "").trim() : "";
+  if (jdText.length < 30) {
+    toast("JD 文本太短，至少 30 个字符", "error");
+    return;
+  }
+  const preview = $("[data-command-preview]");
+  if (preview) {
+    preview.innerHTML =
+      '<div class="form-success" role="status">规则评估中（零 LLM，秒出）…</div>';
+  }
+  try {
+    let resumeId = state.quickEvalResumeId || null;
+    if (!resumeId) {
+      const resumes = await api("/api/master-resumes");
+      const list = Array.isArray(resumes) ? resumes : [];
+      resumeId = list.length ? list[0].resume_id : null;
+      state.quickEvalResumeId = resumeId;
+    }
+    const body = await api("/api/quick-eval", {
+      method: "POST",
+      body: JSON.stringify({ jd_text: jdText, master_resume_id: resumeId }),
+    });
+    if (body.existing_job_id) {
+      state.quickEval = { jd_text: jdText, master_resume_id: resumeId, existing_job_id: body.existing_job_id };
+      if (preview) {
+        preview.innerHTML =
+          '<div class="form-error" role="alert">该 JD 已在岗位库中。</div>' +
+          '<a class="btn btn-outline btn-sm" href="#/workspace/' + encodeURIComponent(body.existing_job_id) + '" data-action="close-command-panel">查看该岗位 →</a>';
+      }
+      return;
+    }
+    state.quickEval = { jd_text: jdText, master_resume_id: resumeId, existing_job_id: null };
+    const ev = body.evaluation || {};
+    const coverage = ev.keyword_coverage;
+    const coverageText = coverage
+      ? `关键词覆盖 ${coverage.matched}/${coverage.required}` +
+        (coverage.missing && coverage.missing.length ? `（缺 ${esc(coverage.missing.slice(0, 3).join("、"))}）` : "")
+      : "JD 未提取到必备技能";
+    const missing = ev.missing_top || [];
+    if (preview) {
+      preview.innerHTML = `
+        <div class="form-success" role="status">
+          <strong>规则匹配分：${esc(ev.total == null ? "—" : ev.total)} / 100</strong>
+          <span>${esc(ev.recommendation || "")}</span>
+          <span>${esc(coverageText)}</span>
+          ${missing.length ? `<span>主要缺口：${esc(missing.join("、"))}</span>` : ""}
+          <span class="small muted">规则打分仅供参考；深度对齐（STAR 改写 + 评估）请入库后在工作台运行。</span>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" data-action="quick-eval-adopt">值得投？一键入库并对齐</button>`;
+    }
+  } catch (error) {
+    if (preview) {
+      preview.innerHTML = `<div class="form-error" role="alert">${esc(error.message)}</div>`;
+    }
+    toast(error.message, "error");
+  }
 }
 
 export async function confirmCommandPanel() {

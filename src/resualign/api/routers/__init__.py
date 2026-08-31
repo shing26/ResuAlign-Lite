@@ -8,6 +8,7 @@ from . import (
     kanban,
     nodes,
     optimize,
+    quick_eval,
     resumes,
     rules,
     settings,
@@ -25,4 +26,5 @@ router.include_router(resumes.router)
 router.include_router(settings.router)
 router.include_router(nodes.router)
 router.include_router(optimize.router)
+router.include_router(quick_eval.router)
 router.include_router(workspace.router)
