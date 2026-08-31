@@ -136,8 +136,9 @@ def test_job_library_migrates_legacy_db_and_keeps_data(tmp_path):
     # Every historical ALTER recorded exactly once. De-bloat removed the
     # blocker_queue (29), reminder/refresh (31-34, 36, 40, 41) migrations;
     # the surviving set is 1..28 plus {30, 35, 37, 38, 39, 42} (42: last_alignment_error, Phase 3)
-    # and {43} (alignment_metrics + application_result, quality attribution).
-    assert _migrated_versions(store) == set(range(1, 29)) | {30, 35, 37, 38, 39, 42, 43}
+    # {43} (alignment_metrics + application_result, quality attribution) and
+    # {44} (deadline) follow.
+    assert _migrated_versions(store) == set(range(1, 29)) | {30, 35, 37, 38, 39, 42, 43, 44}
 
 
 def test_upgrade_keeps_historical_alignment_artifacts(tmp_path):
@@ -248,7 +249,7 @@ def test_fresh_job_library_db_records_migrations_as_applied(tmp_path):
         tenant_id="t1", title="Fresh", jd_text="Python backend."
     )
     assert job["alignment_status"] == "idle"
-    assert _migrated_versions(store) == set(range(1, 29)) | {30, 35, 37, 38, 39, 42, 43}
+    assert _migrated_versions(store) == set(range(1, 29)) | {30, 35, 37, 38, 39, 42, 43, 44}
 
 
 def test_migrated_legacy_db_supports_workbench_columns(tmp_path):

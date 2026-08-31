@@ -93,6 +93,8 @@ class JobUpdateRequest(BaseModel):
     # 投递结果归因（screen_pass/ats_reject/no_response/other）；枚举校验在
     # store 层（APPLICATION_RESULTS），空串按 clear-on-empty 清除。
     application_result: str | None = None
+    # 岗位截止日期（YYYY-MM-DD）；空串按 clear-on-empty 清除。
+    deadline: str | None = None
 
 class BulkStatusRequest(BaseModel):
     job_ids: list[str]
@@ -383,6 +385,52 @@ class AlignmentQuality(BaseModel):
     diffs_total: int = 0
     diffs_accepted: int = 0
     adoption_ratio: float | None = None
+
+
+class ReviewJobCard(BaseModel):
+    """复盘行动清单里的岗位瘦卡（不携带 JD 全文）。"""
+
+    job_id: str
+    title: str
+    company: str | None = None
+    status: str = "draft"
+    alignment_status: str = "idle"
+    application_result: str | None = None
+    next_step: str | None = None
+    next_step_due_at: str | None = None
+    deadline: str | None = None
+
+
+class ReviewAttribution(BaseModel):
+    """投递结果归因对比：对齐 vs 未对齐的过筛率。
+
+    任一组样本 < min_sample 时对应比率为 None——小样本不展示比率，
+    只展示计数（避免 1/1=100% 的误导）。
+    """
+
+    min_sample: int = 3
+    aligned_total: int = 0
+    aligned_pass: int = 0
+    aligned_pass_rate: float | None = None
+    unaligned_total: int = 0
+    unaligned_pass: int = 0
+    unaligned_pass_rate: float | None = None
+
+
+class ReviewActions(BaseModel):
+    overdue_next_steps: list[ReviewJobCard] = Field(default_factory=list)
+    stale_jobs: list[ReviewJobCard] = Field(default_factory=list)
+    due_soon: list[ReviewJobCard] = Field(default_factory=list)
+
+
+class ReviewResponse(BaseModel):
+    """Aggregated data for GET /api/review（每周投递复盘）。"""
+
+    generated_at: str
+    week_pace: list[dict[str, Any]] = Field(default_factory=list)
+    stage_distribution: dict[str, int] = Field(default_factory=dict)
+    actions: ReviewActions = Field(default_factory=ReviewActions)
+    attribution: ReviewAttribution = Field(default_factory=ReviewAttribution)
 
 
 class DashboardResponse(BaseModel):

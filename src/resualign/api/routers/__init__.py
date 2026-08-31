@@ -9,6 +9,7 @@ from . import (
     nodes,
     optimize,
     resumes,
+    review,
     rules,
     settings,
     workspace,
@@ -24,5 +25,6 @@ router.include_router(auth.router)
 router.include_router(resumes.router)
 router.include_router(settings.router)
 router.include_router(nodes.router)
+router.include_router(review.router)
 router.include_router(optimize.router)
 router.include_router(workspace.router)

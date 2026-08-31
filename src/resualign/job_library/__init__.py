@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS library_jobs (
     rejected_at TEXT,
     next_step_due_at TEXT,
     application_result TEXT,
+    deadline TEXT,
     interview_stage TEXT,
     match_stale INTEGER NOT NULL DEFAULT 0,
     workbench_job_id TEXT,
@@ -313,6 +314,12 @@ class JobLibraryStore(_SqliteStore):
             "diffs_accepted INTEGER NOT NULL DEFAULT 0, "
             "updated_at REAL NOT NULL, PRIMARY KEY (tenant_id, metric_date)); "
             "ALTER TABLE library_jobs ADD COLUMN application_result TEXT;",
+        ),
+        # 44: 岗位截止日期（校招生死线）。DATE 文本列，clear-on-empty 与
+        # next_step_due_at 一致；复盘页与看板「近 7 天截止」筛选消费。
+        (
+            44,
+            "ALTER TABLE library_jobs ADD COLUMN deadline TEXT;",
         ),
     )
 
@@ -855,6 +862,7 @@ class JobLibraryStore(_SqliteStore):
         allowed_seniorities: Sequence[str] | None = None,
         last_alignment_error: str | None = None,
         application_result: str | None = None,
+        deadline: str | None = None,
     ) -> Optional[dict[str, Any]]:
         """Update editable fields. None-valued fields are left unchanged.
 
@@ -1068,6 +1076,12 @@ class JobLibraryStore(_SqliteStore):
             else:
                 sets.append("application_result = ?")
                 values.append(application_result)
+        if deadline is not None:
+            if deadline == "":
+                sets.append("deadline = NULL")
+            else:
+                sets.append("deadline = ?")
+                values.append(deadline)
         if match_stale is not None:
             sets.append("match_stale = ?")
             values.append(match_stale)
@@ -1832,6 +1846,7 @@ class JobLibraryStore(_SqliteStore):
             "next_step_due_at": row["next_step_due_at"] or None,
             "interview_stage": row["interview_stage"] or None,
             "application_result": row["application_result"] or None,
+            "deadline": row["deadline"] or None,
             "match_stale": bool(row["match_stale"]),
             "workbench_job_id": row["workbench_job_id"],
             "workbench_resume_id": row["workbench_resume_id"],
