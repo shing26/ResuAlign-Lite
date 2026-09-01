@@ -1,10 +1,10 @@
 # ResuAlign 求职工作台
 
 ResuAlign 是一个**本地优先**的求职工作台：把简历诊断、岗位库管理、单岗位
-对齐精修和投递闭环放在一个 FastAPI + Web UI 里。核心引擎与前端解耦——
+对齐精修和投递闭环放进一个 FastAPI + Web UI。核心引擎与前端解耦——
 CLI 和 Web 共用同一套流水线；所有数据落在本地 SQLite，不依赖外部服务。
 
-核心闭环：**岗位库 → 工作台对齐 → 记录投递 → 安排跟进**。
+核心闭环：**岗位库 → 工作台对齐 → 记录投递 → 每周复盘**。
 
 防编造是硬约束：每条改写建议都携带指向主简历原文的 provenance；模型只能
 改写/重排/强调已有事实，缺来源的建议会被 provenance 硬门禁拦截并标记
@@ -12,23 +12,42 @@ CLI 和 Web 共用同一套流水线；所有数据落在本地 SQLite，不依�
 
 ## 功能总览
 
-- **驾驶舱**：KPI 总览（简历/岗位/对齐进度）、技能缺口排行（来自真实岗位
-  JD 聚合）、快速继续最近任务。
+- **驾驶舱**：KPI 总览（简历/岗位/对齐进度/建议采纳率）、技能缺口排行
+  （来自真实岗位 JD 聚合）、快速继续最近任务。
 - **简历中心**：主简历列表与单份档案；独立诊断（评分/技能/问题/建议）、
-  版本历史、导出 Markdown，刷新后可恢复最近一次诊断。`#/resumes` 与
-  `#/resume/list` 均进列表，`#/resume/<id>` 进单份档案。
+  版本历史、导出 Markdown；**网申档案**——LLM 抽取姓名/教育/经历等
+  原子字段，供回填扩展使用，可手动编辑，简历变更后自动标记过期。
 - **岗位库**：万能输入（Ctrl+K 粘贴 JD / 链接）、油猴插件一键摄入
   （local-ingest）、自动分类与薪资提取；解析失败可降级为粘贴 JD 并保留
-  来源；看板五列跟踪投递状态（未投递 → 已投递 → 面试中 → Offer → 放弃）。
+  来源；看板五列跟踪投递状态（未投递 → 已投递 → 面试中 → Offer → 放弃），
+  卡片带截止日期提醒与投递结果归因。
 - **工作台**：单岗位对齐调优。对照编辑（逐条 Diff）与 A4 纸预览双视图；
   Live Sheet 定稿实时预览；建议卡带 provenance 徽标与置信度，支持
   采纳/跳过/单条润色/手工编辑；保存定稿、刷新恢复、另存为主简历；
   导出 Markdown / JSON / PDF。
-- **设置**：LLM 多节点管理（主节点 + 备用节点、连通性测试）、按角色
-  超时与成本护栏（每日调用上限，达限返回 429）、分类词表自定义，
+- **投递复盘**：近 7 天投递节奏、阶段分布、三条规则化行动清单
+  （逾期跟进 / 临近截止 / 停滞岗位），以及**对齐有效性对比**——
+  对齐 vs 未对齐简历的过筛率（样本不足时只报计数，不展示误导性比率）。
+- **快速评估**：Ctrl+K 粘贴 JD → 纯规则秒出匹配分与缺口 top3，
+  不建岗位先判断值不值得投；值得投则一键入库并对齐。
+- **网申回填扩展**（`extension/`）：Chrome MV3 扩展读取本地结构化档案，
+  在任意网申页面逐字段点击填充——对齐的成果直接填进网申表单，
+  数据全程本地零上传。
+- **设置**：LLM 多节点管理（主节点 + 备用节点、连通性测试与健康徽标）、
+  按角色超时与成本护栏（每日调用上限，达限返回 429）、分类词表自定义，
   保存即生效。
 - **主题**：默认浅色（Slate + Indigo），支持明暗切换；移动端完整适配
   （底部导航、触控尺寸、抽屉交互）。
+
+## 可靠性设计
+
+- **梯度降级**：改写阶段失败不丢任务——token 预算自动翻倍重试 →
+  降级宽松 JSON mode → 最坏情况产出「诊断完成 · 改写未产出」的部分
+  成功并给一键重试；配额/鉴权类失败仍硬失败。
+- **状态机收口**：看板徽标（idle/queued/running/succeeded/failed）由
+  独立状态机单写点维护，与 worker 注册表实时同步，不再依赖重启兜底。
+- **节点健康**：LLM 节点连通性测试结果持久化，设置页徽标可见；
+  对齐失败横幅可一键切换健康节点重跑。
 
 ## 快速开始（本地）
 
@@ -68,6 +87,21 @@ docker compose up --build
 把服务暴露到局域网/公网前，务必阅读
 [docs/deployment-security.md](docs/deployment-security.md)
 （个人模式匿名访问风险、反向代理 Basic Auth、单进程约束等）。
+
+## 网申回填扩展
+
+```text
+extension/   ← Chrome MV3 扩展，零构建
+```
+
+1. Chrome 打开 `chrome://extensions/`，开启「开发者模式」
+2. 「加载已解压的扩展程序」→ 选择本 `extension/` 目录
+3. 在简历中心为目标简历「生成档案」
+4. 打开任意网申页面，点右下角「回填」：先点击网页输入框，再点侧边栏
+   字段自动填入（React/Vue 受控表单兼容）
+
+数据流：扩展 → background → 本机 ResuAlign 服务，全程不过第三方服务器。
+详见 [extension/README.md](extension/README.md)。
 
 ## 命令行
 
@@ -149,14 +183,17 @@ powershell -File scripts\backup.ps1
 - `POST /api/jobs/local-ingest`：油猴插件本地摄入岗位。
 - `GET /api/jobs/{id}`、`POST /api/analyze`：岗位详情与异步分析任务。
 - `POST /api/master-resumes`、`GET /api/master-resumes/{id}`：主简历 CRUD
-  与版本。
+  与版本；`/profile`：结构化档案（抽取/查看/编辑）。
 - `POST /api/jobs/{id}/workbench`：对齐任务排队；`POST
   /api/jobs/{job_id}/accept`：采纳建议；`POST /api/jobs/{job_id}/final-draft`：
   保存定稿；`POST /api/jobs/{job_id}/exports`：导出（md/json/pdf）。
 - `POST /api/jobs/{id}/reclassify`：重新分类待定岗位；`POST
   /api/jobs/{id}/cancel`：取消排队任务。
 - `GET /api/dashboard`：驾驶舱 KPI 与技能缺口聚合。
-- `GET/PUT /api/settings`、`/api/llm/nodes`：设置与 LLM 节点管理。
+- `GET /api/review`：投递复盘聚合（节奏/阶段分布/行动清单/归因对比）。
+- `POST /api/quick-eval`：粘贴 JD 纯规则快速评估（零 LLM）。
+- `GET/PUT /api/settings`、`/api/llm/nodes`：设置与 LLM 节点管理
+  （含 `test-all` 连通性探测）。
 
 完整契约见 `contracts/openapi-current.json`（或运行时 `/docs`）。
 
@@ -167,7 +204,7 @@ $env:PYTHONPATH = "D:\ResuAlign-Lite\src"
 python -m pytest tests/                                   # 全量单元/契约测试
 python -m pytest --cov=resualign --cov-report=term-missing tests/
 python -m pytest tests/e2e -v --e2e                       # Playwright e2e
-node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs
+node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs tests/extension/*.test.mjs
 
 # 离线确定性基准（无网络，15 用例）
 python benchmarks/run_benchmark.py --offline
@@ -181,15 +218,17 @@ python benchmarks/run_benchmark.py --online
 
 前端回归护栏集中在 `tests/frontend/`：`ux-regression.test.mjs`（导航对比度
 WCAG AA、路由矩阵、硬门禁建议卡渲染契约）与 `css-structure.test.mjs`
-（花括号平衡、关键布局选择器 v3 定义存活、简历网格行高约束）。
-当前基线：**815 个 pytest + 486 个前端 node 测试**（2026-08-31 阶段 E 对齐收口后实测）。
+（花括号平衡、关键布局选择器 v3 定义存活、简历网格行高约束）；
+`tests/extension/` 覆盖回填扩展的纯函数核心（档案平铺、字段匹配、
+受控组件赋值、空框跳转）。
+当前基线：**840 个 pytest + 501 个前端/扩展 node 测试**（2026-09-01 实测）。
 
 ## CI
 
 三阶段（GitHub Actions，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)）：
 
 1. **Stage 1**：ruff 门禁 + 单元/契约测试（并行，85% 覆盖率门槛）+
-   前端 node:test 全量 + ESM import 图检查。
+   前端/扩展 node:test 全量 + ESM import 图检查。
 2. **Stage 2**：延迟/调用次数基准门禁 + 离线基准套件。
 3. **Stage 3**：Phase 20 关键路径 Playwright 冒烟（假 LLM，桌面 + 移动
    双视口，失败自动落盘诊断产物）+ e2e 套件。
@@ -197,8 +236,8 @@ WCAG AA、路由矩阵、硬门禁建议卡渲染契约）与 `css-structure.tes
 ## 文档
 
 - 用户手册：[docs/user-guide.md](docs/user-guide.md)
-- 架构决策：[docs/adr/](docs/adr/)（ADR-0026 v3 shell、ADR-0031 文档润色
-  范式、ADR-0032 LLM 稳定性与流式、ADR-0033 消费者视觉刷新等）
+- 架构决策：[docs/adr/](docs/adr/)（ADR-0026 v3 shell、ADR-0027 投递
+  生命周期单一事实源、ADR-0028 本地摄入与投递快照等）
 - 领域词汇表：[CONTEXT.md](CONTEXT.md)
 - 部署安全：[docs/deployment-security.md](docs/deployment-security.md)
 - 备份恢复：[docs/backup-restore.md](docs/backup-restore.md) ·
