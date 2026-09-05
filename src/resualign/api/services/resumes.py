@@ -99,6 +99,9 @@ _PROFILE_SYSTEM = (
     "你是简历结构化引擎。从主简历 Markdown 中抽取原子字段供网申表单自动填充。"
     "只抽取简历中明确存在的事实，缺失字段留空字符串或空数组，绝不编造。"
     "日期统一为 YYYY-MM 或 YYYY 格式（以简历原文为准）。"
+    "联系方式可能写在同一行并用 ｜ / | / 空格分隔（如「电话 138-xxxx ｜ 邮箱 xx@yy.com」），"
+    "逐项拆出填入 basic 对应字段。工作经历可能以「项目经历」「实习经历」段落呈现——"
+    "有受雇公司属性的条目归 work，其余归 projects。"
 )
 
 
@@ -164,7 +167,11 @@ def extract_resume_profile(user: dict[str, Any], resume_id: str) -> dict[str, An
         "skills": result.get("skills") or [],
         "summary": str(result.get("summary", "")),
     }
-    # 证件号绝不自动抽取（敏感字段，用户在编辑 UI 自行补充）
+    # 证件号绝不自动抽取（敏感字段，用户在编辑 UI 自行补充）。
+    # 缺陷 #2 兜底：LLM 漏抽联系方式时用规则从原文填充空位（LLM 值优先）。
+    from ...local_fallback import enrich_profile_from_text
+
+    profile = enrich_profile_from_text(content, profile)
     saved = api_module._resumes.save_resume_profile(
         tenant_id,
         resume_id,

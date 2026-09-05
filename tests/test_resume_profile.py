@@ -233,3 +233,82 @@ def test_profile_extract_rejects_empty_content():
         headers=_auth_headers(),
     )
     assert r.status_code == 422
+
+
+def test_enrich_profile_from_text_fills_contact_fields():
+    """缺陷 #2 回归：LLM 漏抽 basic 时，规则兜底从简历文本填充电话/邮箱。
+
+    真实格式来源：测试报告里那份「电话 138-0000-0000 ｜ 邮箱 xxx」分隔符行简历。
+    """
+    from resualign.local_fallback import enrich_profile_from_text
+
+    content = """陈振成 后端开发工程师
+电话 138-0000-0000 ｜ 邮箱 chen@example.com
+坐标 上海
+教育经历：广东理工学院 计算机科学与技术 本科 2020-2024
+技能：Java, Spring Boot
+"""
+    profile = {
+        "basic": {"name": "", "phone": "", "email": "", "gender": "",
+                  "birth": "", "location": "", "id_number": ""},
+        "education": [], "work": [], "projects": [], "skills": [], "summary": "",
+    }
+    enriched = enrich_profile_from_text(content, profile)
+    assert enriched["basic"]["phone"] == "138-0000-0000"
+    assert enriched["basic"]["email"] == "chen@example.com"
+    assert enriched["basic"]["location"] == "上海"
+
+
+def test_enrich_profile_never_overwrites_llm_values():
+    """LLM 已抽到的字段不被规则覆盖（规则只兜底空位）。"""
+    from resualign.local_fallback import enrich_profile_from_text
+
+    content = "电话 139-1111-2222 ｜ 邮箱 other@example.com"
+    profile = {
+        "basic": {"name": "已有名字", "phone": "138-0000-0000", "email": "",
+                  "gender": "", "birth": "", "location": "", "id_number": ""},
+        "education": [], "work": [], "projects": [], "skills": [], "summary": "",
+    }
+    enriched = enrich_profile_from_text(content, profile)
+    assert enriched["basic"]["phone"] == "138-0000-0000"  # LLM 值保留
+    assert enriched["basic"]["email"] == "other@example.com"  # 空位被兜底
+    assert enriched["basic"]["name"] == "已有名字"
+
+
+def test_extract_enriches_basic_from_text_when_llm_misses(monkeypatch):
+    """缺陷 #2 端到端：LLM 返回 basic 全空时，落库前被规则兜底填充。"""
+    content = """李四 全栈工程师
+电话 139-1111-2222 ｜ 邮箱 lisi@example.com
+坐标 北京
+技能：Vue, FastAPI
+"""
+    resume = client.post(
+        "/api/master-resumes",
+        json={"title": "兜底简历", "content": content},
+        headers=_auth_headers(),
+    ).json()
+
+    # 模拟 LLM 只抽到 skills，basic 全空（漏抽场景）
+    class _SparseClient:
+        def chat_structured(self, system, user, schema_model, model=None):
+            return {"basic": {}, "education": [], "work": [], "projects": [],
+                    "skills": ["Vue"], "summary": ""}
+
+        def close(self):
+            pass
+
+    import resualign.llm as _llm
+    monkeypatch.setattr(_llm, "OpenAIClient", lambda *a, **kw: _SparseClient())
+    monkeypatch.setattr(
+        "resualign.api.build_config",
+        lambda: type("C", (), {"is_llm_configured": True, "model": "test-m"})(),
+    )
+    r = client.post(
+        f"/api/master-resumes/{resume['resume_id']}/profile/extract",
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 200
+    basic = r.json()["profile"]["data"]["basic"]
+    assert basic["phone"] == "139-1111-2222"
+    assert basic["email"] == "lisi@example.com"
+    assert basic["location"] == "北京"

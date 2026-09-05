@@ -149,3 +149,32 @@ def local_ats_score(resume_text, jd_profile) -> dict:
         for skill in required
     ]
     return {"score": round(score, 3), "details": details}
+
+
+_PHONE_RE = re.compile(r"(?:\+?86[-\s]?)?1[3-9]\d[-\s]?\d{4}[-\s]?\d{4}")
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_LOCATION_RE = re.compile(r"(?:坐标|城市|所在地|base[:：\s]*)\s*([\u4e00-\u9fa5]{2,8})")
+
+
+def enrich_profile_from_text(content: str, profile: dict) -> dict:
+    """Rule-based backstop for the structured profile extraction.
+
+    LLM 抽取漏掉联系方式等高置信字段时（缺陷 #2：basic 全空），从简历
+    原文用正则兜底填充 basic 的空位。规则只填 LLM 未抽到的字段
+    （LLM 值优先，规则不覆盖），且绝不触碰非空字符串以外的判断。
+    """
+    text = content or ""
+    basic = profile.setdefault("basic", {})
+    if not basic.get("phone"):
+        m = _PHONE_RE.search(text)
+        if m:
+            basic["phone"] = m.group(0)
+    if not basic.get("email"):
+        m = _EMAIL_RE.search(text)
+        if m:
+            basic["email"] = m.group(0)
+    if not basic.get("location"):
+        m = _LOCATION_RE.search(text)
+        if m:
+            basic["location"] = m.group(1)
+    return profile
