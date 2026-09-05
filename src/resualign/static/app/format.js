@@ -258,7 +258,7 @@ export function buildDiagnosisMarkdownFrom(diagnosis, title, originalContent = "
 /* Hash routing                                                        */
 /* ------------------------------------------------------------------ */
 
-const ROUTE_NAMES = ["resume", "resumes", "jobs", "workspace", "settings", "dashboard", "today"];
+const ROUTE_NAMES = ["resume", "resumes", "jobs", "workspace", "settings", "dashboard", "review", "today"];
 
 /* UX 走查 P1-A（2026-08-28）：裸 #/resumes 归一化为列表哨兵，与
  * #/resume/list 等价出列表；#/resume/<id> 才进单份档案。 */

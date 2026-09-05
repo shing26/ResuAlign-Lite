@@ -328,3 +328,7 @@ test("jobSelectOptionsHtml escapes job fields and handles empty lists", () => {
   assert.equal(body.querySelectorAll("option").length, 2);
   assert.match(jobSelectOptionsHtml([]), /选择岗位\.\.\./);
 });
+
+test("parseHashValue resolves the review route (PM 反馈串台回归)", () => {
+  assert.equal(parseHashValue("#/review").name, "review");
+});
