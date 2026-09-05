@@ -115,7 +115,8 @@ async function renderResumeDetailView(app, resumeId) {
         <div class="resume-band-actions">
           <span class="status-line" data-resume-band-status><span class="dot dot-success" aria-hidden="true"></span><span data-resume-band-status-text>最近诊断：${diagnosis && Number.isFinite(Number(diagnosis.score)) ? `${esc(diagnosis.score)} 分` : "尚未诊断"}</span></span>
           <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">诊断简历</button>
-          <button class="btn btn-secondary btn-sm" data-action="export-resume-md" data-id="${resume.resume_id}">导出 Markdown</button>
+          <button class="btn btn-secondary btn-sm" data-action="export-resume-md" data-id="${resume.resume_id}" title="导出简历正文 Markdown">导出简历 MD</button>
+          <button class="btn btn-secondary btn-sm" data-action="export-diagnosis" data-id="${resume.resume_id}" hidden title="导出最近一次诊断报告 PDF">导出诊断 PDF</button>
           <button class="btn btn-danger btn-sm" data-action="delete-resume" data-id="${resume.resume_id}">删除</button>
         </div>
       </div>
@@ -126,9 +127,7 @@ async function renderResumeDetailView(app, resumeId) {
             <span class="small muted" data-diagnosis-meta>尚未诊断</span>
           </div>
           <div class="diagnosis-banner__actions">
-            <button class="btn btn-outline btn-sm" data-action="export-diagnosis" hidden>导出 PDF</button>
-            <button class="btn btn-secondary btn-sm" data-action="export-diagnosis-md" hidden>导出 Markdown</button>
-            <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">诊断简历</button>
+            <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">重新诊断</button>
           </div>
         </div>
         <div class="progress-wrap" data-diagnosis-progress hidden>
@@ -173,7 +172,7 @@ async function renderResumeDetailView(app, resumeId) {
               <button class="btn btn-primary btn-sm" data-action="toggle-resume-inline-edit" data-id="${resume.resume_id}">编辑源码</button>
               <button class="btn btn-outline btn-sm" data-action="edit-resume" data-id="${resume.resume_id}">编辑</button>
               <button class="btn btn-outline btn-sm" data-action="copy-resume-md" data-id="${resume.resume_id}">复制 MD</button>
-              <button class="btn btn-secondary btn-sm" data-action="print-resume">导出 PDF</button>
+              <button class="btn btn-secondary btn-sm" data-action="print-resume" title="打开打印视图（可另存为 PDF）">打印预览</button>
             </div>
           </div>
           <div class="resume-preview-bar" data-resume-preview-bar hidden>

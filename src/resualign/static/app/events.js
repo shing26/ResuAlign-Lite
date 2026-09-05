@@ -482,6 +482,10 @@ export function renderDiagnosisIdle() {
       node.hidden = true;
     },
   );
+  const bandExportHide = document.querySelector(
+    ".resume-band [data-action='export-diagnosis']",
+  );
+  if (bandExportHide) bandExportHide.hidden = true;
   const diagnoseBtn = $("[data-action='diagnose-resume']", panel);
   if (diagnoseBtn) {
     diagnoseBtn.disabled = false;
@@ -562,6 +566,11 @@ export function renderDiagnosisResult(snapshot) {
       node.hidden = false;
     },
   );
+  // 导出按钮已收敛到 resume-band（PM 评审去重）：诊断成功时同步点亮。
+  const bandExport = document.querySelector(
+    ".resume-band [data-action='export-diagnosis']",
+  );
+  if (bandExport) bandExport.hidden = false;
   const target = $("[data-diagnosis-result]", panel);
   if (!target) return;
   target.hidden = false;
@@ -619,6 +628,10 @@ export function renderDiagnosisError(snapshot) {
       node.hidden = true;
     },
   );
+  const bandExportHide = document.querySelector(
+    ".resume-band [data-action='export-diagnosis']",
+  );
+  if (bandExportHide) bandExportHide.hidden = true;
   const diagnoseBtn = $("[data-action='diagnose-resume']", panel);
   if (diagnoseBtn) {
     diagnoseBtn.disabled = false;
