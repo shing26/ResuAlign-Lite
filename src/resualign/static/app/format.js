@@ -2630,7 +2630,7 @@ export function skillGapHtml(gaps, onSkillGapUrl) {
         <span class="skill-gap-row__track" aria-hidden="true">
           <span class="skill-gap-row__fill skill-gap-row__fill--${tone}" style="width:${width}%"></span>
         </span>
-        <span class="skill-gap-row__count">${count} 个岗位</span>
+        <span class="skill-gap-row__count">${tone === "hot" ? `需求最多 · ${count} 个岗位` : `${count} 个岗位`}</span>
       </button>`;
     })
     .join("");
