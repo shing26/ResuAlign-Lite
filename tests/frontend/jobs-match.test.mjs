@@ -445,3 +445,12 @@ test("quick-eval is wired through command palette (source contract)", () => {
   const events = read("events.js");
   assert.match(events, /quickEval/, "state carries quickEval");
 });
+
+test("update-master-resume 原地反哺接线（source contract）", () => {
+  const canvas = read("split-canvas.js");
+  assert.match(canvas, /data-action="update-master-resume"/, "button wired in canvas");
+  assert.match(canvas, /workbench_resume_id/, "guarded by pinned resume id");
+  const main = read("main.js");
+  assert.match(main, /"confirm-update-master"/, "confirm action exists");
+  assert.match(main, /版本时间线/, "rollback affordance surfaced in modal copy");
+});

@@ -2299,6 +2299,51 @@ const actions = {
        </div>`,
     );
   },
+  /* 原地反哺（PM 评审提议，#61 期一配套）：把当前定稿写入 pinned 主简历
+   * 的下一个版本（resume_versions +1，版本历史可回滚）。与「另存为」
+   * （新建一份、不改原简历）互补：确信这版比原主简历好时用这个。 */
+  "update-master-resume": () => {
+    const draft = state.wbFinalDraft && state.wbFinalDraft.draft;
+    const job = state.wbJob || {};
+    const resumeId = job.workbench_resume_id || "";
+    if (!draft) {
+      toast("请先保存定稿", "error");
+      return;
+    }
+    if (!resumeId) {
+      toast("当前岗位未绑定主简历，请用「另存为新主简历」", "info");
+      return;
+    }
+    const baseResume = (state.wbResumes || []).find(
+      (resume) => resume.resume_id === resumeId,
+    );
+    const nextVersion = (baseResume ? baseResume.current_version : 0) + 1;
+    showModal(
+      "更新到主简历",
+      `<p>将当前定稿写入「${esc(baseResume ? baseResume.title : "主简历")}」的 v${nextVersion}。</p>
+       <p class="muted small">原版本保留在版本时间线中，可随时回滚；诊断缓存将失效（建议更新后重新诊断）。</p>
+       <div class="actions">
+         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+         <button class="btn btn-primary" type="button" data-action="confirm-update-master">确认更新</button>
+       </div>`,
+    );
+  },
+  "confirm-update-master": async () => {
+    const draft = state.wbFinalDraft && state.wbFinalDraft.draft;
+    const job = state.wbJob || {};
+    const resumeId = job.workbench_resume_id || "";
+    closeModal();
+    if (!draft || !resumeId) {
+      toast("请先保存定稿", "error");
+      return;
+    }
+    const updated = await api(`/api/master-resumes/${encodeURIComponent(resumeId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ content: draft }),
+    });
+    toast(`已更新主简历到 v${updated.current_version}，可在版本时间线回滚`, "success");
+    navigate("resume", resumeId);
+  },
   "confirm-save-as": async () => {
     const draft = state.wbFinalDraft && state.wbFinalDraft.draft;
     const job = state.wbJob || {};
