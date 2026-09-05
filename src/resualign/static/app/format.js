@@ -258,7 +258,7 @@ export function buildDiagnosisMarkdownFrom(diagnosis, title, originalContent = "
 /* Hash routing                                                        */
 /* ------------------------------------------------------------------ */
 
-const ROUTE_NAMES = ["resume", "resumes", "jobs", "workspace", "settings", "dashboard", "today"];
+const ROUTE_NAMES = ["resume", "resumes", "jobs", "workspace", "settings", "dashboard", "review", "today"];
 
 /* UX 走查 P1-A（2026-08-28）：裸 #/resumes 归一化为列表哨兵，与
  * #/resume/list 等价出列表；#/resume/<id> 才进单份档案。 */
@@ -2630,7 +2630,7 @@ export function skillGapHtml(gaps, onSkillGapUrl) {
         <span class="skill-gap-row__track" aria-hidden="true">
           <span class="skill-gap-row__fill skill-gap-row__fill--${tone}" style="width:${width}%"></span>
         </span>
-        <span class="skill-gap-row__count">${count} 个岗位</span>
+        <span class="skill-gap-row__count">${tone === "hot" ? `需求最多 · ${count} 个岗位` : `${count} 个岗位`}</span>
       </button>`;
     })
     .join("");

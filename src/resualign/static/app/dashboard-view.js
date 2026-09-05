@@ -1,7 +1,7 @@
 /* ResuAlign v3 Dashboard: metric strip + quick continue + skill gaps.
    All values are derived from the live API, never hard-coded. */
 import { alignmentStatusLabel, esc, formatDate, jobStatusLabel, state } from "./events.js";
-import { dashboardEmptyGuideHtml, shortenGapPhrase } from "./format.js";
+import { dashboardEmptyGuideHtml, shortenGapPhrase, skillGapHtml } from "./format.js";
 
 function escAttr(value) {
   return esc(String(value ?? ""));
@@ -164,27 +164,19 @@ export async function renderDashboard(container) {
       </div>`;
 
   const gaps = Array.isArray(payload.skill_gaps) ? payload.skill_gaps : [];
-  const maxCount = Math.max(1, ...gaps.map((gap) => Number(gap.count) || 0));
-  const gapHtml = gaps.length
-    ? gaps
-        .map((gap) => {
-          const count = Math.max(0, Number(gap.count) || 0);
-          const pct = Math.round((count / maxCount) * 100);
-          const peak = pct === 100;
-          return `
-            <button type="button" class="skill-row" data-action="goto-skill" data-skill="${escAttr(gap.skill || "")}">
-              <span class="skill-main">
-                <span class="skill-name" title="${escAttr(gap.skill || "")}">${escAttr(shortenGapPhrase(gap.skill || "未命名技能"))}</span>
-                <span class="skill-track"><span class="skill-fill${peak ? "" : " warn"}" style="width:${peak ? 100 : pct}%"></span></span>
-              </span>
-              <span class="skill-count${peak ? " peak" : " warn"}">${peak ? `需求最多 · ${count} 岗` : `${count} 岗`}</span>
-            </button>`;
-        })
-        .join("")
-    : `<div class="muted small" data-skill-gaps>暂无技能缺口数据</div>`;
+  /* PM 评审（2026-09-01）颜色倒挂修复：高缺口=红（急需补），低缺口=中性。
+   * 统一走 format.js skillGapHtml（原内联实现把峰值行标中性、低缺口全红），
+   * 技能名沿用 shortenGapPhrase 截断。 */
+  const normalizedGaps = gaps.map((gap) => ({
+    ...gap,
+    skill: shortenGapPhrase(gap.skill || "未命名技能"),
+  }));
+  const gapHtml = skillGapHtml(normalizedGaps);
 
   const recentJobs = jobs
     .filter((job) => job && job.job_id)
+    /* PM 评审：与快速继续结构性重复——动态里跳过快速继续那条 */
+    .filter((job) => job.job_id !== (quick && quick.job_id))
     .sort(
       (a, b) =>
         (Number(b.updated_at) || 0) - (Number(a.updated_at) || 0),

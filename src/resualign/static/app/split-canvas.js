@@ -662,6 +662,7 @@ function renderFinalDraftPanel(app) {
       <button class="btn btn-secondary btn-sm" data-action="export-final-draft-md">导出 Markdown</button>
       <button class="btn btn-secondary btn-sm" data-action="export-final-draft-json">导出 JSON</button>
       <button class="btn btn-secondary btn-sm" data-action="save-as-new-resume">另存为新主简历</button>
+      ${(job.workbench_resume_id || "").trim() ? '<button class="btn btn-secondary btn-sm" data-action="update-master-resume">更新到主简历</button>' : ""}
     </div>`;
 }
 

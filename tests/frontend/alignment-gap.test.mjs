@@ -212,10 +212,15 @@ test("main.js drops legacy application create/edit/delete actions", () => {
   assert.doesNotMatch(src, /stopApplicationPolling/, "application polling removed");
 });
 
-test("dashboard-view.js labels skill-gap frequency honestly", () => {
-  const src = read("dashboard-view.js");
+test("skill-gap frequency labels live in skillGapHtml honestly", () => {
+  /* 2026-09-01 重构：内联渲染收敛到 format.js skillGapHtml（颜色倒挂修复），
+   * 契约目标随实现迁移；诚实文案语义不变。 */
+  const src = read("format.js");
   assert.match(src, /需求最多/, "peak-frequency skill label");
   assert.doesNotMatch(src, /已覆盖/, "no misleading covered label");
+  const dash = read("dashboard-view.js");
+  assert.match(dash, /skillGapHtml\(/, "dashboard consumes the shared renderer");
+  assert.doesNotMatch(dash, /skill-fill.*warn/, "no legacy inverted tone logic");
 });
 
 test("main.js wires the rerun alignment action", () => {

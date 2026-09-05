@@ -130,6 +130,9 @@ test("skillGapHtml renders a row per gap with proportional widths", () => {
   assert.equal(rows[0].querySelector(".skill-gap-row__fill").style.width, "100%");
   assert.equal(rows[1].querySelector(".skill-gap-row__fill").style.width, "60%");
   assert.equal(rows[2].querySelector(".skill-gap-row__fill").style.width, "20%");
+  // PM 评审颜色倒挂回归：高缺口（峰值）必须 hot（红），低缺口必须 cool（中性）
+  assert.ok(rows[0].querySelector(".skill-gap-row__fill--hot"), "peak gap uses hot tone");
+  assert.ok(rows[2].querySelector(".skill-gap-row__fill--cool"), "low gap uses cool tone");
   assert.match(rows[2].querySelector(".skill-gap-row__count").textContent, /1 个岗位/);
 });
 
@@ -327,4 +330,8 @@ test("jobSelectOptionsHtml escapes job fields and handles empty lists", () => {
   assert.equal(body.querySelector("img"), null);
   assert.equal(body.querySelectorAll("option").length, 2);
   assert.match(jobSelectOptionsHtml([]), /选择岗位\.\.\./);
+});
+
+test("parseHashValue resolves the review route (PM 反馈串台回归)", () => {
+  assert.equal(parseHashValue("#/review").name, "review");
 });
