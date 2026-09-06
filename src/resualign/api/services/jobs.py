@@ -634,9 +634,13 @@ def _queue_job(user: dict[str, Any], payload: dict[str, Any], application_id: st
     config = api_module.build_config()
     # R4 P0-6（03-AIE §③）：入口统一护栏 —— 每日 cap + 同一 job 连续失败熔断
     # （防无脑重试烧额度）。job_ref_key 仅工作台重试携带（library_job_id）。
-    api_module.enforce_llm_task_entry(
+    # P1-1：enforce 内部已原子预留每日 cap 名额，把预留标记带进 payload，
+    # 任务结束时未消费则释放。
+    reserved_slot = api_module.enforce_llm_task_entry(
         user['user_id'], job_ref_key=(payload or {}).get('library_job_id')
     )
+    if reserved_slot:
+        payload['llm_slot_reserved'] = True
     job = api_module._registry.create(payload, config, tenant_id=user['user_id'], application_id=application_id)
     payload['workbench'] = workbench
     api_module._payloads[job.job_id] = (payload, config, application_id, user['user_id'])
@@ -682,6 +686,16 @@ def _run_job_holding_gate(job_id: str) -> None:
             payload, tenant_id, application_id = stored
             config = api_module.build_config()
         _llm_tenant_token = set_llm_tenant(tenant_id)
+        # P1-1（2026-09-06 安全审查）：入队时若预留了每日 cap 名额，记录
+        # 起点调用数；任务结束一次真实 LLM 调用都没发生（缓存全命中或早期
+        # 失败）就释放预留，避免缓存重跑逐步吃光当日额度。发生过调用时
+        # record_call 已消费预留，无需释放。
+        reserved_slot = bool(payload.get('llm_slot_reserved'))
+        calls_before = (
+            api_module._llm_usage.get_usage(tenant_id)['calls']
+            if reserved_slot
+            else None
+        )
         try:
             job = api_module._registry.get(job_id)
             if job is None or job.status != 'queued':
@@ -1055,6 +1069,17 @@ def _run_job_holding_gate(job_id: str) -> None:
                     )
         finally:
             reset_llm_tenant(_llm_tenant_token)
+            if calls_before is not None:
+                try:
+                    calls_after = api_module._llm_usage.get_usage(tenant_id)[
+                        'calls'
+                    ]
+                    if calls_after == calls_before:
+                        api_module._llm_usage.release_call(tenant_id)
+                except Exception:  # noqa: BLE001 - accounting must not break jobs
+                    logger.exception(
+                        'Failed to release daily LLM slot for job %s', job_id
+                    )
             api_module._registry.delete_payload(job_id)
             api_module._payloads.pop(job_id, None)
 

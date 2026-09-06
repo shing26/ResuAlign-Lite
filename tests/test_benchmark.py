@@ -117,6 +117,44 @@ def test_schema_retry_fake_payload_triggers_retry(benchmark_module):
     assert result["diffs"]
 
 
+def test_adversarial_hallucination_blocked_offline(benchmark_module):
+    """P1-2（#77）：offline 对抗用例必须真正检验 provenance 门控——
+    FakeLLM 注入「真锚点 + 编造载荷」，门控必须把编造 diff 拦进
+    invalid_diffs，让 evidence 不含任何 must_not_contain 声明。"""
+    cases = {
+        case["id"]: case
+        for case in benchmark_module.load_cases(CASES_DIR)
+    }
+    config = benchmark_module._build_config("offline")
+    for case_id in (
+        "adversarial-hallucination-claims",
+        "adversarial-hallucination-projects",
+    ):
+        case = cases[case_id]
+        client = benchmark_module.FakeLLMClient()
+        client.hallucinate = True
+        report = benchmark_module.run(
+            config,
+            case["resume_text"],
+            case["jd_text"],
+            llm_client=client,
+        )
+        # 编造载荷必须被内容级门控拦截，留在 invalid_diffs
+        invalid_proposals = [
+            diff.proposed or ""
+            for diff in (report.tailored_resume.invalid_diffs or [])
+        ]
+        assert any(
+            "Stanford" in text for text in invalid_proposals
+        ), f"{case_id}: 编造 diff 未被拦截进 invalid_diffs"
+        # 已验证建议与证据面不得携带任何声明（含「真锚点」的 proposed）
+        evidence = benchmark_module._evidence_from_report(report)
+        for claim in case["must_not_contain"]:
+            assert claim not in evidence, (
+                f"{case_id}: 幻觉声明 {claim!r} 泄漏进 evidence"
+            )
+
+
 def test_keyword_overlap_heuristic(benchmark_module):
     result = benchmark_module.evaluate_goals(
         ["highlight Redis caching for high concurrency"],

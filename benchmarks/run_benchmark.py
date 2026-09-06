@@ -184,18 +184,55 @@ _FAKE_RESPONSES = {
 class FakeLLMClient:
     """Deterministic LLM client for offline benchmark runs."""
 
+    # P1-2（2026-09-06 安全审查）：对抗用例上模拟「会幻觉的模型」——锚点
+    # 逐字真实、载荷编造，让 anti_hallucination 用例真正检验 provenance
+    # 内容级门控，而不是恒真断言。
+    HALLUCINATED_TAIL = (
+        "Led a 20-person team at Stanford, deploying AWS Glue pipelines "
+        "with TensorFlow, and PhD-level Flink research on Google Cloud."
+    )
+
     def __init__(self):
         self.calls = []
         self.call_count = 0
         self.schema_retry = False
         self.schema_retry_attempts = 0
         self.schema_retry_stage = "tailor"
+        self.hallucinate = False
+
+    @classmethod
+    def _fabricated_diff(cls, user: str) -> Optional[dict]:
+        """Build a hallucinated diff anchored to a real resume line.
+
+        The anchor is extracted verbatim from the user prompt (the actual
+        resume bullet), mirroring the audit attack: pass the provenance
+        gate while smuggling fabricated claims into ``proposed``.
+        """
+        resume_part = user.split("Gap Report:")[0]
+        for line in resume_part.splitlines():
+            line = line.strip()
+            if line.startswith("- ") and len(line) > 30:
+                anchor = line[2:].strip()
+                return {
+                    "type": "modify",
+                    "original": anchor,
+                    "proposed": f"{anchor} {cls.HALLUCINATED_TAIL}",
+                    "reason": "adversarial: hallucinated claims",
+                    "confidence": "high",
+                    "provenance": anchor,
+                }
+        return None
 
     def chat_json(self, system: str, user: str, model: Optional[str] = None) -> dict:
         self.calls.append({"system": system, "user": user})
         self.call_count += 1
         stage = self._stage(system)
-        return copy.deepcopy(_FAKE_RESPONSES[stage])
+        result = copy.deepcopy(_FAKE_RESPONSES[stage])
+        if stage == "tailor" and self.hallucinate:
+            fabricated = self._fabricated_diff(user)
+            if fabricated:
+                result.setdefault("diffs", []).append(fabricated)
+        return result
 
     def chat_structured(
         self,
@@ -399,6 +436,7 @@ def _run_case(case: Dict, config: ResuAlignConfig, client) -> Dict:
     jd_texts = list(case.get("batch_jds") or [case["jd_text"]])
     client.schema_retry = bool(case.get("schema_retry"))
     client.schema_retry_attempts = 0
+    client.hallucinate = case.get("scenario") == "anti_hallucination"
     call_start = client.call_count
     diagnosis = case.get("cached_diagnosis")
 
