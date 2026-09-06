@@ -139,6 +139,10 @@ def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
 
 _tenant_run_gates: dict[str, threading.Lock] = {}
 _tenant_gates_lock = threading.Lock()
+# P2（2026-09-06 安全审查 #78）：内存生命周期有界化——gate/payload 缓存
+# 不再无界增长（多租户长驻进程下 _payloads 还含简历文本与 config）。
+_MAX_TENANT_GATES = 4096
+_MAX_CACHED_PAYLOADS = 512
 
 
 def _get_tenant_run_gate(tenant_id: str) -> threading.Lock:
@@ -149,9 +153,34 @@ def _get_tenant_run_gate(tenant_id: str) -> threading.Lock:
     alignments from the same account.
     """
     with _tenant_gates_lock:
-        if tenant_id not in _tenant_run_gates:
-            _tenant_run_gates[tenant_id] = threading.Lock()
-        return _tenant_run_gates[tenant_id]
+        gate = _tenant_run_gates.get(tenant_id)
+        if gate is None:
+            if len(_tenant_run_gates) >= _MAX_TENANT_GATES:
+                # 先清未被持有的 gate（不在运行中的租户可安全重建）。
+                idle = [
+                    key
+                    for key, value in _tenant_run_gates.items()
+                    if not value.locked()
+                ]
+                for key in idle:
+                    _tenant_run_gates.pop(key, None)
+                if len(_tenant_run_gates) >= _MAX_TENANT_GATES:
+                    _tenant_run_gates.pop(next(iter(_tenant_run_gates)), None)
+            gate = _tenant_run_gates.setdefault(tenant_id, threading.Lock())
+        return gate
+
+
+def _prune_payload_cache() -> None:
+    """Bound the in-memory payload cache (P2 #78).
+
+    Completed jobs pop their own entry; queued-backlog or crashed-run
+    entries otherwise grow without bound. Overflow entries fall back to the
+    registry's stored payload on execution (``_run_job`` reads it when the
+    in-memory entry is gone), so pruning never loses a runnable job.
+    """
+    while len(api_module._payloads) > _MAX_CACHED_PAYLOADS:
+        oldest = next(iter(api_module._payloads))
+        api_module._payloads.pop(oldest, None)
 
 
 def _sync_alignment_status(
@@ -661,6 +690,7 @@ def _queue_job(user: dict[str, Any], payload: dict[str, Any], application_id: st
     job = api_module._registry.create(payload, config, tenant_id=user['user_id'], application_id=application_id)
     payload['workbench'] = workbench
     api_module._payloads[job.job_id] = (payload, config, application_id, user['user_id'])
+    _prune_payload_cache()
     if application_id:
         api_module._applications.set_application_job(user['user_id'], application_id, job.job_id, 'running')
     threading.Thread(target=api_module._run_job, args=(job.job_id,), daemon=True).start()
@@ -1306,7 +1336,7 @@ def _export_meta_lines(meta: dict[str, Any], version: int) -> list[str]:
     return [
         f"- 定稿版本：v{version}",
         f"- 模型：{meta.get('model') or '-'}",
-        f"- Prompt 版本：{meta.get('prompt_version') or '-'}",
+        f"- 生成配置版本：{meta.get('prompt_version') or '-'}",
         f"- 生成时间：{iso(meta.get('generated_at'))}",
         f"- 保存时间：{iso(meta.get('final_draft_updated_at'))}",
         *_match_score_meta_lines(meta),
@@ -1362,7 +1392,7 @@ def _export_print_html(
     # 匹配分双口径（#82）：分别标注 AI 评估与规则四维。
     match_rows = {"定稿版本": f"v{job.get('final_draft_version') or 0}",
                   "模型": meta.get("model") or "-",
-                  "Prompt 版本": meta.get("prompt_version") or "-"}
+                  "生成配置版本": meta.get("prompt_version") or "-"}
     if meta.get("eval_match_score") is not None:
         match_rows["匹配分（AI 评估）"] = str(meta["eval_match_score"])
     if meta.get("rule_match_score") is not None:

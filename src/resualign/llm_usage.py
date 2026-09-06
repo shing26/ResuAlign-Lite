@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any, Iterator
 
 from .store_base import _SqliteStore
@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS llm_daily_usage (
     estimated_cost REAL NOT NULL DEFAULT 0,
     updated_at REAL NOT NULL,
     reserves INTEGER NOT NULL DEFAULT 0,
+    tokens_in INTEGER NOT NULL DEFAULT 0,
+    tokens_out INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (tenant_id, usage_date)
 );
 """
@@ -35,6 +37,14 @@ _LLM_USAGE_MIGRATIONS = (
     (
         1,
         "ALTER TABLE llm_daily_usage ADD COLUMN reserves INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        2,
+        "ALTER TABLE llm_daily_usage ADD COLUMN tokens_in INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        3,
+        "ALTER TABLE llm_daily_usage ADD COLUMN tokens_out INTEGER NOT NULL DEFAULT 0",
     ),
 )
 
@@ -92,7 +102,7 @@ class LLMUsageStore(_SqliteStore):
         """
         if cap <= 0:
             return False
-        day = usage_date or date.today().isoformat()
+        day = usage_day(usage_date)
         now = time.time()
         with self._lock:
             self._ensure_initialized()
@@ -116,7 +126,7 @@ class LLMUsageStore(_SqliteStore):
         usage_date: str | None = None,
     ) -> None:
         """Return one unconsumed reservation (floor at zero)."""
-        day = usage_date or date.today().isoformat()
+        day = usage_day(usage_date)
         now = time.time()
         with self._lock:
             self._ensure_initialized()
@@ -133,28 +143,43 @@ class LLMUsageStore(_SqliteStore):
         tenant_id: str,
         usage_date: str | None = None,
         estimated_cost: float = 0.0,
+        tokens_in: int | None = None,
+        tokens_out: int | None = None,
     ) -> None:
         """Increment the tenant's daily call counter once per logical call.
 
         Each recorded call consumes one outstanding reservation (P1-1):
         reservations only shift *when* a call is counted, never double-count.
+        Real token counts (P2 #78) are accumulated when the provider reports
+        them, replacing the fixed 2000/1000 estimate for cost accuracy.
         """
-        day = usage_date or date.today().isoformat()
+        day = usage_day(usage_date)
         now = time.time()
+        tokens_in = max(0, int(tokens_in or 0))
+        tokens_out = max(0, int(tokens_out or 0))
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
                 conn.execute(
                     "INSERT INTO llm_daily_usage ("
                     "tenant_id, usage_date, calls, estimated_cost, "
-                    "reserves, updated_at"
-                    ") VALUES (?, ?, 1, ?, 0, ?) "
+                    "reserves, tokens_in, tokens_out, updated_at"
+                    ") VALUES (?, ?, 1, ?, 0, ?, ?, ?) "
                     "ON CONFLICT(tenant_id, usage_date) DO UPDATE SET "
                     "calls = calls + 1, "
                     "estimated_cost = estimated_cost + excluded.estimated_cost, "
                     "reserves = MAX(reserves - 1, 0), "
+                    "tokens_in = tokens_in + excluded.tokens_in, "
+                    "tokens_out = tokens_out + excluded.tokens_out, "
                     "updated_at = excluded.updated_at",
-                    (tenant_id, day, max(0.0, estimated_cost), now),
+                    (
+                        tenant_id,
+                        day,
+                        max(0.0, estimated_cost),
+                        tokens_in,
+                        tokens_out,
+                        now,
+                    ),
                 )
 
     def get_usage(
@@ -163,12 +188,13 @@ class LLMUsageStore(_SqliteStore):
         usage_date: str | None = None,
     ) -> dict[str, Any]:
         """Return today's call count and estimated cost for a tenant."""
-        day = usage_date or date.today().isoformat()
+        day = usage_day(usage_date)
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
                 row = conn.execute(
-                    "SELECT calls, estimated_cost, reserves FROM llm_daily_usage "
+                    "SELECT calls, estimated_cost, reserves, tokens_in, "
+                    "tokens_out FROM llm_daily_usage "
                     "WHERE tenant_id = ? AND usage_date = ?",
                     (tenant_id, day),
                 ).fetchone()
@@ -179,6 +205,8 @@ class LLMUsageStore(_SqliteStore):
             if row
             else 0.0,
             "reserves": int(row["reserves"] or 0) if row else 0,
+            "tokens_in": int(row["tokens_in"] or 0) if row else 0,
+            "tokens_out": int(row["tokens_out"] or 0) if row else 0,
         }
 
     def snapshot(
@@ -196,15 +224,31 @@ class LLMUsageStore(_SqliteStore):
         }
 
 
+def usage_day(usage_date: str | None = None) -> str:
+    """Return the UTC day key for usage accounting (P2-5: fixed boundary)."""
+    if usage_date:
+        return usage_date
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 def estimate_call_cost(
     cost_per_1k_in: float | None,
     cost_per_1k_out: float | None,
+    tokens_in: int | None = None,
+    tokens_out: int | None = None,
 ) -> float:
-    """Estimate one logical call's cost from configured per-1k prices."""
+    """Estimate one call's cost from configured per-1k prices.
+
+    When the provider reported real token counts (P2 #78), they replace the
+    fixed ESTIMATED_INPUT/OUTPUT_TOKENS placeholders (up to ~3x drift).
+    """
     price_in = max(0.0, float(cost_per_1k_in or 0.0))
     price_out = max(0.0, float(cost_per_1k_out or 0.0))
+    real_in = tokens_in if tokens_in and tokens_in > 0 else ESTIMATED_INPUT_TOKENS
+    real_out = (
+        tokens_out if tokens_out and tokens_out > 0 else ESTIMATED_OUTPUT_TOKENS
+    )
     return round(
-        (ESTIMATED_INPUT_TOKENS / 1000.0) * price_in
-        + (ESTIMATED_OUTPUT_TOKENS / 1000.0) * price_out,
+        (real_in / 1000.0) * price_in + (real_out / 1000.0) * price_out,
         6,
     )

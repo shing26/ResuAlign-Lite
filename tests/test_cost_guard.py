@@ -370,3 +370,36 @@ def test_run_job_releases_slot_when_no_llm_calls():
     usage = api_module._llm_usage.get_usage(user["user_id"])
     assert usage["calls"] == 0
     assert usage["reserves"] == 0
+
+
+def test_estimate_call_cost_uses_real_tokens_when_reported():
+    """P2 #78：provider 返回真实 token 时按实计价（替换固定 2000/1000）。"""
+    assert estimate_call_cost(0.5, 1.5, tokens_in=1000, tokens_out=500) == 1.25
+    # 部分缺失回退固定估算
+    assert estimate_call_cost(0.5, 1.5, tokens_in=1000) == 2.0
+    assert estimate_call_cost(0.5, 1.5) == 2.5
+
+
+def test_usage_store_accumulates_tokens(tmp_path):
+    store = LLMUsageStore(db_path=tmp_path / "usage.db")
+    store.record_call("t1", estimated_cost=1.0, tokens_in=100, tokens_out=50)
+    store.record_call("t1", estimated_cost=2.0, tokens_in=300, tokens_out=150)
+    usage = store.get_usage("t1")
+    assert usage["tokens_in"] == 400
+    assert usage["tokens_out"] == 200
+    assert usage["estimated_cost"] == 3.0
+
+
+def test_platform_cap_ceiling_rejects_tenant_override(monkeypatch):
+    """P2 #78：RESUALIGN_MAX_DAILY_LLM_CAP 之上的租户 cap 被拒绝。"""
+    from resualign.settings_store import SettingsStore, UserStoreError
+
+    store = api_module._settings_store
+    assert isinstance(store, SettingsStore)
+    monkeypatch.setenv("RESUALIGN_MAX_DAILY_LLM_CAP", "10")
+    store.update_settings("t1", {"daily_llm_cap": 5})
+    with pytest.raises(UserStoreError, match="platform ceiling"):
+        store.update_settings("t1", {"daily_llm_cap": 100})
+    # 未设上限环境变量时不限制
+    monkeypatch.delenv("RESUALIGN_MAX_DAILY_LLM_CAP")
+    store.update_settings("t1", {"daily_llm_cap": 100})

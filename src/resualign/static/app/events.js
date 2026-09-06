@@ -155,8 +155,20 @@ export function stopAllPolling() {
 
 export function toast(message, kind = "info") {
   const region = $("#toast-region");
+  /* B6③（2026-09-06 走查 #83）：同一事件里 toast 出现两条——对相同文案
+   * 在短窗口内去重，无论上游触发几次。 */
+  const last = region.lastElementChild;
+  if (
+    last &&
+    last.dataset.text === message &&
+    Date.now() - Number(last.dataset.at || 0) < 500
+  ) {
+    return;
+  }
   const node = document.createElement("div");
   node.className = `toast ${kind}`;
+  node.dataset.text = message;
+  node.dataset.at = String(Date.now());
   const text = document.createElement("span");
   text.textContent = message;
   const close = document.createElement("button");

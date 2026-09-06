@@ -353,19 +353,6 @@ def run(
                         filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
                     ),
                 )
-            if use_roles:
-                editor_fn, editor_kwargs = _editor_call_plan(
-                    node_store,
-                    tenant_id,
-                    granularity,
-                    resume_text=resume_text,
-                    gap_report_text=gap_report_str,
-                    prompt_focus=prompt_focus,
-                    custom_prompt=custom_prompt,
-                    jd_context=truncate_text(
-                        filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
-                    ),
-                )
                 try:
                     tailor_result, _ = call_with_role(
                         "editor",

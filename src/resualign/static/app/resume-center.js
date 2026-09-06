@@ -70,6 +70,7 @@ async function renderResumeListView(app) {
       <div class="row">
         <button class="btn btn-primary" data-action="new-resume">新建主简历</button>
         <button class="btn btn-outline" data-action="upload-resume">上传简历文件</button>
+        <span class="small muted">支持 PDF / DOCX / TXT</span>
         <input type="file" id="resume-upload-input" accept=".pdf,.docx,.txt" hidden>
       </div>
     </div>
@@ -252,12 +253,13 @@ function openResumeEditorModal(resume) {
   );
 }
 
-/* 新建主简历模态框；prefill 用于上传解析回填（title/content）。 */
+/* 新建/上传主简历模态框；prefill 用于上传解析回填（title/content）。 */
 export function openResumeCreator(prefill = {}) {
   const title = prefill.title || "";
   const content = prefill.content || "";
+  /* B6②（#83）：上传解析回填时弹窗标题与动作一致，不再都叫「新建」。 */
   showModal(
-    "新建主简历",
+    content ? "上传主简历" : "新建主简历",
     `<form data-form="resume-create">
       <div class="field"><label>标题</label>
         <input type="text" name="title" required placeholder="例如：2026 后端大厂版" value="${esc(title)}"></div>

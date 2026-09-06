@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import time
 from typing import Any
@@ -537,6 +538,23 @@ def _validate_settings(settings: dict[str, Any]) -> None:
             raise UserStoreError("daily_llm_cap must be an integer or null") from None
         if daily_cap < 0:
             raise UserStoreError("daily_llm_cap must be a non-negative integer")
+        # P2（2026-09-06 安全审查 #78）：平台级硬上限——多租户代付场景下
+        # 租户自行调高 cap 即成本旁路。RESUALIGN_MAX_DAILY_LLM_CAP 未设时
+        # 不限制（单机自付部署不受影响）。
+        platform_max = os.environ.get("RESUALIGN_MAX_DAILY_LLM_CAP")
+        if platform_max is not None and str(platform_max).strip() != "":
+            try:
+                platform_max_value = int(platform_max)
+            except ValueError:
+                raise UserStoreError(
+                    "RESUALIGN_MAX_DAILY_LLM_CAP must be an integer"
+                ) from None
+            if daily_cap > platform_max_value:
+                raise UserStoreError(
+                    f"daily_llm_cap exceeds the platform ceiling "
+                    f"({platform_max_value}); contact the platform operator "
+                    f"if you need a higher cap"
+                )
     for key in ("llm_cost_per_1k_in", "llm_cost_per_1k_out"):
         value = settings.get(key)
         if value is not None:

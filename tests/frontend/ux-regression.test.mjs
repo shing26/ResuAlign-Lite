@@ -293,3 +293,28 @@ test("#82: 匹配分双口径——来源显式区分 AI 评估与规则四维",
   const mainSrc = read("main.js");
   assert.match(mainSrc, /规则匹配分已更新/);
 });
+
+test("#83: UX 摩擦清理——toast 去重 / 上传提示 / 需求最多样本量 / 盾牌与置信度一致", () => {
+  // toast 同文案短窗口去重
+  const eventsSrc = read("events.js");
+  assert.match(eventsSrc, /last\.dataset\.text === message/);
+  // 「应用已采纳」按钮不折行
+  const fmtSrc = read("format.js");
+  assert.ok(
+    !fmtSrc.includes("应用已${ICON_CHECK} 采纳"),
+    "旧的应用按钮文案应已替换",
+  );
+  assert.match(fmtSrc, /应用已采纳 \$\{ICON_CHECK\}/);
+  // 上传格式提示外显 + 上传回填弹窗标题与动作一致
+  const resumeSrc = read("resume-center.js");
+  assert.match(resumeSrc, /支持 PDF \/ DOCX \/ TXT/);
+  assert.match(resumeSrc, /content \? "上传主简历" : "新建主简历"/);
+  // 「需求最多」仅在样本量足够时出现，小样本降级为诚实表述
+  assert.match(fmtSrc, /tone === "hot" && count >= 10/);
+  assert.match(fmtSrc, /库内 \$\{count\} 个岗位要求此技能/);
+  // 置信度 low 与「高可信」盾牌不再同卡共存
+  assert.match(fmtSrc, /lowConfidence && stateKey === "verified"/);
+  // 差距项附行动指引
+  assert.match(fmtSrc, /data-gap-hint/);
+  assert.match(fmtSrc, /确实没有依据的经历不要硬凑/);
+});
