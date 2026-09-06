@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any, Iterator
 
 from .store_base import _SqliteStore
