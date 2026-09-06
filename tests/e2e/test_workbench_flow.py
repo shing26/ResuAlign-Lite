@@ -341,10 +341,19 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
         # --- 6. canonical 定稿 Markdown 导出含采纳后的文本 ----------------
         # MVP-09：导出只走 /api/jobs/{job_id}/exports，内容来自持久化的
         # final_draft + accepted_diff_ids，不再导出会话内临时 Markdown。
+        # PR #86 (#80): a draft carrying [待人工确认：...] placeholders
+        # shows a blocking confirm modal before the download starts; click
+        # through it when it appears (the fake-LLM draft always has one).
         with page.expect_download(timeout=15000) as download_info:
             final_panel.locator(
                 '[data-action="export-final-draft-md"]'
             ).click()
+            modal = page.locator("[data-placeholder-proceed]")
+            try:
+                modal.wait_for(timeout=2000)
+                modal.click()
+            except Exception:
+                pass  # no placeholder — silent download path
         content = _read_download(download_info.value)
         expect(
             content.startswith("# "),
