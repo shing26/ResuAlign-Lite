@@ -628,6 +628,7 @@ export function renderGap(gap) {
       <div class="gap-group gap-group--missing">
         <div class="split-section-title">差距项</div>
         <div class="gap-tags">${missing.map((item) => gapTag(item)).join("")}</div>
+        <div class="small muted" data-gap-hint>怎么补：把已有经历中与该技能相关的事实改写得更贴近岗位措辞（逐条采纳建议即可）；确实没有依据的经历不要硬凑。</div>
       </div>`);
   }
   if (strengths.length) {
@@ -749,6 +750,15 @@ export function diffCard(diff, index, jobId) {
   const type = diff.type || "modify";
   const provenance = diff.provenance || diff.provenance_quote || "";
   const stateKey = diff.provenance_state || "pending_review";
+  /* 虚假感②（#83）：置信度 low 时不再显示「高可信」盾牌——两个信号
+   * 同卡互相打脸；统一降级为「建议复核」（锚点仍 verified，仅展示降级）。 */
+  const lowConfidence = String(diff.confidence) === "low";
+  const badgeState =
+    lowConfidence && stateKey === "verified" ? "pending_review" : stateKey;
+  const badgeLabel =
+    lowConfidence && stateKey === "verified"
+      ? "建议复核"
+      : PROVENANCE_LABELS[stateKey] || "来源待核对";
   const label = PROVENANCE_LABELS[stateKey] || "来源待核对";
   const noProvenance = !String(provenance || "").trim();
   const invalid =
@@ -782,7 +792,7 @@ export function diffCard(diff, index, jobId) {
           ${diffSectionBadge(diff)}
           <span class="small muted">${diff.confidence ? `置信度 ${esc(diff.confidence)}` : ""}</span>
         </div>
-        <span class="provenance-badge provenance-badge--${esc(stateKey)}" data-provenance title="${esc(provenance)}">${provenanceBadgeIcon(stateKey)}<span>${esc(label)}</span></span>
+        <span class="provenance-badge provenance-badge--${esc(badgeState)}" data-provenance title="${esc(provenance)}">${provenanceBadgeIcon(badgeState)}<span>${esc(badgeLabel)}</span></span>
       </div>
       <div class="diff-card__columns">
         <div class="diff-card__col diff-card__col--original">
@@ -876,7 +886,7 @@ export function alignmentControls(session, resumes, jobId) {
       <div class="align-form__row">
         <button class="btn btn-primary" type="submit" data-align-run ${running ? "disabled" : ""}>${running ? "对齐运行中..." : failed ? "重新运行对齐" : "一键生成对齐简历"}</button>
         <button class="btn btn-outline btn-sm" type="button" data-action="cancel-align-job" ${running ? "" : "hidden"}>${alignment.status === "queued" ? "取消任务" : "停止等待"}</button>
-        <button class="btn btn-ghost btn-sm" type="button" data-action="apply-accepted-bullets" data-id="${esc(jobId)}" ${!alignment.draft ? "disabled" : ""}>应用已${ICON_CHECK} 采纳</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="apply-accepted-bullets" data-id="${esc(jobId)}" style="white-space:nowrap" ${!alignment.draft ? "disabled" : ""}>应用已采纳 ${ICON_CHECK}</button>
         <span class="small muted" data-align-status>${alignment.status === "succeeded" ? "已生成对齐版本" : alignment.status === "failed" ? `任务失败：${esc(alignment.error || "请重试")}` : alignment.status === "running" || alignment.status === "queued" ? "正在生成..." : ""}</span>
       </div>
       <label class="eval-option">
@@ -2663,7 +2673,7 @@ export function skillGapHtml(gaps, onSkillGapUrl) {
         <span class="skill-gap-row__track" aria-hidden="true">
           <span class="skill-gap-row__fill skill-gap-row__fill--${tone}" style="width:${width}%"></span>
         </span>
-        <span class="skill-gap-row__count">${tone === "hot" ? `需求最多 · ${count} 个岗位` : `${count} 个岗位`}</span>
+        <span class="skill-gap-row__count">${tone === "hot" && count >= 10 ? `需求最多 · ${count} 个岗位` : `库内 ${count} 个岗位要求此技能`}</span>
       </button>`;
     })
     .join("");

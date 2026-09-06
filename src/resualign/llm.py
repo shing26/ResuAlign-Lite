@@ -35,12 +35,17 @@ def _observe_llm_call(
     attempts: int,
     status: str,
     mode: Optional[str] = None,
+    usage: Optional[dict] = None,
 ) -> None:
-    """Record one LLM call in memory and emit a structured ``llm.call`` event."""
+    """Record one LLM call in memory and emit a structured ``llm.call`` event.
+
+    ``usage`` carries the provider's real token counts when available
+    (P2 #78) so cost accounting can replace the fixed 2000/1000 estimate.
+    """
     _LLM_CALL_STATS.record(duration_ms, status)
     if _DAILY_USAGE_RECORDER is not None:
         try:
-            _DAILY_USAGE_RECORDER()
+            _DAILY_USAGE_RECORDER(usage=usage)
         except Exception:  # noqa: BLE001 - accounting must not break LLM calls
             _logger.warning("Daily LLM usage recorder failed", exc_info=True)
     extra: dict[str, Any] = {
@@ -52,6 +57,9 @@ def _observe_llm_call(
     }
     if mode is not None:
         extra["mode"] = mode
+    if usage:
+        extra["tokens_in"] = usage.get("prompt_tokens")
+        extra["tokens_out"] = usage.get("completion_tokens")
     log_event(
         _logger,
         "llm.call",
@@ -444,6 +452,8 @@ class OpenAIClient(LLMClient):
         _t0 = time.monotonic()
         attempts = 0
         status = "failed"
+        # P2（#78）：best-effort 捕获 provider 返回的真实 token 用量。
+        last_usage: dict = {}
         try:
             def _post(payload: dict) -> httpx.Response:
                 if self._deadline_s is not None:
@@ -469,6 +479,7 @@ class OpenAIClient(LLMClient):
                     r = _post(payload)
                     r.raise_for_status()
                     response = r.json()
+                    last_usage = response.get("usage") or {}
                     message = response["choices"][0]["message"]
                     content = message.get("content") or ""
                     finish_reason = response["choices"][0].get("finish_reason")
@@ -539,6 +550,7 @@ class OpenAIClient(LLMClient):
                 duration_ms=(time.monotonic() - _t0) * 1000,
                 attempts=attempts,
                 status=status,
+                usage=last_usage,
             )
 
     def stream_chat_json(
@@ -721,6 +733,8 @@ class OpenAIClient(LLMClient):
         _t0 = time.monotonic()
         attempts = 0
         status = "failed"
+        # P2（#78）：best-effort 捕获 provider 返回的真实 token 用量。
+        last_usage: dict = {}
         try:
             def _post() -> httpx.Response:
                 if self._deadline_s is not None:
@@ -743,6 +757,7 @@ class OpenAIClient(LLMClient):
                     r = _post()
                     r.raise_for_status()
                     response = r.json()
+                    last_usage = response.get("usage") or {}
                     message = response["choices"][0]["message"]
                     content = message.get("content") or ""
                     finish_reason = response["choices"][0].get("finish_reason")
@@ -822,6 +837,7 @@ class OpenAIClient(LLMClient):
                 attempts=attempts,
                 status=status,
                 mode="json_schema",
+                usage=last_usage,
             )
     def _chat_structured_json_mode(
         self,
@@ -848,6 +864,8 @@ class OpenAIClient(LLMClient):
         _t0 = time.monotonic()
         attempts = 0
         status = "failed"
+        # P2（#78）：best-effort 捕获 provider 返回的真实 token 用量。
+        last_usage: dict = {}
         try:
             def _post(payload: dict) -> httpx.Response:
                 if self._deadline_s is not None:
@@ -870,6 +888,7 @@ class OpenAIClient(LLMClient):
                     r = _post(payload)
                     r.raise_for_status()
                     response = r.json()
+                    last_usage = response.get("usage") or {}
                     message = response["choices"][0]["message"]
                     content = message.get("content") or ""
                     finish_reason = response["choices"][0].get("finish_reason")
@@ -945,6 +964,7 @@ class OpenAIClient(LLMClient):
                 attempts=attempts,
                 status=status,
                 mode="json_object",
+                usage=last_usage,
             )
 DIAG_PROMPT = """PROMPT_VERSION: diagnose/v3
 

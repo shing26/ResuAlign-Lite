@@ -119,8 +119,13 @@ def enforce_llm_task_entry(
     return reserved
 
 
-def record_daily_llm_usage() -> None:
-    """Persist one logical LLM call for the current tenant (recorder hook)."""
+def record_daily_llm_usage(usage: dict[str, Any] | None = None) -> None:
+    """Persist one logical LLM call for the current tenant (recorder hook).
+
+    ``usage`` carries the provider's real token counts when available
+    (P2 #78): real tokens replace the fixed 2000/1000 estimate for the
+    cost figure, and are accumulated on the daily usage row.
+    """
     from ...llm_usage import current_llm_tenant
 
     tenant = current_llm_tenant()
@@ -132,8 +137,20 @@ def record_daily_llm_usage() -> None:
         settings = api_module._settings_store.get_settings(tenant)
     except Exception:  # noqa: BLE001 - usage accounting must never break calls
         settings = {}
+    tokens_in = None
+    tokens_out = None
+    if isinstance(usage, dict):
+        tokens_in = usage.get("prompt_tokens")
+        tokens_out = usage.get("completion_tokens")
     cost = estimate_call_cost(
         settings.get("llm_cost_per_1k_in"),
         settings.get("llm_cost_per_1k_out"),
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
     )
-    api_module._llm_usage.record_call(tenant, estimated_cost=cost)
+    api_module._llm_usage.record_call(
+        tenant,
+        estimated_cost=cost,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+    )
