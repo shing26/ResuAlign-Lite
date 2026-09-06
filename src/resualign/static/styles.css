@@ -10683,6 +10683,17 @@ details > summary::-webkit-details-marker,
   color: #fff;
 }
 
+/* #81: 失败终态——「未完成：原因」红点，不再停在 pending 样式。 */
+.workbench-live-progress__step.is-failed {
+  color: var(--error);
+}
+
+.workbench-live-progress__step.is-failed .workbench-live-progress__dot {
+  border-color: var(--error);
+  background: var(--error-soft);
+  color: var(--error);
+}
+
 .workbench-live-progress__copy {
   min-width: 0;
   display: flex;

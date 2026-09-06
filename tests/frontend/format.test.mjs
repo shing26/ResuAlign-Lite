@@ -534,9 +534,10 @@ test("matchBadgeInfo prefers eval score, then gap, then persisted job score", ()
     alignment: { eval_score: { jd_match_score: 88 } },
     gap: { score: 60 },
   };
+  /* #82 匹配分双口径：来源文案必须区分「AI 评估」与「规则四维」。 */
   assert.deepEqual(matchBadgeInfo(session, { match_score: 50 }), {
     score: 88,
-    source: "来自 AI 评估",
+    source: "AI 对齐匹配分（LLM 评估）",
   });
 
   assert.deepEqual(
@@ -546,8 +547,17 @@ test("matchBadgeInfo prefers eval score, then gap, then persisted job score", ()
 
   assert.deepEqual(matchBadgeInfo({}, { match_score: 50 }), {
     score: 50,
-    source: "来自 AI 评估",
+    source: "上次评估匹配分（LLM）",
   });
+
+  // 持久化分与规则四维 total 一致 → 标注为规则口径
+  assert.deepEqual(
+    matchBadgeInfo(
+      {},
+      { match_score: 50, match_score_detail: { total: 50.0 } },
+    ),
+    { score: 50, source: "规则匹配分（四维打分）" },
+  );
 
   assert.deepEqual(matchBadgeInfo({}, {}), { score: null, source: "" });
   assert.deepEqual(matchBadgeInfo(null, null), { score: null, source: "" });
@@ -559,10 +569,10 @@ test("renderMatchBadge renders score, source title and muted source label", () =
     {},
   );
   assert.match(html, /class="match-badge match--high" data-match-badge/);
-  assert.match(html, /title="来自 AI 评估"/);
+  assert.match(html, /title="AI 对齐匹配分（LLM 评估）"/);
   assert.match(html, /match-badge__icon/);
   assert.match(html, />匹配 82</);
-  assert.match(html, /data-match-source>来自 AI 评估</);
+  assert.match(html, /data-match-source>AI 对齐匹配分（LLM 评估）</);
 
   assert.equal(renderMatchBadge({}, {}), "");
 });

@@ -258,3 +258,38 @@ test("#80: 导出定稿前扫描 [待人工确认] 占位符并阻断式确认",
   assert.match(mainSrc, /data-placeholder-proceed/);
   assert.match(mainSrc, /仍要导出/);
 });
+
+/* ---------- 护栏 5：2026-09-06 走查 P1（#81 / #82） ---------- */
+
+test("#81: 失败终态——三阶段清单不再停在 pending", () => {
+  const fmtSrc = read("format.js");
+  // workbenchLiveProgress 提供 is-failed 终态 + 「任务失败：原因」消息
+  assert.match(fmtSrc, /alignmentFailed/);
+  assert.match(fmtSrc, /is-failed/);
+  assert.match(fmtSrc, /任务失败：\$\{failureNote\}/);
+  assert.match(fmtSrc, /未完成：/);
+  assert.match(STYLES, /\.workbench-live-progress__step\.is-failed/);
+  // 排队被预检拦截（422）时落失败终态：split-align 提交捕获错误并标记
+  const mainSrc = read("main.js");
+  assert.match(mainSrc, /markAlignmentBlocked/);
+  const canvasSrc = read("split-canvas.js");
+  assert.match(canvasSrc, /export async function markAlignmentBlocked\(/);
+  // 后端 402 文案带指路（无裸英文+HTTP 码直达用户）
+  const backendSrc = readFileSync(
+    join(here, "../../src/resualign/api/routers/settings.py"),
+    "utf8",
+  );
+  assert.match(backendSrc, /余额不足：请给该节点充值，或到「系统设置 → 模型节点」/);
+});
+
+test("#82: 匹配分双口径——来源显式区分 AI 评估与规则四维", () => {
+  const fmtSrc = read("format.js");
+  assert.match(fmtSrc, /export function jobMatchSource\(/);
+  assert.match(fmtSrc, /AI 对齐匹配分（LLM 评估）/);
+  assert.match(fmtSrc, /规则匹配分（四维打分）/);
+  // 同步 LLM 路由的评估勾选文案随口径更新
+  const canvasSrc = read("split-canvas.js");
+  assert.ok(canvasSrc !== "");
+  const mainSrc = read("main.js");
+  assert.match(mainSrc, /规则匹配分已更新/);
+});

@@ -263,3 +263,40 @@ def test_export_legacy_final_draft_without_alignment_meta():
     assert body["meta"]["match_score"] is None
     assert body["accepted_diff_ids"] == []
     assert body["content"] == "Legacy final draft"
+
+
+def test_export_labels_match_score_calibers():
+    """#82 匹配分双口径：AI 评估分与规则四维分在导出里分别标注，
+    不再共用一个「匹配分」名字承载两个数值。"""
+    job = _create_job()
+    api_module._jobs.save_alignment(
+        job["tenant_id"],
+        job["job_id"],
+        match_score=72,
+        match_score_detail={"total": 52.0, "version": 1},
+        eval_score={"jd_match_score": 72, "hallucination_detected": False},
+        draft="Python developer with Redis caching.",
+    )
+    saved = client.post(
+        f"/api/jobs/{job['job_id']}/final-draft",
+        json={"draft": "Python developer with Redis caching."},
+    )
+    assert saved.status_code == 200
+    md = client.post(
+        f"/api/jobs/{job['job_id']}/exports",
+        json={"format": "markdown"},
+    ).json()
+    assert "- 匹配分（AI 评估）：72" in md["content"]
+    assert "- 匹配分（规则四维）：52.0" in md["content"]
+    pdf = client.post(
+        f"/api/jobs/{job['job_id']}/exports",
+        json={"format": "pdf"},
+    ).json()
+    assert "匹配分（AI 评估）" in pdf["content"]
+    assert "匹配分（规则四维）" in pdf["content"]
+    js = client.post(
+        f"/api/jobs/{job['job_id']}/exports",
+        json={"format": "json"},
+    ).json()
+    assert js["meta"]["eval_match_score"] == 72
+    assert js["meta"]["rule_match_score"] == 52.0
