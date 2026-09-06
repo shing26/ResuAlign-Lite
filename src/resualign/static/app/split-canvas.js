@@ -1318,6 +1318,28 @@ export async function startAlignmentRun(jobId, resumeId, granularity, focus, run
   return result;
 }
 
+/* B4（2026-09-06 走查 #81）：排队被预检拦截（422，如 402 欠费）时，把
+ * 拦截原因落成对齐失败终态并重渲染——三阶段清单显示「任务失败：原因」，
+ * 不再停在 pending 样式让用户分不清该等还是该去设置。 */
+export async function markAlignmentBlocked(message) {
+  if (!activeSession) return;
+  activeSession.alignment = {
+    ...(activeSession.alignment || {}),
+    status: "failed",
+    stage: "failed",
+    error: message,
+  };
+  const app = $("#app-router-view");
+  if (app) {
+    try {
+      const resumes = await api("/api/master-resumes");
+      renderSplitCanvas(app, activeSession, resumes, workbenchJobs);
+    } catch {
+      /* 渲染失败不影响 toast 提示本身 */
+    }
+  }
+}
+
 export async function analyzeActiveJd() {
   const session = activeSession;
   if (!session || !session.session_id) return;

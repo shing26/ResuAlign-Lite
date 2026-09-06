@@ -507,11 +507,19 @@ export function workbenchProgressPipelineHtml(session) {
   const diffs = alignment.diffs || [];
 
   const alignmentRunning = ["queued", "running"].includes(alignment.status);
+  /* B4（2026-09-06 走查 #81）：失败必须有终态——「未开始/未完成：原因」，
+   * 不能停在 pending 样式让用户无法判断该等还是该去设置。 */
+  const alignmentFailed = alignment.status === "failed";
+  const failureNote = alignmentFailed
+    ? alignment.error || "任务失败，请重试"
+    : "";
   const liveMessage = alignmentRunning
     ? alignment.message || ""
     : alignment.status === "succeeded"
       ? "简历对齐已完成"
-      : "";
+      : alignmentFailed
+        ? `任务失败：${failureNote}`
+        : "";
 
   const steps = [
     {
@@ -523,6 +531,8 @@ export function workbenchProgressPipelineHtml(session) {
           : "",
       done: jd.status === "ready" && Boolean(jd.profile),
       active: ["queued", "running"].includes(jd.status),
+      failed: alignmentFailed && !(jd.status === "ready" && Boolean(jd.profile)),
+      idle: !alignmentRunning && !alignmentFailed && !jd.profile,
     },
     {
       key: "gap",
@@ -532,6 +542,11 @@ export function workbenchProgressPipelineHtml(session) {
         : "",
       done: ["ready", "blocked"].includes(gap.status),
       active: gap.status === "queued" || gap.status === "running",
+      failed: alignmentFailed && !["ready", "blocked"].includes(gap.status),
+      idle:
+        !alignmentRunning &&
+        !alignmentFailed &&
+        !["ready", "blocked"].includes(gap.status),
     },
     {
       key: "tailor",
@@ -539,6 +554,8 @@ export function workbenchProgressPipelineHtml(session) {
       detail: diffs.length ? `已生成 ${diffs.length} 条精修建议` : "",
       done: alignment.status === "succeeded",
       active: ["queued", "running"].includes(alignment.status),
+      failed: alignmentFailed,
+      idle: !alignmentRunning && !alignmentFailed && !diffs.length,
     },
   ];
 
@@ -548,11 +565,11 @@ export function workbenchProgressPipelineHtml(session) {
       ${steps
         .map(
           (step) => `
-        <div class="workbench-live-progress__step ${step.done ? "is-done" : ""} ${step.active ? "is-active" : ""}" data-progress-step="${esc(step.key)}">
-          <span class="workbench-live-progress__dot" aria-hidden="true">${step.done ? ICON_PROGRESS_CHECK : step.active ? "…" : "·"}</span>
+        <div class="workbench-live-progress__step ${step.done ? "is-done" : ""} ${step.active ? "is-active" : ""} ${step.failed ? "is-failed" : ""}" data-progress-step="${esc(step.key)}">
+          <span class="workbench-live-progress__dot" aria-hidden="true">${step.done ? ICON_PROGRESS_CHECK : step.failed ? "×" : step.active ? "…" : "·"}</span>
           <div class="workbench-live-progress__copy">
             <span class="workbench-live-progress__label">${esc(step.label)}</span>
-            ${step.detail ? `<span class="workbench-live-progress__detail">${esc(step.detail)}</span>` : ""}
+            ${step.detail ? `<span class="workbench-live-progress__detail">${esc(step.detail)}</span>` : step.failed ? `<span class="workbench-live-progress__detail">未完成：${esc(failureNote)}</span>` : step.idle ? `<span class="workbench-live-progress__detail">未开始</span>` : ""}
           </div>
         </div>`,
         )
@@ -864,7 +881,7 @@ export function alignmentControls(session, resumes, jobId) {
       </div>
       <label class="eval-option">
         <input type="checkbox" name="run_eval">
-        <span>本次运行评估（幻觉检测 / JD 匹配分）</span>
+        <span>本次运行评估（幻觉检测 / AI 对齐匹配分）</span>
       </label>
       <div class="small muted" style="margin:-4px 0 6px">每任务额外一次 LLM 调用；不勾选则按设置页默认执行。</div>
       ${running ? `
@@ -971,9 +988,9 @@ export function boardCard(job, statuses = null) {
   const canonical = canonicalJobStatus(job.status);
   const optionsHtml = jobStatusOptionsHtml(statuses, canonical);
   const match = job.match_score != null ? Math.round(job.match_score) : null;
-  /* #F10: job.match_score persists the last workbench eval result, so the
-   * badge title discloses the score origin instead of a bare "匹配度". */
-  const matchTitle = match != null ? "匹配度 · 来自 AI 评估" : "尚未分析";
+  /* #F10/#82: 徽章 title 披露分数口径（AI 评估 vs 规则四维）。 */
+  const matchTitle =
+    match != null ? `匹配度 · ${jobMatchSource(job)}` : "尚未分析";
   return `
     <article class="board-card copilot-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}" draggable="true" data-board-drag>
       <div class="board-card__top">
@@ -1036,7 +1053,8 @@ export function renderBoardCard(job, statuses = null) {
   const canonical = canonicalJobStatus(job.status);
   const statusOptions = jobStatusOptionsHtml(statuses, canonical);
   const match = job.match_score != null ? Math.round(job.match_score) : null;
-  const matchTitle = match != null ? "匹配度 · 来自 AI 评估" : "尚未分析";
+  const matchTitle =
+    match != null ? `匹配度 · ${jobMatchSource(job)}` : "尚未分析";
   return `
     <article class="board-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}">
       <div class="board-card__top">
@@ -1984,18 +2002,33 @@ export function applyAcceptedDiffsToDraft(draft, diffs, acceptedIds) {
  * （gap.score）→ 岗位持久化匹配分（job.match_score，后端写自最近一次
  * 工作台 eval）。来源文案随徽章 title + 旁注展示。 */
 
+/* 匹配分双口径（#82）：job.match_score 由最近一次工作台 eval 或规则四维
+ * 打分写入，来源必须显式区分——同名不同值是走查实锤的信任杀手。 */
+export function jobMatchSource(job) {
+  if (!job || job.match_score == null) return "";
+  const detail = job.match_score_detail;
+  const ruleTotal =
+    detail && typeof detail === "object" ? detail.total : null;
+  return ruleTotal != null && Number(ruleTotal) === Number(job.match_score)
+    ? "规则匹配分（四维打分）"
+    : "上次评估匹配分（LLM）";
+}
+
 export function matchBadgeInfo(session, job) {
   const alignment = (session && session.alignment) || {};
   const evalScore = alignment.eval_score || {};
   const gap = (session && session.gap) || {};
   if (evalScore.jd_match_score != null) {
-    return { score: Number(evalScore.jd_match_score), source: "来自 AI 评估" };
+    return {
+      score: Number(evalScore.jd_match_score),
+      source: "AI 对齐匹配分（LLM 评估）",
+    };
   }
   if (gap.score != null) {
     return { score: Number(gap.score), source: "来自能力分析" };
   }
   if (job && job.match_score != null) {
-    return { score: Number(job.match_score), source: "来自 AI 评估" };
+    return { score: Number(job.match_score), source: jobMatchSource(job) };
   }
   return { score: null, source: "" };
 }

@@ -61,6 +61,7 @@ import {
   renderOptimizerCanvas,
   setWbAuxPane,
   setWbViewMode,
+  markAlignmentBlocked,
   startAlignmentRun,
   syncLiveSheetDraft,
 } from "./split-canvas.js";
@@ -617,7 +618,7 @@ async function renderSettingsView(app) {
             <form data-form="settings-eval-default" class="llm-eval-default">
               <label class="check-line">
                 <input type="checkbox" name="eval_default" ${settings.eval_default ? "checked" : ""}>
-                运行对齐时默认开启评估（幻觉检测 / JD 匹配分）
+                运行对齐时默认开启评估（幻觉检测 / AI 对齐匹配分）
               </label>
               <div class="small muted">每任务额外一次 LLM 调用；工作台可按次覆盖。</div>
               <div class="row" style="margin-top:10px">
@@ -1521,7 +1522,7 @@ const actions = {
         { method: "POST" },
       );
       toast(
-        updated.match_reason || `匹配分已更新：${updated.match_score ?? "—"}`,
+        updated.match_reason || `规则匹配分已更新：${updated.match_score ?? "—"}`,
         "success",
       );
       renderKanban($("#app-router-view"));
@@ -2723,14 +2724,24 @@ async function handleForm(formName, data, form) {
         flagMissingMasterResume(form, select);
         return;
       }
-      const result = await startAlignmentRun(
-        jobId,
-        data.master_resume_id,
-        data.granularity || "medium",
-        data.prompt_focus || "balanced",
-        runEvalFromForm(data),
-      );
-      toast(`对齐任务已排队：${result.job_id}`, "success");
+      const result = await (async () => {
+        try {
+          const queued = await startAlignmentRun(
+            jobId,
+            data.master_resume_id,
+            data.granularity || "medium",
+            data.prompt_focus || "balanced",
+            runEvalFromForm(data),
+          );
+          toast(`对齐任务已排队：${queued.job_id}`, "success");
+        } catch (error) {
+          /* B4（#81）：排队被预检拦截（如 402 欠费）时落失败终态，
+           * 三阶段清单显示「任务失败：原因」，不再停在 pending。 */
+          const message = error.message || "对齐排队失败";
+          toast(message, "error");
+          await markAlignmentBlocked(message);
+        }
+      })();
       break;
     }
     case "resume-create":

@@ -526,6 +526,9 @@ class JobExportMeta(BaseModel):
     generated_at: float | None = None
     final_draft_updated_at: float | None = None
     match_score: float | None = None
+    # 匹配分双口径（#82）：AI 评估分与规则四维分分别透出。
+    eval_match_score: float | None = None
+    rule_match_score: float | None = None
     workbench_resume_id: str | None = None
 
 

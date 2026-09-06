@@ -4141,6 +4141,28 @@
             ],
             "title": "Match Score"
           },
+          "eval_match_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Match Score"
+          },
+          "rule_match_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule Match Score"
+          },
           "workbench_resume_id": {
             "anyOf": [
               {

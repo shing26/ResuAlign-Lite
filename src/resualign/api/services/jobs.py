@@ -105,7 +105,24 @@ def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
             timeout=5.0,
         )
         status = probe.get('status', '')
+        # 虚假感修复（#81）：预检结果回写节点健康徽标——欠费/掉线实锤后，
+        # 设置页不再显示陈旧的绿点「连通正常」；探测成功也刷新时间戳。
+        node_id = node.get("node_id") if node is not None else None
+        if node_id and status == 'ok':
+            try:
+                api_module._llm_nodes.record_node_health(
+                    tenant_id, node_id, 'ok', probe.get('latency_ms')
+                )
+            except Exception:  # noqa: BLE001 - telemetry must not block runs
+                pass
         if status in ('http_401', 'http_402', 'http_403'):
+            if node_id:
+                try:
+                    api_module._llm_nodes.record_node_health(
+                        tenant_id, node_id, status, probe.get('latency_ms')
+                    )
+                except Exception:  # noqa: BLE001 - telemetry must not block runs
+                    pass
             return False, probe.get('message', '模型服务鉴权失败，请检查设置')
         if (
             status in ('network_error', 'timeout')
@@ -1215,12 +1232,26 @@ def build_job_export(
     """Build the canonical export payload from persisted library fields."""
     draft = (job.get("final_draft") or "").strip()
     accepted = _accepted_diffs(job)
+    # 匹配分双口径修复（#82）：界面与导出统一区分「AI 评估」与「规则四维」
+    # 两个口径，同名不同值不再并存。
+    match_detail = job.get("match_score_detail")
+    eval_score = job.get("eval_score")
     meta = {
         "model": job.get("model"),
         "prompt_version": job.get("prompt_version"),
         "generated_at": job.get("generated_at"),
         "final_draft_updated_at": job.get("final_draft_updated_at"),
         "match_score": job.get("match_score"),
+        "eval_match_score": (
+            eval_score.get("jd_match_score")
+            if isinstance(eval_score, dict)
+            else None
+        ),
+        "rule_match_score": (
+            match_detail.get("total")
+            if isinstance(match_detail, dict)
+            else None
+        ),
         "workbench_resume_id": job.get("workbench_resume_id"),
     }
     version = int(job.get("final_draft_version") or 0)
@@ -1278,8 +1309,21 @@ def _export_meta_lines(meta: dict[str, Any], version: int) -> list[str]:
         f"- Prompt 版本：{meta.get('prompt_version') or '-'}",
         f"- 生成时间：{iso(meta.get('generated_at'))}",
         f"- 保存时间：{iso(meta.get('final_draft_updated_at'))}",
-        f"- 匹配分：{meta.get('match_score') if meta.get('match_score') is not None else '-'}",
+        *_match_score_meta_lines(meta),
     ]
+
+
+def _match_score_meta_lines(meta: dict[str, Any]) -> list[str]:
+    """匹配分元信息（#82 双口径）：AI 评估分与规则四维分分别标注，不再
+    用同一个「匹配分」名字承载两个数值。"""
+    lines: list[str] = []
+    if meta.get("eval_match_score") is not None:
+        lines.append(f"- 匹配分（AI 评估）：{meta['eval_match_score']}")
+    if meta.get("rule_match_score") is not None:
+        lines.append(f"- 匹配分（规则四维）：{meta['rule_match_score']}")
+    if not lines and meta.get("match_score") is not None:
+        lines.append(f"- 匹配分：{meta['match_score']}")
+    return lines
 
 
 def _export_markdown(
@@ -1315,18 +1359,23 @@ def _export_print_html(
     meta: dict[str, Any],
 ) -> str:
     title = html.escape(job.get("title") or "未命名岗位")
+    # 匹配分双口径（#82）：分别标注 AI 评估与规则四维。
+    match_rows = {"定稿版本": f"v{job.get('final_draft_version') or 0}",
+                  "模型": meta.get("model") or "-",
+                  "Prompt 版本": meta.get("prompt_version") or "-"}
+    if meta.get("eval_match_score") is not None:
+        match_rows["匹配分（AI 评估）"] = str(meta["eval_match_score"])
+    if meta.get("rule_match_score") is not None:
+        match_rows["匹配分（规则四维）"] = str(meta["rule_match_score"])
+    if "匹配分（AI 评估）" not in match_rows and "匹配分（规则四维）" not in match_rows:
+        match_rows["匹配分"] = (
+            str(meta.get("match_score"))
+            if meta.get("match_score") is not None
+            else "-"
+        )
     meta_rows = "".join(
-        f"<tr><th>{key}</th><td>{html.escape(str(value))}</td></tr>"
-        for key, value in {
-            "定稿版本": f"v{job.get('final_draft_version') or 0}",
-            "模型": meta.get("model") or "-",
-            "Prompt 版本": meta.get("prompt_version") or "-",
-            "匹配分": (
-                str(meta.get("match_score"))
-                if meta.get("match_score") is not None
-                else "-"
-            ),
-        }.items()
+        f"<tr><th>{html.escape(str(key))}</th><td>{html.escape(str(value))}</td></tr>"
+        for key, value in match_rows.items()
     )
     accepted_html = ""
     if accepted:

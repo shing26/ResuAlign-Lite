@@ -687,8 +687,9 @@ test("boardCard match badge title discloses the score source", () => {
     title: "后端",
     status: "applied",
     match_score: 80,
+    match_score_detail: { total: 80 },
   });
-  assert.match(html, /class="match-badge match--high" data-match-total title="匹配度 · 来自 AI 评估">80<\/span>/);
+  assert.match(html, /class="match-badge match--high" data-match-total title="匹配度 · 规则匹配分（四维打分）">80<\/span>/);
   assert.match(
     boardCard({ job_id: "j2", title: "T", status: "draft" }),
     /class="match-badge match-badge--empty" title="尚未分析">待分析<\/span>/,
@@ -701,8 +702,9 @@ test("renderBoardCard match badge carries the source title", () => {
     title: "前端",
     status: "applied",
     match_score: 66,
+    match_score_detail: { total: 66 },
   });
-  assert.match(html, /class="match-badge match--mid" data-match-total title="匹配度 · 来自 AI 评估">66<\/span>/);
+  assert.match(html, /class="match-badge match--mid" data-match-total title="匹配度 · 规则匹配分（四维打分）">66<\/span>/);
   const empty = renderBoardCard({ job_id: "j2", title: "T", status: "draft" });
   assert.match(empty, /class="match-badge match-badge--empty" title="尚未分析">待分析<\/span>/);
 });
@@ -760,7 +762,7 @@ test("alignmentControls includes a run_eval checkbox (unchecked by default)", ()
     "job-9",
   );
   assert.match(html, /<input type="checkbox" name="run_eval">/);
-  assert.match(html, /本次运行评估（幻觉检测 \/ JD 匹配分）/);
+  assert.match(html, /本次运行评估（幻觉检测 \/ AI 对齐匹配分）/);
   assert.match(html, /不勾选则按设置页默认执行/);
   assert.doesNotMatch(html, /name="run_eval"[^>]*checked/);
 });
