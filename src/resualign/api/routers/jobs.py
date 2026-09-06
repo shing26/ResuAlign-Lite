@@ -819,6 +819,10 @@ def rewrite_workbench_bullet(
                 tenant=user['user_id'],
             )
 
+    # P0（2026-09-06 安全审查 #76）：重写产物只有通过内容级校验
+    # （rewrite_bullet 内部，provenance_state=verified）才能进入 diffs；
+    # 编造内容留在 invalid_diffs 并携带「已拦截」原因，不再自动洗白。
+    verified_rewrite = rewritten.provenance_state == 'verified'
     replacement = {
         'diff_id': target.get('diff_id'),
         'section': target.get('section', ''),
@@ -834,23 +838,27 @@ def rewrite_workbench_bullet(
             if rewritten.source_span is not None
             else None
         ),
-        'provenance_state': 'verified',
+        'provenance_state': rewritten.provenance_state,
     }
     new_diffs = []
     replaced = False
     for diff in job.get('diffs') or []:
         if diff.get('diff_id') == req.diff_id:
-            new_diffs.append(replacement)
-            replaced = True
+            if verified_rewrite:
+                new_diffs.append(replacement)
+                replaced = True
+            # 未通过校验：从 diffs 中移除旧条目（不留在已验证队列）。
         else:
             new_diffs.append(diff)
-    if not replaced:
+    if verified_rewrite and not replaced:
         new_diffs.append(replacement)
     new_invalid_diffs = [
         diff
         for diff in (job.get('invalid_diffs') or [])
         if diff.get('diff_id') != req.diff_id
     ]
+    if not verified_rewrite:
+        new_invalid_diffs.append(replacement)
     api_module._jobs.update_job(
         user['user_id'],
         job_id,
@@ -862,7 +870,7 @@ def rewrite_workbench_bullet(
         original=original,
         proposed=rewritten.proposed,
         reason=rewritten.reason,
-        provenance_state='verified',
+        provenance_state=rewritten.provenance_state,
     )
 
 def job_status(job_id: str, user: dict[str, Any]=Depends(get_current_user)):

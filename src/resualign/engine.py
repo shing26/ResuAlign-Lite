@@ -435,8 +435,13 @@ def run(
             report.diffs = report.tailored_resume.diffs
             # Phase 3: whole-document editors sometimes return sections but
             # no diffs array. Derive section-level diffs so a "succeeded"
-            # alignment is never empty of actionable advice.
-            if not report.diffs:
+            # alignment is never empty of actionable advice. P0（#75）：
+            # 仅当模型真的没给 diffs（invalid_diffs 为空）才派生——strict
+            # 门把全部 diffs 过滤成 invalid 时，整章派生会把未校验内容包装
+            # 成 verified（确定性绕过放大器），必须保持零建议 + 原因可见。
+            if not report.diffs and not (
+                report.tailored_resume.invalid_diffs or []
+            ):
                 from .tailor import derive_section_diffs
 
                 derived = derive_section_diffs(
