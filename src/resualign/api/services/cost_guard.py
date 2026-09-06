@@ -17,11 +17,16 @@ CAP_REACHED_DETAIL = {
 
 
 def llm_daily_status(tenant_id: str) -> dict[str, Any]:
-    """Return today's usage, cap, estimated cost, and blocking state."""
+    """Return today's usage, cap, estimated cost, and blocking state.
+
+    P1-1（2026-09-06 安全审查）：blocked/remaining 按实际调用 + 未消费预留
+    计算（``calls + reserves``），入队即占坑，任务真正调用时消费。
+    """
     settings = api_module._settings_store.get_settings(tenant_id)
     usage = api_module._llm_usage.get_usage(tenant_id)
     cap = settings.get("daily_llm_cap")
     cap_value = int(cap) if cap is not None else None
+    effective_calls = usage["calls"] + usage.get("reserves", 0)
     return {
         "date": usage["usage_date"],
         "calls": usage["calls"],
@@ -30,19 +35,34 @@ def llm_daily_status(tenant_id: str) -> dict[str, Any]:
             usage["estimated_cost"],
             4,
         ),
-        "blocked": cap_value is not None and usage["calls"] >= cap_value,
+        "blocked": cap_value is not None and effective_calls >= cap_value,
         "remaining": (
             None
             if cap_value is None
-            else max(0, cap_value - usage["calls"])
+            else max(0, cap_value - effective_calls)
         ),
     }
 
 
 def enforce_daily_llm_cap(tenant_id: str) -> None:
-    """Reject a new LLM task with 429 when today's cap is exhausted."""
-    status = llm_daily_status(tenant_id)
-    if status["blocked"]:
+    """Reject a new LLM task with 429 when today's cap is exhausted.
+
+    P1-1：检查与预留合并为一次原子条件递增（``WHERE calls + reserves <
+    cap``），并发入队不再能整体击穿每日 cap。预留由任务的真实 LLM 调用
+    （record_call）消费；任务结束未消费的由 _run_job 释放，未释放的随
+    「当日」边界过期（保守方向：只会少用不会多用）。
+    """
+    settings = api_module._settings_store.get_settings(tenant_id)
+    cap = settings.get("daily_llm_cap")
+    if cap is None:
+        return
+    cap_value = int(cap)
+    if cap_value <= 0:
+        raise HTTPException(
+            status_code=429,
+            detail=CAP_REACHED_DETAIL,
+        )
+    if not api_module._llm_usage.reserve_call(tenant_id, cap_value):
         raise HTTPException(
             status_code=429,
             detail=CAP_REACHED_DETAIL,
@@ -61,20 +81,27 @@ _REPEATED_FAILURES_DETAIL = {
 def enforce_llm_task_entry(
     tenant_id: str,
     job_ref_key: str | None = None,
-) -> None:
+) -> bool:
     """Entry interception: daily cap + consecutive-failure circuit breaker.
 
     Wired into ``_queue_job`` (api/services/jobs.py) so every queued LLM task
     is gated; ``job_ref_key`` is the library_job_id for workbench retries.
+    Returns whether a daily-cap slot was reserved (P1-1) so the queue can
+    carry the flag for release-at-completion.
     """
+    settings = api_module._settings_store.get_settings(tenant_id)
+    reserved = settings.get("daily_llm_cap") is not None
     enforce_daily_llm_cap(tenant_id)
     if job_ref_key:
         streak = api_module._registry.recent_fail_streak(tenant_id, job_ref_key)
         if streak >= _FAIL_STREAK_LIMIT:
+            # 熔断拒绝时保留已成功的预留（保守占用，随当日边界过期），
+            # 不再走反向释放路径。
             raise HTTPException(
                 status_code=429,
                 detail=_REPEATED_FAILURES_DETAIL,
             )
+    return reserved
 
 
 def record_daily_llm_usage() -> None:

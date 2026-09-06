@@ -22,9 +22,21 @@ CREATE TABLE IF NOT EXISTS llm_daily_usage (
     calls INTEGER NOT NULL DEFAULT 0,
     estimated_cost REAL NOT NULL DEFAULT 0,
     updated_at REAL NOT NULL,
+    reserves INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (tenant_id, usage_date)
 );
 """
+
+# 2026-09-06（安全审查 P1-1）：新增 reserves 列——任务入队时原子条件预留
+# 一个调用名额（WHERE calls + reserves < cap），堵住 check-then-spend 竞态
+# （N 个并发请求整体击穿每日 cap）。真实调用发生时 record_call 消费一个
+# 预留；任务结束仍未消费的预留由调用方释放，未释放的随「当日」边界过期。
+_LLM_USAGE_MIGRATIONS = (
+    (
+        1,
+        "ALTER TABLE llm_daily_usage ADD COLUMN reserves INTEGER NOT NULL DEFAULT 0",
+    ),
+)
 
 _LLM_TENANT: ContextVar[str] = ContextVar(
     "resualign_llm_tenant",
@@ -61,10 +73,60 @@ class LLMUsageStore(_SqliteStore):
     """SQLite-backed daily call counter shared across process restarts."""
 
     SCHEMA_SQL = _LLM_USAGE_SCHEMA
-    MIGRATIONS: tuple[tuple[int, str], ...] = ()
+    MIGRATIONS: tuple[tuple[int, str], ...] = _LLM_USAGE_MIGRATIONS
 
     def _ensure_initialized(self) -> None:
         super()._ensure_initialized(_LLM_USAGE_SCHEMA)
+
+    def reserve_call(
+        self,
+        tenant_id: str,
+        cap: int,
+        usage_date: str | None = None,
+    ) -> bool:
+        """Atomically claim one daily call slot (P1-1 race fix).
+
+        Claims only when ``calls + reserves < cap``; returns ``False`` when
+        today's cap is exhausted. The claim is consumed by the next
+        :meth:`record_call` or returned via :meth:`release_call`.
+        """
+        if cap <= 0:
+            return False
+        day = usage_date or date.today().isoformat()
+        now = time.time()
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "INSERT INTO llm_daily_usage ("
+                    "tenant_id, usage_date, calls, estimated_cost, "
+                    "reserves, updated_at"
+                    ") VALUES (?, ?, 0, 0, 1, ?) "
+                    "ON CONFLICT(tenant_id, usage_date) DO UPDATE SET "
+                    "reserves = reserves + 1, "
+                    "updated_at = excluded.updated_at "
+                    "WHERE llm_daily_usage.calls + llm_daily_usage.reserves < ?",
+                    (tenant_id, day, now, cap),
+                )
+                return cursor.rowcount > 0
+
+    def release_call(
+        self,
+        tenant_id: str,
+        usage_date: str | None = None,
+    ) -> None:
+        """Return one unconsumed reservation (floor at zero)."""
+        day = usage_date or date.today().isoformat()
+        now = time.time()
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE llm_daily_usage SET "
+                    "reserves = MAX(reserves - 1, 0), updated_at = ? "
+                    "WHERE tenant_id = ? AND usage_date = ?",
+                    (now, tenant_id, day),
+                )
 
     def record_call(
         self,
@@ -72,7 +134,11 @@ class LLMUsageStore(_SqliteStore):
         usage_date: str | None = None,
         estimated_cost: float = 0.0,
     ) -> None:
-        """Increment the tenant's daily call counter once per logical call."""
+        """Increment the tenant's daily call counter once per logical call.
+
+        Each recorded call consumes one outstanding reservation (P1-1):
+        reservations only shift *when* a call is counted, never double-count.
+        """
         day = usage_date or date.today().isoformat()
         now = time.time()
         with self._lock:
@@ -80,11 +146,13 @@ class LLMUsageStore(_SqliteStore):
             with self._connect() as conn:
                 conn.execute(
                     "INSERT INTO llm_daily_usage ("
-                    "tenant_id, usage_date, calls, estimated_cost, updated_at"
-                    ") VALUES (?, ?, 1, ?, ?) "
+                    "tenant_id, usage_date, calls, estimated_cost, "
+                    "reserves, updated_at"
+                    ") VALUES (?, ?, 1, ?, 0, ?) "
                     "ON CONFLICT(tenant_id, usage_date) DO UPDATE SET "
                     "calls = calls + 1, "
                     "estimated_cost = estimated_cost + excluded.estimated_cost, "
+                    "reserves = MAX(reserves - 1, 0), "
                     "updated_at = excluded.updated_at",
                     (tenant_id, day, max(0.0, estimated_cost), now),
                 )
@@ -100,7 +168,7 @@ class LLMUsageStore(_SqliteStore):
             self._ensure_initialized()
             with self._connect() as conn:
                 row = conn.execute(
-                    "SELECT calls, estimated_cost FROM llm_daily_usage "
+                    "SELECT calls, estimated_cost, reserves FROM llm_daily_usage "
                     "WHERE tenant_id = ? AND usage_date = ?",
                     (tenant_id, day),
                 ).fetchone()
@@ -110,6 +178,7 @@ class LLMUsageStore(_SqliteStore):
             "estimated_cost": float(row["estimated_cost"] or 0.0)
             if row
             else 0.0,
+            "reserves": int(row["reserves"] or 0) if row else 0,
         }
 
     def snapshot(
@@ -123,6 +192,7 @@ class LLMUsageStore(_SqliteStore):
             "date": usage["usage_date"],
             "calls": usage["calls"],
             "estimated_cost": round(usage["estimated_cost"], 4),
+            "reserves": usage["reserves"],
         }
 
 

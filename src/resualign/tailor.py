@@ -1,4 +1,5 @@
 import bisect
+import contextvars
 import json as _json
 import re
 import uuid
@@ -529,7 +530,10 @@ def tailor_resume(
     result = _structured_or_json(client, system, user, TailoredResumeSchema)
     diffs = []
     invalid_diffs = []
-    strict_provenance = bool(getattr(client, "strict_provenance", False))
+    # P1-4（2026-09-06 安全审查）：fail-closed——未显式声明 strict_provenance
+    # 的 client（鸭子类型/mock）一律按 strict 处理；真实 OpenAIClient 本就
+    # 默认 True（llm.py）。
+    strict_provenance = bool(getattr(client, "strict_provenance", True))
     for item in result.get("diffs", []):
         diff, valid = parse_diff_with_provenance(item, resume_text)
         if diff.type == "add" and not diff.original.strip():
@@ -833,14 +837,19 @@ def tailor_resume_map_reduce(
             for b in targets
         ]
     else:
+        # P1-3（2026-09-06 安全审查）：ThreadPoolExecutor 不传播 contextvars，
+        # 工作线程读到空租户 → LLM 调用静默逃逸租户计量与熔断。父线程为
+        # 每个任务复制一份上下文快照（同一 Context 对象不可跨线程并发 run）。
+        snapshots = [contextvars.copy_context() for _ in targets]
         with ThreadPoolExecutor(max_workers=min(4, len(targets))) as pool:
             rewrites = list(
                 pool.map(
-                    lambda b: _try_rewrite_bullet(
-                        client, b["text"], resume_text, b["section"],
+                    lambda pair: pair[0].run(
+                        _try_rewrite_bullet,
+                        client, pair[1]["text"], resume_text, pair[1]["section"],
                         instruction, jd_context,
                     ),
-                    targets,
+                    zip(snapshots, targets),
                 )
             )
 

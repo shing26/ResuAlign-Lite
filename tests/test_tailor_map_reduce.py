@@ -123,6 +123,34 @@ def test_map_reduce_runs_concurrently_for_multiple_targets():
     }
 
 
+def test_map_reduce_parallel_propagates_tenant_context():
+    """P1-3（#77）：ThreadPoolExecutor 必须传播 contextvars——工作线程里的
+    LLM 调用要能读到 llm_tenant，否则云节点用量静默逃逸租户计量。"""
+    import threading
+
+    from resualign.llm_usage import current_llm_tenant, llm_tenant_context
+
+    seen = []
+    lock = threading.Lock()
+
+    class ProbeLLM(MockBulletLLM):
+        def chat_structured(self, system, user, schema_model, model=None):
+            result = super().chat_structured(system, user, schema_model, model)
+            name = getattr(schema_model, "__name__", "")
+            if name != TailoredResumeSchema.__name__:
+                with lock:
+                    seen.append((threading.current_thread().name, current_llm_tenant()))
+            return result
+
+    llm = ProbeLLM()
+    with llm_tenant_context("tenant-probe"):
+        tailor_resume_map_reduce(
+            llm, RESUME, _gap_report_json(["Python", "Redis"]), parallel=True
+        )
+    assert seen, "并行路径应发生多次 bullet 调用"
+    assert {tenant for _, tenant in seen} == {"tenant-probe"}
+
+
 def test_map_reduce_falls_back_to_whole_doc_without_bullets():
     llm = MockBulletLLM()
     result = tailor_resume_map_reduce(

@@ -232,3 +232,139 @@ def test_settings_status_reports_daily_usage():
     assert daily["cap"] == 4
     assert daily["remaining"] == 3
     assert daily["blocked"] is False
+
+
+# ---------------------------------------------------------------------------
+# P1-1（2026-09-06 安全审查 #77）：每日 cap 原子预留——堵 check-then-spend 竞态
+# ---------------------------------------------------------------------------
+
+
+def test_reserve_call_stops_at_cap(tmp_path):
+    store = LLMUsageStore(db_path=tmp_path / "usage.db")
+    assert store.reserve_call("t1", cap=2) is True
+    assert store.reserve_call("t1", cap=2) is True
+    assert store.reserve_call("t1", cap=2) is False
+    usage = store.get_usage("t1")
+    assert usage["calls"] == 0
+    assert usage["reserves"] == 2
+
+
+def test_concurrent_reserve_never_exceeds_cap(tmp_path):
+    import threading
+
+    store = LLMUsageStore(db_path=tmp_path / "usage.db")
+    granted = []
+    lock = threading.Lock()
+
+    def attempt():
+        ok = store.reserve_call("t1", cap=5)
+        with lock:
+            granted.append(ok)
+
+    threads = [threading.Thread(target=attempt) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sum(1 for ok in granted if ok) == 5
+    assert store.get_usage("t1")["reserves"] == 5
+
+
+def test_record_call_consumes_reservation(tmp_path):
+    store = LLMUsageStore(db_path=tmp_path / "usage.db")
+    store.reserve_call("t1", cap=3)
+    store.record_call("t1")
+    usage = store.get_usage("t1")
+    assert usage["calls"] == 1
+    assert usage["reserves"] == 0
+
+
+def test_release_call_returns_unconsumed_slot(tmp_path):
+    store = LLMUsageStore(db_path=tmp_path / "usage.db")
+    store.reserve_call("t1", cap=2)
+    store.release_call("t1")
+    usage = store.get_usage("t1")
+    assert usage["reserves"] == 0
+    # 释放后可以再次预留
+    assert store.reserve_call("t1", cap=2) is True
+
+
+def test_enforce_reserves_atomically_and_blocks_second_entry():
+    api_module._settings_store.update_settings("t1", {"daily_llm_cap": 1})
+    # 第一次入队成功并占住唯一名额
+    api_module.enforce_daily_llm_cap("t1")
+    assert api_module._llm_usage.get_usage("t1")["reserves"] == 1
+    # 并发/后续入队被原子条件递增挡下（旧的 check-then-spend 会整体击穿）
+    with pytest.raises(HTTPException) as exc_info:
+        api_module.enforce_daily_llm_cap("t1")
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail["code"] == "llm_daily_cap_reached"
+    # 真实调用发生 → 消费预留，额度不再被占
+    api_module._llm_usage.record_call("t1")
+    assert api_module._llm_usage.get_usage("t1")["reserves"] == 0
+
+
+def test_run_job_releases_slot_when_no_llm_calls():
+    """入队预留了 cap 名额但任务零 LLM 调用（缓存全命中/早失败）→ 释放。"""
+    import time as _time
+
+    from resualign.models import (
+        GapReport,
+        JDProfile,
+        Report,
+        TailoredResume,
+    )
+
+    headers = _auth_headers()
+    user = client.get("/api/auth/me", headers=headers).json()
+    api_module._settings_store.update_settings(
+        user["user_id"], {"daily_llm_cap": 5}
+    )
+    resume = client.post(
+        "/api/master-resumes",
+        json={"title": "R", "content": "Python developer."},
+        headers=headers,
+    ).json()
+    with patch("resualign.api._classify_job", return_value={}):
+        job = client.post(
+            "/api/jobs",
+            json={
+                "title": "B",
+                "jd_text": f"Python backend {_time.time_ns()}",
+            },
+            headers=headers,
+        ).json()
+    report = Report(
+        score=80,
+        skills=["Python"],
+        model="test-model",
+        jd_profile=JDProfile(must_have_skills=["Python"]),
+        gap_report=GapReport(missing_keywords=[]),
+        tailored_resume=TailoredResume(
+            sections={"experience": "Built FastAPI"},
+            diffs=[],
+        ),
+        diffs=[],
+    )
+    with patch("resualign.api._run_job"), patch(
+        "resualign.api.build_config",
+        return_value=ResuAlignConfig(
+            provider="deepseek", api_key="sk-test", model="test-model"
+        ),
+    ):
+        queued = client.post(
+            f"/api/jobs/{job['job_id']}/workbench",
+            json={"master_resume_id": resume["resume_id"]},
+            headers=headers,
+        )
+    assert queued.status_code == 202
+    analysis_job_id = queued.json()["job_id"]
+    # 入队已预留 1 个名额
+    assert api_module._llm_usage.get_usage(user["user_id"])["reserves"] == 1
+    with patch("resualign.api.build_config"), patch(
+        "resualign.api.run", return_value=report
+    ):
+        api_module._run_job(analysis_job_id)
+    usage = api_module._llm_usage.get_usage(user["user_id"])
+    assert usage["calls"] == 0
+    assert usage["reserves"] == 0
