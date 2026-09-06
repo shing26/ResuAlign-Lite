@@ -829,12 +829,12 @@ export function alignmentControls(session, resumes, jobId) {
   const running = alignment.status === "running" || alignment.status === "queued";
   const failed = alignment.status === "failed";
   return `
-    <form class="align-form" data-form="split-align">
+    <form class="align-form" data-form="split-align" novalidate>
       <input type="hidden" name="job_id" value="${esc(jobId)}">
       <div class="align-form__row">
         <label class="field" style="flex:1;min-width:0">
           <span class="small">主简历</span>
-          <select name="master_resume_id" required>
+          <select name="master_resume_id">
             <option value="">${resumes.length ? "选择简历..." : "请先到简历中心创建主简历"}</option>
             ${optionsHtml}
           </select>

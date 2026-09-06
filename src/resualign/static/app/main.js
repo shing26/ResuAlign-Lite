@@ -899,11 +899,75 @@ function findApplicationEntry(jobId) {
 /* MVP-09: 定稿导出统一走 POST /api/jobs/{job_id}/exports。PDF 响应把
  * print-html 写入 #print-root 后触发打印；Markdown/JSON 用响应里的
  * canonical 内容与文件名下载，不再从 transient session 拼装。 */
-async function exportFinalDraft(format) {
+/* #80: [待人工确认：…] 占位符是「AI 编指标未遂」的半成品标注，采纳后
+ * 会原样进入定稿。导出前扫描并阻断式确认，不允许静默通过。 */
+function countMetricPlaceholders(text) {
+  const matches = (text || "").match(/\[待人工确认[^\]]*\]/g);
+  return matches ? matches.length : 0;
+}
+
+async function draftPlaceholderCount(jobId) {
+  let draft =
+    (state.wbWorkingDraft && state.wbWorkingDraft.jobId === jobId
+      ? state.wbWorkingDraft.draft
+      : null) ||
+    (state.wbJob && state.wbJob.job_id === jobId
+      ? state.wbJob.final_draft
+      : "") ||
+    "";
+  if (!draft) {
+    try {
+      const job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+      draft = job.final_draft || "";
+    } catch {
+      return 0;
+    }
+  }
+  return countMetricPlaceholders(draft);
+}
+
+function confirmPlaceholderExport(count, onProceed) {
+  showModal(
+    "定稿包含待确认占位符",
+    `<p>定稿中有 <b>${count}</b> 处「[待人工确认：…]」占位指标（如“耗时降低 X%”）。这些是尚未核实的内容，导出后会原样出现在 HR 看到的简历里。</p>
+     <p class="small muted">建议先在工作台中补齐真实数据或删除这些占位符，再导出。</p>
+     <div class="actions">
+       <button class="btn btn-ghost" type="button" data-placeholder-cancel>回去修改</button>
+       <button class="btn btn-primary" type="button" data-placeholder-proceed>我已知晓，仍要导出</button>
+     </div>`,
+  );
+  const backdrop = document.querySelector(".modal-backdrop");
+  if (!backdrop) {
+    onProceed();
+    return;
+  }
+  const cancel = backdrop.querySelector("[data-placeholder-cancel]");
+  const proceed = backdrop.querySelector("[data-placeholder-proceed]");
+  if (cancel) {
+    cancel.addEventListener("click", () => closeModal());
+  }
+  if (proceed) {
+    proceed.addEventListener("click", () => {
+      closeModal();
+      onProceed();
+    });
+  }
+}
+
+async function exportFinalDraft(format, options = {}) {
   const jobId = (state.wbJob && state.wbJob.job_id) || (state.route && state.route.jobId);
   if (!jobId) {
     toast("当前没有可导出的岗位", "error");
     return;
+  }
+  if (!options.confirmedPlaceholders) {
+    const placeholders = await draftPlaceholderCount(jobId);
+    if (placeholders > 0) {
+      confirmPlaceholderExport(placeholders, () =>
+        exportFinalDraft(format, { confirmedPlaceholders: true }),
+      );
+      return;
+    }
   }
   let body;
   try {
@@ -1729,6 +1793,13 @@ const actions = {
     const form = $("[data-form='split-align']");
     if (!form) {
       toast("请先在右侧「优化设置」中配置主简历", "error");
+      return;
+    }
+    /* #79: 未选主简历时原生 required 校验会静默拦截 requestSubmit——
+     * 主 CTA 看起来完全无反应。这里预检并给出 toast + 面板高亮。 */
+    const select = form.querySelector("[name='master_resume_id']");
+    if (select && !select.value) {
+      flagMissingMasterResume(form, select);
       return;
     }
     if (typeof form.requestSubmit === "function") {
@@ -2577,8 +2648,31 @@ document.addEventListener("change", (event) => {
   }
 });
 
-document.addEventListener("submit", async (event) => {
-  const form = event.target;
+/* #79: 主 CTA 静默失败修复——校验失败时 toast + 高亮主简历选择面板 +
+ * 滚动聚焦，选择后自动撤销高亮。 */
+function flagMissingMasterResume(form, select) {
+  toast("请先选择主简历，再开始对齐", "error");
+  if (!select) return;
+  const field = select.closest(".field") || select;
+  field.classList.add("field--missing");
+  select.addEventListener(
+    "change",
+    () => field.classList.remove("field--missing"),
+    { once: true },
+  );
+  try {
+    select.scrollIntoView({ block: "center", behavior: "smooth" });
+  } catch {
+    select.scrollIntoView();
+  }
+  try {
+    select.focus({ preventScroll: true });
+  } catch {
+    select.focus();
+  }
+}
+
+document.addEventListener("submit", async (event) => {  const form = event.target;
   const formName = form.dataset.form;
   if (!formName) return;
   event.preventDefault();
@@ -2623,7 +2717,10 @@ async function handleForm(formName, data, form) {
     case "split-align": {
       const jobId = data.job_id;
       if (!data.master_resume_id) {
-        toast("请先选择主简历", "error");
+        /* #79: novalidate 后提交事件总能到达这里——除 toast 外同时
+         * 高亮主简历选择面板，避免「点了没反应」。 */
+        const select = form && form.querySelector("[name='master_resume_id']");
+        flagMissingMasterResume(form, select);
         return;
       }
       const result = await startAlignmentRun(

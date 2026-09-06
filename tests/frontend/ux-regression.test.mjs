@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import {
+  alignmentControls,
   diffList,
   parseHashValue,
   renderGap,
@@ -17,6 +18,10 @@ import {
   shortenGapPhrase,
   workbenchGuideHtml,
 } from "../../src/resualign/static/app/format.js";
+
+/* 源码契约护栏用：读取 app/ 下模块源码 */
+const read = (name) =>
+  readFileSync(join(here, "../../src/resualign/static/app", name), "utf8");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const STYLES_RAW = readFileSync(
@@ -215,4 +220,41 @@ test("P2-C: idle 任务（无草稿）不渲染投递闭环引导条", () => {
   // 有草稿才出现引导（已生成草稿 → 记录投递 → 安排跟进）
   const withDraft = { job_id: "j1", final_draft: "draft text" };
   assert.match(workbenchGuideHtml(withDraft, false), /workbench-guide/);
+});
+
+/* ---------- 护栏 4：2026-09-06 焦虑应届生走查 P0（#79 / #80） ---------- */
+
+test("#79: split-align 表单不再依赖静默的原生 required 校验", () => {
+  // 主简历 select 去掉 required + 表单 novalidate：原生校验会静默拦截
+  // requestSubmit，主 CTA「开始对齐」看起来完全无反应（走查 B1 等了 40s）。
+  const html = alignmentControls({ alignment: {}, resume: {} }, [], "j1");
+  assert.match(html, /data-form="split-align" novalidate/);
+  assert.doesNotMatch(html, /name="master_resume_id" required/);
+  // 两条入口都有 JS 预检：run-alignment action + split-align submit 分支
+  const mainSrc = read("main.js");
+  assert.match(mainSrc, /function flagMissingMasterResume\(/);
+  assert.match(
+    mainSrc,
+    /"run-alignment"[\s\S]{0,400}?flagMissingMasterResume\(form, select\)/,
+  );
+  assert.match(
+    mainSrc,
+    /case "split-align":[\s\S]{0,300}?flagMissingMasterResume\(form, select\)/,
+  );
+  // 高亮样式存在（toast 之外必须有可见面板反馈）
+  assert.match(STYLES, /\.align-form \.field--missing select/);
+});
+
+test("#80: 导出定稿前扫描 [待人工确认] 占位符并阻断式确认", () => {
+  const mainSrc = read("main.js");
+  // 占位符扫描存在（源码里是正则字面量，匹配转义形态）
+  assert.ok(mainSrc.includes("待人工确认"), "main.js 应包含占位符扫描");
+  assert.match(mainSrc, /function countMetricPlaceholders\(/);
+  // 导出函数有确认闸门：未确认时不直接导出
+  assert.match(mainSrc, /async function exportFinalDraft\(format, options/);
+  assert.match(mainSrc, /options\.confirmedPlaceholders/);
+  // 阻断式弹窗提供「回去修改 / 我已知晓，仍要导出」双出口
+  assert.match(mainSrc, /data-placeholder-cancel/);
+  assert.match(mainSrc, /data-placeholder-proceed/);
+  assert.match(mainSrc, /仍要导出/);
 });

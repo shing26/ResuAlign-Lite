@@ -4800,6 +4800,13 @@ body.command-palette-open {
   min-width: 0;
 }
 
+/* #79: 主简历未选择时点击「开始对齐」的高亮反馈（替代被静默拦截的
+ * 原生 required 校验气泡）。 */
+.align-form .field--missing select {
+  border-color: var(--error);
+  box-shadow: 0 0 0 2px var(--error-soft);
+}
+
 .align-form .btn-primary {
   min-height: 36px;
 }
