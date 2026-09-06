@@ -521,8 +521,21 @@ def run_key_path(
         (job.get("final_draft") or "").strip(),
         "final draft was not persisted after accepting a bullet",
     )
+    # PR #86 (#80): exporting a final draft that still carries
+    # [待人工确认：...] placeholders now shows a blocking confirm modal.
+    # The fake-LLM draft always has one, so click through it if it appears;
+    # when no placeholder is present the download starts immediately.
+    def _confirm_placeholder_export():
+        modal = page.locator("[data-placeholder-proceed]")
+        try:
+            modal.wait_for(timeout=2000)
+            modal.click()
+        except Exception:
+            pass  # no placeholder modal — silent download path
+
     with page.expect_download() as download_info:
         panel.locator('[data-action="export-final-draft-md"]').click()
+        _confirm_placeholder_export()
     download = download_info.value
     expect(
         download.suggested_filename.endswith(".md"),
@@ -547,6 +560,7 @@ def run_key_path(
             and resp.request.method == "POST"
         ) as response_info:
             panel.locator('[data-action="export-final-draft"]').click()
+            _confirm_placeholder_export()
         export = response_info.value.json()
         expect(export.get("format") == "pdf", "pdf export format mismatch")
         expect(
