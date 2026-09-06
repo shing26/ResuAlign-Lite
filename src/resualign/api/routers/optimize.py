@@ -20,7 +20,7 @@ def optimize_master_resume(
     """Queue the xzjobs-style resume optimization: local overall analysis
     followed by per-module (project experience) LLM polish."""
     api_module._enforce_rate_limit(request, api_module._analyze_rate_limiter)
-    api_module.enforce_daily_llm_cap(user['user_id'])
+    api_module.check_daily_llm_cap(user['user_id'])
     resume = api_module._resumes.get_master_resume(user['user_id'], resume_id)
     if resume is None:
         raise HTTPException(status_code=404, detail='Master resume not found')

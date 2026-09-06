@@ -44,13 +44,28 @@ def llm_daily_status(tenant_id: str) -> dict[str, Any]:
     }
 
 
+def check_daily_llm_cap(tenant_id: str) -> None:
+    """Non-reserving fast 429 check for queue routes.
+
+    Routes that delegate to ``_queue_job`` use this pre-check; the atomic
+    reservation happens exactly once inside ``enforce_llm_task_entry``
+    (P1-1: a route-level reserve here would double-book the slot).
+    """
+    status = llm_daily_status(tenant_id)
+    if status["blocked"]:
+        raise HTTPException(
+            status_code=429,
+            detail=CAP_REACHED_DETAIL,
+        )
+
+
 def enforce_daily_llm_cap(tenant_id: str) -> None:
     """Reject a new LLM task with 429 when today's cap is exhausted.
 
     P1-1：检查与预留合并为一次原子条件递增（``WHERE calls + reserves <
     cap``），并发入队不再能整体击穿每日 cap。预留由任务的真实 LLM 调用
-    （record_call）消费；任务结束未消费的由 _run_job 释放，未释放的随
-    「当日」边界过期（保守方向：只会少用不会多用）。
+    （record_call）消费；走 _queue_job 的任务结束时未消费的由 _run_job
+    释放，未释放的随「当日」边界过期（保守方向：只会少用不会多用）。
     """
     settings = api_module._settings_store.get_settings(tenant_id)
     cap = settings.get("daily_llm_cap")

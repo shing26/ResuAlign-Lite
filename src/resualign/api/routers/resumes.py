@@ -89,7 +89,8 @@ def get_master_resume(resume_id: str, user: dict[str, Any]=Depends(get_current_u
 def diagnose_master_resume(resume_id: str, request: Request, user: dict[str, Any]=Depends(get_current_user)):
     """Queue an independent no-JD diagnosis for one master resume."""
     api_module._enforce_rate_limit(request, api_module._analyze_rate_limiter)
-    api_module.enforce_daily_llm_cap(user['user_id'])
+    # P1-1：_queue_job 内部会原子预留每日 cap 名额，这里只做非预留预检。
+    api_module.check_daily_llm_cap(user['user_id'])
     resume = api_module._resumes.get_master_resume(user['user_id'], resume_id)
     if resume is None:
         raise HTTPException(status_code=404, detail='Master resume not found')

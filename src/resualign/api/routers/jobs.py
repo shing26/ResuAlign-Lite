@@ -372,7 +372,8 @@ def delete_library_job(job_id: str, user: dict[str, Any]=Depends(get_current_use
 def run_workbench(job_id: str, req: WorkbenchRunRequest, request: Request, user: dict[str, Any]=Depends(get_current_user)):
     """Queue a per-job pipeline run pinned to a Master Resume version."""
     api_module._enforce_rate_limit(request, api_module._analyze_rate_limiter)
-    api_module.enforce_daily_llm_cap(user['user_id'])
+    # P1-1：_queue_job 内部会原子预留每日 cap 名额，这里只做非预留预检。
+    api_module.check_daily_llm_cap(user['user_id'])
     job = api_module._jobs.get_job(user['user_id'], job_id)
     if job is None:
         raise HTTPException(status_code=404, detail='Job not found')

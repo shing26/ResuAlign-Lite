@@ -317,9 +317,8 @@ def test_run_job_releases_slot_when_no_llm_calls():
 
     headers = _auth_headers()
     user = client.get("/api/auth/me", headers=headers).json()
-    api_module._settings_store.update_settings(
-        user["user_id"], {"daily_llm_cap": 5}
-    )
+    # 先建岗位/简历（此时 cap 未设，建岗的同步分类路由不预留名额），
+    # 再设 cap——否则建岗路由的预留会混入计数。
     resume = client.post(
         "/api/master-resumes",
         json={"title": "R", "content": "Python developer."},
@@ -334,6 +333,9 @@ def test_run_job_releases_slot_when_no_llm_calls():
             },
             headers=headers,
         ).json()
+    api_module._settings_store.update_settings(
+        user["user_id"], {"daily_llm_cap": 5}
+    )
     report = Report(
         score=80,
         skills=["Python"],
