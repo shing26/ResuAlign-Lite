@@ -482,6 +482,187 @@ def test_noop_diffs_filtered_into_invalid():
     assert persisted["invalid_diffs"][0]["original"] == "Python developer."
 
 
+def test_eval_hallucination_blocks_diffs_into_invalid():
+    """P0 #74：evaluator 自评判定幻觉时硬阻断——diffs 整体降级 invalid，
+    不作为已验证建议保存（此前只扣 5 分不阻断）。"""
+    job = _create_job()
+    resume = _create_resume()
+    diff = DiffItem(
+        type="modify",
+        original="Python developer.",
+        proposed="Python developer with Redis caching.",
+        reason="JD match",
+        confidence="high",
+        provenance="Python developer.",
+    )
+    report = Report(
+        score=84,
+        skills=["Python"],
+        model="test-model",
+        jd_profile=JDProfile(must_have_skills=["Python"]),
+        gap_report=GapReport(missing_keywords=["Redis"]),
+        tailored_resume=TailoredResume(
+            sections={"experience": "Built FastAPI with Redis caching"},
+            diffs=[diff],
+        ),
+        diffs=[diff],
+        eval_score=EvalScore(
+            jd_match_score=90,
+            improvement=6,
+            hallucination_detected=True,
+            hallucination_details=["编造了 Redis 经验"],
+            gap_coverage=0.8,
+        ),
+    )
+    with patch("resualign.api._run_job"), patch(
+        "resualign.api.build_config", return_value=_config()
+    ):
+        queued = client.post(
+            f"/api/jobs/{job['job_id']}/workbench",
+            json={"master_resume_id": resume["resume_id"]},
+            headers=_auth_headers(),
+        )
+    assert queued.status_code == 202
+    analysis_job_id = queued.json()["job_id"]
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api.run", return_value=report
+    ):
+        api_module._run_job(analysis_job_id)
+    persisted = client.get(
+        f"/api/jobs/{job['job_id']}", headers=_auth_headers()
+    ).json()
+    assert persisted["alignment_status"] == "succeeded"
+    assert persisted["diffs"] == []
+    assert len(persisted["invalid_diffs"]) == 1
+    blocked = persisted["invalid_diffs"][0]
+    assert blocked["provenance_state"] == "fabricated"
+    assert "真实性评估" in blocked["reason"]
+
+
+def _persist_single_diff_job(diff: DiffItem) -> str:
+    """Queue + run a workbench job that persists exactly one diff; return
+    the library job_id for rewrite-route tests."""
+    job = _create_job()
+    resume = _create_resume()
+    report = Report(
+        score=84,
+        skills=["Python"],
+        model="test-model",
+        jd_profile=JDProfile(must_have_skills=["Python"]),
+        gap_report=GapReport(missing_keywords=["Redis"]),
+        tailored_resume=TailoredResume(
+            sections={"experience": "Built FastAPI"},
+            diffs=[diff],
+        ),
+        diffs=[diff],
+    )
+    with patch("resualign.api._run_job"), patch(
+        "resualign.api.build_config", return_value=_config()
+    ):
+        queued = client.post(
+            f"/api/jobs/{job['job_id']}/workbench",
+            json={"master_resume_id": resume["resume_id"]},
+            headers=_auth_headers(),
+        )
+    assert queued.status_code == 202
+    analysis_job_id = queued.json()["job_id"]
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api.run", return_value=report
+    ):
+        api_module._run_job(analysis_job_id)
+    return job["job_id"]
+
+
+def test_rewrite_route_verified_result_moves_into_diffs():
+    """P0 #76：重写产物过内容级校验（verified）才能进入 diffs 队列。"""
+    diff = DiffItem(
+        type="modify",
+        original="Python developer.",
+        proposed="Python developer with caching.",
+        reason="queued for rewrite",
+        confidence="low",
+        provenance="Python developer.",
+        provenance_state="missing",
+    )
+    job_id = _persist_single_diff_job(diff)
+    persisted = client.get(
+        f"/api/jobs/{job_id}", headers=_auth_headers()
+    ).json()
+    diff_id = persisted["diffs"][0]["diff_id"]
+    rewritten = DiffItem(
+        type="modify",
+        original="Python developer.",
+        proposed="Python developer with Redis caching.",
+        reason="rewrite ok",
+        confidence="high",
+        provenance="Python developer.",
+        provenance_state="verified",
+    )
+    with patch(
+        "resualign.api.build_config", return_value=_config()
+    ), patch("resualign.api.OpenAIClient"), patch(
+        "resualign.api.rewrite_bullet", return_value=rewritten
+    ):
+        response = client.post(
+            f"/api/jobs/{job_id}/workbench/rewrite",
+            json={"diff_id": diff_id, "instruction": "concise"},
+            headers=_auth_headers(),
+        )
+    assert response.status_code == 200
+    assert response.json()["provenance_state"] == "verified"
+    updated = client.get(
+        f"/api/jobs/{job_id}", headers=_auth_headers()
+    ).json()
+    assert len(updated["diffs"]) == 1
+    assert updated["diffs"][0]["provenance_state"] == "verified"
+    assert updated["invalid_diffs"] == []
+
+
+def test_rewrite_route_fabricated_result_stays_in_invalid():
+    """P0 #76：重写产物未过内容级校验时不得自动洗白进 diffs。"""
+    diff = DiffItem(
+        type="modify",
+        original="Python developer.",
+        proposed="Python developer with caching.",
+        reason="queued for rewrite",
+        confidence="low",
+        provenance="Python developer.",
+        provenance_state="missing",
+    )
+    job_id = _persist_single_diff_job(diff)
+    persisted = client.get(
+        f"/api/jobs/{job_id}", headers=_auth_headers()
+    ).json()
+    diff_id = persisted["diffs"][0]["diff_id"]
+    rewritten = DiffItem(
+        type="modify",
+        original="Python developer.",
+        proposed="Led a 20-person team at Stanford.",
+        reason="已拦截：数字 20 在简历原文中无依据",
+        confidence="high",
+        provenance="Python developer.",
+        provenance_state="fabricated",
+    )
+    with patch(
+        "resualign.api.build_config", return_value=_config()
+    ), patch("resualign.api.OpenAIClient"), patch(
+        "resualign.api.rewrite_bullet", return_value=rewritten
+    ):
+        response = client.post(
+            f"/api/jobs/{job_id}/workbench/rewrite",
+            json={"diff_id": diff_id, "instruction": "quantified"},
+            headers=_auth_headers(),
+        )
+    assert response.status_code == 200
+    assert response.json()["provenance_state"] == "fabricated"
+    updated = client.get(
+        f"/api/jobs/{job_id}", headers=_auth_headers()
+    ).json()
+    assert updated["diffs"] == []
+    assert len(updated["invalid_diffs"]) == 1
+    assert updated["invalid_diffs"][0]["provenance_state"] == "fabricated"
+
+
 def test_save_alignment_hint_field_roundtrip(tmp_path):
     """tailor 降级时 last_alignment_error 作为 succeeded 运行的提示字段
     持久化；正常成功用 None 清掉旧提示。"""

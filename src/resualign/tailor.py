@@ -167,6 +167,101 @@ def _ensure_metric_placeholder(text: str) -> str:
     return f"{text.rstrip()} {METRIC_PLACEHOLDER}"
 
 
+# P0（2026-09-06 安全审查 #74）：provenance 门只验引文锚点、不验 proposed
+# 载荷——模型可以给出逐字真实的锚点，同时在 proposed 里编造简历中不存在的
+# 数字或机构/术语。以下内容级校验在解析之后、采纳之前对 proposed 做回溯
+# 比对，未支撑内容一律降级 invalid_diffs（ADR-0019「Zero hallucination is
+# a hard gate」的代码级执行，不受 strict_provenance 开关影响）。
+# 校验范围：数字指标 + 大写拉丁专名（技术名/机构名）。自由措辞、小写英文
+# 形容词与「[待人工确认：…]」可编辑占位符豁免——占位符是显式待人工补齐的
+# 标注，不是当成事实呈现的内容。
+_METRIC_PLACEHOLDER_RE = re.compile(r"\[[^\]\[]*待人工确认[^\]\[]*\]")
+_LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9.+#/-]*")
+_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_PROPER_NOUN_MIN_CHARS = 3
+
+
+def _unsupported_content(
+    proposed: str,
+    *supported_texts: str,
+) -> list[str]:
+    """Return details of proposed content not backed by any supported text.
+
+    Two fabrication-prone content classes are checked: numeric metrics and
+    capitalized Latin tokens (tech terms / org names). Both must appear in
+    the resume (or the JD allowlist corpus) to count as supported.
+    """
+    text = _METRIC_PLACEHOLDER_RE.sub(" ", proposed or "")
+    corpus = "\n".join(t for t in supported_texts if t)
+    corpus_numbers = set(_NUMBER_RE.findall(corpus.replace(",", "")))
+    corpus_lower = corpus.lower()
+    # 中文语境下拉丁词基本是术语/专名（Stanford/Kubernetes），全部回溯；
+    # 纯英文改写是散文，句首大写（Led/Built）不是专名信号，只查缩写与
+    # 驼峰（QPS/FastAPI），避免把措辞润色误判为编造。
+    cjk_context = bool(_CJK_RE.search(text))
+
+    def _noun_candidate(token: str) -> bool:
+        if token.upper() == token or any(c.isupper() for c in token[1:]):
+            return True
+        return cjk_context
+
+    unsupported: list[str] = []
+    for number in _NUMBER_RE.findall(text.replace(",", "")):
+        if number not in corpus_numbers:
+            unsupported.append(f"数字 {number}")
+    seen_tokens: set[str] = set()
+    for token in _LATIN_TOKEN_RE.findall(text):
+        key = token.lower()
+        if key in seen_tokens:
+            continue
+        seen_tokens.add(key)
+        if len(token) < _PROPER_NOUN_MIN_CHARS or token.islower():
+            continue
+        if not _noun_candidate(token):
+            continue
+        if key not in corpus_lower:
+            unsupported.append(f"名称/术语 {token}")
+    return unsupported
+
+
+def _mark_unsupported(diff: DiffItem, unsupported: list[str]) -> DiffItem:
+    """Flag a diff whose proposed content failed the support check."""
+    diff.provenance_state = "fabricated"
+    detail = "、".join(unsupported)
+    diff.reason = (
+        f"{diff.reason}；" if diff.reason else ""
+    ) + f"已拦截：{detail} 在简历原文中无依据"
+    return diff
+
+
+def _gap_support_text(gap_report_text: str) -> str:
+    """Extract the JD-derived allowlist corpus from a gap report payload.
+
+    The tailor prompt instructs the model to reuse the JD's exact phrases
+    for facts the resume already supports, so JD terminology (skills,
+    scenarios, context) is legitimate rewrite material, not fabrication.
+    """
+    try:
+        data = _json.loads(gap_report_text or "{}")
+    except (ValueError, TypeError):
+        return ""
+    parts: list[str] = []
+    for key in (
+        "missing_keywords",
+        "misaligned_emphasis",
+        "strength_matches",
+        "business_scenarios",
+        "jd_context",
+    ):
+        value = data.get(key)
+        if isinstance(value, str):
+            parts.append(value)
+        elif isinstance(value, list):
+            parts.extend(str(item) for item in value)
+    return "\n".join(parts)
+
+
 def _normalized_char_map(text: str) -> tuple[str, list[int]]:
     """Return whitespace-collapsed text plus a char->original index map."""
     norm_chars: list[str] = []
@@ -466,6 +561,12 @@ def derive_section_diffs(
     """
     if tailored.diffs:
         return tailored.diffs
+    if tailored.invalid_diffs:
+        # P0（2026-09-06 安全审查 #75）：strict 门把全部 diffs 过滤成
+        # invalid 时（invalid_diffs 非空），整章派生会把未校验的 sections
+        # 重写包装成 verified ——「模型越幻觉越容易触发」的确定性绕过放大器。
+        # 仅当模型真的没给 diffs（invalid_diffs 为空）才允许章节派生。
+        return []
     derived: list[DiffItem] = []
     for heading, new_text in (tailored.sections or {}).items():
         span = _locate_section_span(heading, resume_text)
@@ -530,11 +631,21 @@ def tailor_resume(
     diffs = []
     invalid_diffs = []
     strict_provenance = bool(getattr(client, "strict_provenance", False))
+    jd_support = _gap_support_text(gap_report_text)
     for item in result.get("diffs", []):
         diff, valid = parse_diff_with_provenance(item, resume_text)
         if diff.type == "add" and not diff.original.strip():
             invalid_diffs.append(diff)
             continue
+        # 内容级校验（#74）：锚点真实但 proposed 编造数字/专名 → 直接拦截，
+        # 不进入 diffs（先于 strict 锚点门，编造内容不因非 strict 模式放行）。
+        if diff.proposed and diff.type in {"modify", "remove"}:
+            unsupported = _unsupported_content(
+                diff.proposed, resume_text, diff.original, jd_support
+            )
+            if unsupported:
+                invalid_diffs.append(_mark_unsupported(diff, unsupported))
+                continue
         if not valid and strict_provenance:
             invalid_diffs.append(diff)
         else:
@@ -576,18 +687,26 @@ def rewrite_bullet(
             content,
         )
         if cached is not None:
-            return DiffItem(
+            diff = DiffItem(
                 diff_id=uuid.uuid4().hex,
                 type="modify",
                 original=original,
-                proposed=cached.get("proposed", ""),
-                reason=cached.get("reason", ""),
+                proposed=str(cached.get("proposed") or ""),
+                reason=str(cached.get("reason") or ""),
                 confidence="high",
                 provenance=original,
                 provenance_quote=original,
                 source_span=(0, len(original)),
-                provenance_state="verified",
             )
+            # P0（#76）：缓存产物同样过内容级校验，编造内容不得标 verified。
+            unsupported = _unsupported_content(
+                diff.proposed, original, jd_context or ""
+            )
+            if unsupported:
+                _mark_unsupported(diff, unsupported)
+            else:
+                diff.provenance_state = "verified"
+            return diff
 
     system = BULLET_REWRITE_PROMPT
     user = (
@@ -617,9 +736,16 @@ def rewrite_bullet(
         provenance=original,
         provenance_quote=original,
         source_span=(0, len(original)),
-        provenance_state="verified",
     )
-    if cache is not None:
+    # P0（#76）：重写产物过内容级校验后才能标 verified；改写铁律是
+    # 「只应用指令到已有事实上」，proposed 中出现 original/JD 语料都
+    # 支撑不了的数字或专名即视为编造。
+    unsupported = _unsupported_content(proposed, original, jd_context or "")
+    if unsupported:
+        _mark_unsupported(diff, unsupported)
+    else:
+        diff.provenance_state = "verified"
+    if cache is not None and diff.provenance_state == "verified":
         cache.put(
             tenant,
             resolved_model,
@@ -848,13 +974,21 @@ def tailor_resume_map_reduce(
     invalid_diffs: list[DiffItem] = []
     accepted: set[str] = set()
     for diff in rewrites:
-        if diff.proposed and diff.proposed.strip():
+        if (
+            diff.proposed
+            and diff.proposed.strip()
+            and diff.provenance_state != "fabricated"
+        ):
             accepted.add(diff.original)
             diffs.append(diff)
         else:
             diff.confidence = "low"
-            diff.provenance_state = "missing"
-            diff.reason = (diff.reason or "") + " [生成失败，可单条重试]"
+            if diff.provenance_state == "fabricated":
+                # 内容级校验拦截（#76）：保留「已拦截：…」原因，不冒充生成失败。
+                diff.reason = (diff.reason or "") + " [可单条重试]"
+            else:
+                diff.provenance_state = "missing"
+                diff.reason = (diff.reason or "") + " [生成失败，可单条重试]"
             invalid_diffs.append(diff)
 
     # Reassemble sections: targeted bullets replaced with proposed text,

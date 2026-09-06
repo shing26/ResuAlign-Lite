@@ -84,7 +84,9 @@ def test_tailor_diff_section_filled_from_llm():
             "provenance": "Worked on backend",
         }],
     })
-    result = tailor_resume(mock, "Resume", "Gap")
+    # 内容级校验（#74）：proposed 的 FastAPI 必须在简历原文中有依据，
+    # 否则会被拦截进 invalid_diffs 而非 diffs。
+    result = tailor_resume(mock, "Worked on backend with FastAPI", "Gap")
     assert result.diffs[0].section == "项目经历"
 
 

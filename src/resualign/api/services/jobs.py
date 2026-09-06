@@ -862,18 +862,56 @@ def _run_job_holding_gate(job_id: str) -> None:
                 # accepted advice; fold them into invalid_diffs so the UI can
                 # explain "the model returned no actionable edits".
                 raw_diffs = list(result.get("diffs") or [])
-                noop_diffs = [d for d in raw_diffs if _is_noop_diff(d)]
-                kept_diffs = [d for d in raw_diffs if not _is_noop_diff(d)]
-                if noop_diffs:
-                    logger.info(
-                        "library job %s: filtered %d no-op diff(s) out of %d",
-                        library_job_id, len(noop_diffs), len(raw_diffs),
+                # P0（2026-09-06 安全审查 #74）：evaluator 自评判定幻觉时
+                # 硬阻断——本轮 diffs 不作为已验证建议保存，整体降级 invalid
+                # （ADR-0019 零幻觉硬门；此前只在匹配分里扣 5 分，不阻断）。
+                eval_hallucinated = bool(
+                    isinstance(eval_score, dict)
+                    and eval_score.get("hallucination_detected")
+                )
+                if eval_hallucinated and raw_diffs:
+                    blocked = []
+                    for diff in raw_diffs:
+                        diff = dict(diff)
+                        diff["provenance_state"] = "fabricated"
+                        reason = (diff.get("reason") or "").rstrip("；;。 ")
+                        diff["reason"] = (
+                            f"{reason}；真实性评估判定本轮改写存在无依据内容，已整体拦截"
+                            if reason
+                            else "真实性评估判定本轮改写存在无依据内容，已整体拦截"
+                        )
+                        blocked.append(diff)
+                    logger.warning(
+                        "library job %s: evaluator flagged hallucination; "
+                        "blocked %d diff(s) from verified advice",
+                        library_job_id, len(raw_diffs),
                     )
-                    invalid = list(tailored.get("invalid_diffs") or [])
-                    invalid.extend(noop_diffs)
+                    kept_diffs = []
+                    noop_diffs = []
+                    invalid = list(tailored.get("invalid_diffs") or []) + blocked
                 else:
+                    noop_diffs = [d for d in raw_diffs if _is_noop_diff(d)]
+                    kept_diffs = [d for d in raw_diffs if not _is_noop_diff(d)]
                     invalid = list(tailored.get("invalid_diffs") or [])
+                    if noop_diffs:
+                        logger.info(
+                            "library job %s: filtered %d no-op diff(s) out of %d",
+                            library_job_id, len(noop_diffs), len(raw_diffs),
+                        )
+                        invalid.extend(noop_diffs)
                 result["diffs"] = kept_diffs
+                if result.get('tailor_degraded'):
+                    alignment_error = (
+                        '改写阶段多次失败，本轮只产出诊断与缺口分析；'
+                        '点击「重新运行对齐」补齐改写建议（已缓存阶段会跳过）'
+                    )
+                elif eval_hallucinated and not kept_diffs:
+                    alignment_error = (
+                        '真实性评估判定本轮改写存在无依据内容，'
+                        '全部建议已拦截；请核对后重试对齐'
+                    )
+                else:
+                    alignment_error = None
                 try:
                     api_module._jobs.save_alignment(
                         tenant_id,
@@ -897,13 +935,9 @@ def _run_job_holding_gate(job_id: str) -> None:
                             f"eval:{EVALUATOR_PROMPT_VERSION}"
                         ),
                         alignment_status='succeeded',
-                        # tailor 降级（succeeded + 零 diffs）时把原因写进
-                        # 提示字段：前端橙色徽标与工作台说明都读这里。
-                        last_alignment_error=(
-                            '改写阶段多次失败，本轮只产出诊断与缺口分析；'
-                            '点击「重新运行对齐」补齐改写建议（已缓存阶段会跳过）'
-                            if result.get('tailor_degraded') else None
-                        ),
+                        # tailor 降级 / eval 幻觉拦截时把原因写进提示字段：
+                        # 前端橙色徽标与工作台说明都读这里。
+                        last_alignment_error=alignment_error,
                     )
                 except Exception:
                     logger.exception(
