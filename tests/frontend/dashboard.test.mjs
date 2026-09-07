@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { Window } from "happy-dom";
 
 import {
@@ -356,4 +357,14 @@ test("jobSelectOptionsHtml escapes job fields and handles empty lists", () => {
 
 test("parseHashValue resolves the review route (PM 反馈串台回归)", () => {
   assert.equal(parseHashValue("#/review").name, "review");
+});
+
+test("dashboard-view quickHref guards null quick (空库 dashboard 报错回归)", () => {
+  /* 2026-09-07 空库复现：renderDashboard 在 quick_continue=null 时
+   * quickHref 三元仍解引用 quick.job_id → 整页「出错了」。锁定守卫。 */
+  const src = readFileSync(
+    new URL("../../src/resualign/static/app/dashboard-view.js", import.meta.url),
+    "utf-8",
+  );
+  assert.match(src, /qBusy \|\| !quick\s*\n\s*\? ""/, "quickHref must check !quick");
 });
