@@ -417,7 +417,8 @@ def test_job_registry_inherits_shared_store(tmp_path):
             for row in conn.execute("SELECT version FROM schema_migrations")
         }
     assert {"jobs", "job_payloads", "schema_migrations"} <= tables
-    assert versions == {1}
+    # 2 = 瘦身收尾 DROP 遗留表（crawl_tasks/blocker_queue/job_refresh_events）
+    assert versions == {1, 2}
     assert registry.get(job.job_id).status == "succeeded"
 
 

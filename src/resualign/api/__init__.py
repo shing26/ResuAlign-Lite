@@ -6,7 +6,7 @@ Provides:
 - /api/jobs              - tenant-scoped Job Library CRUD and batch import
 - POST /api/auth/*       - signup, login, logout, and current-user lookup
 - /api/master-resumes    - versioned Master Resume CRUD and rollback
-- /api/applications      - dormant per-tenant application records and reruns
+- GET  /api/dashboard    - cross-view KPI/quick-continue aggregation
 - GET  /health           - liveness check
 - /                      - static frontend (index.html)
 """
