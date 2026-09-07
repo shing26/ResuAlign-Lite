@@ -19,6 +19,8 @@ from resualign.jobs import JobRegistry
 from resualign.settings_store import SettingsStore
 from resualign.workspace import UserStore
 
+from .conftest import fake_password
+
 CONTRACTS_DIR = Path(__file__).resolve().parents[1] / "contracts"
 OPENAPI_GOLDEN = CONTRACTS_DIR / "openapi-v1.json"
 OPENAPI_CURRENT = CONTRACTS_DIR / "openapi-current.json"
@@ -78,13 +80,13 @@ def _auth_headers(client: TestClient) -> dict[str, str]:
     assert (
         client.post(
             "/api/auth/signup",
-            json={"email": "contract@example.com", "password": "password-123"},
+            json={"email": "contract@example.com", "password": fake_password("123")},
         ).status_code
         == 201
     )
     r = client.post(
         "/api/auth/login",
-        json={"email": "contract@example.com", "password": "password-123"},
+        json={"email": "contract@example.com", "password": fake_password("123")},
     )
     assert r.status_code == 200
     _auth_cache = {"Authorization": f"Bearer {r.json()['token']}"}

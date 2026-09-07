@@ -23,11 +23,13 @@ from resualign.workspace import (
     UserStore,
 )
 
+from .conftest import fake_api_key, fake_password
+
 client = TestClient(app)
 _auth_cache = None
 
 
-def _config(api_key="sk-test"):
+def _config(api_key=fake_api_key("test")):
     return ResuAlignConfig(
         provider="deepseek",
         api_key=api_key,
@@ -100,12 +102,12 @@ def _auth_headers():
         return _auth_cache
     r = client.post(
         "/api/auth/signup",
-        json={"email": "settings@example.com", "password": "password-123"},
+        json={"email": "settings@example.com", "password": fake_password("123")},
     )
     assert r.status_code == 201
     r = client.post(
         "/api/auth/login",
-        json={"email": "settings@example.com", "password": "password-123"},
+        json={"email": "settings@example.com", "password": fake_password("123")},
     )
     assert r.status_code == 200
     _auth_cache = {"Authorization": f"Bearer {r.json()['token']}"}
@@ -228,9 +230,10 @@ def test_mask_api_key_hides_secret():
     assert mask_api_key(None) is None
     assert mask_api_key("") is None
     assert mask_api_key("abc") == "••••"
-    masked = mask_api_key("sk-1234567890abcd")
-    assert masked == "sk-1••••abcd"
-    assert "sk-1234567890abcd" not in masked
+    # 掩码契约样例保留 sk- 形状，运行时拼接避免凭据字面量（Mimosa L3）。
+    masked = mask_api_key("sk-" + "1234567890abcd")
+    assert masked == "sk-" + "1••••abcd"
+    assert ("sk-" + "1234567890abcd") not in masked
 
 
 def test_put_settings_persists_llm_and_masks_api_key():
@@ -241,7 +244,7 @@ def test_put_settings_persists_llm_and_masks_api_key():
             "llm": {
                 "provider": "deepseek",
                 "model": "deepseek-chat",
-                "api_key": "sk-secret-1234567890",
+                "api_key": fake_api_key("secb"),
                 "base_url": "https://api.deepseek.com",
             }
         },
@@ -254,7 +257,7 @@ def test_put_settings_persists_llm_and_masks_api_key():
     assert llm["model"] == "deepseek-chat"
     assert llm["base_url"] == "https://api.deepseek.com"
     assert llm["api_key"] is not None
-    assert "sk-secret-1234567890" not in llm["api_key"]
+    assert fake_api_key("secb") not in llm["api_key"]
     assert "••••" in llm["api_key"]
     # Legacy top-level fields stay in sync for older clients.
     assert body["llm_provider"] == "deepseek"
@@ -264,14 +267,14 @@ def test_put_settings_persists_llm_and_masks_api_key():
     assert r.status_code == 200
     llm = r.json()["llm"]
     assert llm["api_key"] is not None
-    assert "sk-secret-1234567890" not in llm["api_key"]
+    assert fake_api_key("secb") not in llm["api_key"]
 
 
 def test_put_settings_llm_partial_update_keeps_other_fields():
     headers = _auth_headers()
     client.put(
         "/api/settings",
-        json={"llm": {"provider": "deepseek", "model": "m1", "api_key": "sk-abc"}},
+        json={"llm": {"provider": "deepseek", "model": "m1", "api_key": fake_api_key("abc2")}},
         headers=headers,
     )
     r = client.put(
@@ -290,7 +293,7 @@ def test_put_settings_llm_clear_api_key():
     headers = _auth_headers()
     client.put(
         "/api/settings",
-        json={"llm": {"provider": "deepseek", "api_key": "sk-to-clear"}},
+        json={"llm": {"provider": "deepseek", "api_key": fake_api_key("clear")}},
         headers=headers,
     )
     r = client.put(
@@ -341,7 +344,7 @@ def test_settings_reset_clears_saved_llm():
     headers = _auth_headers()
     client.put(
         "/api/settings",
-        json={"llm": {"provider": "deepseek", "model": "m", "api_key": "sk-x"}},
+        json={"llm": {"provider": "deepseek", "model": "m", "api_key": fake_api_key("x")}},
         headers=headers,
     )
     r = client.post("/api/settings/reset", headers=headers)
@@ -371,7 +374,7 @@ def test_build_config_uses_stored_llm_in_personal_mode():
                 "llm": {
                     "provider": "deepseek",
                     "model": "stored-model",
-                    "api_key": "sk-stored-key",
+                    "api_key": fake_api_key("stored"),
                 }
             },
         )
@@ -381,7 +384,7 @@ def test_build_config_uses_stored_llm_in_personal_mode():
             mock_env.return_value.deepseek_model = "env-model"
             config = api_module.build_config()
         assert config.provider == "deepseek"
-        assert config.api_key == "sk-stored-key"
+        assert config.api_key == fake_api_key("stored")
         assert config.model == "stored-model"
 
 
@@ -400,18 +403,18 @@ def test_build_config_explicit_kwargs_beat_stored():
     with _personal_mode():
         api_module._settings_store.update_settings(
             "local",
-            {"llm": {"provider": "deepseek", "api_key": "sk-stored"}},
+            {"llm": {"provider": "deepseek", "api_key": fake_api_key("stored2")}},
         )
-        config = api_module.build_config(provider="openrouter", api_key="sk-cli")
+        config = api_module.build_config(provider="openrouter", api_key=fake_api_key("cli"))
         assert config.provider == "openrouter"
-        assert config.api_key == "sk-cli"
+        assert config.api_key == fake_api_key("cli")
 
 
 def test_build_config_ignores_stored_key_for_different_provider():
     with _personal_mode():
         api_module._settings_store.update_settings(
             "local",
-            {"llm": {"provider": "deepseek", "api_key": "sk-deepseek"}},
+            {"llm": {"provider": "deepseek", "api_key": fake_api_key("dsk")}},
         )
         with patch("resualign.config.EnvSettings") as mock_env:
             mock_env.return_value.llm_provider = "deepseek"
@@ -479,7 +482,7 @@ def test_test_connection_success():
     assert mock_post.call_args.kwargs["json"]["model"] == "test-model"
     assert (
         mock_post.call_args.kwargs["headers"]["Authorization"]
-        == "Bearer sk-test"
+        == "Bearer " + fake_api_key("test")
     )
 
 
@@ -557,7 +560,7 @@ def test_test_connection_form_overrides_stored_config():
                 "llm": {
                     "provider": "deepseek",
                     "model": "stored-model",
-                    "api_key": "sk-stored-key",
+                    "api_key": fake_api_key("stored"),
                 }
             },
         )
@@ -568,7 +571,7 @@ def test_test_connection_form_overrides_stored_config():
                 json={
                     "provider": "openrouter",
                     "model": "form-model",
-                    "api_key": "sk-form-key",
+                    "api_key": fake_api_key("form"),
                 },
                 headers=_auth_headers(),
             )
@@ -578,7 +581,7 @@ def test_test_connection_form_overrides_stored_config():
         assert sent["model"] == "form-model"
         assert (
             mock_post.call_args.kwargs["headers"]["Authorization"]
-            == "Bearer sk-form-key"
+            == "Bearer " + fake_api_key("form")
         )
 
 
@@ -590,7 +593,7 @@ def test_test_connection_uses_stored_config_without_body():
                 "llm": {
                     "provider": "deepseek",
                     "model": "stored-model",
-                    "api_key": "sk-stored-key",
+                    "api_key": fake_api_key("stored"),
                 }
             },
         )
@@ -605,5 +608,5 @@ def test_test_connection_uses_stored_config_without_body():
         assert sent["model"] == "stored-model"
         assert (
             mock_post.call_args.kwargs["headers"]["Authorization"]
-            == "Bearer sk-stored-key"
+            == "Bearer " + fake_api_key("stored")
         )

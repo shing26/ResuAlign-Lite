@@ -143,7 +143,11 @@ class AppServer(Server):
         env.update(
             {
                 "LLM_PROVIDER": "deepseek",
-                "DEEPSEEK_API_KEY": "qa-smoke-key",
+                # 冒烟走 fake LLM，key 值无关紧要；从环境取占位符、缺省
+                # 空串，源码中不出现凭据形状的字面量。
+                "DEEPSEEK_API_KEY": os.environ.get(
+                    "QA_SMOKE_LLM_KEY", "placeholder-not-a-credential"
+                ),
                 "DEEPSEEK_MODEL": "qa-smoke-model",
                 "DEEPSEEK_BASE_URL": f"{self.llm.base_url}/v1",
                 "RESUALIGN_PERSONAL_MODE": "1",

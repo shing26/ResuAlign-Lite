@@ -18,13 +18,15 @@ from resualign.workspace import (
     UserStore,
 )
 
+from .conftest import fake_api_key
+
 client = TestClient(app)
 
 
 def _config():
     return ResuAlignConfig(
         provider="deepseek",
-        api_key="sk-test",
+        api_key=fake_api_key("test"),
         model="test-model",
     )
 

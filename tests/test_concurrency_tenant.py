@@ -31,6 +31,8 @@ from resualign.workspace import (
     UserStore,
 )
 
+from .conftest import fake_api_key, fake_password
+
 client = TestClient(app)
 _auth_cache = None
 
@@ -39,7 +41,7 @@ WORKERS_PER_TENANT = 4
 CONCURRENCY = len(TENANTS) * WORKERS_PER_TENANT
 
 
-def _config(api_key: str = "sk-test") -> ResuAlignConfig:
+def _config(api_key: str = fake_api_key("test")) -> ResuAlignConfig:
     return ResuAlignConfig(
         provider="deepseek",
         api_key=api_key,
@@ -101,12 +103,12 @@ def test_concurrent_tenant_workload_stays_isolated():
             try:
                 signup = thread_client.post(
                     "/api/auth/signup",
-                    json={"email": email, "password": "password-123"},
+                    json={"email": email, "password": fake_password("123")},
                 )
                 assert signup.status_code == 201, signup.text
                 token = thread_client.post(
                     "/api/auth/login",
-                    json={"email": email, "password": "password-123"},
+                    json={"email": email, "password": fake_password("123")},
                 ).json()["token"]
                 headers = {"Authorization": f"Bearer {token}"}
 
@@ -223,11 +225,11 @@ def test_concurrent_jobs_share_one_sqlite_file_without_locking_errors():
             email = f"runner-{tenant}-{index}@concurrent.local"
             thread_client.post(
                 "/api/auth/signup",
-                json={"email": email, "password": "password-123"},
+                json={"email": email, "password": fake_password("123")},
             )
             token = thread_client.post(
                 "/api/auth/login",
-                json={"email": email, "password": "password-123"},
+                json={"email": email, "password": fake_password("123")},
             ).json()["token"]
             headers = {"Authorization": f"Bearer {token}"}
             queued = thread_client.post(
@@ -296,10 +298,10 @@ def _signup_login(index: int) -> tuple[int, str]:
     email = f"session-{index}@concurrent.local"
     thread_client.post(
         "/api/auth/signup",
-        json={"email": email, "password": "password-123"},
+        json={"email": email, "password": fake_password("123")},
     )
     token = thread_client.post(
         "/api/auth/login",
-        json={"email": email, "password": "password-123"},
+        json={"email": email, "password": fake_password("123")},
     ).json()["token"]
     return index, token

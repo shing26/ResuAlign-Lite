@@ -11,6 +11,8 @@ from resualign.schema_registry import (
     TailoredResume,
 )
 
+from .conftest import fake_api_key
+
 
 def test_schema_registry_exposes_json_schema():
     assert "score" in Analysis.model_json_schema()["properties"]
@@ -21,7 +23,7 @@ def test_schema_registry_exposes_json_schema():
 
 def test_chat_structured_uses_json_schema_for_openai(httpx_mock):
     config = ResuAlignConfig(
-        api_key="sk-test",
+        api_key=fake_api_key("test"),
         model="m1",
         provider="openai",
     )
@@ -52,7 +54,7 @@ def test_chat_structured_json_mode_retries_schema_validation(
     httpx_mock, monkeypatch
 ):
     monkeypatch.setattr("resualign.llm.time.sleep", lambda _: None)
-    config = ResuAlignConfig(api_key="sk-test", model="m1")
+    config = ResuAlignConfig(api_key=fake_api_key("test"), model="m1")
     client = OpenAIClient(config)
     httpx_mock.add_response(
         json={

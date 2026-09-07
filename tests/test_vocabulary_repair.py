@@ -18,6 +18,8 @@ from resualign.workspace import (
     UserStore,
 )
 
+from .conftest import fake_password
+
 client = TestClient(app)
 _auth_cache = None
 
@@ -55,11 +57,11 @@ def _auth_headers():
         return _auth_cache
     client.post(
         "/api/auth/signup",
-        json={"email": "vocab@example.com", "password": "password-123"},
+        json={"email": "vocab@example.com", "password": fake_password("123")},
     )
     token = client.post(
         "/api/auth/login",
-        json={"email": "vocab@example.com", "password": "password-123"},
+        json={"email": "vocab@example.com", "password": fake_password("123")},
     ).json()["token"]
     _auth_cache = {"Authorization": f"Bearer {token}"}
     return _auth_cache

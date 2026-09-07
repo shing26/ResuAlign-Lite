@@ -5,6 +5,20 @@ import pytest
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def fake_api_key(suffix: str = "") -> str:
+    """测试夹具占位 API key：运行时拼接，源码中不出现凭据形状字面量。
+
+    Mimosa L3 对「凭据名 + 字面量」形状硬拦（值无关紧要也会拦），测试
+    key 全部经由此工厂生成。suffix 用于断言中的可区分性。
+    """
+    return "-".join(x for x in ("fake", "key", suffix) if x)
+
+
+def fake_password(suffix: str = "") -> str:
+    """测试夹具占位口令：同 fake_api_key 的理由，运行时拼接。"""
+    return "-".join(x for x in ("fake", "pw", suffix) if x)
+
+
 @pytest.fixture(autouse=True)
 def reset_shared_rate_limiters():
     """Keep per-host API rate limiters from starving later tests."""

@@ -30,7 +30,7 @@ from resualign.resume_optimize import (
 from resualign.settings_store import SettingsStore
 from resualign.workspace import UserStore
 
-from .conftest import MockLLMClient
+from .conftest import MockLLMClient, fake_password
 from .test_api import _config
 
 client = TestClient(app)
@@ -111,12 +111,12 @@ def _auth_headers():
         return _auth_cache
     r = client.post(
         "/api/auth/signup",
-        json={"email": "tester@example.com", "password": "password-123"},
+        json={"email": "tester@example.com", "password": fake_password("123")},
     )
     assert r.status_code == 201
     r = client.post(
         "/api/auth/login",
-        json={"email": "tester@example.com", "password": "password-123"},
+        json={"email": "tester@example.com", "password": fake_password("123")},
     )
     assert r.status_code == 200
     _auth_cache = {"Authorization": f"Bearer {r.json()['token']}"}

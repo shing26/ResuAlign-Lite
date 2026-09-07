@@ -18,6 +18,8 @@ from resualign.api import app
 from resualign.jobs import JobRegistry
 from resualign.workspace import MasterResumeStore, UserStore
 
+from .conftest import fake_password
+
 client = TestClient(app)
 _auth_cache = None
 _other_cache = None
@@ -71,11 +73,11 @@ def _auth_headers() -> dict[str, str]:
         return _auth_cache
     client.post(
         "/api/auth/signup",
-        json={"email": "versions@example.com", "password": "password-123"},
+        json={"email": "versions@example.com", "password": fake_password("123")},
     )
     token = client.post(
         "/api/auth/login",
-        json={"email": "versions@example.com", "password": "password-123"},
+        json={"email": "versions@example.com", "password": fake_password("123")},
     ).json()["token"]
     _auth_cache = {"Authorization": f"Bearer {token}"}
     return _auth_cache
@@ -87,11 +89,11 @@ def _other_headers() -> dict[str, str]:
         return _other_cache
     client.post(
         "/api/auth/signup",
-        json={"email": "other@example.com", "password": "other-password"},
+        json={"email": "other@example.com", "password": fake_password("other")},
     )
     token = client.post(
         "/api/auth/login",
-        json={"email": "other@example.com", "password": "other-password"},
+        json={"email": "other@example.com", "password": fake_password("other")},
     ).json()["token"]
     _other_cache = {"Authorization": f"Bearer {token}"}
     return _other_cache

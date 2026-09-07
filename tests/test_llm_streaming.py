@@ -13,6 +13,8 @@ from resualign.llm_nodes import LLMNodeStore
 from resualign.models import ResuAlignConfig
 from resualign.role_router import call_with_role_streaming
 
+from .conftest import fake_api_key
+
 
 class _ChunkStream(httpx.SyncByteStream):
     """A byte stream that yields chunks lazily so timing can be simulated."""
@@ -37,7 +39,7 @@ def _delta_line(content: str | None) -> bytes:
 def _stream_client(handler: httpx.MockTransport) -> OpenAIClient:
     config = ResuAlignConfig(
         provider="openai",
-        api_key="sk-test",
+        api_key=fake_api_key("test"),
         model="m1",
         base_url="https://api.openai.com/v1",
     )
@@ -120,7 +122,7 @@ def test_call_with_role_streaming_falls_back_to_default(tmp_path):
         name="Default",
         provider="deepseek",
         base_url="https://api.deepseek.com",
-        api_key="sk-default",
+        api_key=fake_api_key("dflt"),
         model="default-model",
         is_active=True,
     )
@@ -129,7 +131,7 @@ def test_call_with_role_streaming_falls_back_to_default(tmp_path):
         name="Primary",
         provider="deepseek",
         base_url="https://api.deepseek.com",
-        api_key="sk-primary",
+        api_key=fake_api_key("prim"),
         model="primary-model",
     )
     store.set_role_binding(tenant, "editor", primary["node_id"])

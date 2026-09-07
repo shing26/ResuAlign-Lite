@@ -25,12 +25,14 @@ from resualign.workspace import (
     UserStore,
 )
 
+from .conftest import fake_api_key, fake_password
+
 client = TestClient(app)
 _auth_cache = None
 _other_cache = None
 
 
-def _config(api_key="sk-test"):
+def _config(api_key=fake_api_key("test")):
     return ResuAlignConfig(
         provider="deepseek",
         api_key=api_key,
@@ -97,12 +99,12 @@ def _auth_headers():
         return _auth_cache
     r = client.post(
         "/api/auth/signup",
-        json={"email": "tester@example.com", "password": "password-123"},
+        json={"email": "tester@example.com", "password": fake_password("123")},
     )
     assert r.status_code == 201
     r = client.post(
         "/api/auth/login",
-        json={"email": "tester@example.com", "password": "password-123"},
+        json={"email": "tester@example.com", "password": fake_password("123")},
     )
     assert r.status_code == 200
     _auth_cache = {"Authorization": f"Bearer {r.json()['token']}"}
@@ -115,12 +117,12 @@ def _other_headers():
         return _other_cache
     r = client.post(
         "/api/auth/signup",
-        json={"email": "other@example.com", "password": "other-password"},
+        json={"email": "other@example.com", "password": fake_password("other")},
     )
     assert r.status_code == 201
     r = client.post(
         "/api/auth/login",
-        json={"email": "other@example.com", "password": "other-password"},
+        json={"email": "other@example.com", "password": fake_password("other")},
     )
     assert r.status_code == 200
     _other_cache = {"Authorization": f"Bearer {r.json()['token']}"}
@@ -679,7 +681,7 @@ def test_cached_diagnosis_rejects_changed_content_or_model():
         is None
     )
     other_model = ResuAlignConfig(
-        provider="deepseek", api_key="sk-test", model="other-model"
+        provider="deepseek", api_key=fake_api_key("test"), model="other-model"
     )
     assert (
         api_module._cached_diagnosis(resume, other_model, tenant_id="tenant")

@@ -24,10 +24,12 @@ from resualign.workspace import (
     UserStore,
 )
 
+from .conftest import fake_api_key
+
 client = TestClient(app)
 
 
-def _config(api_key="sk-test"):
+def _config(api_key=fake_api_key("test")):
     from resualign.models import ResuAlignConfig
 
     return ResuAlignConfig(

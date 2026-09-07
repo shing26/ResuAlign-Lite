@@ -10,6 +10,8 @@ from resualign.workspace import (
     UserStoreError,
 )
 
+from .conftest import fake_password
+
 
 @pytest.fixture
 def db_path(tmp_path):
@@ -23,7 +25,7 @@ def _store(db_path):
 def test_create_user_and_login(db_path):
     store = _store(db_path)
 
-    user = store.create_user("ada@example.com", "correct-horse")
+    user = store.create_user("ada@example.com", fake_password("horse"))
 
     assert user["user_id"]
     assert user["email"] == "ada@example.com"
@@ -31,24 +33,24 @@ def test_create_user_and_login(db_path):
     assert "password_hash" not in user
     assert "salt" not in user
 
-    token = store.login("ada@example.com", "correct-horse")
+    token = store.login("ada@example.com", fake_password("horse"))
     assert token
 
 
 def test_duplicate_email_rejected(db_path):
     store = _store(db_path)
-    store.create_user("ada@example.com", "password-1")
+    store.create_user("ada@example.com", fake_password("p1"))
 
     with pytest.raises(UserStoreError):
-        store.create_user("ada@example.com", "password-2")
+        store.create_user("ada@example.com", fake_password("p2"))
 
 
 def test_wrong_password_rejected(db_path):
     store = _store(db_path)
-    store.create_user("ada@example.com", "correct-horse")
+    store.create_user("ada@example.com", fake_password("horse"))
 
     with pytest.raises(UserStoreError):
-        store.login("ada@example.com", "wrong-password")
+        store.login("ada@example.com", fake_password("wrong"))
 
 
 def test_unknown_email_rejected(db_path):
@@ -60,8 +62,8 @@ def test_unknown_email_rejected(db_path):
 
 def test_token_roundtrip_and_revocation(db_path):
     store = _store(db_path)
-    store.create_user("ada@example.com", "correct-horse")
-    token = store.login("ada@example.com", "correct-horse")
+    store.create_user("ada@example.com", fake_password("horse"))
+    token = store.login("ada@example.com", fake_password("horse"))
 
     user = store.user_for_token(token)
     assert user["email"] == "ada@example.com"
@@ -79,8 +81,8 @@ def test_invalid_token_returns_none(db_path):
 
 def test_tokens_are_stored_hashed_not_plaintext(db_path):
     store = _store(db_path)
-    store.create_user("ada@example.com", "correct-horse")
-    token = store.login("ada@example.com", "correct-horse")
+    store.create_user("ada@example.com", fake_password("horse"))
+    token = store.login("ada@example.com", fake_password("horse"))
 
     raw = db_path.read_bytes()
     assert token.encode("utf-8") not in raw
@@ -89,8 +91,8 @@ def test_tokens_are_stored_hashed_not_plaintext(db_path):
 
 def test_passwords_are_hashed_with_salt(db_path):
     store = _store(db_path)
-    first = store.create_user("one@example.com", "same-password")
-    second = store.create_user("two@example.com", "same-password")
+    first = store.create_user("one@example.com", fake_password("same"))
+    second = store.create_user("two@example.com", fake_password("same"))
 
     assert first["user_id"] != second["user_id"]
     raw = db_path.read_bytes()

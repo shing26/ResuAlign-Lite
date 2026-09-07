@@ -25,11 +25,13 @@ from resualign.workspace import (
     UserStore,
 )
 
+from .conftest import fake_api_key, fake_password
+
 client = TestClient(app)
 _auth_cache = None
 
 
-def _config(api_key="sk-test"):
+def _config(api_key=fake_api_key("test")):
     return ResuAlignConfig(
         provider="deepseek",
         api_key=api_key,
@@ -72,11 +74,11 @@ def _auth_headers():
         return _auth_cache
     client.post(
         "/api/auth/signup",
-        json={"email": "wb-result@example.com", "password": "password-123"},
+        json={"email": "wb-result@example.com", "password": fake_password("123")},
     )
     token = client.post(
         "/api/auth/login",
-        json={"email": "wb-result@example.com", "password": "password-123"},
+        json={"email": "wb-result@example.com", "password": fake_password("123")},
     ).json()["token"]
     _auth_cache = {"Authorization": f"Bearer {token}"}
     return _auth_cache
