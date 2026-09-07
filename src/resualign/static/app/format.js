@@ -425,6 +425,21 @@ export const PROVENANCE_LABELS = {
   pending_review: "建议复核",
 };
 
+/* P2 决策 2（2026-09-07）：置信度不再裸显英文枚举，与徽章体系共用一套
+ * 语义色标度。注意「高置信」（模型自信）与「高可信」（来源 verified，
+ * PROVENANCE_LABELS）是两个刻度，刻意不合并。 */
+export const CONFIDENCE_LABELS = {
+  high: "高置信",
+  medium: "中置信",
+  low: "低置信",
+};
+
+export const CONFIDENCE_BADGE_CLASS = {
+  high: "badge-green",
+  medium: "badge-amber",
+  low: "badge-red",
+};
+
 /* Shared stage labels (also re-exported by events.js for progress bars). */
 export const STAGE_LABELS = {
   queued: "排队中",
@@ -790,7 +805,9 @@ export function diffCard(diff, index, jobId) {
         <div class="diff-card__type">
           <span class="badge ${invalid ? "badge-amber" : "badge-blue"}">${esc(typeLabel)}</span>
           ${diffSectionBadge(diff)}
-          <span class="small muted">${diff.confidence ? `置信度 ${esc(diff.confidence)}` : ""}</span>
+          ${diff.confidence && CONFIDENCE_LABELS[diff.confidence]
+            ? `<span class="badge ${CONFIDENCE_BADGE_CLASS[diff.confidence]}" data-confidence-badge="${esc(diff.confidence)}">${CONFIDENCE_LABELS[diff.confidence]}</span>`
+            : ""}
         </div>
         <span class="provenance-badge provenance-badge--${esc(badgeState)}" data-provenance title="${esc(provenance)}">${provenanceBadgeIcon(badgeState)}<span>${esc(badgeLabel)}</span></span>
       </div>
@@ -2645,6 +2662,15 @@ export function jobsEmptyGuideHtml() {
     </section>`;
 }
 
+/* P2 决策 4（2026-09-07）：差距项行级可行动指引，按 tone 分档静态模板
+ * （gaps 契约仅 {skill, count}，后端下发无个性化输入故否决）。
+ * key 必须与下方 tone 枚举（hot/warm/cool）严格对齐，未知 tone 回退 cool。 */
+const GAP_TONE_HINTS = {
+  hot: "该技能在库内岗位中出现频率最高：优先对含此技能的经历条目做对齐改写",
+  warm: "多个岗位要求此技能：把已有相关经历改写得更贴近岗位措辞",
+  cool: "少数岗位要求此技能：有真实依据再补，不要硬凑",
+};
+
 /* 技能缺口热力图：横向热力条，宽度按 count / max 比例，颜色按相对强度
  * 梯度（cool=info / warm=warning / hot=danger，全部走现有语义 token）。
  * 每条渲染为 data-action="goto-skill" + data-skill 的可点击按钮；
@@ -2667,8 +2693,9 @@ export function skillGapHtml(gaps, onSkillGapUrl) {
       const url =
         typeof onSkillGapUrl === "function" ? onSkillGapUrl(skill) : "";
       const urlAttr = url ? ` data-skill-url="${esc(url)}"` : "";
+      const hint = esc(GAP_TONE_HINTS[tone] || GAP_TONE_HINTS.cool);
       return `
-      <button type="button" class="skill-gap-row" data-action="goto-skill" data-skill="${esc(skill)}"${urlAttr}>
+      <button type="button" class="skill-gap-row" data-action="goto-skill" data-skill="${esc(skill)}"${urlAttr} title="${hint}" aria-label="${esc(skill)}，${hint}">
         <span class="skill-gap-row__name">${esc(skill)}</span>
         <span class="skill-gap-row__track" aria-hidden="true">
           <span class="skill-gap-row__fill skill-gap-row__fill--${tone}" style="width:${width}%"></span>
@@ -2677,7 +2704,9 @@ export function skillGapHtml(gaps, onSkillGapUrl) {
       </button>`;
     })
     .join("");
-  return `<div class="skill-gap-list" data-skill-gaps>${rows}</div>`;
+  /* 列表级行动引导：与 renderGap 的 data-gap-hint 同钩子模式，触屏无
+   * title 的可发现性由此兜底。 */
+  return `<div class="skill-gap-list" data-skill-gaps>${rows}<div class="muted small" data-gap-hint>点击任意技能可跳到要求它的岗位工作台；怎么补：优先改写与该技能相关的已有经历，确实没有依据的经历不要硬凑。</div></div>`;
 }
 
 /* Quick Continue 卡：最近工作的岗位快照 + 「继续」入口。quick_continue

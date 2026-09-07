@@ -228,7 +228,9 @@ test("diffCard renders actionable modify card with provenance", () => {
   assert.match(html, /provenance-badge provenance-badge--verified/);
   assert.match(html, /provenance-icon/);
   assert.match(html, /高可信/);
-  assert.match(html, /置信度 high/);
+  /* P2 决策 2：置信度渲染为语义色徽章，不再裸显英文枚举 */
+  assert.match(html, /data-confidence-badge="high"/);
+  assert.match(html, /badge-green" data-confidence-badge="high">高置信<\/span>/);
   assert.doesNotMatch(html, /diff-card--invalid/);
 });
 
@@ -344,7 +346,22 @@ test("diffCard renders the section badge in the card head when section is set", 
   const typeGroup = html.match(/<div class="diff-card__type">([\s\S]*?)<\/div>/)[1];
   assert.match(typeGroup, /badge-blue">改写<\/span>/);
   assert.match(typeGroup, /diff-card__section">项目经历<\/span>/);
-  assert.match(typeGroup, /置信度 high/);
+  assert.match(typeGroup, /data-confidence-badge="high"/);
+});
+
+test("diffCard renders low confidence as red badge and keeps #83 shield downgrade", () => {
+  /* P2 决策 2 + #83 锁定：低置信 → badge-red「低置信」，同时 provenance
+   * 徽章从 verified 降级为 pending_review（建议复核），两信号方向一致。 */
+  const html = diffCard(
+    { ...SAMPLE_DIFF, confidence: "low" },
+    0,
+    "job-1",
+  );
+  assert.match(html, /data-confidence-badge="low"/);
+  assert.match(html, /badge-red" data-confidence-badge="low">低置信<\/span>/);
+  assert.match(html, /provenance-badge provenance-badge--pending_review/);
+  assert.match(html, /建议复核/);
+  assert.doesNotMatch(html, /data-confidence-badge="low"[^>]*>高置信</);
 });
 
 test("diffCard omits the section badge when section is blank", () => {

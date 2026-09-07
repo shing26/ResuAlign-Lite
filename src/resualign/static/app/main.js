@@ -930,7 +930,7 @@ async function draftPlaceholderCount(jobId) {
 function confirmPlaceholderExport(count, onProceed) {
   showModal(
     "定稿包含待确认占位符",
-    `<p>定稿中有 <b>${count}</b> 处「[待人工确认：…]」占位指标（如“耗时降低 X%”）。这些是尚未核实的内容，导出后会原样出现在 HR 看到的简历里。</p>
+    `<p>定稿中有 <b>${count}</b> 处「[待人工确认：…]」占位指标（如“请将 X% 换成你的真实数据”）。这些是尚未核实的内容，导出后会原样出现在 HR 看到的简历里。</p>
      <p class="small muted">建议先在工作台中补齐真实数据或删除这些占位符，再导出。</p>
      <div class="actions">
        <button class="btn btn-ghost" type="button" data-placeholder-cancel>回去修改</button>

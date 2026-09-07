@@ -189,19 +189,76 @@ def test_ensure_metric_placeholder_appends_only_when_missing():
     assert _ensure_metric_placeholder("") == ""
     assert METRIC_PLACEHOLDER in _ensure_metric_placeholder("构建高吞吐后端服务")
     assert _ensure_metric_placeholder("耗时降低 35%") == "耗时降低 35%"
+    # P2 决策 1：幂等显式化——重复调用不双份追加（新措辞不含 hint 词）
+    once = _ensure_metric_placeholder("构建高吞吐后端服务")
+    assert _ensure_metric_placeholder(once) == once
+    # 历史措辞占位串同样幂等（已持久化 draft 兼容）
+    legacy = "构建服务 [待人工确认：耗时降低 X% / 支撑 QPS 达 Y]"
+    assert _ensure_metric_placeholder(legacy) == legacy
 
 
 def test_parse_diff_with_provenance_appends_placeholder_for_unquantified_proposal():
+    """P2 决策 1：门控后需 section（叙事章节）+ reason（量化意图）才追加。"""
     diff, valid = parse_diff_with_provenance(
         {
             "type": "modify",
             "original": "负责后端开发",
             "proposed": "构建高吞吐后端服务",
+            "reason": "补齐量化指标支撑业务规模",
+            "section": "工作经历",
             "provenance": "负责后端开发",
         },
         "负责后端开发",
     )
     assert valid is True
+    assert METRIC_PLACEHOLDER in diff.proposed
+
+
+def test_parse_diff_with_provenance_gates_placeholder_by_reason_and_section():
+    """门控三反例：reason 无量化意图 / 非叙事章节 / 两者皆缺 → 均不追加。"""
+    base = {
+        "type": "modify",
+        "original": "负责后端开发",
+        "proposed": "构建高吞吐后端服务",
+        "provenance": "负责后端开发",
+    }
+
+    # 1) reason 无量化意图（即使 section 是叙事章节）
+    diff, _ = parse_diff_with_provenance(
+        {**base, "section": "工作经历", "reason": "更贴合岗位措辞"},
+        "负责后端开发",
+    )
+    assert METRIC_PLACEHOLDER not in diff.proposed
+
+    # 2) section 非叙事章节（即使 reason 提量化）
+    diff, _ = parse_diff_with_provenance(
+        {**base, "section": "专业技能", "reason": "补齐量化指标"},
+        "负责后端开发",
+    )
+    assert METRIC_PLACEHOLDER not in diff.proposed
+
+    # 3) section 缺失
+    diff, _ = parse_diff_with_provenance(
+        {**base, "reason": "补齐量化指标"},
+        "负责后端开发",
+    )
+    assert METRIC_PLACEHOLDER not in diff.proposed
+
+
+def test_parse_diff_with_provenance_placeholder_forced_by_prompt_focus():
+    """信号 A：prompt_focus="quantified" 时叙事章节无条件追加。"""
+    diff, _ = parse_diff_with_provenance(
+        {
+            "type": "modify",
+            "original": "负责后端开发",
+            "proposed": "构建高吞吐后端服务",
+            "reason": "更贴合岗位措辞",
+            "section": "项目经历",
+            "provenance": "负责后端开发",
+        },
+        "负责后端开发",
+        prompt_focus="quantified",
+    )
     assert METRIC_PLACEHOLDER in diff.proposed
 
 

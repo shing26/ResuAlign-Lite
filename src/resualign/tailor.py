@@ -37,8 +37,8 @@ BULLET_REWRITE_PROMPT = """PROMPT_VERSION: bullet_rewrite/v3
 ## 强动词库（Few-Shot：从下面的动词起步，绝不使用弱动词）
 优先使用：构建、设计、落地、优化、重构、驱动、支撑、主导、搭建、打通、调优、攻克、沉淀、推广、量化
 禁止使用：负责、参与、协助、了解、熟悉（这些是简历空话；出现即视为失败输出）
-每条 proposed 必须满足「强动词 + 具象机制（如联合索引/读写分离/本地缓存）+ 量化插槽 [X%]」三件套；
-若原文无数字，保留 [待人工确认：…] 占位符并由用户补齐，绝不编造具体数值。
+每条 proposed 必须满足「强动词 + 具象机制（如联合索引/读写分离/本地缓存）」的要求；
+不要在 proposed 中添加任何占位符或「待人工确认」标注——系统会按规则自动追加，你只需改写内容，绝不编造具体数值。
 
 ## Output Contract（只能输出一个 JSON 对象，2 个字段）
 键名固定为：proposed / reason
@@ -50,13 +50,35 @@ BULLET_REWRITE_PROMPT = """PROMPT_VERSION: bullet_rewrite/v3
 - proposed 中每个技术名词与数字都能在原文找到依据；无新增事实；长度在上限内；
 - proposed 不含「负责/参与/协助/了解/熟悉」等弱动词；
 - 只输出 JSON，无 markdown fence，无解释文字。"""
-METRIC_PLACEHOLDER = "[待人工确认：耗时降低 X% / 支撑 QPS 达 Y]"
+METRIC_PLACEHOLDER = "[待人工确认：请将 X% / Y 换成你的真实数据；无法量化请删除本括号]"
 _METRIC_HINT_RE = re.compile(
     r"(?:\d+(?:\.\d+)?\s*(?:%|倍|万|亿|ms\b|s\b|qps\b|tps\b))|"
     r"\b(?:qps|tps|rt|pv|uv|roi)\b|"
     r"(?:成本降低|耗时降低|性能提升)",
     re.IGNORECASE,
 )
+# P2 决策 1（2026-09-07）：占位指标串门控——只在建议真实涉及量化改写时插入，
+# 不再对所有 modify/add 无条件追加。纯确定性规则（零 LLM 二次调用）：
+# - 章节白名单：专业技能/教育背景/证书等非叙事章节的占位指标无意义，硬否决；
+# - 信号 A：整卷改写聚焦量化（prompt_focus == "quantified"，tailor_resume 下传）；
+# - 信号 B：单条 diff 的 reason 自述量化意图（正则回溯，reason ≤40 字）。
+_NARRATIVE_SECTION_RE = re.compile(
+    r"项目|工作|经历|实践|成果|summary|评价", re.IGNORECASE
+)
+_QUANT_INTENT_RE = re.compile(
+    r"量化|指标|数字|占比|百分比|数据|规模|效率|提升|降低|QPS|%", re.IGNORECASE
+)
+
+
+def _wants_metric_placeholder(
+    section: str, reason: str, prompt_focus: str | None
+) -> bool:
+    """Whether the metric placeholder applies to this suggestion."""
+    if not section or not _NARRATIVE_SECTION_RE.search(section):
+        return False
+    if prompt_focus == "quantified":
+        return True
+    return bool(_QUANT_INTENT_RE.search(reason or ""))
 
 
 TAILOR_PROMPT = """PROMPT_VERSION: tailor/v2
@@ -85,7 +107,7 @@ TAILOR_PROMPT = """PROMPT_VERSION: tailor/v2
 ## 改写规则
 1. 只允许：改述、重排、重强调简历中已存在的事实；禁止发明或推断任何事实。
 2. 简历已支持 JD 关键词时，用 JD 的确切短语改写该条（如 "Redis caching for high concurrency"），但只能依托简历已有事实，不新增能力。
-3. 原文无数字/指标时禁止补数；在事实句后附加明确标注的占位符 "[待人工确认：耗时降低 X% / 支撑 QPS 达 Y]"，不得把占位符当事实呈现。
+3. 原文无数字/指标时禁止补数；不要自行添加占位符或「待人工确认」标注（系统按规则自动追加），不得把占位符当事实呈现。
 4. 每条 proposed 的技术名词、业务场景短语必须能在 original 或简历原文中找到依据；provenance 必须逐字匹配简历原文（允许空白差异，不允许大意或改写）。
 5. 覆盖检查：完成后确认差距报告中每个 missing_keyword / misaligned_emphasis 至少被一条 diff 或一个改动的章节覆盖；无法用已有事实覆盖的，不要硬凑。
 6. 语言：与简历原文同语言；JD 技术短语保留英文原文（如 "production Kubernetes deployment"、"FastAPI async endpoints"）。
@@ -136,9 +158,9 @@ BULLET_INSTRUCTIONS = {
     "quantified": (
         "Rewrite in STAR order: strong action verb + technical method + "
         "business scenario + quantified outcome. If the original has no "
-        "number, append a clearly marked editable placeholder such as "
-        "'[待人工确认：耗时降低 X% / 支撑 QPS 达 Y]'. Never invent a concrete "
-        "metric."
+        "number, leave the metric unstated — do NOT add any placeholder or "
+        "'待人工确认' marker yourself; the system appends it automatically. "
+        "Never invent a concrete metric."
     ),
     "high_concurrency": (
         "Tie the existing facts to high-concurrency, low-latency, or "
@@ -163,7 +185,11 @@ def _has_quantified_metric(text: str) -> bool:
 
 
 def _ensure_metric_placeholder(text: str) -> str:
-    if not text or _has_quantified_metric(text):
+    # 幂等：已带占位串（含历史措辞）直接返回，不依赖 _METRIC_HINT_RE
+    # 恰好匹配占位串内文——新措辞不再含 hint 词。
+    if not text or _METRIC_PLACEHOLDER_RE.search(text):
+        return text
+    if _has_quantified_metric(text):
         return text
     return f"{text.rstrip()} {METRIC_PLACEHOLDER}"
 
@@ -430,6 +456,7 @@ def _fuzzy_locate_quote(
 def parse_diff_with_provenance(
     item: dict,
     resume_text: str,
+    prompt_focus: str | None = None,
 ) -> tuple[DiffItem, bool]:
     """Build a DiffItem and verify its provenance against the source resume."""
     diff_type = item.get("type", "modify")
@@ -500,7 +527,11 @@ def parse_diff_with_provenance(
         source_span=source_span,
         provenance_state=provenance_state,
     )
-    if diff.type in {"modify", "add"} and diff.proposed:
+    if (
+        diff.type in {"modify", "add"}
+        and diff.proposed
+        and _wants_metric_placeholder(diff.section, diff.reason, prompt_focus)
+    ):
         diff.proposed = _ensure_metric_placeholder(diff.proposed)
     return diff, valid
 
@@ -637,7 +668,9 @@ def tailor_resume(
     strict_provenance = bool(getattr(client, "strict_provenance", True))
     jd_support = _gap_support_text(gap_report_text)
     for item in result.get("diffs", []):
-        diff, valid = parse_diff_with_provenance(item, resume_text)
+        diff, valid = parse_diff_with_provenance(
+            item, resume_text, prompt_focus=prompt_focus
+        )
         if diff.type == "add" and not diff.original.strip():
             invalid_diffs.append(diff)
             continue

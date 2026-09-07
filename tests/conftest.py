@@ -105,10 +105,13 @@ def _gap_only():
 
 
 def _tailor():
+    # P2 决策 1（2026-09-07）：占位指标串改为门控追加——reason 需带量化意图、
+    # section 需为叙事章节占位符才会插入，保住 e2e 导出确认弹窗链路覆盖。
     return {"sections": {"experience": "Built services using Java"},
             "diffs": [{"type": "modify", "original": "Python dev",
                         "proposed": "Built services using Java",
-                        "reason": "match", "confidence": "high",
+                        "section": "工作经历",
+                        "reason": "补齐量化指标", "confidence": "high",
                         "provenance": "Python dev",
                         "provenance_quote": "Python dev"}]}
 

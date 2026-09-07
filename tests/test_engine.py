@@ -507,11 +507,18 @@ def test_direct_path_local_editor_skips_whole_doc_fallback(monkeypatch):
     """P1（2026-09-07 双轴审查补）：engine.run 直连分支（CLI/.env 场景）对
     本地节点同样必须传 whole_doc_fallback=False——审查发现该分支漏传，
     全败时仍会走整文档 fallback 在 90s deadline 上必然超时。"""
+    from resualign.llm import LLMResponseError
     from resualign.schema_registry import (
         Analysis,
         DiffItem,
+    )
+    from resualign.schema_registry import (
         GapReport as GapReportSchema,
+    )
+    from resualign.schema_registry import (
         JDProfile as JDProfileSchema,
+    )
+    from resualign.schema_registry import (
         TailoredResume as TailoredResumeSchema,
     )
 

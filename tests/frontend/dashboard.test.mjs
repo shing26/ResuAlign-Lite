@@ -166,6 +166,28 @@ test("skillGapHtml buckets heat tones by relative count", () => {
   assert.match(fills[2].className, /--cool/);
 });
 
+test("skillGapHtml carries tone-tiered actionable hints (P2 决策 4)", () => {
+  const body = bodyFrom(
+    skillGapHtml([
+      { skill: "Kafka", count: 12 },
+      { skill: "Redis", count: 5 },
+      { skill: "Airflow", count: 1 },
+    ]),
+  );
+  const rows = [...body.querySelectorAll(".skill-gap-row")];
+  /* 行级：title 按 tone 分档（hot=优先改写 / warm=贴近措辞 / cool=不硬凑） */
+  assert.match(rows[0].getAttribute("title"), /频率最高/);
+  assert.match(rows[0].getAttribute("title"), /对齐改写/);
+  assert.match(rows[1].getAttribute("title"), /贴近岗位措辞/);
+  assert.match(rows[2].getAttribute("title"), /不要硬凑/);
+  assert.match(rows[0].getAttribute("aria-label"), /Kafka/);
+  /* 列表级：data-gap-hint 行动引导兜底触屏可发现性 */
+  const hint = body.querySelector("[data-gap-hint]");
+  assert.ok(hint, "list-level hint rendered");
+  assert.match(hint.textContent, /跳到要求它的岗位工作台/);
+  assert.match(hint.textContent, /确实没有依据的经历不要硬凑/);
+});
+
 test("skillGapHtml renders an empty state for no gaps", () => {
   const body = bodyFrom(skillGapHtml([]));
   assert.match(body.querySelector("[data-skill-gaps]").textContent, /暂无技能缺口数据/);
