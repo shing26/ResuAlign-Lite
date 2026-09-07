@@ -33,15 +33,49 @@ GAP_ANALYSIS_PROMPT = """PROMPT_VERSION: gap_analyzer/v2
 - 只输出一个 JSON 对象，无 markdown fence，无解释文字。"""
 
 
-def analyze_gaps(client: LLMClient, resume_text: str, jd_profile_text: str) -> GapReport:
+def analyze_gaps(
+    client: LLMClient,
+    resume_text: str,
+    jd_profile_text: str,
+    cache=None,
+    tenant: str = "default",
+    model=None,
+) -> GapReport:
+    resolved_model = model or getattr(client, "model", "default")
+    # 缓存键同时覆盖两个输入（简历 + JD 画像）；分隔符用原文不可能出现的
+    # 控制字符，避免不同配对方式拼出同一键。画像本身已被 profiler 缓存、
+    # 内容稳定，因此「同简历同岗位重跑」整段 gap 调用可复用。
+    cache_content = f"{resume_text}\x1e{jd_profile_text}"
+    if cache is not None:
+        cached = cache.get(
+            tenant,
+            resolved_model,
+            GAP_ANALYZER_PROMPT_VERSION,
+            cache_content,
+        )
+        if cached is not None:
+            return GapReport(
+                missing_keywords=cached.get("missing_keywords", []),
+                misaligned_emphasis=cached.get("misaligned_emphasis", []),
+                strength_matches=cached.get("strength_matches", []),
+            )
     user = f"Resume:\n{resume_text}\n\nJD Profile:\n{jd_profile_text}"
     # R4 §2.3-附（04b-PE）：chat_json → _structured_or_json —— gap 获得 schema 校验
     # + 纠错重试（max_retries=1，最多 2 次往返）。配套义务（AIE P0-5）：
     # engine.py:212-227 在结构失败（code ∈ schema/parse/empty）时降级为空 gap +
     # gap_degraded，不整体 fail；本行与降级 patch 同时合入（合入顺序：降级先于/同时）。
     result = _structured_or_json(client, GAP_ANALYSIS_PROMPT, user, GapReportSchema)
-    return GapReport(
+    gap = GapReport(
         missing_keywords=result.get("missing_keywords", []),
         misaligned_emphasis=result.get("misaligned_emphasis", []),
         strength_matches=result.get("strength_matches", []),
     )
+    if cache is not None:
+        cache.put(
+            tenant,
+            resolved_model,
+            GAP_ANALYZER_PROMPT_VERSION,
+            cache_content,
+            gap.__dict__,
+        )
+    return gap

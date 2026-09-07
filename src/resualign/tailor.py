@@ -889,6 +889,7 @@ def tailor_resume_map_reduce(
     custom_prompt: str = "",
     jd_context: str = "",
     parallel: bool = True,
+    whole_doc_fallback: bool = True,
 ) -> TailoredResume:
     """Rewrite a resume bullet-by-bullet, concurrent where safe (ADR-0032).
 
@@ -898,7 +899,9 @@ def tailor_resume_map_reduce(
     recorded as an ``invalid_diff`` (for Phase 4 per-item retry) instead of
     failing the whole run; when every targeted bullet fails the map-reduce
     falls back to whole-document editing so the callers' role fallback still
-    has a stable output.
+    has a stable output. Pass ``whole_doc_fallback=False`` for local nodes:
+    the whole-document contract cannot finish inside the editor deadline on
+    a small local model, so the fallback there is a guaranteed timeout.
     """
     if granularity not in GRANULARITY_GUIDES:
         raise ValueError(
@@ -1015,15 +1018,27 @@ def tailor_resume_map_reduce(
             sections.setdefault(key, []).append(unit["text"])
 
     if not diffs:
-        # Every targeted bullet failed: fall back to whole-document editing so
-        # role-level fallback / callers still get a coherent result.
-        return tailor_resume(
-            client,
-            resume_text,
-            gap_report_text,
-            granularity=granularity,
-            prompt_focus=prompt_focus,
-            custom_prompt=custom_prompt,
+        if whole_doc_fallback:
+            # Every targeted bullet failed: fall back to whole-document
+            # editing so role-level fallback / callers still get a coherent
+            # result.
+            return tailor_resume(
+                client,
+                resume_text,
+                gap_report_text,
+                granularity=granularity,
+                prompt_focus=prompt_focus,
+                custom_prompt=custom_prompt,
+            )
+        # Local nodes (whole_doc_fallback=False): the whole-document editor
+        # cannot finish inside the editor deadline on a small local model,
+        # so keep the honest partial result — invalid_diffs carry
+        # 「生成失败，可单条重试」 instead of burning the deadline twice on
+        # a fallback that can only end in timeout.
+        return TailoredResume(
+            sections={k: "\n".join(v) for k, v in sections.items()},
+            diffs=[],
+            invalid_diffs=invalid_diffs,
         )
 
     return TailoredResume(

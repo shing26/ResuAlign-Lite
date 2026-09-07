@@ -166,3 +166,54 @@ def test_map_reduce_rejects_invalid_granularity():
             MockBulletLLM(), RESUME, _gap_report_json(["Redis"]),
             granularity="ultra",
         )
+
+
+class FailAllBulletsLLM(MockBulletLLM):
+    """Fails every per-bullet call; whole-doc editor calls still succeed."""
+
+    def chat_structured(self, system, user, schema_model, model=None):
+        if getattr(schema_model, "__name__", "") != TailoredResumeSchema.__name__:
+            raise LLMResponseError("single bullet generation failed")
+        return super().chat_structured(system, user, schema_model, model)
+
+
+class ProbeWholeDocLLM(FailAllBulletsLLM):
+    """Counts whole-document editor calls (TailoredResumeSchema)."""
+
+    def __init__(self):
+        super().__init__()
+        self.whole_doc_calls = 0
+
+    def chat_structured(self, system, user, schema_model, model=None):
+        if getattr(schema_model, "__name__", "") == TailoredResumeSchema.__name__:
+            self.whole_doc_calls += 1
+        return super().chat_structured(system, user, schema_model, model)
+
+
+def test_map_reduce_all_failed_falls_back_to_whole_doc_by_default():
+    """全败 + 默认 whole_doc_fallback=True：走整文档编辑器（云节点语义）。"""
+    llm = ProbeWholeDocLLM()
+    tailor_resume_map_reduce(llm, RESUME, _gap_report_json(["Python", "Redis"]))
+    assert llm.whole_doc_calls == 1
+
+
+def test_map_reduce_local_node_all_failed_keeps_partial_result():
+    """P1（2026-09-07）：本地节点全败不再走整文档 fallback——7B 模型整文档
+    契约 ~200s 必超 editor 90s deadline（engine._editor_call_plan 实测注释），
+    fallback 只会把 deadline 烧两遍后整 run 失败。应保留 invalid_diffs
+    「生成失败，可单条重试」的诚实部分结果。"""
+    llm = ProbeWholeDocLLM()
+    result = tailor_resume_map_reduce(
+        llm, RESUME, _gap_report_json(["Python", "Redis"]),
+        parallel=False, whole_doc_fallback=False,
+    )
+    assert llm.whole_doc_calls == 0
+    assert result.diffs == []
+    assert {d.original for d in result.invalid_diffs} == {
+        "使用 Python 开发后端服务",
+        "使用 Redis 做缓存与会话管理",
+    }
+    assert all("可单条重试" in (d.reason or "") for d in result.invalid_diffs)
+    # Sections reassembled verbatim — no whole-doc text leaked in.
+    assert "使用 Python 开发后端服务" in result.sections.get("工作经历", "")
+    assert "使用 Redis 做缓存与会话管理" in result.sections.get("工作经历", "")

@@ -134,6 +134,7 @@ export function buildLlmNodePayload(data) {
     provider: String(source.node_provider || "").trim(),
     model: String(source.node_model || "").trim(),
     base_url: String(source.node_base_url || "").trim() || null,
+    disable_thinking: Boolean(source.node_disable_thinking),
   };
   const apiKey = String(source.node_api_key || "").trim();
   if (apiKey) payload.api_key = apiKey;

@@ -105,6 +105,7 @@ def resolve_config_for_role(
         "model": node.get("model", ""),
         "api_key": node.get("api_key", ""),
         "base_url": node.get("base_url", ""),
+        "disable_thinking": bool(node.get("disable_thinking", False)),
     }
 
 
@@ -216,6 +217,7 @@ def call_with_role(
             model=fallback_node.get("model", ""),
             api_key=fallback_node.get("api_key", ""),
             base_url=fallback_node.get("base_url", ""),
+            disable_thinking=bool(fallback_node.get("disable_thinking", False)),
         )
         meta["fallback_node_name"] = fallback_node.get("name", "")
 
@@ -300,6 +302,7 @@ def call_with_role_streaming(
         model=fallback_node.get("model", ""),
         api_key=fallback_node.get("api_key", ""),
         base_url=fallback_node.get("base_url", ""),
+        disable_thinking=bool(fallback_node.get("disable_thinking", False)),
     )
     meta["fallback_node_name"] = fallback_node.get("name", "")
 
@@ -323,9 +326,11 @@ def is_parallel_safe(
 
     Parallel execution is only safe (and beneficial) when every independent
     role uses a cloud API. Local Ollama nodes are serialized regardless.
+    Accepts any store exposing ``resolve_node_for_role`` (node-store fakes
+    in tests included); locality is decided by ``LLMNodeStore._is_local_node``.
     """
     for role in roles:
         node = node_store.resolve_node_for_role(tenant_id, role)
-        if node_store._is_local_node(node):
+        if LLMNodeStore._is_local_node(node):
             return False
     return True

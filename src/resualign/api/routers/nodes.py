@@ -110,6 +110,7 @@ def create_llm_node(
             base_url=req.base_url,
             api_key=req.api_key,
             model=req.model,
+            disable_thinking=req.disable_thinking,
         )
     except api_module.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

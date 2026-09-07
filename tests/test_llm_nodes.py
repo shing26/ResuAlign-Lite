@@ -627,3 +627,71 @@ def test_test_all_probes_every_node_and_persists():
     # 全部落库
     listed = client.get("/api/llm/nodes", headers=headers).json()
     assert all(n["last_test_status"] == "ok" for n in listed)
+
+
+# ---------------------------------------------------------------------------
+# 方案 A（2026-09-07）：disable_thinking 节点级推理关闭开关
+# ---------------------------------------------------------------------------
+
+
+def test_node_disable_thinking_roundtrip():
+    """存储层：create/update 持久化布尔，默认 False，行读取还原 bool。"""
+    store = LLMNodeStore(db_path=":memory:")
+    node = store.create_node(
+        "local", name="nvidia", provider="openrouter",
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="sk-nv", model="meta/muse-glimmer-30b",
+        disable_thinking=True,
+    )
+    assert node["disable_thinking"] is True
+    # 默认 False
+    plain = store.create_node(
+        "local", name="plain", provider="deepseek", api_key="sk", model="m"
+    )
+    assert plain["disable_thinking"] is False
+    # update 可翻转
+    updated = store.update_node(
+        "local", plain["node_id"], {"disable_thinking": True}
+    )
+    assert updated["disable_thinking"] is True
+
+
+def test_role_router_propagates_disable_thinking():
+    """角色路由：resolve_config_for_role 与 fallback 构造都透传该字段。"""
+    from resualign.role_router import resolve_config_for_role
+
+    class _Node:
+        def resolve_node_for_role(self, tenant_id, role):
+            return {
+                "provider": "openrouter",
+                "model": "meta/muse-glimmer-30b",
+                "api_key": "k",
+                "base_url": "https://integrate.api.nvidia.com/v1",
+                "disable_thinking": True,
+            }
+
+    resolved = resolve_config_for_role(_Node(), "t", "editor")
+    assert resolved["disable_thinking"] is True
+
+
+def test_build_config_disable_thinking_from_active_node():
+    """build_config：激活节点的 disable_thinking 进入管线配置（settings
+    快照 → build_config → OpenAIClient.request_direct_output 全链）。"""
+    with _personal_mode():
+        api_module._llm_nodes.create_node(
+            "local",
+            name="nvidia",
+            provider="openrouter",
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key="sk-nv",
+            model="meta/muse-glimmer-30b",
+            is_active=True,
+            disable_thinking=True,
+        )
+        with patch("resualign.config.EnvSettings") as mock_env:
+            _mock_env(mock_env)
+            config = api_module.build_config()
+        assert config.disable_thinking is True
+        # 全链冒烟：配置进客户端后应发出 thinking disabled extra
+        client = OpenAIClient(config)
+        assert client.request_direct_output is True

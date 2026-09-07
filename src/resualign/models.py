@@ -106,6 +106,11 @@ class ResuAlignConfig:
     api_key: str = ""
     model: str = "deepseek-chat"
     base_url: str = ""
+    # Node-level opt-out for reasoning models: send the provider-agnostic
+    # ``thinking: {"type": "disabled"}`` extra so the completion budget is
+    # spent on ``content`` instead of ``reasoning_content`` (NVIDIA NIM and
+    # DeepSeek both honor it; verified 2026-09-07 on integrate.api.nvidia.com).
+    disable_thinking: bool = False
 
     @property
     def is_llm_configured(self) -> bool:

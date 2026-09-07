@@ -412,8 +412,25 @@ test("buildLlmNodePayload maps node_* fields and trims values", () => {
     provider: "deepseek",
     model: "deepseek-chat",
     base_url: "https://api.deepseek.com/v1",
+    disable_thinking: false,
     api_key: "sk-abc",
   });
+});
+
+test("buildLlmNodePayload carries disable_thinking checkbox state", () => {
+  const on = buildLlmNodePayload({
+    node_name: "nvidia",
+    node_provider: "openrouter",
+    node_model: "meta/muse-glimmer-30b",
+    node_disable_thinking: "on",
+  });
+  assert.equal(on.disable_thinking, true);
+  const off = buildLlmNodePayload({
+    node_name: "nvidia",
+    node_provider: "openrouter",
+    node_model: "meta/muse-glimmer-30b",
+  });
+  assert.equal(off.disable_thinking, false);
 });
 
 test("buildLlmNodePayload omits api_key and nulls base_url when blank", () => {

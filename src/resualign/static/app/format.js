@@ -3396,6 +3396,7 @@ export function llmNodeCardHtml(node, lastTest) {
   const model = String(n.model || "").trim() || "—";
   const baseUrl = String(n.base_url || "").trim();
   const maskedKey = maskApiKey(n.api_key);
+  const disableThinking = Boolean(n.disable_thinking);
   const testResult = lastTest ? nodeTestResultHtml(lastTest) : "";
   /* 持久化健康徽标：test 端点结果落库后的回显（无本会话新鲜结果时）。
    * status 语义与 probe_llm_connection 一致：ok 之外都是具体失败原因。 */
@@ -3428,6 +3429,7 @@ export function llmNodeCardHtml(node, lastTest) {
         <div><dt>服务商</dt><dd>${esc(provider)}</dd></div>
         <div><dt>模型</dt><dd>${esc(model)}</dd></div>
         ${baseUrl ? `<div><dt>Base URL</dt><dd>${esc(baseUrl)}</dd></div>` : ""}
+        ${disableThinking ? '<div><dt>思考模式</dt><dd>已关闭</dd></div>' : ""}
         <div><dt>API Key</dt><dd class="llm-node-card__key">${maskedKey ? esc(maskedKey) : '<span class="muted">未配置</span>'}</dd></div>
       </dl>
       <div class="llm-node-card__actions">
@@ -3450,6 +3452,7 @@ export function llmNodeFormHtml(node) {
   const model = String(n.model || "");
   const baseUrl = String(n.base_url || "");
   const hasKey = Boolean(n.api_key);
+  const disableThinking = Boolean(n.disable_thinking);
   const providerOptions = LLM_NODE_PROVIDERS.map(
     (value) =>
       `<option value="${esc(value)}" ${provider === value ? "selected" : ""}>${esc(LLM_NODE_PROVIDER_LABELS[value] || value)}</option>`,
@@ -3468,6 +3471,11 @@ export function llmNodeFormHtml(node) {
         <div class="field wide"><label>API Key${nodeId ? "（编辑留空保持不变）" : ""}</label>
           <input type="password" name="node_api_key" autocomplete="new-password" value="" placeholder="${hasKey ? "已保存，留空保持不变" : "输入 API Key（Ollama 可留空）"}">
           ${hasKey ? `<div class="small muted">已保存 Key：${esc(maskApiKey(n.api_key))}</div>` : ""}</div>
+        <div class="field wide"><label class="field-inline">
+          <input type="checkbox" name="node_disable_thinking" ${disableThinking ? "checked" : ""}>
+          <span>关闭思考模式（推理模型勾选）</span>
+        </label>
+        <div class="small muted">勾选后请求携带 thinking: disabled——reasoning 模型（如 NVIDIA NIM）不再把输出预算耗在推理内容上，直接产出正文。</div></div>
       </div>
       <div class="actions">
         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>

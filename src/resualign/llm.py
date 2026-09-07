@@ -379,11 +379,17 @@ class OpenAIClient(LLMClient):
         # R4 P0-4：短角色条件性 transport 重试（classifier/intake/profiler/gap/polish）。
         # 长生成角色（editor/tailor）恒 False：超时重试只会再等一个世纪。
         self._retry_transport = bool(retry_transport) if retry_transport is not None else False
-        # DeepSeek reasoning models spend the output budget on
-        # ``reasoning_content`` before emitting the final JSON, which can
-        # cause 200 responses with empty ``content`` and finish_reason=length
-        self.request_direct_output = provider == "deepseek" or (
-            "deepseek.com" in self.base_url
+        # Reasoning models spend the output budget on ``reasoning_content``
+        # before emitting the final JSON, which can cause 200 responses with
+        # empty ``content`` and finish_reason=length. DeepSeek is detected
+        # automatically; any other node can opt in per-node via the
+        # ``disable_thinking`` config flag (e.g. NVIDIA NIM reasoning
+        # models, where the role max_tokens clamps would otherwise be
+        # consumed entirely by reasoning).
+        self.request_direct_output = (
+            provider == "deepseek"
+            or "deepseek.com" in self.base_url
+            or bool(getattr(config, "disable_thinking", False))
         )
         self._client = httpx.Client(
             timeout=httpx.Timeout(

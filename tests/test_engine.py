@@ -503,6 +503,64 @@ def test_is_local_llm_detection():
     assert _is_local_llm("deepseek", "https://api.deepseek.com") is False
 
 
+def test_direct_path_local_editor_skips_whole_doc_fallback(monkeypatch):
+    """P1（2026-09-07 双轴审查补）：engine.run 直连分支（CLI/.env 场景）对
+    本地节点同样必须传 whole_doc_fallback=False——审查发现该分支漏传，
+    全败时仍会走整文档 fallback 在 90s deadline 上必然超时。"""
+    from resualign.schema_registry import (
+        Analysis,
+        DiffItem,
+        GapReport as GapReportSchema,
+        JDProfile as JDProfileSchema,
+        TailoredResume as TailoredResumeSchema,
+    )
+
+    class BulletFailLLM:
+        """diagnose/profiler/gap 正常作答；所有 bullet 改写全败。"""
+
+        model = "m"
+
+        def chat_structured(self, system, user, schema_model, model=None):
+            name = schema_model.__name__
+            if name == Analysis.__name__:
+                return {"score": 80, "issues": [], "skills": ["Java"]}
+            if name == JDProfileSchema.__name__:
+                return {
+                    "must_have_skills": [], "nice_to_have_skills": [],
+                    "soft_skills": [], "business_scenarios": [],
+                    "min_years_experience": None,
+                    "education_requirements": [],
+                }
+            if name == GapReportSchema.__name__:
+                return {
+                    "missing_keywords": ["Python", "Redis"],
+                    "misaligned_emphasis": [],
+                    "strength_matches": [],
+                }
+            if name == DiffItem.__name__:
+                raise LLMResponseError("single bullet generation failed")
+            if name == TailoredResumeSchema.__name__:
+                raise AssertionError(
+                    "bullet editor should be used, not whole-doc"
+                )
+            raise AssertionError(f"unexpected schema {name}")
+
+    def no_whole_doc(*args, **kwargs):
+        raise AssertionError(
+            "whole-doc fallback must not run for a local direct-path node"
+        )
+
+    monkeypatch.setattr("resualign.engine.tailor_resume", no_whole_doc)
+    report = run(
+        ResuAlignConfig(provider="ollama", model="qwen2.5:7b"),
+        "张三\n\n工作经历\n- 使用 Python 开发后端服务\n- 使用 Redis 做缓存\n",
+        jd_text="Java backend",
+        llm_client=BulletFailLLM(),
+    )
+    assert report.tailored_resume.diffs == []
+    assert len(report.tailored_resume.invalid_diffs) == 2
+
+
 def test_engine_tailor_degrades_on_editor_failure(monkeypatch):
     """editor 阶段结构/超时类失败 → 空改写 + tailor_degraded，任务继续而非
     整体 failed（诊断/画像/缺口照常保存）。"""
@@ -543,3 +601,87 @@ def test_engine_tailor_reraises_account_failures(monkeypatch):
             jd_text="Java backend",
             llm_client=mock,
         )
+
+
+# ---------------------------------------------------------------------------
+# P2（2026-09-07）：diagnose 与 profiler 在云节点上并发执行（is_parallel_safe
+# 接线）；本地节点保持串行。两阶段互不依赖（一个只看简历、一个只看 JD）。
+# ---------------------------------------------------------------------------
+
+def test_engine_diagnose_and_profile_overlap_on_cloud_nodes(monkeypatch):
+    """云节点：diagnose 阻塞期间 profiler 必须已进入——两阶段并发。"""
+    import threading
+
+    order = []
+    lock = threading.Lock()
+    release = threading.Event()
+
+    def fake(role, fn, node_store, tenant_id, *, fn_kwargs=None,
+             default_config=None):
+        with lock:
+            order.append(f"{role}:start")
+        if role == "diagnose":
+            assert release.wait(timeout=5), (
+                "profiler never started while diagnose was running — "
+                "stages were serialized on a cloud node"
+            )
+            return _diag(), {"role": role}
+        if role == "profiler":
+            with lock:
+                order.append("profiler:entered-while-diagnose-running")
+            release.set()
+            return _profile_obj(), {"role": role}
+        if role == "gap_analyzer":
+            return _gap_obj(), {"role": role}
+        if role == "editor":
+            return _tailor_resume_obj(), {"role": role}
+        raise AssertionError(f"unexpected role {role}")
+
+    monkeypatch.setattr("resualign.engine.call_with_role", fake)
+    report = run(
+        ResuAlignConfig(model="m"),
+        "Python dev resume",
+        jd_text="Java backend",
+        node_store=_FakeNodeStore(),
+        tenant_id="t",
+    )
+    assert report.jd_profile is not None
+    with lock:
+        assert "profiler:entered-while-diagnose-running" in order, order
+
+
+def test_engine_local_nodes_stay_sequential(monkeypatch):
+    """本地节点：profiler 不得在 diagnose 结束前启动（串行不变）。"""
+    import threading
+
+    order = []
+    lock = threading.Lock()
+
+    def fake(role, fn, node_store, tenant_id, *, fn_kwargs=None,
+             default_config=None):
+        with lock:
+            order.append(f"{role}:start")
+        if role == "diagnose":
+            with lock:
+                assert "profiler:start" not in order, order
+            return _diag(), {"role": role}
+        if role == "profiler":
+            return _profile_obj(), {"role": role}
+        if role == "gap_analyzer":
+            return _gap_obj(), {"role": role}
+        if role == "editor":
+            return _tailor_resume_obj(), {"role": role}
+        raise AssertionError(f"unexpected role {role}")
+
+    monkeypatch.setattr("resualign.engine.call_with_role", fake)
+    report = run(
+        ResuAlignConfig(model="m"),
+        "Python dev resume",
+        jd_text="Java backend",
+        node_store=_LocalNodeStore(),
+        tenant_id="t",
+    )
+    assert report.jd_profile is not None
+    with lock:
+        assert order[0] == "diagnose:start", order
+        assert "profiler:entered-while-diagnose-running" not in order, order
