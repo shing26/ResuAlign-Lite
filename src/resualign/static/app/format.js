@@ -3513,6 +3513,67 @@ export function llmNodeFormHtml(node) {
     </form>`;
 }
 
+/** 设置页「简单/专家」模式切换（新手体验：默认简单，专家需显式切换）。 */
+export function settingsModeSwitchHtml(mode) {
+  const isSimple = mode !== "expert";
+  return `<div class="settings-mode-switch" data-settings-mode-switch role="group" aria-label="设置模式">
+      <button type="button" class="settings-mode-switch__btn${isSimple ? " is-active" : ""}" data-action="settings-mode-simple" aria-pressed="${isSimple}">简单</button>
+      <button type="button" class="settings-mode-switch__btn${isSimple ? "" : " is-active"}" data-action="settings-mode-expert" aria-pressed="${!isSimple}">专家</button>
+    </div>`;
+}
+
+/* --- 新手体验：简单模式连接面板 --- */
+/** 简单模式唯一面板：服务商下拉 + 模型 + API Key + 测试连接。
+ *  node 为要编辑的节点（activeNode 优先，否则第一个节点；null 表示新建）。
+ *  复用 llm-node-test 动作：面板带 data-llm-node-card /
+ *  data-llm-node-test-result，测试结果内联渲染。表单提交走
+ *  simple-llm-form（复用 buildLlmNodePayload / validateLlmNodePayload）。
+ *  disable_thinking 以隐藏字段透传，避免简单模式保存时意外重置该开关。 */
+export function simpleLlmSetupHtml(node, lastTest) {
+  const n = node && typeof node === "object" ? node : {};
+  const isEdit = Boolean(n.node_id);
+  const provider = String(n.provider || "deepseek");
+  const providerOptions = LLM_NODE_PROVIDERS.map(
+    (value) =>
+      `<option value="${esc(value)}" ${provider === value ? "selected" : ""}>${esc(LLM_NODE_PROVIDER_LABELS[value] || value)}</option>`,
+  ).join("");
+  const hasKey = Boolean(n.api_key);
+  const testResult = lastTest ? nodeTestResultHtml(lastTest) : "";
+  return `
+    <section class="panel simple-llm-panel" data-simple-llm-panel ${isEdit ? `data-llm-node-card data-node-id="${esc(n.node_id)}"` : ""}>
+      <div class="panel-head">
+        <div>
+          <h2>连接 AI 助手</h2>
+          <p>选择服务商并粘贴 API Key，保存后即可开始对齐简历</p>
+        </div>
+        ${isEdit && n.is_active ? '<span class="badge badge-green">已启用</span>' : ""}
+      </div>
+      <div class="panel-body">
+        <form data-form="simple-llm-form" class="simple-llm-form">
+          ${isEdit ? `<input type="hidden" name="node_id" value="${esc(n.node_id)}">` : ""}
+          <input type="hidden" name="node_name" value="${esc(isEdit ? n.name || "我的 AI 助手" : "我的 AI 助手")}">
+          ${n.disable_thinking ? '<input type="hidden" name="node_disable_thinking" value="on">' : ""}
+          <div class="form-grid">
+            <div class="field"><label>AI 服务商</label>
+              <select name="node_provider">${providerOptions}</select></div>
+            <div class="field"><label>模型名称</label>
+              <input type="text" name="node_model" required value="${esc(String(n.model || ""))}" placeholder="例如 deepseek-chat"></div>
+            <div class="field wide"><label>API Key</label>
+              <input type="password" name="node_api_key" autocomplete="new-password" value="" placeholder="${hasKey ? "已保存，留空保持不变" : "输入 API Key（Ollama 本地模型可留空）"}"></div>
+            <div class="field wide"><label>Base URL（可选，Ollama 本地用户需要）</label>
+              <input type="text" name="node_base_url" value="${esc(String(n.base_url || ""))}" placeholder="留空使用服务商默认地址，例如 http://localhost:11434"></div>
+          </div>
+          <div class="row simple-llm-form__actions">
+            <button class="btn btn-primary" type="submit">${isEdit ? "保存并启用" : "启用 AI 助手"}</button>
+            ${isEdit ? `<button class="btn btn-outline" type="button" data-action="llm-node-test" data-id="${esc(n.node_id)}">测试连接</button>` : ""}
+          </div>
+        </form>
+        <div data-llm-node-test-result>${testResult}</div>
+        ${isEdit ? "" : '<p class="small muted">保存后第一个节点自动启用。备用节点、成本护栏等高级配置可在「专家模式」中调整。</p>'}
+      </div>
+    </section>`;
+}
+
 /* --- T4: 自动化规则列表 + 新增表单 --- */
 
 /** 规则列表。每条渲染类型中文标签 + value + label + enabled 开关 + 删除。
