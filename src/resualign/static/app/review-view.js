@@ -2,7 +2,8 @@
    全部数据来自 GET /api/review 的确定性聚合（零 LLM）。复盘不是新状态机：
    它消费既有时间线字段（applied_at / next_step_due_at / deadline /
    application_result），只做只读呈现。 */
-import { alignmentStatusLabel, esc, jobStatusLabel, state } from "./events.js";
+import { alignmentStatusLabel, esc, jobStatusLabel, state, toast } from "./events.js";
+import { APPLICATION_RESULT_LABELS } from "./format.js";
 
 function escAttr(value) {
   return esc(String(value ?? ""));
@@ -87,6 +88,9 @@ function attributionCard(attribution) {
         <div class="review-attr__empty muted small">
           暂无投递结果归因数据。在岗位详情里给已投递的岗位标注「投递结果归因」，
           积累后这里会对比<b>对齐过 vs 未对齐</b>简历的过筛率——对齐是否有效的直接证据。
+          <div class="review-attr__empty-cta">
+            <a class="btn btn-outline btn-sm" href="#/jobs">去岗位库标注</a>
+          </div>
         </div>
       </div>`;
   }
@@ -97,11 +101,75 @@ function attributionCard(attribution) {
     </div>`;
 }
 
+/* 复盘冷启动（2026-09-10）：快速标注卡。列出近 14 天已投递但未标注归因的
+ * 岗位，下拉选择即走既有 PATCH /api/jobs/{id}（全字段可选，部分更新有先例）。
+ * 无待标注岗位时整卡隐藏，不占空间。 */
+const ANNOTATE_WINDOW_DAYS = 14;
+const ANNOTATE_MAX_ROWS = 8;
+
+export function pendingAnnotateJobs(jobs, now = Date.now()) {
+  const list = Array.isArray(jobs) ? jobs : [];
+  const windowMs = ANNOTATE_WINDOW_DAYS * 86400000;
+  return list
+    .filter(
+      (job) =>
+        job &&
+        job.job_id &&
+        !job.application_result &&
+        ["applied", "interview", "offer", "withdrawn"].includes(
+          String(job.status || ""),
+        ),
+    )
+    .map((job) => ({
+      job,
+      appliedAt: Date.parse(job.applied_at || job.updated_at || ""),
+    }))
+    .filter(({ appliedAt }) => Number.isFinite(appliedAt) && now - appliedAt <= windowMs)
+    .sort((a, b) => b.appliedAt - a.appliedAt);
+}
+
+export function quickAnnotateHtml(rows, totalCount) {
+  const options = Object.entries(APPLICATION_RESULT_LABELS)
+    .map(
+      ([value, label]) =>
+        `<option value="${escAttr(value)}">${escAttr(label)}</option>`,
+    )
+    .join("");
+  return `
+    <div class="review-annotate" data-review-annotate>
+      <h3 class="review-action__title">最近投递待标注 <span class="badge badge-amber">${escAttr(totalCount)}</span></h3>
+      <p class="small muted">选择投递结果，下方「对齐有效性」会立即计入对比——样本够时直接看到对齐有没有提高过筛率。</p>
+      <div class="review-annotate__list" data-annotate-list>
+        ${rows
+          .map(
+            (job) => `
+          <div class="review-annotate__row" data-annotate-row data-job-id="${escAttr(job.job_id)}">
+            <div class="review-annotate__main">
+              <strong>${escAttr(job.title || "未命名岗位")}</strong>
+              <span class="small muted">${escAttr(job.company || "")} · 投递于 ${escAttr(String(job.applied_at || job.updated_at || "").slice(0, 10))}</span>
+            </div>
+            <select class="review-annotate__select" data-annotate-select aria-label="标注「${escAttr(job.title || "未命名岗位")}」的投递结果">
+              <option value="">选择结果…</option>
+              ${options}
+            </select>
+          </div>`,
+          )
+          .join("")}
+      </div>
+      ${totalCount > rows.length ? `<p class="small muted">仅显示最近 ${escAttr(rows.length)} 条，其余可在岗位库逐条标注。</p>` : ""}
+    </div>`;
+}
+
 export async function renderReviewView(container) {
   let payload = null;
+  let jobs = [];
   try {
-    const response = await fetch("/api/review");
-    if (response.ok) payload = await response.json();
+    const [reviewResponse, jobsResponse] = await Promise.all([
+      fetch("/api/review"),
+      fetch("/api/jobs?limit=500"),
+    ]);
+    if (reviewResponse.ok) payload = await reviewResponse.json();
+    if (jobsResponse.ok) jobs = (await jobsResponse.json()) || [];
   } catch (error) {
     console.warn("Review fetch failed", error);
   }
@@ -125,6 +193,13 @@ export async function renderReviewView(container) {
     (sum, n) => sum + toCount(n),
     0,
   );
+  const annotatePending = pendingAnnotateJobs(jobs);
+  const annotateHtml = annotatePending.length
+    ? quickAnnotateHtml(
+        annotatePending.slice(0, ANNOTATE_MAX_ROWS).map(({ job }) => job),
+        annotatePending.length,
+      )
+    : "";
 
   container.innerHTML = `
     <div class="view view-scroll dashboard-view">
@@ -134,6 +209,9 @@ export async function renderReviewView(container) {
           : `<div class="panel main-pane"><div class="panel-body muted small">
               岗位库还是空的：先到「岗位库」用 Ctrl+K 粘贴 JD 或油猴插件录入岗位，
               投递并记录时间后，这里的节奏与复盘结论会自动生成。
+              <div class="review-attr__empty-cta">
+                <a class="btn btn-primary btn-sm" href="#/jobs">去岗位库录入</a>
+              </div>
             </div></div>`
       }
       <div class="dash-grid">
@@ -152,15 +230,15 @@ export async function renderReviewView(container) {
           <div class="panel-body">
             <div class="review-action">
               <h3 class="review-action__title">下一步已逾期 <span class="badge ${overdueCount ? "badge-red" : "badge-gray"}">${overdueCount}</span></h3>
-              ${actionList(actions.overdue_next_steps, "没有逾期的跟进事项")}
+              ${actionList(actions.overdue_next_steps, "没有逾期的跟进事项 · 给岗位设置「下一步跟进时间」，逾期会在这里提醒")}
             </div>
             <div class="review-action">
               <h3 class="review-action__title">临近截止 <span class="badge ${dueSoonCount ? "badge-amber" : "badge-gray"}">${dueSoonCount}</span></h3>
-              ${actionList(actions.due_soon, "未来 7 天没有即将截止的岗位")}
+              ${actionList(actions.due_soon, "未来 7 天没有即将截止的岗位 · 给岗位补充截止日期可提前提醒")}
             </div>
             <div class="review-action">
               <h3 class="review-action__title">超过 7 天无进展 <span class="badge ${staleCount ? "badge-amber" : "badge-gray"}">${staleCount}</span></h3>
-              ${actionList(actions.stale_jobs, "没有长期停滞的岗位")}
+              ${actionList(actions.stale_jobs, "没有长期停滞的岗位 · 投递 7 天仍无进展的岗位会出现在这里")}
             </div>
           </div>
         </section>
@@ -168,9 +246,45 @@ export async function renderReviewView(container) {
           <div class="panel-head">
             <div><h2>对齐有效性</h2><p>投递结果归因对比——对齐是否真的提高过筛率</p></div>
           </div>
-          <div class="panel-body">${attributionCard(payload.attribution)}</div>
+          <div class="panel-body">
+            ${annotateHtml}
+            ${attributionCard(payload.attribution)}
+          </div>
         </section>
       </div>
     </div>`;
+
+  /* 快速标注：change 委托在本次渲染的容器内，选中即 PATCH 既有归因字段，
+   * 成功后整视图重渲染（归因对比即时计入，标注卡随余量收缩）。 */
+  const annotateList = container.querySelector("[data-annotate-list]");
+  if (annotateList) {
+    annotateList.addEventListener("change", async (event) => {
+      const select = event.target.closest("[data-annotate-select]");
+      if (!select || !select.value) return;
+      const row = select.closest("[data-annotate-row]");
+      const jobId = row && row.dataset.jobId;
+      if (!jobId) return;
+      select.disabled = true;
+      try {
+        const response = await fetch(
+          `/api/jobs/${encodeURIComponent(jobId)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ application_result: select.value }),
+          },
+        );
+        if (!response.ok) {
+          const detail = await response.json().catch(() => ({}));
+          throw new Error(detail.detail || `标注失败（HTTP ${response.status}）`);
+        }
+        toast("投递结果已标注", "success");
+        renderReviewView(container);
+      } catch (error) {
+        select.disabled = false;
+        toast(error.message || "标注失败，请重试", "error");
+      }
+    });
+  }
   state.route = state.route || {};
 }

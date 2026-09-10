@@ -64,6 +64,65 @@ test("boardCard renders four match dimensions with labels and values", () => {
   assert.equal(dims[3].textContent.includes("经验"), true);
 });
 
+test("match dimensions below 50 are flagged as weak (短板高亮)", () => {
+  const body = bodyFrom(
+    boardCard({
+      ...DETAIL_JOB,
+      match_score_detail: {
+        hard_skills: 88,
+        scenario: 42,
+        expression: 30,
+        experience: 76,
+      },
+    }),
+  );
+  const dims = [...body.querySelectorAll("[data-match-dimension]")];
+  const weak = dims.filter((node) => node.classList.contains("is-weak"));
+  assert.deepEqual(
+    weak.map((node) => node.dataset.matchDimension),
+    ["scenario", "expression"],
+    "only sub-threshold dimensions are flagged",
+  );
+  assert.ok(weak.every((node) => node.querySelector(".match-dim__weak-badge")));
+  assert.match(weak[0].querySelector(".match-dim__weak-badge").textContent, /弱项/);
+  const healthy = dims.filter((node) => !node.classList.contains("is-weak"));
+  assert.ok(
+    healthy.every((node) => !node.querySelector(".match-dim__weak-badge")),
+  );
+  /* 边界：恰好 50 分不算短板 */
+  const edge = bodyFrom(
+    boardCard({
+      ...DETAIL_JOB,
+      match_score_detail: {
+        hard_skills: 50,
+        scenario: 51,
+        expression: 49,
+        experience: 100,
+      },
+    }),
+  );
+  const edgeDims = [...edge.querySelectorAll("[data-match-dimension]")];
+  assert.equal(
+    edgeDims.find((node) => node.dataset.matchDimension === "hard_skills").classList.contains("is-weak"),
+    false,
+    "50 is not weak (threshold is exclusive)",
+  );
+  assert.equal(
+    edgeDims.find((node) => node.dataset.matchDimension === "expression").classList.contains("is-weak"),
+    true,
+  );
+});
+
+test("radar chart dead code is fully removed", () => {
+  const formatSource = read("format.js");
+  const stylesSource = readFileSync(
+    join(appDir, "..", "styles.css"),
+    "utf8",
+  );
+  assert.doesNotMatch(formatSource, /radarHtml|split-radar|radar-fill|radar-grid/, "no radar renderer left in format.js");
+  assert.doesNotMatch(stylesSource, /split-radar|radar-grid|radar-fill|radar-axis|radar-dot/, "no radar styles left in styles.css");
+});
+
 test("boardCard exposes total, reason source and stale recompute action", () => {
   const body = bodyFrom(boardCard(DETAIL_JOB));
   assert.equal(body.querySelector("[data-match-total]").textContent, "83");
@@ -381,7 +440,16 @@ test("jobTimelineFormHtml offers attribution select with current value", () => {
 test("dashboard source contract wires quality adoption card", () => {
   const source = read("dashboard-view.js");
   assert.match(source, /payload\.quality/, "dashboard consumes quality payload");
-  assert.match(source, /采纳率/, "adoption card exists");
+  /* 新手体验（2026-09-10）：KPI 主数字从采纳率百分比换成已优化条目数，
+   * 采纳率降级为 hint 明细，避免低服从率在首页核心位造成负向引导。 */
+  assert.match(source, /已优化条目/, "accepted-entries headline exists");
+  assert.match(source, /diffs_accepted/, "headline uses accepted count");
+  assert.doesNotMatch(
+    source,
+    /adoption_ratio/,
+    "adoption_ratio no longer drives the headline",
+  );
+  assert.match(source, /采纳/, "adoption detail kept in hint");
   assert.match(source, /data-kpi="quality"/, "quality card is tagged");
 });
 

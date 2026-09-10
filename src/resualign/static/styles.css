@@ -4866,66 +4866,6 @@ body.command-palette-open {
   box-shadow: var(--card-shadow-rest);
 }
 
-.split-radar {
-  position: relative;
-  width: 150px;
-  flex: 0 0 auto;
-}
-
-.split-radar svg {
-  display: block;
-  width: 100%;
-}
-
-.radar-grid {
-  stroke: var(--border);
-  stroke-width: 1;
-}
-
-.radar-axis-line {
-  stroke: var(--border);
-  stroke-width: 1;
-}
-
-.radar-fill {
-  fill: rgba(37, 99, 235, 0.18);
-  stroke: var(--match);
-  stroke-width: 2;
-}
-
-.radar-dot {
-  fill: var(--match);
-}
-
-.split-radar__score {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-content: center;
-  text-align: center;
-  pointer-events: none;
-}
-
-.split-radar__score strong {
-  font-size: 22px;
-  color: var(--ink-strong);
-  line-height: 1;
-}
-
-.split-radar__score span {
-  font-size: 10px;
-  color: var(--text-muted);
-}
-
-.split-radar__legend {
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 2px;
-  font-size: 10px;
-  color: var(--text-muted);
-}
-
 .split-diff-area {
   min-width: 0;
   padding-top: 2px;
@@ -10570,6 +10510,26 @@ details > summary::-webkit-details-marker,
   color: var(--ink-strong, #111827);
 }
 
+/* 短板维度（<50 分）：进度条红色 + 「弱项」小徽标。 */
+.match-dim.is-weak .match-dim__track i {
+  background: var(--danger, #dc2626);
+}
+
+.match-dim.is-weak b {
+  color: var(--danger, #dc2626);
+}
+
+.match-dim__weak-badge {
+  font-style: normal;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  margin-left: 4px;
+  border-radius: 4px;
+  color: #fff;
+  background: var(--danger, #dc2626);
+}
+
 .board-match__reason {
   display: flex;
   align-items: center;
@@ -12159,3 +12119,52 @@ select,
 .review-attr__empty {
   padding: 8px 0;
 }
+
+/* 复盘快速标注卡（2026-09-10 冷启动改进）：待标注岗位一行一选。 */
+.review-attr__empty-cta {
+  margin-top: 10px;
+}
+
+.review-annotate {
+  padding: 10px 12px;
+  border: 1px solid var(--ra-border, #e2e8f0);
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+
+.review-annotate__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.review-annotate__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-left: 3px solid var(--ra-accent, #6366f1);
+  border-radius: 6px;
+  background: var(--ra-surface-soft, #f8fafc);
+}
+
+.review-annotate__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.review-annotate__main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-annotate__select {
+  flex: 0 0 auto;
+  max-width: 160px;
+}
+
