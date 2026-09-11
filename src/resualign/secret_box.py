@@ -99,7 +99,7 @@ def decrypt_value(value: str | None) -> str | None:
     token = value[len(_PREFIX):]
     try:
         return fernet.decrypt(token.encode("ascii")).decode("utf-8")
-    except (InvalidToken, InvalidSignature):
+    except InvalidToken:
         # from None：原始 InvalidToken 对终端用户无意义，恢复指引已在上文；
         # 类型根因（密钥不匹配 vs 载荷损坏）可由 message 中的场景区分。
         raise RuntimeError(
