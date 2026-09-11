@@ -140,7 +140,7 @@ export async function renderDashboard(container) {
     quickBtnLabel = "分析中";
     quickBtnExtra = ' aria-disabled="true"';
   }
-  const quickHref = qBusy
+  const quickHref = qBusy || !quick
     ? ""
     : `href="#/workspace/${encodeURIComponent(quick.job_id)}"`;
   const quickHtml = quick && quick.job_id

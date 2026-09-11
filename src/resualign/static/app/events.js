@@ -494,10 +494,10 @@ export function renderDiagnosisIdle() {
       node.hidden = true;
     },
   );
-  const bandExportHide = document.querySelector(
-    ".resume-band [data-action='export-diagnosis']",
-  );
-  if (bandExportHide) bandExportHide.hidden = true;
+  const bandExportHide = $$(".resume-band [data-action='export-diagnosis'], .resume-band [data-action='export-diagnosis-md']");
+  bandExportHide.forEach((node) => {
+    node.hidden = true;
+  });
   const diagnoseBtn = $("[data-action='diagnose-resume']", panel);
   if (diagnoseBtn) {
     diagnoseBtn.disabled = false;
@@ -578,11 +578,13 @@ export function renderDiagnosisResult(snapshot) {
       node.hidden = false;
     },
   );
-  // 导出按钮已收敛到 resume-band（PM 评审去重）：诊断成功时同步点亮。
-  const bandExport = document.querySelector(
-    ".resume-band [data-action='export-diagnosis']",
+  // 导出按钮已收敛到 resume-band（PM 评审去重）：诊断成功时同步点亮
+  // PDF 与 MD 两个诊断导出按钮。
+  $$(".resume-band [data-action='export-diagnosis'], .resume-band [data-action='export-diagnosis-md']").forEach(
+    (node) => {
+      node.hidden = false;
+    },
   );
-  if (bandExport) bandExport.hidden = false;
   const target = $("[data-diagnosis-result]", panel);
   if (!target) return;
   target.hidden = false;
@@ -640,10 +642,10 @@ export function renderDiagnosisError(snapshot) {
       node.hidden = true;
     },
   );
-  const bandExportHide = document.querySelector(
-    ".resume-band [data-action='export-diagnosis']",
-  );
-  if (bandExportHide) bandExportHide.hidden = true;
+  const bandExportHide = $$(".resume-band [data-action='export-diagnosis'], .resume-band [data-action='export-diagnosis-md']");
+  bandExportHide.forEach((node) => {
+    node.hidden = true;
+  });
   const diagnoseBtn = $("[data-action='diagnose-resume']", panel);
   if (diagnoseBtn) {
     diagnoseBtn.disabled = false;

@@ -25,13 +25,13 @@ from resualign.jobs import JobRegistry
 from resualign.llm import LLMResponseError, OpenAIClient
 from resualign.models import JDProfile, ResuAlignConfig
 
-from .conftest import MockLLMClient, _diag, _jd_profile_only, _tailor
+from .conftest import MockLLMClient, _diag, _jd_profile_only, _tailor, fake_api_key
 
 
 def _cfg(**overrides) -> ResuAlignConfig:
     return ResuAlignConfig(
         provider="deepseek",
-        api_key="sk-test",
+        api_key=fake_api_key("test"),
         model="m1",
         **overrides,
     )

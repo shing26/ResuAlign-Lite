@@ -63,6 +63,16 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    # 2（2026-09-07 瘦身收尾）：删除早已随功能移除、但从未迁移走的遗留表。
+    # crawl_tasks 在部分老库存在；job_payloads 建表早于本次清理，无关联。
+    (
+        2,
+        """
+        DROP TABLE IF EXISTS crawl_tasks;
+        DROP TABLE IF EXISTS blocker_queue;
+        DROP TABLE IF EXISTS job_refresh_events;
+        """,
+    ),
 )
 
 _JOB_COLUMNS = (

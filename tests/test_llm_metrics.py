@@ -10,6 +10,8 @@ import resualign.llm as llm_module
 from resualign.llm import LLMResponseError, OpenAIClient
 from resualign.models import ResuAlignConfig
 
+from .conftest import fake_api_key
+
 
 class _ScoreModel(BaseModel):
     score: int
@@ -44,7 +46,7 @@ def captured():
 
 @pytest.fixture
 def config():
-    return ResuAlignConfig(provider="deepseek", api_key="sk-test", model="m1")
+    return ResuAlignConfig(provider="deepseek", api_key=fake_api_key("test"), model="m1")
 
 
 @pytest.fixture(autouse=True)
@@ -123,7 +125,7 @@ def test_chat_structured_json_mode_records_call(
 
 
 def test_chat_structured_provider_mode_records_call(httpx_mock, captured):
-    config = ResuAlignConfig(provider="openai", api_key="sk-test", model="gpt-4o")
+    config = ResuAlignConfig(provider="openai", api_key=fake_api_key("test"), model="gpt-4o")
     client = OpenAIClient(config)
     httpx_mock.add_response(
         json={"choices": [{"message": {"content": '{"score": 9}'}}]}

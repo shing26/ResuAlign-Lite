@@ -96,10 +96,6 @@ class JobUpdateRequest(BaseModel):
     # 岗位截止日期（YYYY-MM-DD）；空串按 clear-on-empty 清除。
     deadline: str | None = None
 
-class BulkStatusRequest(BaseModel):
-    job_ids: list[str]
-    status: str
-
 class JobImportRequest(BaseModel):
     jobs: list[dict[str, Any]] | None = None
     csv_text: str | None = Field(default=None, max_length=_CSV_TEXT_MAX)
@@ -174,6 +170,9 @@ class LLMNodeCreateRequest(BaseModel):
     base_url: str | None = Field(default=None, max_length=_URL_MAX)
     api_key: str | None = Field(default=None, max_length=_LLM_KEY_MAX)
     model: str = Field(max_length=_TITLE_MAX)
+    # Reasoning-model opt-out: send ``thinking: {type: disabled}`` so the
+    # role max_tokens clamps buy ``content`` instead of ``reasoning_content``.
+    disable_thinking: bool = False
 
 
 class LLMNodeUpdateRequest(BaseModel):
@@ -189,6 +188,7 @@ class LLMNodeUpdateRequest(BaseModel):
     api_key: str | None = Field(default=None, max_length=_LLM_KEY_MAX)
     model: str | None = Field(default=None, max_length=_TITLE_MAX)
     is_active: bool | None = None
+    disable_thinking: bool | None = None
 
 
 class SettingsUpdateRequest(BaseModel):

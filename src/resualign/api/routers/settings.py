@@ -51,6 +51,7 @@ def _stored_llm_snapshot() -> dict[str, Any]:
                     "model": node.get("model"),
                     "api_key": node.get("api_key"),
                     "base_url": node.get("base_url"),
+                    "disable_thinking": bool(node.get("disable_thinking")),
                 }
         llm = store.get_settings("local").get("llm") or {}
     except Exception:

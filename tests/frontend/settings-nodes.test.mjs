@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { Window } from "happy-dom";
 
 import {
@@ -11,6 +14,8 @@ import {
   ruleFormHtml,
   ruleListHtml,
   settingsBentoHtml,
+  settingsModeSwitchHtml,
+  simpleLlmSetupHtml,
 } from "../../src/resualign/static/app/format.js";
 import {
   buildAutomationRulePayload,
@@ -412,8 +417,25 @@ test("buildLlmNodePayload maps node_* fields and trims values", () => {
     provider: "deepseek",
     model: "deepseek-chat",
     base_url: "https://api.deepseek.com/v1",
+    disable_thinking: false,
     api_key: "sk-abc",
   });
+});
+
+test("buildLlmNodePayload carries disable_thinking checkbox state", () => {
+  const on = buildLlmNodePayload({
+    node_name: "nvidia",
+    node_provider: "openrouter",
+    node_model: "meta/muse-glimmer-30b",
+    node_disable_thinking: "on",
+  });
+  assert.equal(on.disable_thinking, true);
+  const off = buildLlmNodePayload({
+    node_name: "nvidia",
+    node_provider: "openrouter",
+    node_model: "meta/muse-glimmer-30b",
+  });
+  assert.equal(off.disable_thinking, false);
 });
 
 test("buildLlmNodePayload omits api_key and nulls base_url when blank", () => {
@@ -496,4 +518,88 @@ test("llmNodeCardHtml shows persisted health badge without fresh test result", (
   /* 有本会话新鲜测试结果时不重复渲染持久徽标 */
   const fresh = bodyFrom(llmNodeCardHtml({ ...NODE, last_test_status: "ok" }, { ok: true, status: "ok", latency_ms: 5 }));
   assert.equal(fresh.querySelector(".llm-node-card__head .badge-red"), null);
+});
+
+/* ------------------------------------------------------------------ */
+/* settingsModeSwitchHtml / simpleLlmSetupHtml: 新手体验简单模式          */
+/* ------------------------------------------------------------------ */
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+test("settingsModeSwitchHtml marks only the active mode", () => {
+  const simple = bodyFrom(settingsModeSwitchHtml("simple"));
+  assert.ok(simple.querySelector('[data-action="settings-mode-simple"].is-active'));
+  assert.equal(simple.querySelector('[data-action="settings-mode-expert"].is-active'), null);
+  assert.equal(simple.querySelector('[data-action="settings-mode-simple"]').getAttribute("aria-pressed"), "true");
+  assert.equal(simple.querySelector('[data-action="settings-mode-expert"]').getAttribute("aria-pressed"), "false");
+
+  const expert = bodyFrom(settingsModeSwitchHtml("expert"));
+  assert.equal(expert.querySelector('[data-action="settings-mode-simple"].is-active'), null);
+  assert.ok(expert.querySelector('[data-action="settings-mode-expert"].is-active'));
+});
+
+test("simpleLlmSetupHtml renders a create form without test button", () => {
+  const body = bodyFrom(simpleLlmSetupHtml(null, null));
+  const panel = body.querySelector("[data-simple-llm-panel]");
+  assert.ok(panel, "simple panel is rendered");
+  assert.equal(panel.hasAttribute("data-llm-node-card"), false, "create panel has no node to test");
+  const form = body.querySelector("[data-form='simple-llm-form']");
+  assert.equal(form.querySelector('input[name="node_id"]'), null, "create mode has no node_id");
+  assert.equal(form.querySelector('input[name="node_name"]').value, "我的 AI 助手");
+  assert.deepEqual(
+    [...form.querySelectorAll('select[name="node_provider"] option')].map((o) => o.value),
+    ["deepseek", "openrouter", "ollama"],
+  );
+  assert.equal(form.querySelector('button[type="submit"]').textContent, "启用 AI 助手");
+  assert.equal(body.querySelector('[data-action="llm-node-test"]'), null, "no node yet, no test button");
+  assert.equal(body.querySelector("[data-llm-node-test-result]").textContent.trim(), "");
+});
+
+test("simpleLlmSetupHtml prefills the edit form and keeps key blank", () => {
+  const body = bodyFrom(simpleLlmSetupHtml({ ...NODE, disable_thinking: true }, { ok: true, status: 200, latency_ms: 90 }));
+  const panel = body.querySelector("[data-simple-llm-panel]");
+  assert.equal(panel.dataset.nodeId, "n1");
+  assert.ok(panel.querySelector(".badge-green"), "active node shows the enabled badge");
+  const form = body.querySelector("[data-form='simple-llm-form']");
+  assert.equal(form.querySelector('input[name="node_id"]').value, "n1");
+  assert.equal(form.querySelector('input[name="node_name"]').value, "主 DeepSeek 节点");
+  assert.equal(form.querySelector('input[name="node_disable_thinking"]').value, "on", "disable_thinking is carried through");
+  assert.equal(form.querySelector('select[name="node_provider"]').value, "deepseek");
+  assert.equal(form.querySelector('input[name="node_model"]').value, "deepseek-chat");
+  assert.equal(form.querySelector('input[name="node_api_key"]').value, "", "edit keeps key blank");
+  assert.match(form.querySelector('input[name="node_api_key"]').getAttribute("placeholder"), /已保存，留空保持不变/);
+  assert.equal(form.querySelector('button[type="submit"]').textContent, "保存并启用");
+  const testBtn = body.querySelector('[data-action="llm-node-test"]');
+  assert.ok(testBtn, "edit mode exposes test connection");
+  assert.equal(testBtn.dataset.id, "n1");
+  assert.match(body.querySelector("[data-llm-node-test-result]").textContent, /90 ms/);
+});
+
+test("simpleLlmSetupHtml escapes prefilled values", () => {
+  const body = bodyFrom(
+    simpleLlmSetupHtml({ ...NODE, name: "<b>节点</b>", model: "<script>x</script>" }, null),
+  );
+  assert.equal(body.querySelector("script, b"), null);
+  assert.equal(body.querySelector('input[name="node_name"]').value, "<b>节点</b>");
+  assert.equal(body.querySelector('input[name="node_model"]').value, "<script>x</script>");
+});
+
+test("main.js wires the simple/expert mode switch and simple form submission", () => {
+  const mainJs = readFileSync(join(HERE, "../../src/resualign/static/app/main.js"), "utf8");
+  /* 双模式渲染门控：专家面板仅在 expert 模式输出 */
+  assert.match(
+    mainJs,
+    /settingsMode === "expert" \? expertPanelsHtml : simpleLlmSetupHtml/,
+    "settings view must gate expert panels behind the mode switch",
+  );
+  /* 模式解析：默认简单，「专家」为显式选择后即生效（无节点也允许——
+   * 否则备用节点/Token 面板无处可达，E2E settings 流曾死锁于此） */
+  assert.match(mainJs, /const settingsMode = readSettingsMode\(\);/);
+  assert.doesNotMatch(mainJs, /hasNodes \? readSettingsMode\(\)/);
+  /* 模式持久化与切换动作 */
+  assert.match(mainJs, /"settings-mode-simple"/);
+  assert.match(mainJs, /"settings-mode-expert"/);
+  assert.match(mainJs, /"resualign\.settingsMode"/);
+  /* 简单模式表单提交走节点 CRUD 复用路径 */
+  assert.match(mainJs, /case "simple-llm-form":/);
 });

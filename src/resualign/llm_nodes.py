@@ -18,6 +18,7 @@ import time
 import uuid
 from typing import Any
 
+from .secret_box import decrypt_value, encrypt_value
 from .store_base import UserStoreError, _SqliteStore
 
 _LLM_NODES_SCHEMA = """
@@ -57,9 +58,18 @@ _NODE_FIELDS = (
     "last_test_status",
     "last_test_latency_ms",
     "last_test_at",
+    "disable_thinking",
 )
 
-_EDITABLE_FIELDS = ("name", "provider", "base_url", "api_key", "model", "is_active")
+_EDITABLE_FIELDS = (
+    "name",
+    "provider",
+    "base_url",
+    "api_key",
+    "model",
+    "is_active",
+    "disable_thinking",
+)
 
 _ALLOWED_PROVIDERS = ("deepseek", "openrouter", "ollama")
 
@@ -107,6 +117,14 @@ class LLMNodeStore(_SqliteStore):
             "ALTER TABLE llm_nodes ADD COLUMN last_test_status TEXT; "
             "ALTER TABLE llm_nodes ADD COLUMN last_test_latency_ms REAL; "
             "ALTER TABLE llm_nodes ADD COLUMN last_test_at REAL;",
+        ),
+        # 4: reasoning 模型开关——llm.py 对开启节点发送
+        # ``thinking: {"type": "disabled"}``，防止推理内容烧光角色
+        # max_tokens 钳制后 content 为空（NVIDIA muse-glimmer-30b 实测）。
+        (
+            4,
+            "ALTER TABLE llm_nodes ADD COLUMN "
+            "disable_thinking INTEGER NOT NULL DEFAULT 0;",
         ),
     )
 
@@ -297,12 +315,14 @@ class LLMNodeStore(_SqliteStore):
         base_url: str | None = None,
         api_key: str | None = None,
         is_active: bool | None = None,
+        disable_thinking: bool = False,
     ) -> dict[str, Any]:
         """Insert a node and return it.
 
         The first node of a tenant becomes active automatically; an explicit
         ``is_active=True`` activates the new node and deactivates every other
-        node of the tenant (one active node per tenant).
+        node of the tenant (one active node per tenant). ``disable_thinking``
+        opts the node out of reasoning-model output (see ResuAlignConfig).
         """
         self._validate_node(
             name=name,
@@ -311,6 +331,7 @@ class LLMNodeStore(_SqliteStore):
             base_url=base_url,
             api_key=api_key,
             is_active=is_active,
+            disable_thinking=disable_thinking,
         )
         node_id = uuid.uuid4().hex
         now = time.time()
@@ -331,19 +352,20 @@ class LLMNodeStore(_SqliteStore):
                 conn.execute(
                     "INSERT INTO llm_nodes (node_id, tenant_id, name, "
                     "provider, base_url, api_key, model, is_active, "
-                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, "
-                    "?, ?, ?)",
+                    "created_at, updated_at, disable_thinking) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         node_id,
                         tenant_id,
                         name,
                         provider,
                         base_url,
-                        api_key,
+                        encrypt_value(api_key),
                         model,
                         int(activate),
                         now,
                         now,
+                        int(bool(disable_thinking)),
                     ),
                 )
         node = self.get_node(tenant_id, node_id)
@@ -370,6 +392,7 @@ class LLMNodeStore(_SqliteStore):
             base_url=merged["base_url"],
             api_key=merged["api_key"],
             is_active=merged["is_active"],
+            disable_thinking=merged["disable_thinking"],
         )
         now = time.time()
         with self._lock:
@@ -384,14 +407,16 @@ class LLMNodeStore(_SqliteStore):
                 conn.execute(
                     "UPDATE llm_nodes SET name = ?, provider = ?, "
                     "base_url = ?, api_key = ?, model = ?, is_active = ?, "
-                    "updated_at = ? WHERE tenant_id = ? AND node_id = ?",
+                    "disable_thinking = ?, updated_at = ? "
+                    "WHERE tenant_id = ? AND node_id = ?",
                     (
                         merged["name"],
                         merged["provider"],
                         merged["base_url"],
-                        merged["api_key"],
+                        encrypt_value(merged["api_key"]),
                         merged["model"],
                         int(bool(merged["is_active"])),
+                        int(bool(merged["disable_thinking"])),
                         now,
                         tenant_id,
                         node_id,
@@ -475,6 +500,7 @@ class LLMNodeStore(_SqliteStore):
         base_url: str | None = None,
         api_key: str | None = None,
         is_active: bool | None = None,
+        disable_thinking: bool = False,
     ) -> None:
         if not str(name or "").strip():
             raise UserStoreError("name must be a non-empty string")
@@ -489,6 +515,8 @@ class LLMNodeStore(_SqliteStore):
                 raise UserStoreError(f"{key} must be a string or null")
         if is_active is not None and not isinstance(is_active, bool):
             raise UserStoreError("is_active must be a boolean")
+        if not isinstance(disable_thinking, bool):
+            raise UserStoreError("disable_thinking must be a boolean")
 
     @staticmethod
     def _row_to_dict(row: Any) -> dict[str, Any]:
@@ -498,7 +526,7 @@ class LLMNodeStore(_SqliteStore):
             "name": row["name"],
             "provider": row["provider"],
             "base_url": row["base_url"],
-            "api_key": row["api_key"],
+            "api_key": decrypt_value(row["api_key"]),
             "model": row["model"],
             "is_active": bool(row["is_active"]),
             "created_at": row["created_at"],
@@ -506,4 +534,5 @@ class LLMNodeStore(_SqliteStore):
             "last_test_status": row["last_test_status"],
             "last_test_latency_ms": row["last_test_latency_ms"],
             "last_test_at": row["last_test_at"],
+            "disable_thinking": bool(row["disable_thinking"]),
         }

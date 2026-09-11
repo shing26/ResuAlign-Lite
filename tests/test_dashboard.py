@@ -19,6 +19,8 @@ from resualign.workspace import (
     UserStore,
 )
 
+from .conftest import fake_password
+
 client = TestClient(app)
 _auth_cache = None
 
@@ -65,13 +67,13 @@ def _auth_headers() -> dict[str, str]:
     assert (
         client.post(
             "/api/auth/signup",
-            json={"email": "dashboard@example.com", "password": "password-123"},
+            json={"email": "dashboard@example.com", "password": fake_password("123")},
         ).status_code
         == 201
     )
     token = client.post(
         "/api/auth/login",
-        json={"email": "dashboard@example.com", "password": "password-123"},
+        json={"email": "dashboard@example.com", "password": fake_password("123")},
     ).json()["token"]
     _auth_cache = {"Authorization": f"Bearer {token}"}
     return _auth_cache
@@ -326,13 +328,13 @@ def test_dashboard_is_tenant_scoped():
     assert (
         client.post(
             "/api/auth/signup",
-            json={"email": "b@example.com", "password": "password-123"},
+            json={"email": "b@example.com", "password": fake_password("123")},
         ).status_code
         == 201
     )
     token_b = client.post(
         "/api/auth/login",
-        json={"email": "b@example.com", "password": "password-123"},
+        json={"email": "b@example.com", "password": fake_password("123")},
     ).json()["token"]
     headers_b = {"Authorization": f"Bearer {token_b}"}
 

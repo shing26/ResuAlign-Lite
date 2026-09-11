@@ -11,7 +11,7 @@ from resualign.tailor import (
     tailor_resume,
 )
 
-from .conftest import SchemaAwareLLMClient
+from .conftest import SchemaAwareLLMClient, fake_api_key
 
 
 def test_valid_provenance_quote_passes_hard_gate():
@@ -286,7 +286,7 @@ def test_production_client_drops_invented_provenance(httpx_mock):
     client = OpenAIClient(
         ResuAlignConfig(
             provider="deepseek",
-            api_key="sk-test",
+            api_key=fake_api_key("test"),
             model="test-model",
         )
     )

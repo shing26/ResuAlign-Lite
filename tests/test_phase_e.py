@@ -33,11 +33,13 @@ from resualign.workspace import (
     UserStore,
 )
 
+from .conftest import fake_api_key, fake_password
+
 client = TestClient(app)
 _auth_cache = None
 
 
-def _config(api_key: str = "sk-test") -> ResuAlignConfig:
+def _config(api_key: str = fake_api_key("test")) -> ResuAlignConfig:
     return ResuAlignConfig(
         provider="deepseek",
         api_key=api_key,
@@ -83,11 +85,11 @@ def _auth_headers():
     if _auth_cache is None:
         client.post(
             "/api/auth/signup",
-            json={"email": "phase-e@test.com", "password": "password-123"},
+            json={"email": "phase-e@test.com", "password": fake_password("123")},
         )
         token = client.post(
             "/api/auth/login",
-            json={"email": "phase-e@test.com", "password": "password-123"},
+            json={"email": "phase-e@test.com", "password": fake_password("123")},
         ).json()["token"]
         _auth_cache = {"Authorization": f"Bearer {token}"}
     return _auth_cache
@@ -186,7 +188,7 @@ def test_probe_remote_network_error_non_blocking():
         "resualign.api.services.jobs.api_module._llm_nodes.get_active_node",
         return_value={
             "provider": "deepseek",
-            "api_key": "sk-test",
+            "api_key": fake_api_key("test"),
             "model": "deepseek-v4-flash",
             "base_url": "https://api.deepseek.com",
         },
@@ -209,7 +211,7 @@ def test_probe_http_402_blocks():
         "resualign.api.services.jobs.api_module._llm_nodes.get_active_node",
         return_value={
             "provider": "deepseek",
-            "api_key": "sk-test",
+            "api_key": fake_api_key("test"),
             "model": "deepseek-v4-flash",
             "base_url": "https://api.deepseek.com",
         },

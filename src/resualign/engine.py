@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
 from .evaluator import evaluate
@@ -12,7 +14,7 @@ from .jd_profiler import profile_jd
 from .llm import LLMClient, LLMResponseError, OpenAIClient, diagnose_resume
 from .llm_nodes import LLMNodeStore
 from .models import GapReport, Report, ResuAlignConfig, TailoredResume
-from .role_router import _role_timeout, call_with_role
+from .role_router import _role_timeout, call_with_role, is_parallel_safe
 from .rule_diagnose import diagnose_resume_local
 from .tailor import tailor_resume, tailor_resume_map_reduce
 
@@ -102,8 +104,86 @@ def _editor_call_plan(
                 # Local inference is serialized by the server anyway; keep
                 # one connection to avoid VRAM pressure from parallel runs.
                 "parallel": not LLMNodeStore._is_local_node(editor_node),
+                # Whole-document editing needs ~200s on a 7B local model vs
+                # the 90s editor deadline (measured, see docstring above), so
+                # the all-bullets-failed fallback can never succeed locally.
+                # Local nodes keep the partial result (invalid_diffs with
+                # 「生成失败，可单条重试」) instead of burning 2x the deadline.
+                "whole_doc_fallback": not LLMNodeStore._is_local_node(editor_node),
             }
     return tailor_resume, base_kwargs
+
+
+def _diagnose_and_profile_parallel(
+    node_store: LLMNodeStore,
+    tenant_id: str,
+    resume_text: str,
+    jd_input: str,
+    *,
+    cache,
+    tenant: str,
+    model: str,
+) -> tuple[dict, Any]:
+    """Run the independent diagnose and profiler roles concurrently.
+
+    Diagnose only reads the resume and profiler only reads the JD, so on
+    cloud nodes (``is_parallel_safe`` gates local nodes out — serialized
+    inference gains nothing from two threads) the two round trips overlap
+    instead of adding up. Contracts are unchanged: diagnose keeps its
+    never-fatal local-rules fallback; a profiler failure propagates to the
+    caller after the join (no profile means gap/tailor are meaningless).
+    Each task runs under a parent-copied contextvars snapshot so tenant
+    metering/breaker state survives the thread hop (same pattern as the
+    map-reduce editor, P1-3 #77).
+    """
+
+    def _diag_task() -> dict:
+        try:
+            result, meta = call_with_role(
+                "diagnose", diagnose_resume,
+                node_store, tenant_id,
+                fn_kwargs={
+                    "resume_text": resume_text,
+                    "cache": cache,
+                    "tenant": tenant,
+                    "model": model,
+                },
+            )
+            if meta.get("error"):
+                logger.warning(
+                    "LLM diagnose failed (%s); falling back to local rules",
+                    meta["error"],
+                )
+                return _local_diagnosis(resume_text)
+            return result
+        except Exception as exc:
+            logger.warning(
+                "LLM diagnose raised (%s); falling back to local rules", exc
+            )
+            return _local_diagnosis(resume_text)
+
+    def _profile_task() -> Any:
+        result, _ = call_with_role(
+            "profiler", profile_jd,
+            node_store, tenant_id,
+            fn_kwargs={
+                "jd_text": jd_input,
+                "cache": cache,
+                "tenant": tenant,
+            },
+        )
+        return result
+
+    diag_ctx = contextvars.copy_context()
+    profile_ctx = contextvars.copy_context()
+    with ThreadPoolExecutor(
+        max_workers=2, thread_name_prefix="resualign-stage"
+    ) as pool:
+        diag_future = pool.submit(diag_ctx.run, _diag_task)
+        profile_future = pool.submit(profile_ctx.run, _profile_task)
+        diag_result = diag_future.result()
+        profile = profile_future.result()
+    return diag_result, profile
 
 
 def truncate_text(text: str, limit: int) -> str:
@@ -195,45 +275,72 @@ def run(
                 on_stage(stage, message)
 
         notify("diagnose", "正在分析简历结构与 ATS 基础信息...")
-        if diagnosis is not None:
-            diag_result = diagnosis
-        elif use_roles:
-            try:
-                diag_result, diag_meta = call_with_role(
-                    "diagnose", diagnose_resume,
-                    node_store, tenant_id,
-                    fn_kwargs={
-                        "resume_text": resume_text,
-                        "cache": cache,
-                        "tenant": tenant,
-                        "model": config.model,
-                    },
-                )
-                if diag_meta.get("error"):
+        filtered_jd = ""
+        jd_input = ""
+        if jd_text:
+            # Two-stage extraction: lightweight regex pass narrows scope
+            # before the LLM pass, saving tokens on long JDs (see CONTEXT.md).
+            # Hoisted ahead of the dispatch so diagnose and profiler can run
+            # concurrently on cloud nodes.
+            extracted = extract_structured(jd_text)
+            filtered_jd = "\n\n".join(v for v in extracted.values() if v)
+            jd_input = truncate_text(filtered_jd or jd_text, MAX_JD_INPUT_CHARS)
+
+        # Diagnose (resume-only) and profiler (JD-only) are independent; on
+        # cloud nodes run them concurrently to save up to one diagnose-tier
+        # wall clock per run. Local nodes stay sequential (is_parallel_safe).
+        parallel_diag = (
+            use_roles
+            and diagnosis is None
+            and bool(jd_text)
+            and is_parallel_safe(node_store, tenant_id, "diagnose", "profiler")
+        )
+        diag_result = diagnosis
+        parallel_profile: Any = None
+        if parallel_diag:
+            notify("jd_analysis", "正在解析岗位描述并提取技能与业务场景...")
+            diag_result, parallel_profile = _diagnose_and_profile_parallel(
+                node_store, tenant_id, resume_text, jd_input,
+                cache=cache, tenant=tenant, model=config.model,
+            )
+        if diag_result is None:
+            if use_roles:
+                try:
+                    diag_result, diag_meta = call_with_role(
+                        "diagnose", diagnose_resume,
+                        node_store, tenant_id,
+                        fn_kwargs={
+                            "resume_text": resume_text,
+                            "cache": cache,
+                            "tenant": tenant,
+                            "model": config.model,
+                        },
+                    )
+                    if diag_meta.get("error"):
+                        logger.warning(
+                            "LLM diagnose failed (%s); falling back to local rules",
+                            diag_meta["error"],
+                        )
+                        diag_result = _local_diagnosis(resume_text)
+                except Exception as exc:
                     logger.warning(
-                        "LLM diagnose failed (%s); falling back to local rules",
-                        diag_meta["error"],
+                        "LLM diagnose raised (%s); falling back to local rules", exc
                     )
                     diag_result = _local_diagnosis(resume_text)
-            except Exception as exc:
-                logger.warning(
-                    "LLM diagnose raised (%s); falling back to local rules", exc
-                )
-                diag_result = _local_diagnosis(resume_text)
-        else:
-            try:
-                diag_result = diagnose_resume(
-                    client,
-                    resume_text,
-                    cache=cache,
-                    tenant=tenant,
-                    model=config.model,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "LLM diagnose raised (%s); falling back to local rules", exc
-                )
-                diag_result = _local_diagnosis(resume_text)
+            else:
+                try:
+                    diag_result = diagnose_resume(
+                        client,
+                        resume_text,
+                        cache=cache,
+                        tenant=tenant,
+                        model=config.model,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "LLM diagnose raised (%s); falling back to local rules", exc
+                    )
+                    diag_result = _local_diagnosis(resume_text)
 
         report = Report(
             score=diag_result.get("score", 0),
@@ -243,40 +350,38 @@ def run(
         )
 
         if jd_text:
-            # Two-stage extraction: lightweight regex pass narrows scope
-            # before the LLM pass, saving tokens on long JDs (see CONTEXT.md).
-            extracted = extract_structured(jd_text)
-            filtered_jd = "\n\n".join(v for v in extracted.values() if v)
-            jd_input = truncate_text(filtered_jd or jd_text, MAX_JD_INPUT_CHARS)
-            notify(
-                "jd_analysis",
-                "正在解析岗位描述并提取技能与业务场景...",
-            )
-
-            if use_roles:
-                # Diagnose ran above (LLM with local fallback); profile the
-                # JD via its role node.
-                report.jd_profile, _ = call_with_role(
-                    "profiler", profile_jd,
-                    node_store, tenant_id,
-                    fn_kwargs={
-                        "jd_text": jd_input,
-                        "cache": cache,
-                        "tenant": tenant,
-                    },
-                )
+            if parallel_profile is not None:
+                report.jd_profile = parallel_profile
             else:
-                if llm_client is None:
-                    jd_client = OpenAIClient(
-                        config, timeout=_role_timeout("profiler")
-                    )
-                    jd_client_owned = True
-                report.jd_profile = profile_jd(
-                    jd_client,
-                    jd_input,
-                    cache=cache,
-                    tenant=tenant,
+                notify(
+                    "jd_analysis",
+                    "正在解析岗位描述并提取技能与业务场景...",
                 )
+
+                if use_roles:
+                    # Diagnose ran above (LLM with local fallback); profile the
+                    # JD via its role node.
+                    report.jd_profile, _ = call_with_role(
+                        "profiler", profile_jd,
+                        node_store, tenant_id,
+                        fn_kwargs={
+                            "jd_text": jd_input,
+                            "cache": cache,
+                            "tenant": tenant,
+                        },
+                    )
+                else:
+                    if llm_client is None:
+                        jd_client = OpenAIClient(
+                            config, timeout=_role_timeout("profiler")
+                        )
+                        jd_client_owned = True
+                    report.jd_profile = profile_jd(
+                        jd_client,
+                        jd_input,
+                        cache=cache,
+                        tenant=tenant,
+                    )
 
             # Gap analysis
             notify("jd_profiled", _profile_progress_message(report.jd_profile))
@@ -298,6 +403,8 @@ def run(
                         fn_kwargs={
                             "resume_text": resume_text,
                             "jd_profile_text": _profile_str,
+                            "cache": cache,
+                            "tenant": tenant,
                         },
                     )
                     report.gap_report = gap_result
@@ -316,6 +423,8 @@ def run(
                         jd_client,
                         resume_text,
                         _profile_str,
+                        cache=cache,
+                        tenant=tenant,
                     )
                 except LLMResponseError as exc:
                     if getattr(exc, "code", "") in ("schema", "parse", "empty"):
@@ -394,6 +503,10 @@ def run(
                                 filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
                             ),
                             parallel=False,
+                            # Same reasoning as _editor_call_plan: the
+                            # whole-document editor cannot finish inside the
+                            # editor deadline on a small local model.
+                            whole_doc_fallback=False,
                         )
                     else:
                         report.tailored_resume = tailor_resume(

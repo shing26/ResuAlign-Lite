@@ -169,3 +169,31 @@ def test_delete_scoped_to_tenant(db_path):
     assert reg.get(job.job_id) is not None
     assert reg.delete(job.job_id, tenant_id="tenant-a") is True
     assert reg.get(job.job_id) is None
+
+
+def test_migration_drops_legacy_tables(db_path):
+    """P2 瘦身收尾（2026-09-07）：功能已删但表未迁移走的老库，初始化后
+    遗留表应被 DROP（crawl_tasks / blocker_queue / job_refresh_events）。"""
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    # 表名是字面量常量（非外部输入），逐条显式建表。
+    conn.execute("CREATE TABLE crawl_tasks (id TEXT)")
+    conn.execute("CREATE TABLE blocker_queue (id TEXT)")
+    conn.execute("CREATE TABLE job_refresh_events (id TEXT)")
+    conn.commit()
+    conn.close()
+
+    now = [100.0]
+    reg = _registry(now, db_path)
+    reg.pending_job_ids()  # 触发懒初始化 → 迁移执行
+
+    conn = sqlite3.connect(db_path)
+    tables = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    conn.close()
+    assert not tables & {"crawl_tasks", "blocker_queue", "job_refresh_events"}

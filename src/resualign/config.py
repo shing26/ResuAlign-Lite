@@ -187,4 +187,12 @@ def build_config(
         api_key=resolved_api_key,
         model=resolved_model,
         base_url=resolved_base_url,
+        # Node-level reasoning-model opt-out (see ResuAlignConfig); same
+        # provider-scoped rule as the other persisted fields so a runtime
+        # provider switch never inherits another node's flag.
+        disable_thinking=(
+            bool(persisted.get("disable_thinking", False))
+            if persisted_applies
+            else False
+        ),
     )

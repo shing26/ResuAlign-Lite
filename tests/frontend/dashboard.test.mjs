@@ -1,15 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { Window } from "happy-dom";
 
 import {
   dashboardEmptyGuideHtml,
-  dashboardKpiHtml,
   jobsEmptyGuideHtml,
   jobSelectOptionsHtml,
   matchJobSuggestions,
   parseHashValue,
-  quickContinueHtml,
   renderJobSuggestionsHtml,
   skillGapHtml,
 } from "../../src/resualign/static/app/format.js";
@@ -37,55 +36,6 @@ test("parseHashValue tolerates a skill deep-link query on workspace", () => {
   assert.equal(route.name, "workspace");
   assert.equal(route.jobId, "j1");
   assert.equal(route.resumeId, null);
-});
-
-/* ------------------------------------------------------------------ */
-/* dashboardKpiHtml (4 KPI cards)                                      */
-/* ------------------------------------------------------------------ */
-
-const kpi = {
-  resumes: 3,
-  jobs: 8,
-  applied: 4,
-  interview: 2,
-  offer: 1,
-  declined: 2,
-};
-
-test("dashboardKpiHtml renders three KPI cards with values", () => {
-  const body = bodyFrom(dashboardKpiHtml(kpi));
-  const grid = body.querySelector("[data-dashboard-kpis]");
-  assert.ok(grid, "kpi grid is rendered");
-  const cards = [...grid.querySelectorAll(".dashboard-kpi")];
-  assert.equal(cards.length, 3);
-  assert.equal(cards[0].querySelector(".dashboard-kpi__value").textContent, "3");
-  assert.equal(cards[1].querySelector(".dashboard-kpi__value").textContent, "8");
-  assert.equal(cards[2].querySelector(".dashboard-kpi__value").textContent, "4");
-  assert.match(cards[0].querySelector(".dashboard-kpi__label").textContent, /主简历/);
-  assert.match(cards[2].querySelector(".dashboard-kpi__label").textContent, /已投递/);
-});
-
-test("dashboardKpiHtml shows an applied conversion hint", () => {
-  const body = bodyFrom(dashboardKpiHtml({ ...kpi, applied: 2, jobs: 8 }));
-  const appliedCard = body.querySelector('[data-kpi="applied"]');
-  assert.match(appliedCard.querySelector(".dashboard-kpi__hint").textContent, /25%/);
-});
-
-test("dashboardKpiHtml handles missing kpi gracefully", () => {
-  const body = bodyFrom(dashboardKpiHtml(null));
-  const cards = [...body.querySelectorAll(".dashboard-kpi")];
-  assert.equal(cards.length, 3);
-  assert.equal(cards[0].querySelector(".dashboard-kpi__value").textContent, "0");
-});
-
-test("dashboardKpiHtml coerces non-numeric values and never injects HTML", () => {
-  const body = bodyFrom(
-    dashboardKpiHtml({ resumes: "<script>alert(1)</script>" }),
-  );
-  const card = body.querySelector('[data-kpi="resumes"]');
-  assert.equal(card.querySelector("script"), null);
-  // 数值被 Number() 强制转换：非数字字符串 → 0，天然避免注入
-  assert.equal(card.querySelector(".dashboard-kpi__value").textContent, "0");
 });
 
 test("dashboardEmptyGuideHtml renders only for a truly empty workspace", () => {
@@ -166,6 +116,28 @@ test("skillGapHtml buckets heat tones by relative count", () => {
   assert.match(fills[2].className, /--cool/);
 });
 
+test("skillGapHtml carries tone-tiered actionable hints (P2 决策 4)", () => {
+  const body = bodyFrom(
+    skillGapHtml([
+      { skill: "Kafka", count: 12 },
+      { skill: "Redis", count: 5 },
+      { skill: "Airflow", count: 1 },
+    ]),
+  );
+  const rows = [...body.querySelectorAll(".skill-gap-row")];
+  /* 行级：title 按 tone 分档（hot=优先改写 / warm=贴近措辞 / cool=不硬凑） */
+  assert.match(rows[0].getAttribute("title"), /频率最高/);
+  assert.match(rows[0].getAttribute("title"), /对齐改写/);
+  assert.match(rows[1].getAttribute("title"), /贴近岗位措辞/);
+  assert.match(rows[2].getAttribute("title"), /不要硬凑/);
+  assert.match(rows[0].getAttribute("aria-label"), /Kafka/);
+  /* 列表级：data-gap-hint 行动引导兜底触屏可发现性 */
+  const hint = body.querySelector("[data-gap-hint]");
+  assert.ok(hint, "list-level hint rendered");
+  assert.match(hint.textContent, /跳到要求它的岗位工作台/);
+  assert.match(hint.textContent, /确实没有依据的经历不要硬凑/);
+});
+
 test("skillGapHtml renders an empty state for no gaps", () => {
   const body = bodyFrom(skillGapHtml([]));
   assert.match(body.querySelector("[data-skill-gaps]").textContent, /暂无技能缺口数据/);
@@ -175,89 +147,6 @@ test("skillGapHtml escapes skill names", () => {
   const body = bodyFrom(skillGapHtml([{ skill: "<img src=x onerror=1>", count: 2 }]));
   assert.equal(body.querySelector("img"), null);
   assert.match(body.querySelector(".skill-gap-row__name").innerHTML, /&lt;img/);
-});
-
-/* ------------------------------------------------------------------ */
-/* quickContinueHtml (quick continue card)                             */
-/* ------------------------------------------------------------------ */
-
-const qc = {
-  job_id: "j9",
-  title: "后端工程师",
-  company: "Acme",
-  alignment_status: "succeeded",
-  updated_at: 1780000000,
-};
-
-test("quickContinueHtml renders title, company, status and continue link", () => {
-  const body = bodyFrom(quickContinueHtml(qc));
-  const card = body.querySelector("[data-quick-continue]");
-  assert.ok(card, "quick continue card is rendered");
-  assert.match(card.textContent, /Acme/);
-  assert.match(card.textContent, /已对齐/);
-  assert.equal(card.querySelector(".quick-continue__title").textContent, "后端工程师");
-  const link = card.querySelector("a");
-  assert.equal(link.getAttribute("href"), "#/workspace/j9");
-  assert.equal(link.textContent, "查看");
-});
-
-/* P1-3: failed/canceled/expired 卡带红警示 + 「上次失败 · 重新运行」+ 危险主按钮 */
-test("quickContinueHtml marks failed/canceled/expired as retryable failure", () => {
-  for (const status of ["failed", "canceled", "expired"]) {
-    const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: status }));
-    const card = body.querySelector("[data-quick-continue]");
-    assert.match(card.className, /quick-continue--failed/, `${status} card is failed-styled`);
-    assert.match(card.textContent, /上次失败 · 重新运行/);
-    const link = card.querySelector("a");
-    assert.match(link.className, /btn-danger-solid/);
-    assert.match(link.textContent, /重新运行/);
-    assert.equal(link.getAttribute("href"), `#/workspace/j9`);
-  }
-});
-
-/* P1-3: running/queued 为「分析中」禁用加载态，不产生导航链接 */
-test("quickContinueHtml renders running/queued as busy, disabled", () => {
-  for (const status of ["running", "queued"]) {
-    const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: status }));
-    const card = body.querySelector("[data-quick-continue]");
-    assert.match(card.textContent, /分析中/);
-    const link = card.querySelector("a");
-    assert.equal(link.getAttribute("href"), null, `${status} link must not navigate`);
-    assert.equal(link.getAttribute("aria-disabled"), "true");
-    assert.match(link.className, /is-loading/);
-  }
-});
-
-/* P1-3: idle/pending 维持中性「待分析」+ 「继续」 */
-test("quickContinueHtml keeps idle/pending neutral", () => {
-  for (const status of ["idle", "pending", null]) {
-    const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: status }));
-    const card = body.querySelector("[data-quick-continue]");
-    assert.match(card.textContent, /待分析/);
-    const link = card.querySelector("a");
-    assert.match(link.textContent, /继续/);
-  }
-});
-
-test("quickContinueHtml returns empty for null or job-less payloads", () => {
-  assert.equal(quickContinueHtml(null), "");
-  assert.equal(quickContinueHtml({}), "");
-  assert.equal(quickContinueHtml({ job_id: "" }), "");
-});
-
-test("quickContinueHtml passes unknown alignment status through", () => {
-  const body = bodyFrom(quickContinueHtml({ ...qc, alignment_status: "weird" }));
-  assert.match(body.querySelector("[data-quick-continue]").textContent, /weird/);
-  const link = body.querySelector("a");
-  assert.match(link.textContent, /继续/);
-});
-
-test("quickContinueHtml escapes user content", () => {
-  const body = bodyFrom(
-    quickContinueHtml({ ...qc, title: "<b>x</b>", company: '"><script>alert(1)</script>' }),
-  );
-  assert.equal(body.querySelector("script"), null);
-  assert.match(body.querySelector(".quick-continue__title").innerHTML, /&lt;b&gt;/);
 });
 
 /* ------------------------------------------------------------------ */
@@ -334,4 +223,14 @@ test("jobSelectOptionsHtml escapes job fields and handles empty lists", () => {
 
 test("parseHashValue resolves the review route (PM 反馈串台回归)", () => {
   assert.equal(parseHashValue("#/review").name, "review");
+});
+
+test("dashboard-view quickHref guards null quick (空库 dashboard 报错回归)", () => {
+  /* 2026-09-07 空库复现：renderDashboard 在 quick_continue=null 时
+   * quickHref 三元仍解引用 quick.job_id → 整页「出错了」。锁定守卫。 */
+  const src = readFileSync(
+    new URL("../../src/resualign/static/app/dashboard-view.js", import.meta.url),
+    "utf-8",
+  );
+  assert.match(src, /qBusy \|\| !quick\s*\n\s*\? ""/, "quickHref must check !quick");
 });

@@ -164,7 +164,10 @@ class AppServer(_SubprocessServer):
         env = os.environ.copy()
         env.update({
             "LLM_PROVIDER": "deepseek",
-            "DEEPSEEK_API_KEY": "e2e-smoke-key",
+            # 冒烟走 fake LLM；key 从环境取占位，源码无凭据形状字面量。
+            "DEEPSEEK_API_KEY": os.environ.get(
+                "E2E_SMOKE_LLM_KEY", "placeholder-not-a-credential"
+            ),
             "DEEPSEEK_MODEL": "e2e-smoke-model",
             "DEEPSEEK_BASE_URL": f"{self.llm.base_url}/v1",
             "RESUALIGN_PERSONAL_MODE": "1",

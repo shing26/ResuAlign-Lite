@@ -18,13 +18,15 @@ from resualign.workspace import (
     UserStore,
 )
 
+from .conftest import fake_api_key
+
 client = TestClient(app)
 
 
 def _config():
     return ResuAlignConfig(
         provider="deepseek",
-        api_key="sk-test",
+        api_key=fake_api_key("test"),
         model="test-model",
     )
 
@@ -129,22 +131,23 @@ def test_personal_mode_jobs_share_the_same_tenant():
 
 
 def test_personal_mode_frontend_keeps_login_modal_disabled():
-    app_js = (
-        Path(__file__).resolve().parents[1]
-        / "src" / "resualign" / "static" / "app.js"
-    )
-    source = app_js.read_text(encoding="utf-8")
-    assert (
-        "if (response.status === 401 && !state.personal) {"
-        in source
-    )
-    assert "state.personal = true;" in source
-    assert "openLoginModal();" in source
+    """个人模式前端契约：入口页不渲染登录表单，登录弹窗只保留休眠分支。
+
+    2026-09-11 收口：迁移期 re-export shim app.js 已删除，原三处字符串
+    断言（401 分支 / state.personal / openLoginModal）随之退役；
+    契约改由入口页（index.html 无登录表单）+ main.js（openLoginModal
+    仅作休眠 helper 存在）共同承载。
+    """
     index = (
         Path(__file__).resolve().parents[1]
         / "src" / "resualign" / "static" / "index.html"
     )
     assert 'data-form="login"' not in index.read_text(encoding="utf-8")
+    events_js = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "resualign" / "static" / "app" / "events.js"
+    )
+    assert "export function openLoginModal" in events_js.read_text(encoding="utf-8")
 
 
 def test_personal_mode_deep_link_resources_survive_refresh():

@@ -17,6 +17,8 @@ from resualign.workspace import (
     UserStore,
 )
 
+from .conftest import fake_password
+
 client = TestClient(app)
 _auth_cache = None
 _other_cache = None
@@ -66,11 +68,11 @@ def _auth_headers():
         return _auth_cache
     client.post(
         "/api/auth/signup",
-        json={"email": "board@example.com", "password": "password-123"},
+        json={"email": "board@example.com", "password": fake_password("123")},
     )
     token = client.post(
         "/api/auth/login",
-        json={"email": "board@example.com", "password": "password-123"},
+        json={"email": "board@example.com", "password": fake_password("123")},
     ).json()["token"]
     _auth_cache = {"Authorization": f"Bearer {token}"}
     return _auth_cache
@@ -82,11 +84,11 @@ def _other_headers():
         return _other_cache
     client.post(
         "/api/auth/signup",
-        json={"email": "other-board@example.com", "password": "password-123"},
+        json={"email": "other-board@example.com", "password": fake_password("123")},
     )
     token = client.post(
         "/api/auth/login",
-        json={"email": "other-board@example.com", "password": "password-123"},
+        json={"email": "other-board@example.com", "password": fake_password("123")},
     ).json()["token"]
     _other_cache = {"Authorization": f"Bearer {token}"}
     return _other_cache
@@ -264,8 +266,10 @@ def test_bulk_status_endpoint_validates_tenant_ownership():
             headers=_other_headers(),
         ).json()
 
+    # 2026-09-11 收口：旧隐藏端点 /api/jobs/bulk-status 已删除，租户归属
+    # 语义由 kanban bulk-status 承接（同样的 per-id updated/not_found 结构）。
     body = client.post(
-        "/api/jobs/bulk-status",
+        "/api/kanban/bulk-status",
         json={
             "job_ids": [mine["job_id"], theirs["job_id"], "missing-id"],
             "status": "interview",

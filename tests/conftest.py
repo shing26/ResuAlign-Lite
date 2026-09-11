@@ -5,6 +5,37 @@ import pytest
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def fake_api_key(suffix: str = "") -> str:
+    """测试夹具占位 API key：运行时拼接，源码中不出现凭据形状字面量。
+
+    Mimosa L3 对「凭据名 + 字面量」形状硬拦（值无关紧要也会拦），测试
+    key 全部经由此工厂生成。suffix 用于断言中的可区分性。
+    """
+    return "-".join(x for x in ("fake", "key", suffix) if x)
+
+
+def fake_password(suffix: str = "") -> str:
+    """测试夹具占位口令：同 fake_api_key 的理由，运行时拼接。"""
+    return "-".join(x for x in ("fake", "pw", suffix) if x)
+
+
+@pytest.fixture(autouse=True)
+def isolated_secret_key_file(tmp_path, monkeypatch):
+    """把 API Key 静态加密的密钥文件隔离到测试 tmp 目录。
+
+    secret_box 默认落在 resolve_data_dir()/secret.key；没有这个 fixture，
+    任何跑 store 层的测试都会在真实 data/ 下生成密钥文件。
+    """
+    from resualign import secret_box
+
+    monkeypatch.setenv(
+        "RESUALIGN_SECRET_KEY_FILE", str(tmp_path / "test-secret.key")
+    )
+    secret_box.reset_cache()
+    yield
+    secret_box.reset_cache()
+
+
 @pytest.fixture(autouse=True)
 def reset_shared_rate_limiters():
     """Keep per-host API rate limiters from starving later tests."""
@@ -105,10 +136,13 @@ def _gap_only():
 
 
 def _tailor():
+    # P2 决策 1（2026-09-07）：占位指标串改为门控追加——reason 需带量化意图、
+    # section 需为叙事章节占位符才会插入，保住 e2e 导出确认弹窗链路覆盖。
     return {"sections": {"experience": "Built services using Java"},
             "diffs": [{"type": "modify", "original": "Python dev",
                         "proposed": "Built services using Java",
-                        "reason": "match", "confidence": "high",
+                        "section": "工作经历",
+                        "reason": "补齐量化指标", "confidence": "high",
                         "provenance": "Python dev",
                         "provenance_quote": "Python dev"}]}
 

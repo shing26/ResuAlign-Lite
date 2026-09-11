@@ -5,10 +5,12 @@ import pytest
 from resualign.llm import LLMResponseError, OpenAIClient
 from resualign.models import ResuAlignConfig
 
+from .conftest import fake_api_key
+
 
 @pytest.fixture
 def config():
-    return ResuAlignConfig(api_key="sk-test", model="m1")
+    return ResuAlignConfig(api_key=fake_api_key("test"), model="m1")
 
 
 @pytest.fixture
@@ -113,7 +115,53 @@ def test_deepseek_chat_json_requests_direct_output(httpx_mock, client):
 
 def test_openai_client_omits_thinking(httpx_mock):
     openai_client = OpenAIClient(
-        ResuAlignConfig(provider="openai", api_key="sk-test", model="m1")
+        ResuAlignConfig(provider="openai", api_key=fake_api_key("test"), model="m1")
+    )
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {"message": {"content": '{"score": 88, "skills": ["Java"]}'}}
+            ]
+        }
+    )
+    openai_client.chat_json("system", "user")
+    body = json.loads(httpx_mock.get_requests()[0].read())
+    assert "thinking" not in body
+
+
+def test_disable_thinking_flag_requests_direct_output(httpx_mock):
+    """方案 A（2026-09-07）：任意 provider 的节点可用 disable_thinking
+    选择性关闭推理输出——NVIDIA NIM reasoning 模型（muse-glimmer-30b）
+    会把角色 max_tokens 钳制全部烧在 reasoning_content 上，content 为空。"""
+    openai_client = OpenAIClient(
+        ResuAlignConfig(
+            provider="openrouter",
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=fake_api_key("test"),
+            model="meta/muse-glimmer-30b",
+            disable_thinking=True,
+        )
+    )
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {"message": {"content": '{"score": 88, "skills": ["Java"]}'}}
+            ]
+        }
+    )
+    openai_client.chat_json("system", "user")
+    body = json.loads(httpx_mock.get_requests()[0].read())
+    assert body["thinking"] == {"type": "disabled"}
+
+
+def test_disable_thinking_flag_off_by_default(httpx_mock):
+    openai_client = OpenAIClient(
+        ResuAlignConfig(
+            provider="openrouter",
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=fake_api_key("test"),
+            model="meta/muse-glimmer-30b",
+        )
     )
     httpx_mock.add_response(
         json={

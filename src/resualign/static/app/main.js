@@ -86,19 +86,24 @@ import {
   jobSelectOptionsHtml,
   jobTimelineFormHtml,
   jobsToCsv,
+  LLM_ROLE_LABELS,
   llmNodeCardHtml,
   llmNodeFormHtml,
   nodeTestResultHtml,
   offerCelebrationHtml,
   onboardingSteps,
   parseHashValue,
+  preanalyzeResultHtml,
   RESUME_LIST_SENTINEL,
   renderMarkdown,
   renderOnboardingCard,
   ruleFormHtml,
+  roleBindingsPanelHtml,
   ruleListHtml,
   runEvalFromForm,
   settingsBentoHtml,
+  settingsModeSwitchHtml,
+  simpleLlmSetupHtml,
   snapshotDrawerHtml,
 } from "./format.js";
 import {
@@ -550,16 +555,42 @@ async function switchWorkspaceJob(jobId) {
 /* Sprint 5 T1: 用纯函数 settingsBentoHtml 重渲染 Bento 概览（节点测试后
  * 刷新延迟卡）。state.llmNodeTests 由 renderSettingsView 与
  * llm-node-test action 维护。 */
+
+/* 新手体验：设置页「简单/专家」双模式。选择持久化在 localStorage；
+ * 无任何节点时强制简单模式（专家面板对新手毫无意义）。 */
+const SETTINGS_MODE_KEY = "resualign.settingsMode";
+
+function readSettingsMode() {
+  try {
+    return localStorage.getItem(SETTINGS_MODE_KEY) === "expert"
+      ? "expert"
+      : "simple";
+  } catch {
+    return "simple";
+  }
+}
+
+function writeSettingsMode(mode) {
+  try {
+    localStorage.setItem(SETTINGS_MODE_KEY, mode);
+  } catch {
+    /* storage unavailable: mode stays for this session only */
+  }
+}
+
 async function renderSettingsView(app) {
-  const [settings, status, nodes, rules] = await Promise.all([
+  const [settings, status, nodes, rules, roleBindings] = await Promise.all([
     api("/api/settings"),
     api("/api/settings/status"),
     api("/api/llm/nodes").catch(() => []),
     api("/api/automation/rules").catch(() => []),
+    api("/api/settings/role-bindings").catch(() => null),
   ]);
   state.settings = settings;
   state.llmNodes = Array.isArray(nodes) ? nodes : [];
   state.automationRules = Array.isArray(rules) ? rules : [];
+  state.roleBindings =
+    roleBindings && typeof roleBindings === "object" ? roleBindings : null;
   const vocabulary = settings.classification_vocabulary;
   state.vocabulary = normalizeVocabulary(vocabulary);
   const activeNode = state.llmNodes.find((node) => node.is_active) || null;
@@ -570,19 +601,20 @@ async function renderSettingsView(app) {
   const nodeCards = state.llmNodes
     .map((node) => llmNodeCardHtml(node, (state.llmNodeTests || {})[node.node_id]))
     .join("");
-  app.innerHTML = `
-    <div class="view view-scroll settings-view">
-      <div class="settings-head">
-        <div>
-          <p>配置多个 LLM API 节点、超时护杠与粗筛规则引擎</p>
-        </div>
-        <div class="settings-head-actions">
-          <span class="status-line"><span class="dot ${status.api_key_configured ? "dot-success" : "dot-warn"}" aria-hidden="true"></span>${status.api_key_configured ? "LLM 已配置" : "LLM 未配置"}</span>
-          <button class="btn btn-outline btn-sm" type="button" data-action="reset-settings">恢复默认设置</button>
-        </div>
-      </div>
+  /* 模式解析：无节点默认简单模式；「专家」是显式选择后即生效（否则
+   * 备用节点/Token 面板对想进阶的用户无处可达——E2E settings 流曾在此
+   * 死锁）。 */
+  const settingsMode = readSettingsMode();
+  const modeSwitchHtml = settingsModeSwitchHtml(settingsMode);
+  const simpleSetupNode = activeNode || state.llmNodes[0] || null;
+  const expertPanelsHtml = `
       ${settingsBentoHtml(activeNode, latency)}
       ${costGuardPanelHtml(settings, status.daily || {})}
+      ${roleBindingsPanelHtml(
+        (state.roleBindings && state.roleBindings.roles) || [],
+        state.llmNodes,
+        (state.roleBindings && state.roleBindings.bindings) || {},
+      )}
       <section class="panel local-ingest-panel" data-local-ingest-panel>
         <div class="panel-head">
           <div>
@@ -664,7 +696,20 @@ async function renderSettingsView(app) {
             <label><span>状态</span><textarea name="statuses" rows="5">${esc(vocabulary.statuses.join("\n"))}</textarea></label>
           </div>
         </div>
-      </form>
+      </form>`;
+  app.innerHTML = `
+    <div class="view view-scroll settings-view">
+      <div class="settings-head">
+        <div>
+          <p>连接 AI 助手并管理运行护栏${settingsMode === "expert" ? "（专家模式）" : ""}</p>
+        </div>
+        <div class="settings-head-actions">
+          <span class="status-line"><span class="dot ${status.api_key_configured ? "dot-success" : "dot-warn"}" aria-hidden="true"></span>${status.api_key_configured ? "LLM 已配置" : "LLM 未配置"}</span>
+          ${modeSwitchHtml}
+          <button class="btn btn-outline btn-sm" type="button" data-action="reset-settings">恢复默认设置</button>
+        </div>
+      </div>
+      ${settingsMode === "expert" ? expertPanelsHtml : simpleLlmSetupHtml(simpleSetupNode, simpleSetupNode ? (state.llmNodeTests || {})[simpleSetupNode.node_id] : null)}
     </div>`;
 
   if (
@@ -930,7 +975,7 @@ async function draftPlaceholderCount(jobId) {
 function confirmPlaceholderExport(count, onProceed) {
   showModal(
     "定稿包含待确认占位符",
-    `<p>定稿中有 <b>${count}</b> 处「[待人工确认：…]」占位指标（如“耗时降低 X%”）。这些是尚未核实的内容，导出后会原样出现在 HR 看到的简历里。</p>
+    `<p>定稿中有 <b>${count}</b> 处「[待人工确认：…]」占位指标（如“请将 X% 换成你的真实数据”）。这些是尚未核实的内容，导出后会原样出现在 HR 看到的简历里。</p>
      <p class="small muted">建议先在工作台中补齐真实数据或删除这些占位符，再导出。</p>
      <div class="actions">
        <button class="btn btn-ghost" type="button" data-placeholder-cancel>回去修改</button>
@@ -1595,8 +1640,40 @@ const actions = {
     }
     window.open(url, "_blank", "noopener,noreferrer");
   },
-  "bulk-move-status": async () => {
-    const selected = $$("[data-board-check]:checked").map(
+  /* preanalyze 接线：详情抽屉「AI 预分析」。结果只落在抽屉的结果块里，
+   * 不整页 render（保留用户未保存的表单输入）；重复点击走后端缓存。 */
+  "job-preanalyze": async (button) => {
+    const jobId = button.dataset.id;
+    if (!jobId) return;
+    const mount = button.closest("form")?.querySelector("[data-preanalyze-result]");
+    button.disabled = true;
+    if (mount) mount.innerHTML = '<div class="form-success" role="status">预分析中…（分类 + JD 画像）</div>';
+    try {
+      const data = await api(
+        `/api/jobs/${encodeURIComponent(jobId)}/preanalyze`,
+        { method: "POST" },
+      );
+      if (mount) mount.innerHTML = preanalyzeResultHtml(data);
+      /* 分类结果落库后岗位卡徽章会变，静默刷新后台数据（不重渲染抽屉） */
+      try {
+        const list = await api("/api/jobs?limit=500");
+        state.jobs = Array.isArray(list) ? list : state.jobs;
+      } catch {
+        /* keep stale list */
+      }
+    } catch (error) {
+      if (mount) {
+        mount.innerHTML = `<div class="form-error" role="alert">${esc(
+          error.message || "预分析失败",
+        )}</div>`;
+      } else {
+        toast(error.message || "预分析失败", "error");
+      }
+    } finally {
+      button.disabled = false;
+    }
+  },
+  "bulk-move-status": async () => {    const selected = $$("[data-board-check]:checked").map(
       (input) => input.value,
     );
     const status = $("[data-board-bulk-status]").value;
@@ -1604,9 +1681,15 @@ const actions = {
       toast("请先选择岗位和目标状态", "error");
       return;
     }
-    const body = await api("/api/jobs/bulk-status", {
+    /* 收口到 kanban bulk-status（幂等 + 去重 + 行数上限），替换已废弃的
+     * /api/jobs/bulk-status 旧端点。 */
+    const body = await api("/api/kanban/bulk-status", {
       method: "POST",
-      body: JSON.stringify({ job_ids: selected, status }),
+      body: JSON.stringify({
+        job_ids: selected,
+        status,
+        idempotency_key: `fe-bulk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      }),
     });
     toast(
       `批量移动完成：${body.updated} / ${body.total} 条`,
@@ -1655,6 +1738,36 @@ const actions = {
   /* Sprint 5 T2: LLM 节点管理（新增 / 编辑 / 测试 / 激活 / 删除）。 */
   "llm-node-add": () => {
     showModal("新增 LLM 节点", llmNodeFormHtml(null));
+  },
+  /* 新手体验：设置页简单/专家模式切换（无节点时强制简单，见 renderSettingsView）。 */
+  "settings-mode-simple": () => {
+    writeSettingsMode("simple");
+    render();
+  },
+  "settings-mode-expert": () => {
+    writeSettingsMode("expert");
+    render();
+  },
+  /* 角色绑定一键预设（unified/hybrid/local）。后端条件不满足时返回
+   * {status:"skipped", message}，如实透出给用户。 */
+  "role-preset": async (button) => {
+    const preset = button.dataset.preset;
+    if (!preset) return;
+    button.disabled = true;
+    try {
+      const body = await api("/api/settings/role-bindings/presets", {
+        method: "POST",
+        body: JSON.stringify({ preset }),
+      });
+      if (body.status === "skipped") {
+        toast(body.message || "该预设当前不可用", "info");
+      } else {
+        toast("预设已应用，下一条任务即生效", "success");
+      }
+      render();
+    } finally {
+      button.disabled = false;
+    }
   },
   "llm-node-edit": (button) => {
     const node = (state.llmNodes || []).find(
@@ -3267,6 +3380,58 @@ async function handleForm(formName, data, form) {
         toast("节点已创建", "success");
       }
       closeModal();
+      render();
+      break;
+    }
+    /* 新手体验：简单模式连接表单。复用节点 payload 构建与校验；编辑路径
+     * PUT 后确保目标节点生效，新建路径首个节点由后端自动激活。 */
+    case "simple-llm-form": {
+      const payload = buildLlmNodePayload(data);
+      const nodeId = (data.node_id || "").trim();
+      const validation = validateLlmNodePayload(payload, {
+        isEdit: Boolean(nodeId),
+      });
+      if (!validation.ok) {
+        toast(validation.message, "error");
+        return;
+      }
+      if (nodeId) {
+        await api(`/api/llm/nodes/${encodeURIComponent(nodeId)}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        const target = (state.llmNodes || []).find(
+          (item) => item.node_id === nodeId,
+        );
+        if (!target || !target.is_active) {
+          await api(`/api/llm/nodes/${encodeURIComponent(nodeId)}/activate`, {
+            method: "POST",
+          });
+        }
+        toast("AI 助手已更新并启用", "success");
+      } else {
+        await api("/api/llm/nodes", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        toast("AI 助手已启用", "success");
+      }
+      render();
+      break;
+    }
+    /* 专家模式：角色绑定保存。空值=跟随主节点（后端以 null 删除绑定），
+     * PUT 全量提交当前表单里的角色映射。 */
+    case "settings-role-bindings": {
+      const payload = {};
+      for (const [role, nodeId] of Object.entries(data)) {
+        if (!Object.hasOwn(LLM_ROLE_LABELS, role)) continue;
+        payload[role] = nodeId ? String(nodeId) : null;
+      }
+      await api("/api/settings/role-bindings", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      toast("节点分工已保存，下一条任务即生效", "success");
       render();
       break;
     }

@@ -3,9 +3,9 @@
  * This module MUST stay free of DOM/window/document/localStorage/fetch access
  * so it can be imported and unit-tested directly under Node
  * (see tests/frontend/*.test.mjs). Function bodies were moved from main.js /
- * events.js / split-canvas.js / diff-editor.js /
- * command-panel.js. Signatures and HTML output are covered by the node:test
- * suite; DOM-touching callers keep thin wrappers in their original modules.
+ * events.js / split-canvas.js / command-panel.js. Signatures and HTML output
+ * are covered by the node:test suite; DOM-touching callers keep thin wrappers
+ * in their original modules.
  */
 
 /* Sprint 5: 复用 settings-form.js 的掩码纯函数（maskApiKey），该模块无
@@ -425,6 +425,21 @@ export const PROVENANCE_LABELS = {
   pending_review: "建议复核",
 };
 
+/* P2 决策 2（2026-09-07）：置信度不再裸显英文枚举，与徽章体系共用一套
+ * 语义色标度。注意「高置信」（模型自信）与「高可信」（来源 verified，
+ * PROVENANCE_LABELS）是两个刻度，刻意不合并。 */
+export const CONFIDENCE_LABELS = {
+  high: "高置信",
+  medium: "中置信",
+  low: "低置信",
+};
+
+export const CONFIDENCE_BADGE_CLASS = {
+  high: "badge-green",
+  medium: "badge-amber",
+  low: "badge-red",
+};
+
 /* Shared stage labels (also re-exported by events.js for progress bars). */
 export const STAGE_LABELS = {
   queued: "排队中",
@@ -790,7 +805,9 @@ export function diffCard(diff, index, jobId) {
         <div class="diff-card__type">
           <span class="badge ${invalid ? "badge-amber" : "badge-blue"}">${esc(typeLabel)}</span>
           ${diffSectionBadge(diff)}
-          <span class="small muted">${diff.confidence ? `置信度 ${esc(diff.confidence)}` : ""}</span>
+          ${diff.confidence && CONFIDENCE_LABELS[diff.confidence]
+            ? `<span class="badge ${CONFIDENCE_BADGE_CLASS[diff.confidence]}" data-confidence-badge="${esc(diff.confidence)}">${CONFIDENCE_LABELS[diff.confidence]}</span>`
+            : ""}
         </div>
         <span class="provenance-badge provenance-badge--${esc(badgeState)}" data-provenance title="${esc(provenance)}">${provenanceBadgeIcon(badgeState)}<span>${esc(badgeLabel)}</span></span>
       </div>
@@ -1056,48 +1073,6 @@ function boardAlignButton(job) {
   return "";
 }
 
-/* Workbench board card (jobs view)                                    */
-/* ------------------------------------------------------------------ */
-
-export function renderBoardCard(job, statuses = null) {
-  const canonical = canonicalJobStatus(job.status);
-  const statusOptions = jobStatusOptionsHtml(statuses, canonical);
-  const match = job.match_score != null ? Math.round(job.match_score) : null;
-  const matchTitle =
-    match != null ? `匹配度 · ${jobMatchSource(job)}` : "尚未分析";
-  return `
-    <article class="board-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}">
-      <div class="board-card__top">
-        <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
-        ${match != null ? `<span class="match-badge ${matchTone(match)}" data-match-total title="${matchTitle}">${match}</span>` : `<span class="match-badge match-badge--empty" title="${matchTitle}">待分析</span>`}
-        <button type="button" class="board-card__title" data-action="open-job-timeline" data-id="${job.job_id}">${esc(job.title)}</button>
-        ${boardMoreMenu(job)}
-      </div>
-      <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
-      ${boardMatchBlock(job)}
-      <div class="board-card__tags">
-        <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
-        <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
-        ${jobCompletenessBadge(job)}
-        ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
-      </div>
-      <div class="board-card__timeline">
-        ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}
-        ${applicationResultBadge(job)}
-        ${deadlineBadge(job)}
-        ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
-        ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
-      </div>
-      ${jobSourceUrl(job) ? `<div class="board-card__links">${jobApplyLinkHtml(job)}</div>` : ""}
-      <div class="row" style="margin-top:8px">
-        <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${statusOptions}</select>
-        ${boardAlignButton(job)}
-        <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-workspace" data-id="${job.job_id}">工作台</button>
-      </div>
-    </article>`;
-}
-
-/* ------------------------------------------------------------------ */
 
 /* Batch alignment panel + result matrix                               */
 /* ------------------------------------------------------------------ */
@@ -1511,43 +1486,6 @@ export function computeJobStats(jobs) {
       offerRate: funnelPercent(offer, interview),
     },
   };
-}
-
-export function renderJobStatsHtml(stats) {
-  const data = stats || computeJobStats([]);
-  const counts = data.counts || {};
-  const funnel = data.funnel || {};
-  const percent = (value) => (value == null ? "—" : `${value}%`);
-  const dot = (key) =>
-    `<span class="board-dot board-dot--${key}" aria-hidden="true"></span>`;
-  const countChips = JOB_STATUS_CANONICAL.map(
-    (key) =>
-      `<span class="badge board-stats-chip">${dot(key)}${esc(JOB_STATUS_LABELS[key])}<strong data-stat-count="${key}">${counts[key] ?? 0}</strong></span>`,
-  ).join("");
-  /* Sprint 4 T2: 漏斗三段复用 S1 Dashboard KPI 视觉语言 —— 语义色顶条 +
-   * 圆角卡（info/warning/success），与 dashboard-kpi 卡贯通。 */
-  const funnelCards = [
-    { key: "applyRate", label: "添加→投递", tone: "info", hint: "已投递及以上阶段 ÷ 岗位总数" },
-    { key: "interviewRate", label: "投递→面试", tone: "warning", hint: "进入面试及以上阶段 ÷ 已投递" },
-    { key: "offerRate", label: "面试→Offer", tone: "success", hint: "拿到 Offer ÷ 进入面试" },
-  ]
-    .map(
-      (card) => `
-        <div class="board-stats-card board-stats-card--${card.tone}" title="${esc(card.hint)}">
-          <span class="board-stats-card__label">${card.label}</span>
-          <strong class="board-stats-card__rate" data-stat-rate="${card.key}">${percent(funnel[card.key])}</strong>
-        </div>`,
-    )
-    .join("");
-  return `
-    <div class="board-stats" data-board-stats role="group" aria-label="求职漏斗统计">
-      <div class="board-stats__counts" data-board-stats-counts>${countChips}</div>
-      <span class="board-stats__divider" aria-hidden="true"></span>
-      <div class="board-stats__funnel" data-board-stats-funnel>
-        <span class="small muted board-stats__label">转化</span>
-        ${funnelCards}
-      </div>
-    </div>`;
 }
 
 /* CSV export helpers (RFC 4180-ish: quote fields containing , " CR or LF;
@@ -2351,12 +2289,65 @@ export function jobTimelineFormHtml(job, snapshots = []) {
         <div class="field wide"><label>备注</label><textarea name="notes" rows="3">${esc(job.notes || "")}</textarea></div>
       </div>
       ${applicationSnapshotsHtml(job, snapshots)}
+      <div class="preanalyze-strip" data-preanalyze-strip>
+        <button class="btn btn-outline btn-sm" type="button" data-action="job-preanalyze" data-id="${esc(job.job_id)}">AI 预分析</button>
+        <span class="small muted">分类 + JD 画像 + 匹配分，不改写简历；重复点击走缓存。</span>
+      </div>
+      <div data-preanalyze-result></div>
       <div class="actions">
         <button class="btn btn-primary btn-sm" type="button" data-action="record-application" data-id="${esc(job.job_id)}">记录投递</button>
         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
         <button class="btn btn-primary" type="submit">保存</button>
       </div>
     </form>`;
+}
+
+/* preanalyze 接线（潜伏功能激活）：详情抽屉「AI 预分析」结果块。
+ * data 为 POST /api/jobs/{id}/preanalyze 的 JobPreanalyzeResponse；
+ * 展示分类徽章、匹配分与理由、JD 画像硬技能 chips——零改写、可重复
+ * 点击走缓存。error 非空或 status=failed 时渲染可读错误。 */
+export function preanalyzeResultHtml(data) {
+  const d = data && typeof data === "object" ? data : null;
+  if (!d) return "";
+  if (d.error || d.status === "failed") {
+    return `<div class="form-error" role="alert" data-preanalyze-error>${esc(
+      d.error || "预分析失败，请稍后重试",
+    )}</div>`;
+  }
+  const cls = d.classification && typeof d.classification === "object" ? d.classification : {};
+  const tags = Array.isArray(cls.tech_tags) ? cls.tech_tags : [];
+  const chips = [
+    cls.job_function ? `<span class="badge badge-blue">${esc(cls.job_function)}</span>` : "",
+    cls.seniority ? `<span class="badge badge-teal">${esc(cls.seniority)}</span>` : "",
+    ...tags.map((tag) => `<span class="badge badge-gray">${esc(tag)}</span>`),
+  ]
+    .filter(Boolean)
+    .join("");
+  const score = d.match_score != null ? Math.round(Number(d.match_score)) : null;
+  const profile = d.jd_profile && typeof d.jd_profile === "object" ? d.jd_profile : null;
+  const hardSkills = Array.isArray(profile && profile.hard_skills) ? profile.hard_skills : [];
+  const source = d.match_reason_source === "llm" ? "AI" : "规则";
+  return `
+    <div class="preanalyze-result" data-preanalyze-result-block>
+      <div class="preanalyze-result__row">
+        ${chips || '<span class="small muted">分类暂不可用</span>'}
+        <span class="badge badge-green" data-preanalyze-cache>${d.cache_hit ? "缓存命中" : "新分析"}</span>
+      </div>
+      ${
+        score != null
+          ? `<div class="preanalyze-result__row"><strong data-preanalyze-score>${score}</strong><span class="small muted">/100 · ${esc(
+              d.match_reason || "暂无推荐理由",
+            )}（${esc(source)}理由${d.match_stale ? " · 已过期" : ""}）</span></div>`
+          : ""
+      }
+      ${
+        hardSkills.length
+          ? `<div class="preanalyze-result__row small">画像硬技能：${hardSkills
+              .map((skill) => `<span class="gap-tag">${esc(skill)}</span>`)
+              .join("")}</div>`
+          : ""
+      }
+    </div>`;
 }
 
 /* 安排跟进快捷弹窗。状态默认保持已投递/面试中，其余状态默认面试中；
@@ -2505,17 +2496,6 @@ export function formatElapsed(ms) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-/** Eval 评分是否真实运行过（存在任一评估结果字段）。 */
-export function hasEvalResult(evalScore) {
-  const score = evalScore || {};
-  return (
-    score.jd_match_score != null ||
-    score.improvement != null ||
-    score.hallucination_detected != null ||
-    score.gap_coverage != null
-  );
-}
-
 /** 工作台 per-run 评估开关：勾选传 true，不勾选不传（None 回退全局默认）。 */
 export function runEvalFromForm(data) {
   const value = data && data.run_eval;
@@ -2569,33 +2549,6 @@ export function diffSectionBadge(diff) {
  *   }
  */
 
-/* 3 大 KPI 卡。applied 卡带投递转化提示（占岗位比例）。 */
-export function dashboardKpiHtml(kpi = {}) {
-  const data = kpi && typeof kpi === "object" ? kpi : {};
-  const resumes = Math.max(0, Number(data.resumes) || 0);
-  const jobs = Math.max(0, Number(data.jobs) || 0);
-  const applied = Math.max(0, Number(data.applied) || 0);
-  const applyRate = jobs > 0 ? Math.round((applied / jobs) * 100) : null;
-  const cards = [
-    { key: "resumes", label: "主简历", value: resumes, tone: "info", hint: "可用的主简历底稿" },
-    { key: "jobs", label: "岗位", value: jobs, tone: "teal", hint: "岗位库总数" },
-    { key: "applied", label: "已投递", value: applied, tone: "success", hint: applyRate != null ? `占岗位 ${applyRate}%` : "暂无岗位可计算转化" },
-  ];
-  return `
-    <div class="dashboard-kpi-grid" data-dashboard-kpis>
-      ${cards
-        .map(
-          (card) => `
-        <div class="dashboard-kpi dashboard-kpi--${card.tone}" data-kpi="${card.key}">
-          <div class="dashboard-kpi__label">${esc(card.label)}</div>
-          <div class="dashboard-kpi__value">${esc(card.value)}</div>
-          <div class="dashboard-kpi__hint">${esc(card.hint)}</div>
-        </div>`,
-        )
-        .join("")}
-    </div>`;
-}
-
 /* Lightweight empty-state illustration shared by dashboard and jobs views.
  * Kept as code-native SVG because this is a static, structural illustration
  * rather than a button icon or interactive glyph. */
@@ -2645,6 +2598,15 @@ export function jobsEmptyGuideHtml() {
     </section>`;
 }
 
+/* P2 决策 4（2026-09-07）：差距项行级可行动指引，按 tone 分档静态模板
+ * （gaps 契约仅 {skill, count}，后端下发无个性化输入故否决）。
+ * key 必须与下方 tone 枚举（hot/warm/cool）严格对齐，未知 tone 回退 cool。 */
+const GAP_TONE_HINTS = {
+  hot: "该技能在库内岗位中出现频率最高：优先对含此技能的经历条目做对齐改写",
+  warm: "多个岗位要求此技能：把已有相关经历改写得更贴近岗位措辞",
+  cool: "少数岗位要求此技能：有真实依据再补，不要硬凑",
+};
+
 /* 技能缺口热力图：横向热力条，宽度按 count / max 比例，颜色按相对强度
  * 梯度（cool=info / warm=warning / hot=danger，全部走现有语义 token）。
  * 每条渲染为 data-action="goto-skill" + data-skill 的可点击按钮；
@@ -2667,8 +2629,9 @@ export function skillGapHtml(gaps, onSkillGapUrl) {
       const url =
         typeof onSkillGapUrl === "function" ? onSkillGapUrl(skill) : "";
       const urlAttr = url ? ` data-skill-url="${esc(url)}"` : "";
+      const hint = esc(GAP_TONE_HINTS[tone] || GAP_TONE_HINTS.cool);
       return `
-      <button type="button" class="skill-gap-row" data-action="goto-skill" data-skill="${esc(skill)}"${urlAttr}>
+      <button type="button" class="skill-gap-row" data-action="goto-skill" data-skill="${esc(skill)}"${urlAttr} title="${hint}" aria-label="${esc(skill)}，${hint}">
         <span class="skill-gap-row__name">${esc(skill)}</span>
         <span class="skill-gap-row__track" aria-hidden="true">
           <span class="skill-gap-row__fill skill-gap-row__fill--${tone}" style="width:${width}%"></span>
@@ -2677,7 +2640,9 @@ export function skillGapHtml(gaps, onSkillGapUrl) {
       </button>`;
     })
     .join("");
-  return `<div class="skill-gap-list" data-skill-gaps>${rows}</div>`;
+  /* 列表级行动引导：与 renderGap 的 data-gap-hint 同钩子模式，触屏无
+   * title 的可发现性由此兜底。 */
+  return `<div class="skill-gap-list" data-skill-gaps>${rows}<div class="muted small" data-gap-hint>点击任意技能可跳到要求它的岗位工作台；怎么补：优先改写与该技能相关的已有经历，确实没有依据的经历不要硬凑。</div></div>`;
 }
 
 /* Quick Continue 卡：最近工作的岗位快照 + 「继续」入口。quick_continue
@@ -2699,49 +2664,6 @@ const ALIGNMENT_STATUS_LABELS = {
 export function alignmentStatusLabel(status) {
   return ALIGNMENT_STATUS_LABELS[status]
     || (status ? String(status) : "待分析");
-}
-
-export function quickContinueHtml(qc) {
-  if (!qc || typeof qc !== "object" || !qc.job_id) return "";
-  const status = qc.alignment_status;
-  const qFailed = ["failed", "canceled", "expired"].includes(status);
-  const qBusy = ["running", "queued"].includes(status);
-  let badgeClass = "badge-gray";
-  let badgeLabel = alignmentStatusLabel(status);
-  let btnClass = "btn btn-primary btn-sm";
-  let btnLabel = "继续";
-  let btnAttr = "";
-  let btnHref = `href="#/workspace/${encodeURIComponent(qc.job_id)}"`;
-  if (qFailed) {
-    badgeClass = "badge-red";
-    badgeLabel = "上次失败 · 重新运行";
-    btnClass = "btn btn-danger-solid btn-sm";
-    btnLabel = "重新运行";
-  } else if (status === "succeeded") {
-    badgeClass = "badge-green";
-    badgeLabel = "已对齐";
-    btnClass = "btn btn-outline btn-sm";
-    btnLabel = "查看";
-  } else if (qBusy) {
-    badgeClass = "badge-blue";
-    badgeLabel = "分析中";
-    btnClass = "btn btn-primary btn-sm is-loading";
-    btnLabel = "分析中";
-    btnAttr = ' aria-disabled="true"';
-    btnHref = "";
-  }
-  return `
-    <section class="panel panel-card quick-continue ${qFailed ? "quick-continue--failed" : ""}" data-quick-continue>
-      <div class="quick-continue__head">
-        <span class="badge badge-teal">继续上次</span>
-        <span class="small muted">更新于 ${formatDate(qc.updated_at)}</span>
-      </div>
-      <div class="quick-continue__title">${esc(qc.title)}</div>
-      <div class="quick-continue__meta">${esc(qc.company || "未知公司")} · <span class="quick-continue__status">${esc(badgeLabel)}</span></div>
-      <div class="quick-continue__actions">
-        <a class="${btnClass}" ${btnHref}${btnAttr}>${esc(btnLabel)}</a>
-      </div>
-    </section>`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -3396,6 +3318,7 @@ export function llmNodeCardHtml(node, lastTest) {
   const model = String(n.model || "").trim() || "—";
   const baseUrl = String(n.base_url || "").trim();
   const maskedKey = maskApiKey(n.api_key);
+  const disableThinking = Boolean(n.disable_thinking);
   const testResult = lastTest ? nodeTestResultHtml(lastTest) : "";
   /* 持久化健康徽标：test 端点结果落库后的回显（无本会话新鲜结果时）。
    * status 语义与 probe_llm_connection 一致：ok 之外都是具体失败原因。 */
@@ -3428,6 +3351,7 @@ export function llmNodeCardHtml(node, lastTest) {
         <div><dt>服务商</dt><dd>${esc(provider)}</dd></div>
         <div><dt>模型</dt><dd>${esc(model)}</dd></div>
         ${baseUrl ? `<div><dt>Base URL</dt><dd>${esc(baseUrl)}</dd></div>` : ""}
+        ${disableThinking ? '<div><dt>思考模式</dt><dd>已关闭</dd></div>' : ""}
         <div><dt>API Key</dt><dd class="llm-node-card__key">${maskedKey ? esc(maskedKey) : '<span class="muted">未配置</span>'}</dd></div>
       </dl>
       <div class="llm-node-card__actions">
@@ -3450,6 +3374,7 @@ export function llmNodeFormHtml(node) {
   const model = String(n.model || "");
   const baseUrl = String(n.base_url || "");
   const hasKey = Boolean(n.api_key);
+  const disableThinking = Boolean(n.disable_thinking);
   const providerOptions = LLM_NODE_PROVIDERS.map(
     (value) =>
       `<option value="${esc(value)}" ${provider === value ? "selected" : ""}>${esc(LLM_NODE_PROVIDER_LABELS[value] || value)}</option>`,
@@ -3468,12 +3393,168 @@ export function llmNodeFormHtml(node) {
         <div class="field wide"><label>API Key${nodeId ? "（编辑留空保持不变）" : ""}</label>
           <input type="password" name="node_api_key" autocomplete="new-password" value="" placeholder="${hasKey ? "已保存，留空保持不变" : "输入 API Key（Ollama 可留空）"}">
           ${hasKey ? `<div class="small muted">已保存 Key：${esc(maskApiKey(n.api_key))}</div>` : ""}</div>
+        <div class="field wide"><label class="field-inline">
+          <input type="checkbox" name="node_disable_thinking" ${disableThinking ? "checked" : ""}>
+          <span>关闭思考模式（推理模型勾选）</span>
+        </label>
+        <div class="small muted">勾选后请求携带 thinking: disabled——reasoning 模型（如 NVIDIA NIM）不再把输出预算耗在推理内容上，直接产出正文。</div></div>
       </div>
       <div class="actions">
         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
         <button class="btn btn-primary" type="submit">${nodeId ? "保存修改" : "创建节点"}</button>
       </div>
     </form>`;
+}
+
+/** 设置页「简单/专家」模式切换（新手体验：默认简单，专家需显式切换）。 */
+export function settingsModeSwitchHtml(mode) {
+  const isSimple = mode !== "expert";
+  return `<div class="settings-mode-switch" data-settings-mode-switch role="group" aria-label="设置模式">
+      <button type="button" class="settings-mode-switch__btn${isSimple ? " is-active" : ""}" data-action="settings-mode-simple" aria-pressed="${isSimple}">简单</button>
+      <button type="button" class="settings-mode-switch__btn${isSimple ? "" : " is-active"}" data-action="settings-mode-expert" aria-pressed="${!isSimple}">专家</button>
+    </div>`;
+}
+
+/* --- 新手体验：简单模式连接面板 --- */
+/** 简单模式唯一面板：服务商下拉 + 模型 + API Key + 测试连接。
+ *  node 为要编辑的节点（activeNode 优先，否则第一个节点；null 表示新建）。
+ *  复用 llm-node-test 动作：面板带 data-llm-node-card /
+ *  data-llm-node-test-result，测试结果内联渲染。表单提交走
+ *  simple-llm-form（复用 buildLlmNodePayload / validateLlmNodePayload）。
+ *  disable_thinking 以隐藏字段透传，避免简单模式保存时意外重置该开关。 */
+export function simpleLlmSetupHtml(node, lastTest) {
+  const n = node && typeof node === "object" ? node : {};
+  const isEdit = Boolean(n.node_id);
+  const provider = String(n.provider || "deepseek");
+  const providerOptions = LLM_NODE_PROVIDERS.map(
+    (value) =>
+      `<option value="${esc(value)}" ${provider === value ? "selected" : ""}>${esc(LLM_NODE_PROVIDER_LABELS[value] || value)}</option>`,
+  ).join("");
+  const hasKey = Boolean(n.api_key);
+  const testResult = lastTest ? nodeTestResultHtml(lastTest) : "";
+  return `
+    <section class="panel simple-llm-panel" data-simple-llm-panel ${isEdit ? `data-llm-node-card data-node-id="${esc(n.node_id)}"` : ""}>
+      <div class="panel-head">
+        <div>
+          <h2>连接 AI 助手</h2>
+          <p>选择服务商并粘贴 API Key，保存后即可开始对齐简历</p>
+        </div>
+        ${isEdit && n.is_active ? '<span class="badge badge-green">已启用</span>' : ""}
+      </div>
+      <div class="panel-body">
+        <form data-form="simple-llm-form" class="simple-llm-form">
+          ${isEdit ? `<input type="hidden" name="node_id" value="${esc(n.node_id)}">` : ""}
+          <input type="hidden" name="node_name" value="${esc(isEdit ? n.name || "我的 AI 助手" : "我的 AI 助手")}">
+          ${n.disable_thinking ? '<input type="hidden" name="node_disable_thinking" value="on">' : ""}
+          <div class="form-grid">
+            <div class="field"><label>AI 服务商</label>
+              <select name="node_provider">${providerOptions}</select></div>
+            <div class="field"><label>模型名称</label>
+              <input type="text" name="node_model" required value="${esc(String(n.model || ""))}" placeholder="例如 deepseek-chat"></div>
+            <div class="field wide"><label>API Key</label>
+              <input type="password" name="node_api_key" autocomplete="new-password" value="" placeholder="${hasKey ? "已保存，留空保持不变" : "输入 API Key（Ollama 本地模型可留空）"}"></div>
+            <div class="field wide"><label>Base URL（可选，Ollama 本地用户需要）</label>
+              <input type="text" name="node_base_url" value="${esc(String(n.base_url || ""))}" placeholder="留空使用服务商默认地址，例如 http://localhost:11434"></div>
+          </div>
+          <div class="row simple-llm-form__actions">
+            <button class="btn btn-primary" type="submit">${isEdit ? "保存并启用" : "启用 AI 助手"}</button>
+            ${isEdit ? `<button class="btn btn-outline" type="button" data-action="llm-node-test" data-id="${esc(n.node_id)}">测试连接</button>` : ""}
+          </div>
+        </form>
+        <div data-llm-node-test-result>${testResult}</div>
+        ${isEdit ? "" : '<p class="small muted">保存后第一个节点自动启用。备用节点、成本护栏等高级配置可在「专家模式」中调整；多节点分工（本地分析 + 云端写作）也在那里配置。</p>'}
+      </div>
+    </section>`;
+}
+
+/* --- 专家模式：角色绑定面板 --- */
+/* 五个 pipeline 角色的中文文案（对照 llm_nodes._LLM_ROLES 与
+ * role_router._ROLE_TIMEOUT_DEFAULTS 的顺序）。 */
+export const LLM_ROLE_LABELS = {
+  diagnose: "简历诊断",
+  profiler: "JD 画像",
+  gap_analyzer: "差距分析",
+  editor: "改写引擎",
+  evaluator: "对齐评估",
+};
+
+const LLM_ROLE_HINTS = {
+  diagnose: "对主简历做无 JD 体检，输出 ATS 分与问题清单",
+  profiler: "从 JD 原文抽取硬技能/场景/要求，决定匹配质量",
+  gap_analyzer: "对比主简历与 JD 画像，产出差距报告",
+  editor: "逐条改写建议的生成——最吃模型写作能力",
+  evaluator: "LLM 评审打分与幻觉检测",
+};
+
+/** 角色绑定面板：每行一个角色，下拉选承载节点（不选=跟随主节点）；
+ *  三个一键预设走 data-action（POST presets），保存走 data-form。
+ *  bindings 为 {role: node_id}；node_id 不在下拉中（节点已删）时后端
+ *  已自动回落，无需前端特判。 */
+export function roleBindingsPanelHtml(roles, nodes, bindings) {
+  const roleList = Array.isArray(roles) ? roles : Object.keys(LLM_ROLE_LABELS);
+  const nodeList = Array.isArray(nodes) ? nodes : [];
+  const bindMap = bindings && typeof bindings === "object" ? bindings : {};
+  if (!nodeList.length) {
+    return `
+      <section class="panel role-bindings-panel" data-role-bindings-panel>
+        <div class="panel-head">
+          <div>
+            <h2>节点分工</h2>
+            <p>按任务角色把不同 LLM 节点分配到 pipeline 各环节</p>
+          </div>
+        </div>
+        <div class="panel-body muted small" data-role-bindings-empty>
+          还没有可分配的节点——先在下方「LLM 节点」添加节点，再回来配置分工。
+        </div>
+      </section>`;
+  }
+  const rows = roleList
+    .map((role) => {
+      const key = String(role || "");
+      const label = LLM_ROLE_LABELS[key] || key;
+      const hint = LLM_ROLE_HINTS[key] || "";
+      const bound = bindMap[key] || "";
+      const options = nodeList
+        .map((node) => {
+          const id = String(node && node.node_id || "");
+          const text = `${esc(node.provider || "—")} · ${esc(node.model || "—")} · ${esc(node.name || "未命名")}`;
+          return `<option value="${esc(id)}" ${bound === id ? "selected" : ""}>${text}</option>`;
+        })
+        .join("");
+      return `
+        <div class="role-binding-row" data-role-binding-row>
+          <div class="role-binding-row__main">
+            <strong>${esc(label)}</strong>
+            <span class="small muted">${esc(hint)}</span>
+          </div>
+          <select class="role-binding-row__select" name="${esc(key)}" data-role-select aria-label="「${esc(label)}」使用的节点">
+            <option value="">跟随主节点</option>
+            ${options}
+          </select>
+        </div>`;
+    })
+    .join("");
+  return `
+    <section class="panel role-bindings-panel" data-role-bindings-panel>
+      <div class="panel-head">
+        <div>
+          <h2>节点分工</h2>
+          <p>把 5 个 pipeline 角色指到不同节点——本地模型跑分析、云端模型跑写作；绑定实时生效，也可一键预设</p>
+        </div>
+        <div class="row">
+          <button class="btn btn-outline btn-sm" type="button" data-action="role-preset" data-preset="unified" title="全部角色回落到当前生效节点">统一主节点</button>
+          <button class="btn btn-outline btn-sm" type="button" data-action="role-preset" data-preset="hybrid" title="本地 Ollama 跑诊断/画像/差距，云端节点跑改写/评估">本地分析+云端写作</button>
+          <button class="btn btn-outline btn-sm" type="button" data-action="role-preset" data-preset="local" title="全部角色绑定本地 Ollama 节点，零外发">全本地</button>
+        </div>
+      </div>
+      <form class="panel-body" data-form="settings-role-bindings">
+        <div class="role-binding-list" data-role-binding-list>${rows}</div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn btn-primary btn-sm" type="submit">保存分工</button>
+          <span class="small muted">不选的角色跟随主节点；绑定节点被删除后自动回落。</span>
+        </div>
+      </form>
+    </section>`;
 }
 
 /* --- T4: 自动化规则列表 + 新增表单 --- */

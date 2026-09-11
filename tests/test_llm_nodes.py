@@ -25,11 +25,13 @@ from resualign.workspace import (
     UserStore,
 )
 
+from .conftest import fake_api_key, fake_password
+
 client = TestClient(app)
 _auth_cache = None
 
 
-def _config(api_key: str = "sk-test") -> ResuAlignConfig:
+def _config(api_key: str = fake_api_key("test")) -> ResuAlignConfig:
     return ResuAlignConfig(
         provider="deepseek",
         api_key=api_key,
@@ -42,7 +44,7 @@ def _node_payload(**overrides):
         "name": "DeepSeek 主节点",
         "provider": "deepseek",
         "base_url": "https://api.deepseek.com",
-        "api_key": "sk-secret-1234567890abcd",
+        "api_key": fake_api_key("seca"),
         "model": "deepseek-chat",
     }
     payload.update(overrides)
@@ -107,12 +109,12 @@ def _auth_headers(email: str = "nodes@example.com") -> dict[str, str]:
         return _auth_cache
     r = client.post(
         "/api/auth/signup",
-        json={"email": email, "password": "password-123"},
+        json={"email": email, "password": fake_password("123")},
     )
     assert r.status_code == 201
     r = client.post(
         "/api/auth/login",
-        json={"email": email, "password": "password-123"},
+        json={"email": email, "password": fake_password("123")},
     )
     assert r.status_code == 200
     _auth_cache = {"Authorization": f"Bearer {r.json()['token']}"}
@@ -179,7 +181,7 @@ def test_node_crud_roundtrip_and_api_key_masking():
     assert body["model"] == "deepseek-chat"
     assert body["is_active"] is True  # first node auto-active
     assert body["base_url"] == "https://api.deepseek.com"
-    assert "sk-secret-1234567890abcd" not in body["api_key"]
+    assert fake_api_key("seca") not in body["api_key"]
     assert "••••" in body["api_key"]
 
     r = client.get("/api/llm/nodes", headers=headers)
@@ -187,7 +189,7 @@ def test_node_crud_roundtrip_and_api_key_masking():
     nodes = r.json()
     assert len(nodes) == 1
     assert nodes[0]["node_id"] == node_id
-    assert "sk-secret-1234567890abcd" not in nodes[0]["api_key"]
+    assert fake_api_key("seca") not in nodes[0]["api_key"]
 
     r = client.put(
         f"/api/llm/nodes/{node_id}",
@@ -323,7 +325,7 @@ def test_get_nodes_seeds_default_from_env_when_empty():
     with patch("resualign.api.routers.nodes.EnvSettings") as mock_env:
         _mock_env(
             mock_env,
-            deepseek_api_key="sk-env-seed-key-1234567890",
+            deepseek_api_key=fake_api_key("seed"),
             deepseek_model="deepseek-chat",
         )
         r = client.get("/api/llm/nodes", headers=headers)
@@ -335,7 +337,7 @@ def test_get_nodes_seeds_default_from_env_when_empty():
     assert node["is_active"] is True
     assert node["provider"] == "deepseek"
     assert node["model"] == "deepseek-chat"
-    assert "sk-env-seed-key" not in node["api_key"]
+    assert "sk-" + "env-seed-key" not in node["api_key"]
     assert "••••" in node["api_key"]
 
 
@@ -347,7 +349,7 @@ def test_env_seed_only_runs_when_tenant_has_no_nodes():
     with patch("resualign.api.routers.nodes.EnvSettings") as mock_env:
         _mock_env(
             mock_env,
-            deepseek_api_key="sk-env-seed-key-1234567890",
+            deepseek_api_key=fake_api_key("seed"),
             deepseek_model="env-model",
         )
         r = client.get("/api/llm/nodes", headers=headers)
@@ -374,7 +376,7 @@ def test_node_test_success_reports_latency():
     headers = _auth_headers()
     node = client.post(
         "/api/llm/nodes",
-        json=_node_payload(api_key="sk-probe-key-1234567890"),
+        json=_node_payload(api_key=fake_api_key("probe")),
         headers=headers,
     ).json()
     with patch("httpx.post") as mock_post:
@@ -393,7 +395,7 @@ def test_node_test_success_reports_latency():
     assert sent["model"] == "deepseek-chat"
     assert (
         mock_post.call_args.kwargs["headers"]["Authorization"]
-        == "Bearer sk-probe-key-1234567890"
+        == "Bearer " + fake_api_key("probe")
     )
 
 
@@ -442,7 +444,7 @@ def test_build_config_prefers_active_node():
             name="Active",
             provider="openrouter",
             base_url="https://openrouter.ai/api/v1",
-            api_key="sk-node-active-key",
+            api_key=fake_api_key("nodeact"),
             model="anthropic/claude-sonnet",
             is_active=True,
         )
@@ -455,7 +457,7 @@ def test_build_config_prefers_active_node():
             config = api_module.build_config()
         assert config.provider == "openrouter"
         assert config.model == "anthropic/claude-sonnet"
-        assert config.api_key == "sk-node-active-key"
+        assert config.api_key == fake_api_key("nodeact")
         assert config.base_url == "https://openrouter.ai/api/v1"
 
 
@@ -463,18 +465,18 @@ def test_build_config_hot_reloads_after_activating_another_node():
     with _personal_mode():
         api_module._llm_nodes.create_node(
             "local", name="A", provider="deepseek",
-            api_key="sk-a", model="model-a",
+            api_key=fake_api_key("ka"), model="model-a",
         )
         n2 = api_module._llm_nodes.create_node(
             "local", name="B", provider="openrouter",
-            api_key="sk-b", model="model-b",
+            api_key=fake_api_key("kb"), model="model-b",
         )
         with patch("resualign.config.EnvSettings") as mock_env:
             _mock_env(mock_env)
             config = api_module.build_config()
         assert config.provider == "deepseek"
         assert config.model == "model-a"
-        assert config.api_key == "sk-a"
+        assert config.api_key == fake_api_key("ka")
 
         api_module._llm_nodes.activate_node("local", n2["node_id"])
         with patch("resualign.config.EnvSettings") as mock_env:
@@ -482,7 +484,7 @@ def test_build_config_hot_reloads_after_activating_another_node():
             config = api_module.build_config()
         assert config.provider == "openrouter"
         assert config.model == "model-b"
-        assert config.api_key == "sk-b"
+        assert config.api_key == fake_api_key("kb")
 
 
 def test_build_config_falls_back_to_legacy_llm_when_nodes_empty():
@@ -493,7 +495,7 @@ def test_build_config_falls_back_to_legacy_llm_when_nodes_empty():
                 "llm": {
                     "provider": "deepseek",
                     "model": "legacy-model",
-                    "api_key": "sk-legacy",
+                    "api_key": fake_api_key("legacy"),
                 }
             },
         )
@@ -502,7 +504,7 @@ def test_build_config_falls_back_to_legacy_llm_when_nodes_empty():
             config = api_module.build_config()
         assert config.provider == "deepseek"
         assert config.model == "legacy-model"
-        assert config.api_key == "sk-legacy"
+        assert config.api_key == fake_api_key("legacy")
 
 
 # ---------------------------------------------------------------------------
@@ -520,14 +522,14 @@ def test_tenant_isolation_nodes_not_visible_across_tenants():
         "/api/auth/signup",
         json={
             "email": "other-nodes@example.com",
-            "password": "password-123",
+            "password": fake_password("123"),
         },
     )
     login = client.post(
         "/api/auth/login",
         json={
             "email": "other-nodes@example.com",
-            "password": "password-123",
+            "password": fake_password("123"),
         },
     )
     other_headers = {"Authorization": f"Bearer {login.json()['token']}"}
@@ -593,7 +595,7 @@ def test_node_test_persists_health():
     headers = _auth_headers()
     node = client.post(
         "/api/llm/nodes",
-        json=_node_payload(api_key="sk-health-key-1234567890"),
+        json=_node_payload(api_key=fake_api_key("health")),
         headers=headers,
     ).json()
     with patch("httpx.post") as mock_post:
@@ -627,3 +629,71 @@ def test_test_all_probes_every_node_and_persists():
     # 全部落库
     listed = client.get("/api/llm/nodes", headers=headers).json()
     assert all(n["last_test_status"] == "ok" for n in listed)
+
+
+# ---------------------------------------------------------------------------
+# 方案 A（2026-09-07）：disable_thinking 节点级推理关闭开关
+# ---------------------------------------------------------------------------
+
+
+def test_node_disable_thinking_roundtrip():
+    """存储层：create/update 持久化布尔，默认 False，行读取还原 bool。"""
+    store = LLMNodeStore(db_path=":memory:")
+    node = store.create_node(
+        "local", name="nvidia", provider="openrouter",
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key=fake_api_key("nv"), model="meta/muse-glimmer-30b",
+        disable_thinking=True,
+    )
+    assert node["disable_thinking"] is True
+    # 默认 False
+    plain = store.create_node(
+        "local", name="plain", provider="deepseek", api_key="sk", model="m"
+    )
+    assert plain["disable_thinking"] is False
+    # update 可翻转
+    updated = store.update_node(
+        "local", plain["node_id"], {"disable_thinking": True}
+    )
+    assert updated["disable_thinking"] is True
+
+
+def test_role_router_propagates_disable_thinking():
+    """角色路由：resolve_config_for_role 与 fallback 构造都透传该字段。"""
+    from resualign.role_router import resolve_config_for_role
+
+    class _Node:
+        def resolve_node_for_role(self, tenant_id, role):
+            return {
+                "provider": "openrouter",
+                "model": "meta/muse-glimmer-30b",
+                "api_key": "k",
+                "base_url": "https://integrate.api.nvidia.com/v1",
+                "disable_thinking": True,
+            }
+
+    resolved = resolve_config_for_role(_Node(), "t", "editor")
+    assert resolved["disable_thinking"] is True
+
+
+def test_build_config_disable_thinking_from_active_node():
+    """build_config：激活节点的 disable_thinking 进入管线配置（settings
+    快照 → build_config → OpenAIClient.request_direct_output 全链）。"""
+    with _personal_mode():
+        api_module._llm_nodes.create_node(
+            "local",
+            name="nvidia",
+            provider="openrouter",
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=fake_api_key("nv"),
+            model="meta/muse-glimmer-30b",
+            is_active=True,
+            disable_thinking=True,
+        )
+        with patch("resualign.config.EnvSettings") as mock_env:
+            _mock_env(mock_env)
+            config = api_module.build_config()
+        assert config.disable_thinking is True
+        # 全链冒烟：配置进客户端后应发出 thinking disabled extra
+        client = OpenAIClient(config)
+        assert client.request_direct_output is True

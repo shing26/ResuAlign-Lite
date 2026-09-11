@@ -32,14 +32,6 @@ export function collectFocusables(root) {
   return [...root.querySelectorAll(FOCUSABLE_SELECTOR)].filter(isFocusable);
 }
 
-/** Next tab index with wraparound; -1 when there is nothing to focus. */
-export function nextFocusIndex(current, length, shiftKey) {
-  if (length <= 0) return -1;
-  if (current < 0 || current >= length) return shiftKey ? length - 1 : 0;
-  const delta = shiftKey ? -1 : 1;
-  return (current + delta + length) % length;
-}
-
 /** Focus the first focusable element inside `root`; no-op when none. */
 export function focusInitial(root) {
   const items = collectFocusables(root);

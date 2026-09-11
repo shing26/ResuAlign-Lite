@@ -18,6 +18,8 @@ from resualign.workspace import (
     UserStore,
 )
 
+from .conftest import fake_password
+
 client = TestClient(app)
 _auth_cache = None
 _other_cache = None
@@ -363,12 +365,12 @@ def test_job_tenant_isolation():
 
     r = client.post(
         "/api/auth/signup",
-        json={"email": "other@example.com", "password": "other-password"},
+        json={"email": "other@example.com", "password": fake_password("other")},
     )
     assert r.status_code == 201
     r = client.post(
         "/api/auth/login",
-        json={"email": "other@example.com", "password": "other-password"},
+        json={"email": "other@example.com", "password": fake_password("other")},
     )
     other_headers = {"Authorization": f"Bearer {r.json()['token']}"}
 

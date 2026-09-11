@@ -2560,6 +2560,33 @@ select {
   border-radius: var(--radius-sm);
 }
 
+/* 岗位详情抽屉「AI 预分析」条与结果块。 */
+.preanalyze-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.preanalyze-result {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preanalyze-result__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.preanalyze-result__row [data-preanalyze-score] {
+  font-size: 18px;
+  font-weight: 600;
+}
+
 .cmp-grid--workbench {
   gap: 14px;
 }
@@ -7304,7 +7331,7 @@ select option {
 }
 
 /* ==========================================================================
-   Preview 1:1 utility layer (v2-redesign-preview.html)
+   Shell 1:1 utility layer (v2 redesign)
    Shell + layout utilities without a Tailwind CDN dependency.
    ========================================================================== */
 
@@ -9292,6 +9319,78 @@ body.resume-inline-editing .resume-doc {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* 新手体验：设置页「简单/专家」模式切换（分段控件）。 */
+.settings-mode-switch {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.settings-mode-switch__btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ra-text-tertiary, #64748b);
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.settings-mode-switch__btn.is-active {
+  background: var(--primary);
+  color: #fff;
+}
+
+.simple-llm-panel .form-grid {
+  margin-bottom: 12px;
+}
+
+.simple-llm-form__actions {
+  margin-top: 4px;
+}
+
+/* 专家模式：节点分工（角色绑定）面板。 */.role-binding-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.role-binding-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--ra-accent, #6366f1);
+  border-radius: 6px;
+  background: var(--ra-surface-soft, #f8fafc);
+}
+
+.role-binding-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.role-binding-row__select {
+  flex: 0 0 auto;
+  max-width: 280px;
+}
+
+@media (max-width: 700px) {
+  .role-binding-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .role-binding-row__select {
+    max-width: none;
+  }
 }
 
 .settings-main {

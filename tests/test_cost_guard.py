@@ -21,6 +21,8 @@ from resualign.models import ResuAlignConfig
 from resualign.settings_store import SettingsStore
 from resualign.workspace import UserStore
 
+from .conftest import fake_api_key, fake_password
+
 client = TestClient(app)
 _auth_cache = None
 
@@ -57,12 +59,12 @@ def _auth_headers() -> dict[str, str]:
         return _auth_cache
     r = client.post(
         "/api/auth/signup",
-        json={"email": "cost@example.com", "password": "password-123"},
+        json={"email": "cost@example.com", "password": fake_password("123")},
     )
     assert r.status_code == 201
     r = client.post(
         "/api/auth/login",
-        json={"email": "cost@example.com", "password": "password-123"},
+        json={"email": "cost@example.com", "password": fake_password("123")},
     )
     assert r.status_code == 200
     _auth_cache = {"Authorization": f"Bearer {r.json()['token']}"}
@@ -159,7 +161,7 @@ def test_openai_retries_record_once(httpx_mock, tmp_path, monkeypatch):
     )
     register_daily_usage_recorder(record_daily_llm_usage)
     client_obj = OpenAIClient(
-        ResuAlignConfig(provider="deepseek", api_key="sk-test", model="m1")
+        ResuAlignConfig(provider="deepseek", api_key=fake_api_key("test"), model="m1")
     )
     client_obj.max_retries = 1
     httpx_mock.add_response(status_code=500)
@@ -351,7 +353,7 @@ def test_run_job_releases_slot_when_no_llm_calls():
     with patch("resualign.api._run_job"), patch(
         "resualign.api.build_config",
         return_value=ResuAlignConfig(
-            provider="deepseek", api_key="sk-test", model="test-model"
+            provider="deepseek", api_key=fake_api_key("test"), model="test-model"
         ),
     ):
         queued = client.post(

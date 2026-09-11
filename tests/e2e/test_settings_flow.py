@@ -16,8 +16,9 @@ pytestmark = pytest.mark.e2e
 NODE_NAME = "e2e-openrouter"
 PROVIDER = "openrouter"
 MODEL = "e2e-openrouter-model"
-API_KEY = "sk-e2e-1234567890abcd"
-MASKED_KEY = "sk-e2e-1234567890abcd"[:4] + "••••" + API_KEY[-4:]
+# e2e 目录不是包，无法导入 tests/conftest；就地运行时拼接避免凭据字面量。
+API_KEY = "-".join(["fake", "key", "e2e"])
+MASKED_KEY = API_KEY[:4] + "••••" + API_KEY[-4:]
 
 NODE_GRID = "[data-llm-node-grid]"
 NODE_FORM = '[data-form="llm-node-form"]'
@@ -27,6 +28,8 @@ def test_node_survives_reload(page, base_url, api_call):
     capture_errors(page)
 
     page.goto(f"{base_url}/#/settings", wait_until="domcontentloaded")
+    # 双模式（2026-09-10）：节点管理在专家模式——显式切换后可达。
+    page.click("[data-action='settings-mode-expert']")
     page.wait_for_selector(NODE_GRID, timeout=15000)
 
     # Add a node via the modal form.

@@ -23,11 +23,13 @@ from resualign.models import (
 from resualign.settings_store import SettingsStore
 from resualign.workspace import UserStore
 
+from .conftest import fake_api_key, fake_password
+
 client = TestClient(app)
 _auth_cache = None
 
 
-def _config(api_key="sk-test"):
+def _config(api_key=fake_api_key("test")):
     return ResuAlignConfig(
         provider="deepseek",
         api_key=api_key,
@@ -107,12 +109,12 @@ def _auth_headers():
         return _auth_cache
     r = client.post(
         "/api/auth/signup",
-        json={"email": "tester@example.com", "password": "password-123"},
+        json={"email": "tester@example.com", "password": fake_password("123")},
     )
     assert r.status_code == 201
     r = client.post(
         "/api/auth/login",
-        json={"email": "tester@example.com", "password": "password-123"},
+        json={"email": "tester@example.com", "password": fake_password("123")},
     )
     assert r.status_code == 200
     _auth_cache = {"Authorization": f"Bearer {r.json()['token']}"}
@@ -154,7 +156,7 @@ def test_job_read_requires_auth():
 def test_signup_login_me_logout_flow():
     r = client.post(
         "/api/auth/signup",
-        json={"email": "ada@example.com", "password": "correct-horse"},
+        json={"email": "ada@example.com", "password": fake_password("horse")},
     )
     assert r.status_code == 201
     body = r.json()
@@ -163,7 +165,7 @@ def test_signup_login_me_logout_flow():
 
     r = client.post(
         "/api/auth/login",
-        json={"email": "ada@example.com", "password": "correct-horse"},
+        json={"email": "ada@example.com", "password": fake_password("horse")},
     )
     assert r.status_code == 200
     token = r.json()["token"]
@@ -183,7 +185,7 @@ def test_signup_login_me_logout_flow():
 def test_login_rejects_bad_password():
     client.post(
         "/api/auth/signup",
-        json={"email": "ada@example.com", "password": "correct-horse"},
+        json={"email": "ada@example.com", "password": fake_password("horse")},
     )
     r = client.post(
         "/api/auth/login",
@@ -201,12 +203,12 @@ def test_jobs_are_isolated_between_users():
 
     r = client.post(
         "/api/auth/signup",
-        json={"email": "other@example.com", "password": "other-password"},
+        json={"email": "other@example.com", "password": fake_password("other")},
     )
     assert r.status_code == 201
     r = client.post(
         "/api/auth/login",
-        json={"email": "other@example.com", "password": "other-password"},
+        json={"email": "other@example.com", "password": fake_password("other")},
     )
     other_headers = {"Authorization": f"Bearer {r.json()['token']}"}
 
@@ -576,7 +578,7 @@ def test_completed_job_survives_new_store_on_same_database():
 
 def test_payload_persisted_but_config_never_written_to_database():
     secret_resume = "RESUME_SECRET_TEXT_7f3a"
-    secret_key = "sk-secret-key-9c2b"
+    secret_key = fake_api_key("secd")
     report = Report(
         score=74,
         skills=["Python"],
