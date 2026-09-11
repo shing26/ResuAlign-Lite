@@ -99,6 +99,8 @@ import {
   ruleListHtml,
   runEvalFromForm,
   settingsBentoHtml,
+  settingsModeSwitchHtml,
+  simpleLlmSetupHtml,
   snapshotDrawerHtml,
 } from "./format.js";
 import {
@@ -550,6 +552,29 @@ async function switchWorkspaceJob(jobId) {
 /* Sprint 5 T1: 用纯函数 settingsBentoHtml 重渲染 Bento 概览（节点测试后
  * 刷新延迟卡）。state.llmNodeTests 由 renderSettingsView 与
  * llm-node-test action 维护。 */
+
+/* 新手体验：设置页「简单/专家」双模式。选择持久化在 localStorage；
+ * 无任何节点时强制简单模式（专家面板对新手毫无意义）。 */
+const SETTINGS_MODE_KEY = "resualign.settingsMode";
+
+function readSettingsMode() {
+  try {
+    return localStorage.getItem(SETTINGS_MODE_KEY) === "expert"
+      ? "expert"
+      : "simple";
+  } catch {
+    return "simple";
+  }
+}
+
+function writeSettingsMode(mode) {
+  try {
+    localStorage.setItem(SETTINGS_MODE_KEY, mode);
+  } catch {
+    /* storage unavailable: mode stays for this session only */
+  }
+}
+
 async function renderSettingsView(app) {
   const [settings, status, nodes, rules] = await Promise.all([
     api("/api/settings"),
@@ -570,17 +595,13 @@ async function renderSettingsView(app) {
   const nodeCards = state.llmNodes
     .map((node) => llmNodeCardHtml(node, (state.llmNodeTests || {})[node.node_id]))
     .join("");
-  app.innerHTML = `
-    <div class="view view-scroll settings-view">
-      <div class="settings-head">
-        <div>
-          <p>配置多个 LLM API 节点、超时护杠与粗筛规则引擎</p>
-        </div>
-        <div class="settings-head-actions">
-          <span class="status-line"><span class="dot ${status.api_key_configured ? "dot-success" : "dot-warn"}" aria-hidden="true"></span>${status.api_key_configured ? "LLM 已配置" : "LLM 未配置"}</span>
-          <button class="btn btn-outline btn-sm" type="button" data-action="reset-settings">恢复默认设置</button>
-        </div>
-      </div>
+  /* 模式解析：无节点默认简单模式；「专家」是显式选择后即生效（否则
+   * 备用节点/Token 面板对想进阶的用户无处可达——E2E settings 流曾在此
+   * 死锁）。 */
+  const settingsMode = readSettingsMode();
+  const modeSwitchHtml = settingsModeSwitchHtml(settingsMode);
+  const simpleSetupNode = activeNode || state.llmNodes[0] || null;
+  const expertPanelsHtml = `
       ${settingsBentoHtml(activeNode, latency)}
       ${costGuardPanelHtml(settings, status.daily || {})}
       <section class="panel local-ingest-panel" data-local-ingest-panel>
@@ -664,7 +685,20 @@ async function renderSettingsView(app) {
             <label><span>状态</span><textarea name="statuses" rows="5">${esc(vocabulary.statuses.join("\n"))}</textarea></label>
           </div>
         </div>
-      </form>
+      </form>`;
+  app.innerHTML = `
+    <div class="view view-scroll settings-view">
+      <div class="settings-head">
+        <div>
+          <p>连接 AI 助手并管理运行护栏${settingsMode === "expert" ? "（专家模式）" : ""}</p>
+        </div>
+        <div class="settings-head-actions">
+          <span class="status-line"><span class="dot ${status.api_key_configured ? "dot-success" : "dot-warn"}" aria-hidden="true"></span>${status.api_key_configured ? "LLM 已配置" : "LLM 未配置"}</span>
+          ${modeSwitchHtml}
+          <button class="btn btn-outline btn-sm" type="button" data-action="reset-settings">恢复默认设置</button>
+        </div>
+      </div>
+      ${settingsMode === "expert" ? expertPanelsHtml : simpleLlmSetupHtml(simpleSetupNode, simpleSetupNode ? (state.llmNodeTests || {})[simpleSetupNode.node_id] : null)}
     </div>`;
 
   if (
@@ -1655,6 +1689,15 @@ const actions = {
   /* Sprint 5 T2: LLM 节点管理（新增 / 编辑 / 测试 / 激活 / 删除）。 */
   "llm-node-add": () => {
     showModal("新增 LLM 节点", llmNodeFormHtml(null));
+  },
+  /* 新手体验：设置页简单/专家模式切换（无节点时强制简单，见 renderSettingsView）。 */
+  "settings-mode-simple": () => {
+    writeSettingsMode("simple");
+    render();
+  },
+  "settings-mode-expert": () => {
+    writeSettingsMode("expert");
+    render();
   },
   "llm-node-edit": (button) => {
     const node = (state.llmNodes || []).find(
@@ -3267,6 +3310,42 @@ async function handleForm(formName, data, form) {
         toast("节点已创建", "success");
       }
       closeModal();
+      render();
+      break;
+    }
+    /* 新手体验：简单模式连接表单。复用节点 payload 构建与校验；编辑路径
+     * PUT 后确保目标节点生效，新建路径首个节点由后端自动激活。 */
+    case "simple-llm-form": {
+      const payload = buildLlmNodePayload(data);
+      const nodeId = (data.node_id || "").trim();
+      const validation = validateLlmNodePayload(payload, {
+        isEdit: Boolean(nodeId),
+      });
+      if (!validation.ok) {
+        toast(validation.message, "error");
+        return;
+      }
+      if (nodeId) {
+        await api(`/api/llm/nodes/${encodeURIComponent(nodeId)}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        const target = (state.llmNodes || []).find(
+          (item) => item.node_id === nodeId,
+        );
+        if (!target || !target.is_active) {
+          await api(`/api/llm/nodes/${encodeURIComponent(nodeId)}/activate`, {
+            method: "POST",
+          });
+        }
+        toast("AI 助手已更新并启用", "success");
+      } else {
+        await api("/api/llm/nodes", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        toast("AI 助手已启用", "success");
+      }
       render();
       break;
     }

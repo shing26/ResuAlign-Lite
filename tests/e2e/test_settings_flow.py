@@ -28,6 +28,8 @@ def test_node_survives_reload(page, base_url, api_call):
     capture_errors(page)
 
     page.goto(f"{base_url}/#/settings", wait_until="domcontentloaded")
+    # 双模式（2026-09-10）：节点管理在专家模式——显式切换后可达。
+    page.click("[data-action='settings-mode-expert']")
     page.wait_for_selector(NODE_GRID, timeout=15000)
 
     # Add a node via the modal form.

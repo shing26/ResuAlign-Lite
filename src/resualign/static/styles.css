@@ -9294,6 +9294,38 @@ body.resume-inline-editing .resume-doc {
   gap: 10px;
 }
 
+/* 新手体验：设置页「简单/专家」模式切换（分段控件）。 */
+.settings-mode-switch {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.settings-mode-switch__btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ra-text-tertiary, #64748b);
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.settings-mode-switch__btn.is-active {
+  background: var(--primary);
+  color: #fff;
+}
+
+.simple-llm-panel .form-grid {
+  margin-bottom: 12px;
+}
+
+.simple-llm-form__actions {
+  margin-top: 4px;
+}
+
 .settings-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
