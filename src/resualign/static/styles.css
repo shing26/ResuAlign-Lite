@@ -2560,6 +2560,33 @@ select {
   border-radius: var(--radius-sm);
 }
 
+/* 岗位详情抽屉「AI 预分析」条与结果块。 */
+.preanalyze-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.preanalyze-result {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preanalyze-result__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.preanalyze-result__row [data-preanalyze-score] {
+  font-size: 18px;
+  font-weight: 600;
+}
+
 .cmp-grid--workbench {
   gap: 14px;
 }
@@ -7304,7 +7331,7 @@ select option {
 }
 
 /* ==========================================================================
-   Preview 1:1 utility layer (v2-redesign-preview.html)
+   Shell 1:1 utility layer (v2 redesign)
    Shell + layout utilities without a Tailwind CDN dependency.
    ========================================================================== */
 
@@ -9326,8 +9353,7 @@ body.resume-inline-editing .resume-doc {
   margin-top: 4px;
 }
 
-/* 专家模式：节点分工（角色绑定）面板。 */
-.role-binding-list {
+/* 专家模式：节点分工（角色绑定）面板。 */.role-binding-list {
   display: flex;
   flex-direction: column;
   gap: 6px;

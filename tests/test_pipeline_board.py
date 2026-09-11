@@ -266,8 +266,10 @@ def test_bulk_status_endpoint_validates_tenant_ownership():
             headers=_other_headers(),
         ).json()
 
+    # 2026-09-11 收口：旧隐藏端点 /api/jobs/bulk-status 已删除，租户归属
+    # 语义由 kanban bulk-status 承接（同样的 per-id updated/not_found 结构）。
     body = client.post(
-        "/api/jobs/bulk-status",
+        "/api/kanban/bulk-status",
         json={
             "job_ids": [mine["job_id"], theirs["job_id"], "missing-id"],
             "status": "interview",

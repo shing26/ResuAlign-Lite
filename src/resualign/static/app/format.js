@@ -3,9 +3,9 @@
  * This module MUST stay free of DOM/window/document/localStorage/fetch access
  * so it can be imported and unit-tested directly under Node
  * (see tests/frontend/*.test.mjs). Function bodies were moved from main.js /
- * events.js / split-canvas.js / diff-editor.js /
- * command-panel.js. Signatures and HTML output are covered by the node:test
- * suite; DOM-touching callers keep thin wrappers in their original modules.
+ * events.js / split-canvas.js / command-panel.js. Signatures and HTML output
+ * are covered by the node:test suite; DOM-touching callers keep thin wrappers
+ * in their original modules.
  */
 
 /* Sprint 5: 复用 settings-form.js 的掩码纯函数（maskApiKey），该模块无
@@ -1073,48 +1073,6 @@ function boardAlignButton(job) {
   return "";
 }
 
-/* Workbench board card (jobs view)                                    */
-/* ------------------------------------------------------------------ */
-
-export function renderBoardCard(job, statuses = null) {
-  const canonical = canonicalJobStatus(job.status);
-  const statusOptions = jobStatusOptionsHtml(statuses, canonical);
-  const match = job.match_score != null ? Math.round(job.match_score) : null;
-  const matchTitle =
-    match != null ? `匹配度 · ${jobMatchSource(job)}` : "尚未分析";
-  return `
-    <article class="board-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}">
-      <div class="board-card__top">
-        <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
-        ${match != null ? `<span class="match-badge ${matchTone(match)}" data-match-total title="${matchTitle}">${match}</span>` : `<span class="match-badge match-badge--empty" title="${matchTitle}">待分析</span>`}
-        <button type="button" class="board-card__title" data-action="open-job-timeline" data-id="${job.job_id}">${esc(job.title)}</button>
-        ${boardMoreMenu(job)}
-      </div>
-      <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
-      ${boardMatchBlock(job)}
-      <div class="board-card__tags">
-        <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
-        <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
-        ${jobCompletenessBadge(job)}
-        ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
-      </div>
-      <div class="board-card__timeline">
-        ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}
-        ${applicationResultBadge(job)}
-        ${deadlineBadge(job)}
-        ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
-        ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
-      </div>
-      ${jobSourceUrl(job) ? `<div class="board-card__links">${jobApplyLinkHtml(job)}</div>` : ""}
-      <div class="row" style="margin-top:8px">
-        <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${statusOptions}</select>
-        ${boardAlignButton(job)}
-        <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-workspace" data-id="${job.job_id}">工作台</button>
-      </div>
-    </article>`;
-}
-
-/* ------------------------------------------------------------------ */
 
 /* Batch alignment panel + result matrix                               */
 /* ------------------------------------------------------------------ */
@@ -1528,43 +1486,6 @@ export function computeJobStats(jobs) {
       offerRate: funnelPercent(offer, interview),
     },
   };
-}
-
-export function renderJobStatsHtml(stats) {
-  const data = stats || computeJobStats([]);
-  const counts = data.counts || {};
-  const funnel = data.funnel || {};
-  const percent = (value) => (value == null ? "—" : `${value}%`);
-  const dot = (key) =>
-    `<span class="board-dot board-dot--${key}" aria-hidden="true"></span>`;
-  const countChips = JOB_STATUS_CANONICAL.map(
-    (key) =>
-      `<span class="badge board-stats-chip">${dot(key)}${esc(JOB_STATUS_LABELS[key])}<strong data-stat-count="${key}">${counts[key] ?? 0}</strong></span>`,
-  ).join("");
-  /* Sprint 4 T2: 漏斗三段复用 S1 Dashboard KPI 视觉语言 —— 语义色顶条 +
-   * 圆角卡（info/warning/success），与 dashboard-kpi 卡贯通。 */
-  const funnelCards = [
-    { key: "applyRate", label: "添加→投递", tone: "info", hint: "已投递及以上阶段 ÷ 岗位总数" },
-    { key: "interviewRate", label: "投递→面试", tone: "warning", hint: "进入面试及以上阶段 ÷ 已投递" },
-    { key: "offerRate", label: "面试→Offer", tone: "success", hint: "拿到 Offer ÷ 进入面试" },
-  ]
-    .map(
-      (card) => `
-        <div class="board-stats-card board-stats-card--${card.tone}" title="${esc(card.hint)}">
-          <span class="board-stats-card__label">${card.label}</span>
-          <strong class="board-stats-card__rate" data-stat-rate="${card.key}">${percent(funnel[card.key])}</strong>
-        </div>`,
-    )
-    .join("");
-  return `
-    <div class="board-stats" data-board-stats role="group" aria-label="求职漏斗统计">
-      <div class="board-stats__counts" data-board-stats-counts>${countChips}</div>
-      <span class="board-stats__divider" aria-hidden="true"></span>
-      <div class="board-stats__funnel" data-board-stats-funnel>
-        <span class="small muted board-stats__label">转化</span>
-        ${funnelCards}
-      </div>
-    </div>`;
 }
 
 /* CSV export helpers (RFC 4180-ish: quote fields containing , " CR or LF;
@@ -2368,12 +2289,65 @@ export function jobTimelineFormHtml(job, snapshots = []) {
         <div class="field wide"><label>备注</label><textarea name="notes" rows="3">${esc(job.notes || "")}</textarea></div>
       </div>
       ${applicationSnapshotsHtml(job, snapshots)}
+      <div class="preanalyze-strip" data-preanalyze-strip>
+        <button class="btn btn-outline btn-sm" type="button" data-action="job-preanalyze" data-id="${esc(job.job_id)}">AI 预分析</button>
+        <span class="small muted">分类 + JD 画像 + 匹配分，不改写简历；重复点击走缓存。</span>
+      </div>
+      <div data-preanalyze-result></div>
       <div class="actions">
         <button class="btn btn-primary btn-sm" type="button" data-action="record-application" data-id="${esc(job.job_id)}">记录投递</button>
         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
         <button class="btn btn-primary" type="submit">保存</button>
       </div>
     </form>`;
+}
+
+/* preanalyze 接线（潜伏功能激活）：详情抽屉「AI 预分析」结果块。
+ * data 为 POST /api/jobs/{id}/preanalyze 的 JobPreanalyzeResponse；
+ * 展示分类徽章、匹配分与理由、JD 画像硬技能 chips——零改写、可重复
+ * 点击走缓存。error 非空或 status=failed 时渲染可读错误。 */
+export function preanalyzeResultHtml(data) {
+  const d = data && typeof data === "object" ? data : null;
+  if (!d) return "";
+  if (d.error || d.status === "failed") {
+    return `<div class="form-error" role="alert" data-preanalyze-error>${esc(
+      d.error || "预分析失败，请稍后重试",
+    )}</div>`;
+  }
+  const cls = d.classification && typeof d.classification === "object" ? d.classification : {};
+  const tags = Array.isArray(cls.tech_tags) ? cls.tech_tags : [];
+  const chips = [
+    cls.job_function ? `<span class="badge badge-blue">${esc(cls.job_function)}</span>` : "",
+    cls.seniority ? `<span class="badge badge-teal">${esc(cls.seniority)}</span>` : "",
+    ...tags.map((tag) => `<span class="badge badge-gray">${esc(tag)}</span>`),
+  ]
+    .filter(Boolean)
+    .join("");
+  const score = d.match_score != null ? Math.round(Number(d.match_score)) : null;
+  const profile = d.jd_profile && typeof d.jd_profile === "object" ? d.jd_profile : null;
+  const hardSkills = Array.isArray(profile && profile.hard_skills) ? profile.hard_skills : [];
+  const source = d.match_reason_source === "llm" ? "AI" : "规则";
+  return `
+    <div class="preanalyze-result" data-preanalyze-result-block>
+      <div class="preanalyze-result__row">
+        ${chips || '<span class="small muted">分类暂不可用</span>'}
+        <span class="badge badge-green" data-preanalyze-cache>${d.cache_hit ? "缓存命中" : "新分析"}</span>
+      </div>
+      ${
+        score != null
+          ? `<div class="preanalyze-result__row"><strong data-preanalyze-score>${score}</strong><span class="small muted">/100 · ${esc(
+              d.match_reason || "暂无推荐理由",
+            )}（${esc(source)}理由${d.match_stale ? " · 已过期" : ""}）</span></div>`
+          : ""
+      }
+      ${
+        hardSkills.length
+          ? `<div class="preanalyze-result__row small">画像硬技能：${hardSkills
+              .map((skill) => `<span class="gap-tag">${esc(skill)}</span>`)
+              .join("")}</div>`
+          : ""
+      }
+    </div>`;
 }
 
 /* 安排跟进快捷弹窗。状态默认保持已投递/面试中，其余状态默认面试中；
@@ -2522,17 +2496,6 @@ export function formatElapsed(ms) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-/** Eval 评分是否真实运行过（存在任一评估结果字段）。 */
-export function hasEvalResult(evalScore) {
-  const score = evalScore || {};
-  return (
-    score.jd_match_score != null ||
-    score.improvement != null ||
-    score.hallucination_detected != null ||
-    score.gap_coverage != null
-  );
-}
-
 /** 工作台 per-run 评估开关：勾选传 true，不勾选不传（None 回退全局默认）。 */
 export function runEvalFromForm(data) {
   const value = data && data.run_eval;
@@ -2585,33 +2548,6 @@ export function diffSectionBadge(diff) {
  *     quick_continue: { job_id, title, company, alignment_status, updated_at } | null
  *   }
  */
-
-/* 3 大 KPI 卡。applied 卡带投递转化提示（占岗位比例）。 */
-export function dashboardKpiHtml(kpi = {}) {
-  const data = kpi && typeof kpi === "object" ? kpi : {};
-  const resumes = Math.max(0, Number(data.resumes) || 0);
-  const jobs = Math.max(0, Number(data.jobs) || 0);
-  const applied = Math.max(0, Number(data.applied) || 0);
-  const applyRate = jobs > 0 ? Math.round((applied / jobs) * 100) : null;
-  const cards = [
-    { key: "resumes", label: "主简历", value: resumes, tone: "info", hint: "可用的主简历底稿" },
-    { key: "jobs", label: "岗位", value: jobs, tone: "teal", hint: "岗位库总数" },
-    { key: "applied", label: "已投递", value: applied, tone: "success", hint: applyRate != null ? `占岗位 ${applyRate}%` : "暂无岗位可计算转化" },
-  ];
-  return `
-    <div class="dashboard-kpi-grid" data-dashboard-kpis>
-      ${cards
-        .map(
-          (card) => `
-        <div class="dashboard-kpi dashboard-kpi--${card.tone}" data-kpi="${card.key}">
-          <div class="dashboard-kpi__label">${esc(card.label)}</div>
-          <div class="dashboard-kpi__value">${esc(card.value)}</div>
-          <div class="dashboard-kpi__hint">${esc(card.hint)}</div>
-        </div>`,
-        )
-        .join("")}
-    </div>`;
-}
 
 /* Lightweight empty-state illustration shared by dashboard and jobs views.
  * Kept as code-native SVG because this is a static, structural illustration
@@ -2728,49 +2664,6 @@ const ALIGNMENT_STATUS_LABELS = {
 export function alignmentStatusLabel(status) {
   return ALIGNMENT_STATUS_LABELS[status]
     || (status ? String(status) : "待分析");
-}
-
-export function quickContinueHtml(qc) {
-  if (!qc || typeof qc !== "object" || !qc.job_id) return "";
-  const status = qc.alignment_status;
-  const qFailed = ["failed", "canceled", "expired"].includes(status);
-  const qBusy = ["running", "queued"].includes(status);
-  let badgeClass = "badge-gray";
-  let badgeLabel = alignmentStatusLabel(status);
-  let btnClass = "btn btn-primary btn-sm";
-  let btnLabel = "继续";
-  let btnAttr = "";
-  let btnHref = `href="#/workspace/${encodeURIComponent(qc.job_id)}"`;
-  if (qFailed) {
-    badgeClass = "badge-red";
-    badgeLabel = "上次失败 · 重新运行";
-    btnClass = "btn btn-danger-solid btn-sm";
-    btnLabel = "重新运行";
-  } else if (status === "succeeded") {
-    badgeClass = "badge-green";
-    badgeLabel = "已对齐";
-    btnClass = "btn btn-outline btn-sm";
-    btnLabel = "查看";
-  } else if (qBusy) {
-    badgeClass = "badge-blue";
-    badgeLabel = "分析中";
-    btnClass = "btn btn-primary btn-sm is-loading";
-    btnLabel = "分析中";
-    btnAttr = ' aria-disabled="true"';
-    btnHref = "";
-  }
-  return `
-    <section class="panel panel-card quick-continue ${qFailed ? "quick-continue--failed" : ""}" data-quick-continue>
-      <div class="quick-continue__head">
-        <span class="badge badge-teal">继续上次</span>
-        <span class="small muted">更新于 ${formatDate(qc.updated_at)}</span>
-      </div>
-      <div class="quick-continue__title">${esc(qc.title)}</div>
-      <div class="quick-continue__meta">${esc(qc.company || "未知公司")} · <span class="quick-continue__status">${esc(badgeLabel)}</span></div>
-      <div class="quick-continue__actions">
-        <a class="${btnClass}" ${btnHref}${btnAttr}>${esc(btnLabel)}</a>
-      </div>
-    </section>`;
 }
 
 /* ------------------------------------------------------------------ */

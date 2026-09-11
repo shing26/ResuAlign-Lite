@@ -8,7 +8,6 @@ import {
   focusInitial,
   isFocusable,
   lockBodyScroll,
-  nextFocusIndex,
   restoreFocus,
   trapTabKey,
   unlockBodyScroll,
@@ -48,33 +47,6 @@ function tabEvent(window, shiftKey = false) {
     cancelable: true,
   });
 }
-
-/* ------------------------------------------------------------------ */
-/* nextFocusIndex (pure tab-order math)                                */
-/* ------------------------------------------------------------------ */
-
-test("nextFocusIndex advances forward with wraparound", () => {
-  assert.equal(nextFocusIndex(0, 3, false), 1);
-  assert.equal(nextFocusIndex(1, 3, false), 2);
-  assert.equal(nextFocusIndex(2, 3, false), 0);
-});
-
-test("nextFocusIndex moves backward with wraparound", () => {
-  assert.equal(nextFocusIndex(0, 3, true), 2);
-  assert.equal(nextFocusIndex(1, 3, true), 0);
-  assert.equal(nextFocusIndex(2, 3, true), 1);
-});
-
-test("nextFocusIndex starts at first/last when current is outside the list", () => {
-  assert.equal(nextFocusIndex(-1, 3, false), 0);
-  assert.equal(nextFocusIndex(-1, 3, true), 2);
-  assert.equal(nextFocusIndex(9, 3, false), 0);
-});
-
-test("nextFocusIndex returns -1 for an empty list", () => {
-  assert.equal(nextFocusIndex(0, 0, false), -1);
-  assert.equal(nextFocusIndex(-1, 0, true), -1);
-});
 
 /* ------------------------------------------------------------------ */
 /* isFocusable / collectFocusables                                     */
