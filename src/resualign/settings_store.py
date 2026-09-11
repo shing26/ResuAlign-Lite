@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from .job_library import JOB_FUNCTIONS, JOB_STATUSES, SENIORITIES
+from .secret_box import decrypt_value, encrypt_value
 from .store_base import UserStoreError, _SqliteStore
 
 _SETTINGS_SCHEMA = """
@@ -120,6 +121,14 @@ def _repair_classification_vocabulary(
 
 def _default_llm() -> dict[str, Any]:
     return dict(default_settings()["llm"])
+
+
+def _llm_for_storage(llm: dict[str, Any] | None) -> dict[str, Any]:
+    """Serialize-ready copy of the llm dict with api_key encrypted at rest
+    (ADR-0035). None/空值与已加密值由 encrypt_value 原样透传。"""
+    data = dict(llm or {})
+    data["api_key"] = encrypt_value(data.get("api_key"))
+    return data
 
 
 class SettingsStore(_SqliteStore):
@@ -324,7 +333,7 @@ class SettingsStore(_SqliteStore):
                         ),
                         merged["llm"].get("provider"),
                         merged["llm"].get("model"),
-                        json.dumps(merged["llm"], ensure_ascii=False),
+                        json.dumps(_llm_for_storage(merged["llm"]), ensure_ascii=False),
                         int(merged["eval_default"]),
                         now,
                         merged.get("local_ingest_token"),
@@ -353,7 +362,11 @@ def _parse_llm_json(raw: str | None) -> dict[str, Any]:
             parsed = None
         if isinstance(parsed, dict):
             llm = parsed
-    return {key: llm.get(key) for key in _default_llm()}
+    values = {key: llm.get(key) for key in _default_llm()}
+    # api_key 在 llm_json 中静态加密（ADR-0035）；无前缀的遗留明文由
+    # decrypt_value 原样透传，待下次保存时自然升级为密文。
+    values["api_key"] = decrypt_value(values["api_key"])
+    return values
 
 
 def _parse_reminder_json(raw: str | None) -> dict[str, Any]:

@@ -20,6 +20,23 @@ def fake_password(suffix: str = "") -> str:
 
 
 @pytest.fixture(autouse=True)
+def isolated_secret_key_file(tmp_path, monkeypatch):
+    """把 API Key 静态加密的密钥文件隔离到测试 tmp 目录。
+
+    secret_box 默认落在 resolve_data_dir()/secret.key；没有这个 fixture，
+    任何跑 store 层的测试都会在真实 data/ 下生成密钥文件。
+    """
+    from resualign import secret_box
+
+    monkeypatch.setenv(
+        "RESUALIGN_SECRET_KEY_FILE", str(tmp_path / "test-secret.key")
+    )
+    secret_box.reset_cache()
+    yield
+    secret_box.reset_cache()
+
+
+@pytest.fixture(autouse=True)
 def reset_shared_rate_limiters():
     """Keep per-host API rate limiters from starving later tests."""
     import resualign.api as api_module
