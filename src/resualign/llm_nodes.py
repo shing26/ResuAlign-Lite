@@ -18,6 +18,7 @@ import time
 import uuid
 from typing import Any
 
+from .secret_box import decrypt_value, encrypt_value
 from .store_base import UserStoreError, _SqliteStore
 
 _LLM_NODES_SCHEMA = """
@@ -359,7 +360,7 @@ class LLMNodeStore(_SqliteStore):
                         name,
                         provider,
                         base_url,
-                        api_key,
+                        encrypt_value(api_key),
                         model,
                         int(activate),
                         now,
@@ -412,7 +413,7 @@ class LLMNodeStore(_SqliteStore):
                         merged["name"],
                         merged["provider"],
                         merged["base_url"],
-                        merged["api_key"],
+                        encrypt_value(merged["api_key"]),
                         merged["model"],
                         int(bool(merged["is_active"])),
                         int(bool(merged["disable_thinking"])),
@@ -525,7 +526,7 @@ class LLMNodeStore(_SqliteStore):
             "name": row["name"],
             "provider": row["provider"],
             "base_url": row["base_url"],
-            "api_key": row["api_key"],
+            "api_key": decrypt_value(row["api_key"]),
             "model": row["model"],
             "is_active": bool(row["is_active"]),
             "created_at": row["created_at"],
