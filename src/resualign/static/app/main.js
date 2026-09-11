@@ -86,6 +86,7 @@ import {
   jobSelectOptionsHtml,
   jobTimelineFormHtml,
   jobsToCsv,
+  LLM_ROLE_LABELS,
   llmNodeCardHtml,
   llmNodeFormHtml,
   nodeTestResultHtml,
@@ -96,6 +97,7 @@ import {
   renderMarkdown,
   renderOnboardingCard,
   ruleFormHtml,
+  roleBindingsPanelHtml,
   ruleListHtml,
   runEvalFromForm,
   settingsBentoHtml,
@@ -576,15 +578,18 @@ function writeSettingsMode(mode) {
 }
 
 async function renderSettingsView(app) {
-  const [settings, status, nodes, rules] = await Promise.all([
+  const [settings, status, nodes, rules, roleBindings] = await Promise.all([
     api("/api/settings"),
     api("/api/settings/status"),
     api("/api/llm/nodes").catch(() => []),
     api("/api/automation/rules").catch(() => []),
+    api("/api/settings/role-bindings").catch(() => null),
   ]);
   state.settings = settings;
   state.llmNodes = Array.isArray(nodes) ? nodes : [];
   state.automationRules = Array.isArray(rules) ? rules : [];
+  state.roleBindings =
+    roleBindings && typeof roleBindings === "object" ? roleBindings : null;
   const vocabulary = settings.classification_vocabulary;
   state.vocabulary = normalizeVocabulary(vocabulary);
   const activeNode = state.llmNodes.find((node) => node.is_active) || null;
@@ -603,6 +608,11 @@ async function renderSettingsView(app) {
   const expertPanelsHtml = `
       ${settingsBentoHtml(activeNode, latency)}
       ${costGuardPanelHtml(settings, status.daily || {})}
+      ${roleBindingsPanelHtml(
+        (state.roleBindings && state.roleBindings.roles) || [],
+        state.llmNodes,
+        (state.roleBindings && state.roleBindings.bindings) || {},
+      )}
       <section class="panel local-ingest-panel" data-local-ingest-panel>
         <div class="panel-head">
           <div>
@@ -1697,6 +1707,27 @@ const actions = {
   "settings-mode-expert": () => {
     writeSettingsMode("expert");
     render();
+  },
+  /* 角色绑定一键预设（unified/hybrid/local）。后端条件不满足时返回
+   * {status:"skipped", message}，如实透出给用户。 */
+  "role-preset": async (button) => {
+    const preset = button.dataset.preset;
+    if (!preset) return;
+    button.disabled = true;
+    try {
+      const body = await api("/api/settings/role-bindings/presets", {
+        method: "POST",
+        body: JSON.stringify({ preset }),
+      });
+      if (body.status === "skipped") {
+        toast(body.message || "该预设当前不可用", "info");
+      } else {
+        toast("预设已应用，下一条任务即生效", "success");
+      }
+      render();
+    } finally {
+      button.disabled = false;
+    }
   },
   "llm-node-edit": (button) => {
     const node = (state.llmNodes || []).find(
@@ -3345,6 +3376,22 @@ async function handleForm(formName, data, form) {
         });
         toast("AI 助手已启用", "success");
       }
+      render();
+      break;
+    }
+    /* 专家模式：角色绑定保存。空值=跟随主节点（后端以 null 删除绑定），
+     * PUT 全量提交当前表单里的角色映射。 */
+    case "settings-role-bindings": {
+      const payload = {};
+      for (const [role, nodeId] of Object.entries(data)) {
+        if (!Object.hasOwn(LLM_ROLE_LABELS, role)) continue;
+        payload[role] = nodeId ? String(nodeId) : null;
+      }
+      await api("/api/settings/role-bindings", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      toast("节点分工已保存，下一条任务即生效", "success");
       render();
       break;
     }
