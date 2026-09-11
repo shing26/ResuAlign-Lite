@@ -1,13 +1,16 @@
 // ==UserScript==
 // @name         ResuAlign Local Collector
 // @namespace    https://127.0.0.1:8000/
-// @version      0.1.0
+// @version      0.1.1
 // @description  划词 / 实习僧岗位详情一键摄入 ResuAlign（本地工作台）
 // @author       ResuAlign
 // @match        http://*/*
 // @match        https://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_xmlhttpRequest
+// @connect      127.0.0.1
+// @connect      localhost
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -343,61 +346,78 @@
       return;
     }
     setFeedback("摄入中…", "info");
-    try {
-      const response = await fetch(
-        config.server.replace(/\/+$/, "") + "/api/jobs/local-ingest",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-ResuAlign-Token": config.token,
-          },
-          body: JSON.stringify(payload),
+    /* GM_xmlhttpRequest 而非页面级 fetch：油猴运行在任意外部招聘网站
+     * 页面上，fetch 跨源带自定义 token 头会被浏览器 CORS 预检掐死
+     * （服务端即便配置了 CORS 也依赖其正确性）；GM_xmlhttpRequest 由
+     * 扩展进程发起，天然绕过同源策略。 */
+    const url = config.server.replace(/\/+$/, "") + "/api/jobs/local-ingest";
+    return await new Promise((resolve) => {
+      GM_xmlhttpRequest({
+        method: "POST",
+        url,
+        headers: {
+          "Content-Type": "application/json",
+          "X-ResuAlign-Token": config.token,
         },
-      );
-      let body = {};
-      try {
-        body = await response.json();
-      } catch {
-        /* keep default body */
-      }
-      if (!response.ok) {
-        if (response.status === 401) {
-          GM_setValue(TOKEN_KEY, "");
+        data: JSON.stringify(payload),
+        timeout: 15000,
+        onload: (response) => {
+          let body = {};
+          try {
+            body = JSON.parse(response.responseText || "{}");
+          } catch {
+            /* keep default body */
+          }
+          if (response.status < 200 || response.status >= 300) {
+            if (response.status === 401) {
+              GM_setValue(TOKEN_KEY, "");
+              setFeedback(
+                "Token 无效或已重置：请在系统设置页重新复制",
+                "error",
+              );
+              showConfigModal("Token 无效或已重置，请粘贴新 Token");
+              resolve(false);
+              return;
+            }
+            const detail = body.detail || {};
+            const reason =
+              typeof detail === "string"
+                ? detail
+                : detail.reason ||
+                  detail.action ||
+                  response.statusText ||
+                  "HTTP " + response.status;
+            setFeedback("摄入失败：" + reason, "error");
+            resolve(false);
+            return;
+          }
+          const created = body.status === "created";
+          const link = body.job_id
+            ? '<a href="' +
+              escapeAttr(config.server) +
+              "/#/workspace/" +
+              encodeURIComponent(body.job_id) +
+              '" target="_blank" rel="noopener" style="color:#2563eb;margin-left:6px">去工作台</a>'
+            : "";
           setFeedback(
-            "Token 无效或已重置：请在系统设置页重新复制",
+            (created ? "已入库" : "已在岗位库") + link,
+            created ? "ok" : "info",
+          );
+          resolve(true);
+        },
+        onerror: () => {
+          setFeedback(
+            "摄入失败：无法连接本地服务（请确认服务已启动、地址与端口正确）",
             "error",
           );
-          showConfigModal("Token 无效或已重置，请粘贴新 Token");
-          return;
-        }
-        const detail = body.detail || {};
-        const reason =
-          typeof detail === "string"
-            ? detail
-            : detail.reason || detail.action || response.statusText;
-        setFeedback("摄入失败：" + reason, "error");
-        return;
-      }
-      const created = body.status === "created";
-      const link = body.job_id
-        ? '<a href="' +
-          escapeAttr(config.server) +
-          "/#/workspace/" +
-          encodeURIComponent(body.job_id) +
-          '" target="_blank" rel="noopener" style="color:#2563eb;margin-left:6px">去工作台</a>'
-        : "";
-      setFeedback(
-        (created ? "已入库" : "已在岗位库") + link,
-        created ? "ok" : "info",
-      );
-    } catch (error) {
-      setFeedback(
-        "摄入失败：" + (error && error.message ? error.message : error) +
-          "（请确认服务已启动）",
-        "error",
-      );
-    }
+          resolve(false);
+        },
+        ontimeout: () => {
+          setFeedback("摄入失败：本地服务响应超时", "error");
+          resolve(false);
+        },
+      });
+    });
   }
 
   function start() {
