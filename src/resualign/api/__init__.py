@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from ..alignment_lifecycle import transition_alignment
@@ -364,6 +365,19 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="ResuAlign API", version="0.3.0", lifespan=lifespan)
+
+# CORS：油猴抓取脚本（resualign-collector.user.js）运行在任意外部招聘网站
+# 页面上，用浏览器 fetch 跨源 POST /api/jobs/local-ingest（自定义
+# X-ResuAlign-Token 头会触发预检）。鉴权边界仍由 43 位随机 Token +
+# 127.0.0.1 绑定承担（docs/deployment-security.md），通配 origin 不引入
+# 新风险；allow_credentials 必须为 False（通配 origin 下浏览器约束）。
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-ResuAlign-Token"],
+)
 
 # Serve the static frontend (index.html) from the root
 _static_dir = Path(__file__).resolve().parents[1] / "static"
