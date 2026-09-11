@@ -666,70 +666,6 @@ export function renderGap(gap) {
   return blocks.join("");
 }
 
-export function radarHtml(score) {
-  const value = Math.max(0, Math.min(100, Number(score) || 0));
-  const dims = [
-    { label: "硬技能", weight: value },
-    { label: "经验", weight: Math.max(20, Math.min(100, value * 0.9 + 10)) },
-    { label: "场景", weight: Math.max(20, Math.min(100, value * 0.85 + 15)) },
-    { label: "表达", weight: Math.max(20, Math.min(100, value * 0.8 + 20)) },
-  ];
-  const cx = 100;
-  const cy = 100;
-  const radius = 72;
-  const points = dims.map((dim, index) => {
-    const angle = -Math.PI / 2 + (index * 2 * Math.PI) / dims.length;
-    return {
-      x: cx + Math.cos(angle) * radius,
-      y: cy + Math.sin(angle) * radius,
-    };
-  });
-  const polygon = points
-    .map((point, index) => {
-      const weight = (dims[index].weight || 0) / 100;
-      const x = cx + (point.x - cx) * weight;
-      const y = cy + (point.y - cy) * weight;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-  const grid = [0.33, 0.66, 1]
-    .map((scale) =>
-      points
-        .map((point) => {
-          const x = cx + (point.x - cx) * scale;
-          const y = cy + (point.y - cy) * scale;
-          return `${x.toFixed(1)},${y.toFixed(1)}`;
-        })
-        .join(" "),
-    )
-    .map(
-      (points) =>
-        `<polygon class="radar-grid" points="${points}" fill="none"></polygon>`,
-    )
-    .join("");
-  return `
-    <div class="split-radar" data-match-radar>
-      <svg viewBox="0 0 200 200" role="img" aria-label="岗位匹配雷达">
-        ${grid}
-        ${points
-          .map(
-            (point, index) =>
-              `<line class="radar-axis-line" x1="${cx}" y1="${cy}" x2="${point.x}" y2="${point.y}"></line>`,
-          )
-          .join("")}
-        <polygon class="radar-fill" points="${polygon}"></polygon>
-        ${points
-          .map(
-            (point, index) =>
-              `<circle class="radar-dot" cx="${cx + (point.x - cx) * ((dims[index].weight || 0) / 100)}" cy="${cy + (point.y - cy) * ((dims[index].weight || 0) / 100)}" r="3"></circle>`,
-          )
-          .join("")}
-      </svg>
-      <div class="split-radar__score"><strong>${Math.round(value)}</strong><span>/100</span></div>
-      <div class="split-radar__legend">${dims.map((dim) => `<span>${esc(dim.label)}</span>`).join("")}</div>
-    </div>`;
-}
-
 export function stageStepper(session) {
   const steps = stageProgress(session);
   return `
@@ -967,15 +903,20 @@ const MATCH_DIMENSIONS = [
   { key: "experience", label: "经验" },
 ];
 
+/* 新手体验（2026-09-10）：低于该阈值的维度视为短板，进度条标红并加
+ * 「弱项」徽标，帮用户一秒抓到最该补的维度。 */
+const MATCH_WEAK_THRESHOLD = 50;
+
 function matchDimensionHtml(detail) {
   return MATCH_DIMENSIONS.map(({ key, label }) => {
     const raw = detail[key];
     const num = raw == null || raw === "" ? Number.NaN : Number(raw);
     const value = Number.isFinite(num) ? Math.round(Math.max(0, Math.min(100, num))) : null;
     const width = value == null ? 0 : value;
+    const weak = value != null && value < MATCH_WEAK_THRESHOLD;
     return `
-      <div class="match-dim" data-match-dimension="${key}">
-        <span>${label}</span>
+      <div class="match-dim${weak ? " is-weak" : ""}" data-match-dimension="${key}">
+        <span>${label}${weak ? '<i class="match-dim__weak-badge">弱项</i>' : ""}</span>
         <div class="match-dim__track"><i style="width:${width}%"></i></div>
         <b>${value == null ? "—" : value}</b>
       </div>`;

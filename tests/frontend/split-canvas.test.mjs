@@ -11,7 +11,6 @@ import {
   diffSectionBadge,
   exportDock,
   jdProfileSummary,
-  radarHtml,
   renderBoardCard,
   renderGap,
   renderSkills,
@@ -189,22 +188,8 @@ test("renderGap returns null for empty gap and placeholder when blank", () => {
   assert.match(renderGap({}), /尚未生成差距报告/);
 });
 
-/* ------------------------------------------------------------------ */
-/* radarHtml                                                           */
-/* ------------------------------------------------------------------ */
-
-test("radarHtml renders radar markup with clamped score", () => {
-  const html = radarHtml(85);
-  assert.match(html, /data-match-radar/);
-  assert.match(html, /aria-label="岗位匹配雷达"/);
-  assert.match(html, /<strong>85<\/strong>/);
-  assert.match(html, /radar-fill/);
-  assert.match(html, />硬技能</);
-  const clamped = radarHtml(150);
-  assert.match(clamped, /<strong>100<\/strong>/);
-  const low = radarHtml(-5);
-  assert.match(low, /<strong>0<\/strong>/);
-});
+/* radarHtml 已随死代码清理移除（2026-09-10），相关断言见
+ * tests/frontend/jobs-match.test.mjs 的「radar chart dead code」用例。 */
 
 /* ------------------------------------------------------------------ */
 /* diffCard / diffList                                                 */
