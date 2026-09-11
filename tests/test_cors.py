@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
-from resualign.jobs import JobRegistry
 from resualign.settings_store import SettingsStore
 from resualign.workspace import JobLibraryStore, UserStore
 
