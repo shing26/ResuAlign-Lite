@@ -25,6 +25,8 @@ def test_local_ingest_token_visible_reset_and_persists(
 ):
     capture_errors(page)
     page.goto(f"{base_url}/#/settings", wait_until="domcontentloaded")
+    # 双模式（2026-09-10）：Token 面板在专家模式——显式切换后可达。
+    page.click("[data-action='settings-mode-expert']")
     page.wait_for_selector("[data-local-ingest-panel]", timeout=15000)
     token1 = page.locator("[data-local-ingest-token]").inner_text()
     expect(len(token1) >= 20, "settings should expose a generated token")
