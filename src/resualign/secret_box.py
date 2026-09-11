@@ -19,7 +19,6 @@ import threading
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
-from cryptography.exceptions import InvalidSignature
 
 from .store_base import resolve_data_dir
 
