@@ -592,8 +592,10 @@ test("main.js wires the simple/expert mode switch and simple form submission", (
     /settingsMode === "expert" \? expertPanelsHtml : simpleLlmSetupHtml/,
     "settings view must gate expert panels behind the mode switch",
   );
-  /* 无节点时强制简单模式（绕过已存的专家偏好） */
-  assert.match(mainJs, /hasNodes \? readSettingsMode\(\) : "simple"/);
+  /* 模式解析：默认简单，「专家」为显式选择后即生效（无节点也允许——
+   * 否则备用节点/Token 面板无处可达，E2E settings 流曾死锁于此） */
+  assert.match(mainJs, /const settingsMode = readSettingsMode\(\);/);
+  assert.doesNotMatch(mainJs, /hasNodes \? readSettingsMode\(\)/);
   /* 模式持久化与切换动作 */
   assert.match(mainJs, /"settings-mode-simple"/);
   assert.match(mainJs, /"settings-mode-expert"/);

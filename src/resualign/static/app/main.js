@@ -601,9 +601,10 @@ async function renderSettingsView(app) {
   const nodeCards = state.llmNodes
     .map((node) => llmNodeCardHtml(node, (state.llmNodeTests || {})[node.node_id]))
     .join("");
-  /* 无节点（含节点列表加载失败）时强制简单模式，绕过已存的专家偏好。 */
-  const hasNodes = state.llmNodes.length > 0;
-  const settingsMode = hasNodes ? readSettingsMode() : "simple";
+  /* 模式解析：无节点默认简单模式；「专家」是显式选择后即生效（否则
+   * 备用节点/Token 面板对想进阶的用户无处可达——E2E settings 流曾在此
+   * 死锁）。 */
+  const settingsMode = readSettingsMode();
   const modeSwitchHtml = settingsModeSwitchHtml(settingsMode);
   const simpleSetupNode = activeNode || state.llmNodes[0] || null;
   const expertPanelsHtml = `
