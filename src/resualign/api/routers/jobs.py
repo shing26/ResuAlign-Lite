@@ -16,7 +16,6 @@ from ...llm_usage import llm_tenant_context
 from ...role_router import call_with_role
 from ..deps import get_current_user, get_local_ingest_user
 from ..schemas import (
-    BulkStatusRequest,
     FinalDraftRequest,
     JobCreateRequest,
     JobExportRequest,
@@ -331,30 +330,6 @@ async def update_library_job(job_id: str, req: JobUpdateRequest, request: Reques
     if job is None:
         raise HTTPException(status_code=404, detail='Job not found')
     return job
-
-@router.post('/api/jobs/bulk-status', include_in_schema=False)
-def bulk_update_job_status(req: BulkStatusRequest, user: dict[str, Any]=Depends(get_current_user)):
-    """Update status for many library jobs, returning per-id results.
-
-    Deprecated: this hidden endpoint is superseded by the kanban bulk-status
-    flow (``/api/kanban/bulk-status``) with optimistic locking and
-    idempotency keys. It is kept for backward compatibility only and will be
-    removed in a future release; new callers must use the kanban endpoint.
-    """
-    results: list[dict[str, Any]] = []
-    updated = 0
-    for job_id in req.job_ids:
-        try:
-            job = api_module._jobs.update_job(user['user_id'], job_id, status=req.status)
-        except api_module.UserStoreError as exc:
-            results.append({'job_id': job_id, 'updated': False, 'status': 'error', 'error': str(exc)})
-            continue
-        if job is None:
-            results.append({'job_id': job_id, 'updated': False, 'status': 'not_found'})
-        else:
-            updated += 1
-            results.append({'job_id': job_id, 'updated': True, 'status': 'updated', 'job': job})
-    return {'updated': updated, 'total': len(req.job_ids), 'results': results}
 
 @router.delete('/api/jobs/{job_id}', status_code=204)
 def delete_library_job(job_id: str, user: dict[str, Any]=Depends(get_current_user)):

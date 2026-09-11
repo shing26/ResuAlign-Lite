@@ -365,7 +365,7 @@ export async function renderResumeCenter(app, { resumeId = null, showList = fals
   } else if (showList) {
     await renderResumeListView(app);
   } else {
-    /* v2.0 shell：默认直达最新主简历的 65/35 详情视图（preview.html 契约）；
+    /* v2.0 shell：默认直达最新主简历的 65/35 详情视图（v2 重设计契约）；
      * 显式 #/resume/list 或无简历时才渲染列表/空态。 */
     state.resumes = await api("/api/master-resumes");
     /* Bug-05: 默认直达带诊断的主简历，避免最新“另存版”抢占入口。 */

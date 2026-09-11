@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 import {
   APPLICATION_RESULT_LABELS,
   boardCard,
+  preanalyzeResultHtml,
   jobTimelineFormHtml,
-  renderBoardCard,
 } from "../../src/resualign/static/app/format.js";
 
 const appDir = join(
@@ -123,16 +123,6 @@ test("boardCard omits match block for unanalyzed jobs", () => {
   assert.match(body.querySelector(".match-badge--empty").textContent, /待分析/);
 });
 
-test("renderBoardCard renders the same match block contract", () => {
-  const body = bodyFrom(renderBoardCard(DETAIL_JOB));
-  assert.equal(body.querySelectorAll("[data-match-dimension]").length, 4);
-  assert.ok(body.querySelector("[data-match-total]"));
-  assert.ok(body.querySelector("[data-match-stale]"));
-  assert.ok(
-    body.querySelector('[data-action="recompute-match"][data-id="j1"]'),
-  );
-});
-
 /* P1-2：卡片状态下拉与筛选/编辑同源 —— 标签取自设置词表，恒为五个
  * canonical key（状态机完整）；词表缺项回退内建标签。 */
 test("boardCard status dropdown follows the settings vocabulary labels", () => {
@@ -183,20 +173,6 @@ test("boardCard status dropdown falls back to built-in statuses", () => {
     "offer",
     "withdrawn",
   ]);
-});
-
-test("renderBoardCard status dropdown follows the settings vocabulary", () => {
-  const renamed = ["未投递", "已投递", "面试中", "已拿Offer", "放弃"];
-  const body = bodyFrom(renderBoardCard(DETAIL_JOB, renamed));
-  const options = [...body.querySelectorAll("[data-board-status] option")];
-  assert.deepEqual(options.map((option) => option.value), [
-    "draft",
-    "applied",
-    "interview",
-    "offer",
-    "withdrawn",
-  ]);
-  assert.deepEqual(options.map((option) => option.textContent), renamed);
 });
 
 test("match dimensions tolerate missing or invalid values", () => {
@@ -279,46 +255,6 @@ test("boardCard succeeded with zero diffs shows 无建议 badge", () => {
     node.textContent.includes("无建议"),
   );
   assert.ok(badge, "succeeded+0 diff must show 无建议 badge");
-});
-
-test("renderBoardCard idle alignment_status shows 开始对齐 button", () => {
-  const body = bodyFrom(renderBoardCard(makeAlignJob()));
-  const btn = body.querySelector(".board-card__align");
-  assert.ok(btn, "idle job must have an align button on renderBoardCard");
-  assert.equal(btn.textContent, "开始对齐");
-});
-
-test("renderBoardCard failed alignment_status shows 重新对齐 button", () => {
-  const body = bodyFrom(renderBoardCard(makeAlignJob({ alignment_status: "failed" })));
-  const btn = body.querySelector(".board-card__align");
-  assert.ok(btn, "failed job must have an align button on renderBoardCard");
-  assert.equal(btn.textContent, "重新对齐");
-});
-
-test("renderBoardCard succeeded with zero diffs shows 重新对齐 button", () => {
-  const body = bodyFrom(
-    renderBoardCard(makeAlignJob({ alignment_status: "succeeded", diffs: [] })),
-  );
-  const btn = body.querySelector(".board-card__align");
-  assert.ok(btn, "succeeded+0 diff job must have an align button on renderBoardCard");
-  assert.equal(btn.textContent, "重新对齐");
-});
-
-test("renderBoardCard succeeded with diffs shows no align button", () => {
-  const body = bodyFrom(
-    renderBoardCard(
-      makeAlignJob({
-        alignment_status: "succeeded",
-        diffs: [{ original: "a", proposed: "b" }],
-      }),
-    ),
-  );
-  const btn = body.querySelector(".board-card__align");
-  assert.equal(
-    btn,
-    null,
-    "succeeded with diffs must have NO align button on renderBoardCard",
-  );
 });
 
 test("boardCard distinguishes degraded tailor from plain empty diffs", () => {
@@ -453,4 +389,71 @@ test("update-master-resume 原地反哺接线（source contract）", () => {
   const main = read("main.js");
   assert.match(main, /"confirm-update-master"/, "confirm action exists");
   assert.match(main, /版本时间线/, "rollback affordance surfaced in modal copy");
+});
+
+/* ------------------------------------------------------------------ */
+/* preanalyze 接线（潜伏功能激活，2026-09-11）                            */
+/* ------------------------------------------------------------------ */
+
+test("preanalyzeResultHtml renders classification, score and profile skills", () => {
+  const body = bodyFrom(
+    preanalyzeResultHtml({
+      job_id: "j1",
+      status: "ready",
+      classification: {
+        job_function: "后端开发",
+        seniority: "junior",
+        tech_tags: ["FastAPI", "Redis"],
+      },
+      match_score: 72.4,
+      match_reason: "四维匹配 72 分",
+      match_reason_source: "fallback",
+      match_stale: false,
+      cache_hit: true,
+      jd_profile: { hard_skills: ["Python", "MySQL"] },
+    }),
+  );
+  assert.match(body.textContent, /后端开发/);
+  assert.match(body.textContent, /junior/);
+  assert.match(body.textContent, /FastAPI/);
+  assert.match(body.querySelector("[data-preanalyze-score]").textContent, /72/);
+  assert.match(body.textContent, /四维匹配 72 分/);
+  assert.match(body.textContent, /规则理由/);
+  assert.match(body.textContent, /缓存命中/);
+  assert.match(body.textContent, /画像硬技能/);
+  assert.match(body.textContent, /Python/);
+});
+
+test("preanalyzeResultHtml renders readable error state", () => {
+  const body = bodyFrom(
+    preanalyzeResultHtml({ status: "failed", error: "JD 文本为空" }),
+  );
+  assert.match(body.textContent, /JD 文本为空/);
+  assert.equal(body.querySelector("[data-preanalyze-error]") != null, true);
+  assert.equal(bodyFrom(preanalyzeResultHtml(null)).textContent.trim(), "");
+});
+
+test("preanalyzeResultHtml escapes hostile values", () => {
+  const body = bodyFrom(
+    preanalyzeResultHtml({
+      status: "ready",
+      classification: { job_function: "<b>后端</b>", tech_tags: ["<i>x</i>"] },
+      match_reason: "<script>1</script>",
+      jd_profile: { hard_skills: ["<u>Py</u>"] },
+    }),
+  );
+  assert.equal(body.querySelector("b, i, u, script"), null);
+});
+
+test("job detail drawer exposes the preanalyze entry (source contract)", () => {
+  const format = read("format.js");
+  assert.match(
+    format,
+    /data-action="job-preanalyze"/,
+    "drawer carries the preanalyze button",
+  );
+  assert.match(format, /data-preanalyze-result/, "result mount exists");
+  const main = read("main.js");
+  assert.match(main, /"job-preanalyze"/, "action wired in main.js");
+  assert.match(main, /\/preanalyze/, "calls the preanalyze endpoint");
 });

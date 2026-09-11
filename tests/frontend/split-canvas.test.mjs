@@ -12,7 +12,6 @@ import {
   exportDock,
   jdProfileSummary,
   radarHtml,
-  renderBoardCard,
   renderGap,
   renderSkills,
   stageProgress,
@@ -624,7 +623,7 @@ test("exportDock enables the three final actions for a saved final draft", () =>
 });
 
 /* ------------------------------------------------------------------ */
-/* boardCard (copilot board) vs renderBoardCard (jobs board)           */
+/* boardCard (copilot board)                                           */
 /* ------------------------------------------------------------------ */
 
 test("boardCard renders copilot card with drag handle and match badge", () => {
@@ -665,38 +664,6 @@ test("boardCard shows 待分析 when no match score", () => {
   assert.match(html, /match-badge--empty/);
 });
 
-test("renderBoardCard renders job-board card with check and edit actions", () => {
-  const html = renderBoardCard({
-    job_id: "j1",
-    title: "前端",
-    status: "面试中",
-    classification_pending: false,
-  });
-  assert.match(html, /data-board-check/);
-  assert.match(html, /data-action="open-job-timeline"/);
-  assert.match(html, /data-action="open-job-followup" data-id="j1"/);
-  assert.match(html, /data-action="edit-job"/);
-  assert.match(html, /data-action="delete-job"/);
-  assert.match(html, /aria-label="选择 前端"/);
-  assert.match(html, /value="interview" selected/);
-  assert.doesNotMatch(html, /board-card--pending/);
-  assert.match(
-    renderBoardCard({ job_id: "j1", title: "T", status: "x", classification_pending: true }),
-    /board-card--pending/,
-  );
-});
-
-test("renderBoardCard shows 去投递 when source_url exists", () => {
-  const html = renderBoardCard({
-    job_id: "j1",
-    title: "前端",
-    status: "applied",
-    source_url: "https://example.com/jobs/1",
-  });
-  assert.match(html, /data-action="open-source-url"/);
-  assert.match(html, /去投递 ↗/);
-});
-
 /* F10: 看板卡片匹配徽章 title 标注来源（job.match_score 来自工作台评估） */
 test("boardCard match badge title discloses the score source", () => {
   const html = boardCard({
@@ -713,19 +680,6 @@ test("boardCard match badge title discloses the score source", () => {
   );
 });
 
-test("renderBoardCard match badge carries the source title", () => {
-  const html = renderBoardCard({
-    job_id: "j1",
-    title: "前端",
-    status: "applied",
-    match_score: 66,
-    match_score_detail: { total: 66 },
-  });
-  assert.match(html, /class="match-badge match--mid" data-match-total title="匹配度 · 规则匹配分（四维打分）">66<\/span>/);
-  const empty = renderBoardCard({ job_id: "j2", title: "T", status: "draft" });
-  assert.match(empty, /class="match-badge match-badge--empty" title="尚未分析">待分析<\/span>/);
-});
-
 /* F2: 分类待定徽章可点击重分类（badge → button，带 aria-label） */
 test("boardCard classification-pending badge is a reclassify button", () => {
   const html = boardCard({
@@ -740,23 +694,6 @@ test("boardCard classification-pending badge is a reclassify button", () => {
   );
   assert.doesNotMatch(
     boardCard({ job_id: "j2", title: "T", status: "draft" }),
-    /data-action="reclassify-job"/,
-  );
-});
-
-test("renderBoardCard classification-pending badge is a reclassify button", () => {
-  const html = renderBoardCard({
-    job_id: "j1",
-    title: "前端",
-    status: "applied",
-    classification_pending: true,
-  });
-  assert.match(
-    html,
-    /<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="j1" aria-label="重新分类">分类待定<\/button>/,
-  );
-  assert.doesNotMatch(
-    renderBoardCard({ job_id: "j2", title: "T", status: "draft" }),
     /data-action="reclassify-job"/,
   );
 });
@@ -806,18 +743,4 @@ test("boardCard flags junk JD as 文本异常 even when fields complete", () => 
   });
   assert.match(html, />JD 文本异常</);
   assert.doesNotMatch(html, />待补全</);
-});
-
-test("renderBoardCard shows 待补全 badge when title/company/salary missing", () => {
-  const html = renderBoardCard({ job_id: "j1", status: "draft" });
-  assert.match(html, />待补全</);
-  assert.match(html, /title="缺少：标题、公司、薪资"/);
-  const complete = renderBoardCard({
-    job_id: "j2",
-    title: "T",
-    company: "C",
-    salary_max: 1,
-    status: "draft",
-  });
-  assert.doesNotMatch(complete, />待补全</);
 });

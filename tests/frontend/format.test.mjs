@@ -11,7 +11,6 @@ import {
   formatDate,
   formatElapsed,
   formatSalary,
-  hasEvalResult,
   inlineDiff,
   isBackwardJobStatus,
   isJdUrl,
@@ -886,18 +885,8 @@ test("formatElapsed clamps negatives and handles missing input", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* F1 Eval 开关：hasEvalResult / runEvalFromForm                        */
+/* F1 Eval 开关：runEvalFromForm                                        */
 /* ------------------------------------------------------------------ */
-
-test("hasEvalResult is true when any eval field exists", () => {
-  assert.equal(hasEvalResult({ jd_match_score: 80 }), true);
-  assert.equal(hasEvalResult({ hallucination_detected: false }), true);
-  assert.equal(hasEvalResult({ improvement: 0 }), true);
-  assert.equal(hasEvalResult({ gap_coverage: "60%" }), true);
-  assert.equal(hasEvalResult({}), false);
-  assert.equal(hasEvalResult(null), false);
-  assert.equal(hasEvalResult(undefined), false);
-});
 
 test("runEvalFromForm maps checked to true, unchecked to undefined", () => {
   assert.equal(runEvalFromForm({ run_eval: "on" }), true);

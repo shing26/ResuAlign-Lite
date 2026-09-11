@@ -4,9 +4,7 @@ import { Window } from "happy-dom";
 
 import {
   batchPanelHtml,
-  computeJobStats,
   renderBatchMatrixHtml,
-  renderJobStatsHtml,
 } from "../../../src/resualign/static/app/format.js";
 
 function docFromHtml(html) {
@@ -14,54 +12,6 @@ function docFromHtml(html) {
   window.document.body.innerHTML = html;
   return window.document;
 }
-
-/* ------------------------------------------------------------------ */
-/* renderJobStatsHtml (dashboard stats bar)                           */
-/* ------------------------------------------------------------------ */
-
-const sampleJobs = [
-  { status: "draft" },
-  { status: "draft" },
-  { status: "applied" },
-  { status: "interview" },
-  { status: "offer" },
-  { status: "withdrawn" },
-];
-
-test("renderJobStatsHtml shows five status counts", () => {
-  const doc = docFromHtml(renderJobStatsHtml(computeJobStats(sampleJobs)));
-  const counts = doc.querySelector("[data-board-stats-counts]");
-  assert.equal(counts.querySelectorAll(".badge").length, 5);
-  assert.equal(counts.querySelector('[data-stat-count="draft"]').textContent, "2");
-  assert.equal(counts.querySelector('[data-stat-count="applied"]').textContent, "1");
-  assert.equal(counts.querySelector('[data-stat-count="interview"]').textContent, "1");
-  assert.equal(counts.querySelector('[data-stat-count="offer"]').textContent, "1");
-  assert.equal(counts.querySelector('[data-stat-count="withdrawn"]').textContent, "1");
-});
-
-test("renderJobStatsHtml shows funnel conversion percentages", () => {
-  const doc = docFromHtml(renderJobStatsHtml(computeJobStats(sampleJobs)));
-  const funnel = doc.querySelector("[data-board-stats-funnel]");
-  // applied = 1+1+1 = 3 of 6 -> 50%; interview = 1+1 = 2 of 3 -> 67%; offer = 1 of 2 -> 50%
-  assert.equal(funnel.querySelector('[data-stat-rate="applyRate"]').textContent, "50%");
-  assert.equal(funnel.querySelector('[data-stat-rate="interviewRate"]').textContent, "67%");
-  assert.equal(funnel.querySelector('[data-stat-rate="offerRate"]').textContent, "50%");
-});
-
-test("renderJobStatsHtml renders em dash when a funnel denominator is zero", () => {
-  const doc = docFromHtml(renderJobStatsHtml(computeJobStats([{ status: "draft" }])));
-  const funnel = doc.querySelector("[data-board-stats-funnel]");
-  // 投递/总数 has a live denominator (1) -> 0%; 面试/投递 and Offer/面试 divide by 0 -> "—"
-  assert.equal(funnel.querySelector('[data-stat-rate="applyRate"]').textContent, "0%");
-  assert.equal(funnel.querySelector('[data-stat-rate="interviewRate"]').textContent, "—");
-  assert.equal(funnel.querySelector('[data-stat-rate="offerRate"]').textContent, "—");
-});
-
-test("renderJobStatsHtml falls back to empty stats", () => {
-  const doc = docFromHtml(renderJobStatsHtml());
-  assert.equal(doc.querySelectorAll("[data-board-stats-counts] .badge").length, 5);
-  assert.equal(doc.querySelector('[data-stat-count="draft"]').textContent, "0");
-});
 
 /* ------------------------------------------------------------------ */
 /* renderBatchMatrixHtml (batch comparison matrix)                    */

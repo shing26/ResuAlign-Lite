@@ -68,7 +68,6 @@ from .schemas import (
     AnalyzeRequest,
     AutomationRuleCreateRequest,
     AutomationRuleUpdateRequest,
-    BulkStatusRequest,
     FinalDraftRequest,
     JobCreateRequest,
     JobImportRequest,
@@ -95,7 +94,6 @@ __all__ = [
     "AutomationRuleCreateRequest",
     "AutomationRuleUpdateRequest",
     "BatchAlignStore",
-    "BulkStatusRequest",
     "ContentCache",
     "EnvSettings",
     "FileParseError",
@@ -516,7 +514,6 @@ cancel_analysis_job = _jobs_router.cancel_analysis_job
 reclassify_library_job = _jobs_router.reclassify_library_job
 save_final_draft = _jobs_router.save_final_draft
 update_library_job = _jobs_router.update_library_job
-bulk_update_job_status = _jobs_router.bulk_update_job_status
 delete_library_job = _jobs_router.delete_library_job
 run_workbench = _jobs_router.run_workbench
 accept_workbench_diffs = _jobs_router.accept_workbench_diffs

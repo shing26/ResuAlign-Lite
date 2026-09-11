@@ -93,6 +93,7 @@ import {
   offerCelebrationHtml,
   onboardingSteps,
   parseHashValue,
+  preanalyzeResultHtml,
   RESUME_LIST_SENTINEL,
   renderMarkdown,
   renderOnboardingCard,
@@ -1639,8 +1640,40 @@ const actions = {
     }
     window.open(url, "_blank", "noopener,noreferrer");
   },
-  "bulk-move-status": async () => {
-    const selected = $$("[data-board-check]:checked").map(
+  /* preanalyze 接线：详情抽屉「AI 预分析」。结果只落在抽屉的结果块里，
+   * 不整页 render（保留用户未保存的表单输入）；重复点击走后端缓存。 */
+  "job-preanalyze": async (button) => {
+    const jobId = button.dataset.id;
+    if (!jobId) return;
+    const mount = button.closest("form")?.querySelector("[data-preanalyze-result]");
+    button.disabled = true;
+    if (mount) mount.innerHTML = '<div class="form-success" role="status">预分析中…（分类 + JD 画像）</div>';
+    try {
+      const data = await api(
+        `/api/jobs/${encodeURIComponent(jobId)}/preanalyze`,
+        { method: "POST" },
+      );
+      if (mount) mount.innerHTML = preanalyzeResultHtml(data);
+      /* 分类结果落库后岗位卡徽章会变，静默刷新后台数据（不重渲染抽屉） */
+      try {
+        const list = await api("/api/jobs?limit=500");
+        state.jobs = Array.isArray(list) ? list : state.jobs;
+      } catch {
+        /* keep stale list */
+      }
+    } catch (error) {
+      if (mount) {
+        mount.innerHTML = `<div class="form-error" role="alert">${esc(
+          error.message || "预分析失败",
+        )}</div>`;
+      } else {
+        toast(error.message || "预分析失败", "error");
+      }
+    } finally {
+      button.disabled = false;
+    }
+  },
+  "bulk-move-status": async () => {    const selected = $$("[data-board-check]:checked").map(
       (input) => input.value,
     );
     const status = $("[data-board-bulk-status]").value;
@@ -1648,9 +1681,15 @@ const actions = {
       toast("请先选择岗位和目标状态", "error");
       return;
     }
-    const body = await api("/api/jobs/bulk-status", {
+    /* 收口到 kanban bulk-status（幂等 + 去重 + 行数上限），替换已废弃的
+     * /api/jobs/bulk-status 旧端点。 */
+    const body = await api("/api/kanban/bulk-status", {
       method: "POST",
-      body: JSON.stringify({ job_ids: selected, status }),
+      body: JSON.stringify({
+        job_ids: selected,
+        status,
+        idempotency_key: `fe-bulk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      }),
     });
     toast(
       `批量移动完成：${body.updated} / ${body.total} 条`,
