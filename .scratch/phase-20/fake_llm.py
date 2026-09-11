@@ -243,6 +243,15 @@ async def chat_completions(request: Request) -> dict:
         (m.get("content", "") for m in messages if m.get("role") == "user"),
         "",
     )
+    # Connection probe (settings 测试连接 / node test): no system prompt,
+    # user message is literally "ping". Answer with a one-token pong.
+    if not system.strip() and user.strip() == "ping":
+        STAGE_HITS["probe"] += 1
+        return {
+            "choices": [{
+                "message": {"content": "pong"},
+            }],
+        }
     payload = fake_llm_response(system, user)
     if payload is None:
         # Unknown system prompt: fail loudly instead of guessing.
