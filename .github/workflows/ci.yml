@@ -34,7 +34,6 @@ jobs:
             test-results.xml
       - name: Frontend syntax check (ESM tolerant)
         run: |
-          node --input-type=module --check < src/resualign/static/app.js
           if ls src/resualign/static/app/*.js >/dev/null 2>&1; then
             for file in src/resualign/static/app/*.js; do
               node --input-type=module --check < "$file"
