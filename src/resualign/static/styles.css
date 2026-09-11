@@ -9326,6 +9326,47 @@ body.resume-inline-editing .resume-doc {
   margin-top: 4px;
 }
 
+/* 专家模式：节点分工（角色绑定）面板。 */
+.role-binding-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.role-binding-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--ra-accent, #6366f1);
+  border-radius: 6px;
+  background: var(--ra-surface-soft, #f8fafc);
+}
+
+.role-binding-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.role-binding-row__select {
+  flex: 0 0 auto;
+  max-width: 280px;
+}
+
+@media (max-width: 700px) {
+  .role-binding-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .role-binding-row__select {
+    max-width: none;
+  }
+}
+
 .settings-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);

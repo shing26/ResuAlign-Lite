@@ -3569,8 +3569,98 @@ export function simpleLlmSetupHtml(node, lastTest) {
           </div>
         </form>
         <div data-llm-node-test-result>${testResult}</div>
-        ${isEdit ? "" : '<p class="small muted">保存后第一个节点自动启用。备用节点、成本护栏等高级配置可在「专家模式」中调整。</p>'}
+        ${isEdit ? "" : '<p class="small muted">保存后第一个节点自动启用。备用节点、成本护栏等高级配置可在「专家模式」中调整；多节点分工（本地分析 + 云端写作）也在那里配置。</p>'}
       </div>
+    </section>`;
+}
+
+/* --- 专家模式：角色绑定面板 --- */
+/* 五个 pipeline 角色的中文文案（对照 llm_nodes._LLM_ROLES 与
+ * role_router._ROLE_TIMEOUT_DEFAULTS 的顺序）。 */
+export const LLM_ROLE_LABELS = {
+  diagnose: "简历诊断",
+  profiler: "JD 画像",
+  gap_analyzer: "差距分析",
+  editor: "改写引擎",
+  evaluator: "对齐评估",
+};
+
+const LLM_ROLE_HINTS = {
+  diagnose: "对主简历做无 JD 体检，输出 ATS 分与问题清单",
+  profiler: "从 JD 原文抽取硬技能/场景/要求，决定匹配质量",
+  gap_analyzer: "对比主简历与 JD 画像，产出差距报告",
+  editor: "逐条改写建议的生成——最吃模型写作能力",
+  evaluator: "LLM 评审打分与幻觉检测",
+};
+
+/** 角色绑定面板：每行一个角色，下拉选承载节点（不选=跟随主节点）；
+ *  三个一键预设走 data-action（POST presets），保存走 data-form。
+ *  bindings 为 {role: node_id}；node_id 不在下拉中（节点已删）时后端
+ *  已自动回落，无需前端特判。 */
+export function roleBindingsPanelHtml(roles, nodes, bindings) {
+  const roleList = Array.isArray(roles) ? roles : Object.keys(LLM_ROLE_LABELS);
+  const nodeList = Array.isArray(nodes) ? nodes : [];
+  const bindMap = bindings && typeof bindings === "object" ? bindings : {};
+  if (!nodeList.length) {
+    return `
+      <section class="panel role-bindings-panel" data-role-bindings-panel>
+        <div class="panel-head">
+          <div>
+            <h2>节点分工</h2>
+            <p>按任务角色把不同 LLM 节点分配到 pipeline 各环节</p>
+          </div>
+        </div>
+        <div class="panel-body muted small" data-role-bindings-empty>
+          还没有可分配的节点——先在下方「LLM 节点」添加节点，再回来配置分工。
+        </div>
+      </section>`;
+  }
+  const rows = roleList
+    .map((role) => {
+      const key = String(role || "");
+      const label = LLM_ROLE_LABELS[key] || key;
+      const hint = LLM_ROLE_HINTS[key] || "";
+      const bound = bindMap[key] || "";
+      const options = nodeList
+        .map((node) => {
+          const id = String(node && node.node_id || "");
+          const text = `${esc(node.provider || "—")} · ${esc(node.model || "—")} · ${esc(node.name || "未命名")}`;
+          return `<option value="${esc(id)}" ${bound === id ? "selected" : ""}>${text}</option>`;
+        })
+        .join("");
+      return `
+        <div class="role-binding-row" data-role-binding-row>
+          <div class="role-binding-row__main">
+            <strong>${esc(label)}</strong>
+            <span class="small muted">${esc(hint)}</span>
+          </div>
+          <select class="role-binding-row__select" name="${esc(key)}" data-role-select aria-label="「${esc(label)}」使用的节点">
+            <option value="">跟随主节点</option>
+            ${options}
+          </select>
+        </div>`;
+    })
+    .join("");
+  return `
+    <section class="panel role-bindings-panel" data-role-bindings-panel>
+      <div class="panel-head">
+        <div>
+          <h2>节点分工</h2>
+          <p>把 5 个 pipeline 角色指到不同节点——本地模型跑分析、云端模型跑写作；绑定实时生效，也可一键预设</p>
+        </div>
+        <div class="row">
+          <button class="btn btn-outline btn-sm" type="button" data-action="role-preset" data-preset="unified" title="全部角色回落到当前生效节点">统一主节点</button>
+          <button class="btn btn-outline btn-sm" type="button" data-action="role-preset" data-preset="hybrid" title="本地 Ollama 跑诊断/画像/差距，云端节点跑改写/评估">本地分析+云端写作</button>
+          <button class="btn btn-outline btn-sm" type="button" data-action="role-preset" data-preset="local" title="全部角色绑定本地 Ollama 节点，零外发">全本地</button>
+        </div>
+      </div>
+      <form class="panel-body" data-form="settings-role-bindings">
+        <div class="role-binding-list" data-role-binding-list>${rows}</div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn btn-primary btn-sm" type="submit">保存分工</button>
+          <span class="small muted">不选的角色跟随主节点；绑定节点被删除后自动回落。</span>
+        </div>
+      </form>
     </section>`;
 }
 

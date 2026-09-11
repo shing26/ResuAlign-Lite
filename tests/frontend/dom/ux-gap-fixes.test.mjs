@@ -10,6 +10,7 @@ import "./happy-setup.mjs";
 
 import {
   recoverDiagnosis,
+  renderDiagnosisError,
   renderDiagnosisResult,
   state,
 } from "../../../src/resualign/static/app/events.js";
@@ -29,6 +30,10 @@ function read(name) {
 
 function diagnosisPanelHtml() {
   document.body.innerHTML = `
+    <div class="resume-band">
+      <button data-action="export-diagnosis" hidden></button>
+      <button data-action="export-diagnosis-md" hidden></button>
+    </div>
     <div data-diagnosis-panel>
       <span data-resume-band-status-text></span>
       <span data-diagnosis-meta></span>
@@ -53,6 +58,11 @@ test("source contracts keep the new UX gap fixes wired", () => {
 
   const resumeCenter = read("resume-center.js");
   assert.match(resumeCenter, /data-resume-band-status-text/, "resume band status slot");
+  assert.match(
+    resumeCenter,
+    /data-action="export-diagnosis-md" data-id="\$\{resume\.resume_id\}" hidden/,
+    "band exposes the diagnosis MD export (hidden until a diagnosis succeeds)",
+  );
 
   const main = read("main.js");
   assert.match(main, /请先生成并保存定稿，再记录投递/, "record-application guards draft");
@@ -121,6 +131,24 @@ test("renderDiagnosisResult syncs the resume band status", () => {
   });
   const band = document.querySelector("[data-resume-band-status-text]");
   assert.match(band.textContent, /73 分/);
+  /* 诊断成功：resume-band 的 MD / PDF 两个诊断导出按钮同步点亮（导出
+   * 诊断 MD 复活，2026-09-11）。 */
+  for (const action of ["export-diagnosis", "export-diagnosis-md"]) {
+    const bandBtn = document.querySelector(`.resume-band [data-action='${action}']`);
+    assert.ok(bandBtn, `band button ${action} exists`);
+    assert.equal(bandBtn.hidden, false, `band button ${action} unhides on success`);
+  }
+});
+
+test("diagnosis failure hides both band diagnosis-export buttons", () => {
+  diagnosisPanelHtml();
+  /* 失败态由 renderDiagnosisError 渲染（renderDiagnosisResult 只走成功路径）。 */
+  renderDiagnosisError({ status: "failed", error: "boom" });
+  for (const action of ["export-diagnosis", "export-diagnosis-md"]) {
+    const bandBtn = document.querySelector(`.resume-band [data-action='${action}']`);
+    assert.ok(bandBtn, `band button ${action} exists`);
+    assert.equal(bandBtn.hidden, true, `band button ${action} hides on failure`);
+  }
 });
 
 test("recoverDiagnosis falls back to persisted snapshot when the job is gone", async () => {

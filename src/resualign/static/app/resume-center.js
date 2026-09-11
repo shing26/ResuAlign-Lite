@@ -117,6 +117,7 @@ async function renderResumeDetailView(app, resumeId) {
           <span class="status-line" data-resume-band-status><span class="dot dot-success" aria-hidden="true"></span><span data-resume-band-status-text>最近诊断：${diagnosis && Number.isFinite(Number(diagnosis.score)) ? `${esc(diagnosis.score)} 分` : "尚未诊断"}</span></span>
           <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">诊断简历</button>
           <button class="btn btn-secondary btn-sm" data-action="export-resume-md" data-id="${resume.resume_id}" title="导出简历正文 Markdown">导出简历 MD</button>
+          <button class="btn btn-secondary btn-sm" data-action="export-diagnosis-md" data-id="${resume.resume_id}" hidden title="导出最近一次诊断报告 Markdown">导出诊断 MD</button>
           <button class="btn btn-secondary btn-sm" data-action="export-diagnosis" data-id="${resume.resume_id}" hidden title="导出最近一次诊断报告 PDF">导出诊断 PDF</button>
           <button class="btn btn-danger btn-sm" data-action="delete-resume" data-id="${resume.resume_id}">删除</button>
         </div>
