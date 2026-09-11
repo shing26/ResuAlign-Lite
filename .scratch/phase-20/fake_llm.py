@@ -42,12 +42,16 @@ E2E_CLASSIFY_FAILS_LEFT: int = 0
 #  - tailor        : tailoring (PROMPT_VERSION: tailor/v2)
 #  - evaluator     : evaluation (PROMPT_VERSION: evaluator/v2, run_eval=False in smoke,
 #                    so not required)
+#  - tailor        : whole-document tailoring (PROMPT_VERSION: tailor/v2)
+#                    NOT required since the map-reduce bullet editor
+#                    (bullet_rewrite/v2+) replaced it on medium granularity;
+#                    smoke asserts bullet_rewrite hits instead.
 REQUIRED_STAGES = [
     "classifier",
     "diagnose",
     "jd_profiler",
     "gap_analyzer",
-    "tailor",
+    "bullet_rewrite",
 ]
 
 
@@ -59,6 +63,26 @@ def _resume_from_user(user: str) -> str:
 def _original_bullet_from_user(user: str) -> str:
     match = re.search(r"Original bullet:\n(.*?)\n", user, re.S)
     return match.group(1).strip() if match else "Original bullet"
+
+
+def _bullet_rewrite_response(system: str, user: str) -> dict | None:
+    """Map-reduce bullet editor (bullet_rewrite/v2+). Fake rewrites the
+    original bullet the same way the whole-document tailor does: append
+    the high-concurrency suffix, keeping every original fact so the
+    content-level provenance check marks it verified."""
+    if "PROMPT_VERSION: bullet_rewrite/" not in system:
+        return None
+    STAGE_HITS["bullet_rewrite"] += 1
+    original = _original_bullet_from_user(user)
+    proposed = f"{original} (high concurrency)"
+    return {
+        "type": "modify",
+        "original": original,
+        "proposed": proposed,
+        "reason": "Matches JD high-concurrency scenario",
+        "confidence": "high",
+        "provenance": original,
+    }
 
 
 def _first_bullet(resume: str) -> str:
@@ -135,6 +159,9 @@ def fake_llm_response(system: str, user: str) -> dict | None:
             "misaligned_emphasis": [],
             "strength_matches": ["Python"],
         }
+    bullet = _bullet_rewrite_response(system, user)
+    if bullet is not None:
+        return bullet
     if "PROMPT_VERSION: tailor/v2" in system:
         STAGE_HITS["tailor"] += 1
         resume = _resume_from_user(user)
@@ -162,6 +189,7 @@ def fake_llm_response(system: str, user: str) -> dict | None:
             "gap_coverage": 0.9,
         }
     STAGE_HITS["unknown"] += 1
+    UNKNOWN_PROMPTS.append(system[:300])
     return None
 
 
