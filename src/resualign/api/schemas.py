@@ -110,7 +110,8 @@ class LocalIngestRequest(BaseModel):
     salary_text: str | None = Field(default=None, max_length=_SALARY_TEXT_MAX)
     job_page_url: str | None = Field(default=None, max_length=_URL_MAX)
     jd_text: str = Field(max_length=_JD_TEXT_MAX)
-    site: Literal["shixiseng", "universal"] = "universal"
+    # agent = 浏览器端通用岗位页 Agent（collector 0.2.0 自动提取）。
+    site: Literal["shixiseng", "universal", "agent"] = "universal"
 
 _LLM_KEY_MAX = 2_000
 

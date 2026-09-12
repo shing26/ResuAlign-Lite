@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ResuAlign Local Collector
 // @namespace    https://127.0.0.1:8000/
-// @version      0.1.1
-// @description  划词 / 实习僧岗位详情一键摄入 ResuAlign（本地工作台）
+// @version      0.2.0
+// @description  划词 / 实习僧 / 通用岗位页智能提取——一键摄入 ResuAlign（本地工作台）
 // @author       ResuAlign
 // @match        http://*/*
 // @match        https://*/*
@@ -133,6 +133,218 @@
     };
   }
 
+  /* ---------------------------------------------------------------- */
+  /* 通用岗位页 Agent（0.2.0）：纯 DOM 启发式 + JSON-LD，零 LLM 调用。  */
+  /* 目标：把「用户划词」升级为「页面加载即识别，一键提取」。JD 的      */
+  /* LLM 结构化分类仍由后端 local-ingest 负责，浏览器端不重复智能。      */
+  /* ---------------------------------------------------------------- */
+
+  const JD_ANCHOR_RE =
+    /(岗位职责|任职要求|职位描述|工作职责|岗位要求|职位要求|Job Description|Responsibilities|Requirements|What you['’]ll do|About the role)/i;
+  const SALARY_RE =
+    /(\d+\s*[-–~至]\s*\d+\s*(K|k|万|元)|￥\s*\d+|月薪|薪资待遇)/;
+  const EXP_RE = /(\d+\s*[-–~至]?\s*\d*\s*年(以上|工作经验)?|\d+\s*\+\s*years?)/i;
+  const EXPAND_TEXT_RE =
+    /^(展开全文|查看更多|展开全部|展开剩余|展开|显示全文|更多|Show more|Show More|Read more)$/;
+
+  /** 读 JSON-LD（schema.org/JobPosting）——招聘站最可靠的结构化来源。 */
+  function jsonLdJobPosting() {
+    for (const node of document.querySelectorAll(
+      'script[type="application/ld+json"]',
+    )) {
+      let data;
+      try {
+        data = JSON.parse(node.textContent || "");
+      } catch {
+        continue;
+      }
+      const roots = Array.isArray(data) ? data : [data];
+      for (const root of roots) {
+        const entries =
+          root && Array.isArray(root["@graph"]) ? root["@graph"] : [root];
+        for (const entry of entries) {
+          if (entry && String(entry["@type"] || "") === "JobPosting") {
+            return entry;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /** 给一个元素打岗位内容分：越长、锚点/薪资/经验特征越多，分越高。 */
+  function scoreJobText(text) {
+    if (!text || text.length < 80) return 0;
+    /* 长度每 10 字 1 分（40 封顶）；锚点词（岗位职责/任职要求…）每个
+     * 15 分（45 封顶）——双锚点是岗位页最强信号。 */
+    let score = Math.min(40, Math.round(text.length / 10));
+    const anchors = text.match(new RegExp(JD_ANCHOR_RE.source, "gi")) || [];
+    score += Math.min(45, anchors.length * 15);
+    if (SALARY_RE.test(text)) score += 15;
+    if (EXP_RE.test(text)) score += 15;
+    return score;
+  }
+
+  /** 关键词锚点（岗位职责/任职要求…）向上找最小公共容器。 */
+  function containerFromAnchors() {
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_ELEMENT,
+    );
+    let best = null;
+    let bestScore = 0;
+    for (
+      let node = walker.nextNode();
+      node;
+      node = walker.nextNode()
+    ) {
+      const own = (node.childNodes.length &&
+        [...node.childNodes]
+          .filter((child) => child.nodeType === 3)
+          .map((child) => child.textContent)
+          .join(" ")) || "";
+      if (!JD_ANCHOR_RE.test(own)) continue;
+      let parent = node.parentElement;
+      for (let hop = 0; parent && hop < 6; hop += 1) {
+        const score = scoreJobText(parent.innerText || "");
+        if (score > bestScore) {
+          best = parent;
+          bestScore = score;
+        }
+        parent = parent.parentElement;
+      }
+    }
+    return bestScore >= 60 ? best : null;
+  }
+
+  /** JD 容器：显式 class 优先，其次锚点容器，兜底 main/article。 */
+  function findJdContainer() {
+    const explicit = document.querySelector(
+      ".job-detail-content, .job-detail__content, .job-description, " +
+        ".job-detail, .job-intro, .detail-content, .position-desc, " +
+        "[class*='job-detail'], [class*='job-desc'], [class*='position-desc']",
+    );
+    /* 显式 class 是强信号：命中且有内容即信任，不按字数分数丢弃。 */
+    if (explicit && (explicit.innerText || "").trim().length >= 40) {
+      explicit.__raKind = "explicit";
+      return explicit;
+    }
+    const candidates = [explicit, containerFromAnchors()].filter(Boolean);
+    let best = null;
+    let bestScore = 0;
+    for (const node of candidates) {
+      const score = scoreJobText(node.innerText || "");
+      if (score > bestScore) {
+        best = node;
+        bestScore = score;
+      }
+    }
+    if (best) {
+      best.__raKind = "anchors";
+      return best;
+    }
+    const fallback =
+      document.querySelector("main, article, .container, #app, .page") ||
+      document.body;
+    if (scoreJobText(fallback.innerText || "") >= 60) {
+      fallback.__raKind = "fallback";
+      return fallback;
+    }
+    return null;
+  }
+
+  /** 展开折叠 + 触发懒加载（尽力而为，不报错——SPA 行为各异）。 */
+  async function expandJobContainer(container) {
+    const clickables = [...container.querySelectorAll("button, a, span, div")]
+      .filter((node) => {
+        const label = (node.innerText || "").trim();
+        if (label.length > 12) return false;
+        if (EXPAND_TEXT_RE.test(label)) return true;
+        const cls = String(node.className || "");
+        return /expand|unfold|show-more|collapse/i.test(cls) && label;
+      })
+      .slice(0, 4);
+    for (const node of clickables) {
+      try {
+        node.click();
+      } catch {
+        /* 站点行为各异，失败忽略 */
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    if (container.scrollHeight > container.clientHeight + 40) {
+      container.scrollTop = container.scrollHeight;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    window.scrollTo(0, document.body.scrollHeight);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  /** 汇总 Agent payload：JSON-LD 字段优先，启发式补齐 JD 正文。 */
+  function agentPayload() {
+    const ld = jsonLdJobPosting();
+    const container = findJdContainer();
+    const jdText = (container ? container.innerText : "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    const title =
+      (ld && ld.title) ||
+      firstText([
+        "[class*='job-title']",
+        "[class*='position-name']",
+        "h1",
+      ]) ||
+      document.title;
+    const org = ld && ld.hiringOrganization;
+    const company =
+      (org && (typeof org === "string" ? org : org.name)) ||
+      firstText(["[class*='company-name']", "[class*='company'] a", "[class*='company']"]) ||
+      "";
+    const location = firstText([
+      "[class*='job-location']",
+      "[class*='location']",
+      "[class*='address']",
+      "[class*='city']",
+    ]);
+    let salary = firstText([
+      "[class*='job-salary']",
+      "[class*='salary']",
+      "[class*='compensation']",
+    ]);
+    if (!salary && jdText) {
+      const inBody = jdText.match(SALARY_RE);
+      if (inBody) salary = inBody[0];
+    }
+    return {
+      title: String(title || document.title).trim(),
+      company: String(company || "").trim(),
+      location: String(location || "").trim(),
+      salary_text: String(salary || "").trim(),
+      job_page_url: location.href,
+      jd_text: jdText.slice(0, MAX_JD_LENGTH),
+      site: "agent",
+      _ld_description: ld && ld.description ? String(ld.description) : "",
+      _container_kind: (container && container.__raKind) || "none",
+    };
+  }
+
+  /** 页面是否值得出「一键提取」按钮：JD 文本足够长即认为可信。 */
+  function detectAgentPage() {
+    try {
+      const payload = agentPayload();
+      const text = payload.jd_text || payload._ld_description || "";
+      /* 显式 class 容器（.job-detail 等）本身就是强信号：≥80 字即信任；
+       * 启发式容器走综合评分（≥60）或长文本（≥300）。 */
+      const trusted =
+        scoreJobText(text) >= 60 ||
+        text.length >= 300 ||
+        (payload._container_kind === "explicit" && text.length >= 80);
+      return trusted ? payload : null;
+    } catch {
+      return null;
+    }
+  }
+
   function ensureFloatBox() {
     if (floatBox && document.body.contains(floatBox)) return floatBox;
     floatBox = document.createElement("div");
@@ -150,6 +362,8 @@
     document.body.appendChild(floatBox);
     return floatBox;
   }
+
+  let agentPayloadCached = null;
 
   function setFloatButtons(html) {
     const box = ensureFloatBox();
@@ -169,6 +383,29 @@
         ingest(shixisengPayload()).finally(() => {
           specific.disabled = false;
         });
+      });
+    }
+    const agent = mount.querySelector("#ra-ingest-agent");
+    if (agent) {
+      agent.addEventListener("click", async () => {
+        agent.disabled = true;
+        agent.textContent = "提取中…";
+        try {
+          let payload = agentPayloadCached;
+          if (!payload) payload = detectAgentPage();
+          if (payload) {
+            await expandJobContainer(
+              findJdContainer() || document.body,
+            );
+            payload = agentPayload();
+            const clean = { ...payload };
+            delete clean._ld_description;
+            await ingest(clean);
+          }
+        } finally {
+          agent.disabled = false;
+          agent.textContent = "一键提取岗位";
+        }
       });
     }
     const universal = mount.querySelector("#ra-ingest-selection");
@@ -226,14 +463,20 @@
         'padding:9px 12px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.16)">' +
         "摄入岗位</button>"
       : "";
+    const agent = agentPayloadCached
+      ? '<button id="ra-ingest-agent" type="button" style="' +
+        "background:#2563eb;color:#fff;border:0;border-radius:6px;" +
+        'padding:9px 12px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.16)">' +
+        "一键提取岗位</button>"
+      : "";
     const universal = selectedText
       ? '<button id="ra-ingest-selection" type="button" style="' +
         "background:#0f766e;color:#fff;border:0;border-radius:6px;" +
         'padding:9px 12px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.16)">' +
         "摄入选区 JD</button>"
       : "";
-    if (specific || universal) {
-      setFloatButtons(specific + universal);
+    if (specific || universal || agent) {
+      setFloatButtons(agent + specific + universal);
     } else if (floatBox) {
       const mount = floatBox.querySelector("[data-ra-buttons]");
       if (mount) mount.innerHTML = "";
@@ -426,10 +669,68 @@
     if (isShixisengDetail()) {
       updateFloat();
     }
+    /* 通用岗位页 Agent：加载即检测；SPA 站点通过劫持 pushState/
+     * replaceState + popstate/hashchange 感知路由变化（不引入轮询
+     * timer，油猴在所有标签页常驻，timer 成本必须为零）。 */
+    agentPayloadCached = detectAgentPage();
+    if (agentPayloadCached || isShixisengDetail()) {
+      updateFloat();
+    }
+    let lastHref = location.href;
+    const onUrlChange = () => {
+      if (location.href === lastHref) return;
+      lastHref = location.href;
+      selectedText = "";
+      agentPayloadCached = detectAgentPage();
+      updateFloat();
+    };
+    for (const method of ["pushState", "replaceState"]) {
+      const original = history[method];
+      if (typeof original !== "function") continue;
+      history[method] = function (...args) {
+        const result = original.apply(this, args);
+        onUrlChange();
+        return result;
+      };
+    }
+    window.addEventListener("popstate", onUrlChange);
+    window.addEventListener("hashchange", onUrlChange);
+    /* 展开/懒加载类 DOM 变化不改变 URL：MutationObserver 防抖重检
+     * （JD 正文常在用户点击「展开全文」后才完整出现）。 */
+    let mutationTimer = null;
+    const observer = new MutationObserver(() => {
+      if (mutationTimer) return;
+      mutationTimer = window.setTimeout(() => {
+        mutationTimer = null;
+        const previous = agentPayloadCached ? agentPayloadCached.jd_text : "";
+        agentPayloadCached = detectAgentPage();
+        if ((agentPayloadCached ? agentPayloadCached.jd_text : "") !== previous) {
+          updateFloat();
+        }
+      }, 500);
+    });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
     const config = loadConfig();
     if (!config.server || !config.token) {
       showConfigModal();
     }
+  }
+
+  /* 只读调试/测试出口：暴露纯检测函数（不改变任何页面行为），
+   * 供 node:test（happy-dom）与控制台诊断直接调用。 */
+  if (typeof window !== "undefined") {
+    window.__RA_DEBUG = {
+      detectAgentPage,
+      agentPayload,
+      findJdContainer,
+      scoreJobText,
+      jsonLdJobPosting,
+      expandJobContainer,
+    };
   }
 
   start();

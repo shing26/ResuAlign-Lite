@@ -5135,7 +5135,8 @@
             "type": "string",
             "enum": [
               "shixiseng",
-              "universal"
+              "universal",
+              "agent"
             ],
             "title": "Site",
             "default": "universal"
