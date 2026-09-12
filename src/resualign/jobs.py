@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .observability import log_event
+from .observability import current_request_id, log_event
 from .store_base import (
     _SqliteStore,
     default_job_db_path,  # noqa: F401  (re-exported for external callers)
@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     started_at REAL,
     finished_at REAL,
     result_json TEXT,
-    error TEXT
+    error TEXT,
+    request_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS job_payloads (
     job_id TEXT PRIMARY KEY,
@@ -73,11 +74,18 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         DROP TABLE IF EXISTS job_refresh_events;
         """,
     ),
+    # 3（ticket #101）：request_id 贯穿——任务行持久化触发请求的编号，
+    # worker 线程起点据此恢复 ContextVar（老库加列；新库 CREATE 已含，
+    # _apply_migrations 对重复列 ALTER 记为已应用）。
+    (
+        3,
+        "ALTER TABLE jobs ADD COLUMN request_id TEXT NOT NULL DEFAULT ''",
+    ),
 )
 
 _JOB_COLUMNS = (
     "job_id, status, stage, message, tenant_id, created_at, started_at, "
-    "finished_at, result_json, error"
+    "finished_at, result_json, error, request_id"
 )
 
 
@@ -95,6 +103,7 @@ class AnalysisJob:
     finished_at: Optional[float] = None
     result: Optional[dict[str, Any]] = None
     error: Optional[str] = None
+    request_id: str = ""
 
 
 class JobRegistry(_SqliteStore):
@@ -120,9 +129,16 @@ class JobRegistry(_SqliteStore):
         config: Any,
         tenant_id: str | None = None,
         application_id: str | None = None,
+        request_id: str | None = None,
     ) -> AnalysisJob:
-        """Create a queued job, purging expired entries first."""
+        """Create a queued job, purging expired entries first.
+
+        Ticket #101: the job row persists the request id of the call that
+        created it (middleware-bound ContextVar by default) so the worker
+        thread can restore full-chain log correlation.
+        """
         now = self._clock()
+        rid = request_id or current_request_id() or ""
         with self._lock:
             self._ensure_initialized()
             self._purge_expired(now)
@@ -132,14 +148,15 @@ class JobRegistry(_SqliteStore):
                 config=config,
                 tenant_id=tenant_id or "",
                 created_at=now,
+                request_id=rid,
             )
             with self._connect() as conn:
                 conn.execute(
                     "INSERT INTO jobs ("
                     "job_id, status, stage, message, tenant_id, created_at, "
-                    "started_at, finished_at, result_json, error"
-                    ") VALUES (?, 'queued', '', '', ?, ?, NULL, NULL, NULL, NULL)",
-                    (job.job_id, job.tenant_id, now),
+                    "started_at, finished_at, result_json, error, request_id"
+                    ") VALUES (?, 'queued', '', '', ?, ?, NULL, NULL, NULL, NULL, ?)",
+                    (job.job_id, job.tenant_id, now, rid),
                 )
                 conn.execute(
                     "INSERT INTO job_payloads ("
@@ -232,20 +249,60 @@ class JobRegistry(_SqliteStore):
         """Backward-compatible running transition that ignores double claims."""
         self.claim_running(job_id)
 
-    def requeue_interrupted(self, job_id: str) -> bool:
-        """Requeue a running job left by a dead process; queued stays queued."""
+    def requeue_interrupted(
+        self, job_id: str, request_id: str | None = None
+    ) -> bool:
+        """Requeue a running job left by a dead process; queued stays queued.
+
+        Ticket #101: startup recovery passes a freshly generated request id
+        (recovered work is attributable to the restart, not the original
+        click); the requeued log event is marked ``recovered``.
+        """
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
-                cursor = conn.execute(
-                    "UPDATE jobs SET status = 'queued', started_at = NULL "
-                    "WHERE job_id = ? AND status = 'running'",
-                    (job_id,),
-                )
+                if request_id is None:
+                    cursor = conn.execute(
+                        "UPDATE jobs SET status = 'queued', started_at = NULL "
+                        "WHERE job_id = ? AND status = 'running'",
+                        (job_id,),
+                    )
+                else:
+                    cursor = conn.execute(
+                        "UPDATE jobs SET status = 'queued', started_at = NULL, "
+                        "request_id = ? "
+                        "WHERE job_id = ? AND status = 'running'",
+                        (request_id, job_id),
+                    )
                 requeued = cursor.rowcount > 0
             if requeued:
-                log_event(logger, "job.requeued", extra={"job_id": job_id})
+                extra: dict[str, Any] = {"job_id": job_id}
+                if request_id is not None:
+                    extra["recovered"] = True
+                    extra["request_id"] = request_id
+                log_event(
+                    logger,
+                    "job.requeued",
+                    request_id=request_id,
+                    extra=extra,
+                )
             return requeued
+
+    def request_id_for(self, job_id: str) -> str | None:
+        """The persisted request id, or None when the row is gone.
+
+        Ticket #101: worker threads bind this at run start to restore the
+        correlation chain after the request context is long gone.
+        """
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT request_id FROM jobs WHERE job_id = ?", (job_id,)
+                ).fetchone()
+        if row is None:
+            return None
+        return row["request_id"] or None
 
     def update_progress(self, job_id: str, stage: str, message: str) -> None:
         with self._lock:
@@ -378,6 +435,8 @@ class JobRegistry(_SqliteStore):
                 "error": job.error
                 if job.status in ("failed", "canceled")
                 else None,
+                # Ticket #101: echo so UI/error hints can quote the number.
+                "request_id": job.request_id,
             }
 
     def clear(self) -> None:
@@ -537,6 +596,7 @@ class JobRegistry(_SqliteStore):
             finished_at=row["finished_at"],
             result=result,
             error=row["error"],
+            request_id=row["request_id"],
         )
 
     def _elapsed(self, job: AnalysisJob, now: float) -> float:

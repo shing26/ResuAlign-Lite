@@ -237,7 +237,10 @@ def test_create_job_returns_202_and_queued_snapshot():
     r = client.get(f"/api/jobs/{job_id}", headers=_auth_headers())
 
     assert r.status_code == 200
-    assert r.json() == {
+    body = r.json()
+    # Ticket #101: snapshots now echo the triggering request id (additive).
+    assert body.pop("request_id")
+    assert body == {
         "job_id": job_id,
         "status": "queued",
         "stage": "",
