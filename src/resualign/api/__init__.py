@@ -43,6 +43,8 @@ from ..observability import (
     log_sample_rate,
     log_slow_call,
     new_request_id,
+    reset_request_id,
+    set_request_id,
     should_sample,
 )
 from ..parser import (
@@ -65,6 +67,7 @@ from .deps import (
     _enforce_rate_limit,
     get_current_user,
 )
+from .errors import register_error_handlers, request_id_of
 from .schemas import (
     AnalyzeRequest,
     AutomationRuleCreateRequest,
@@ -366,6 +369,10 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="ResuAlign API", version="0.3.0", lifespan=lifespan)
 
+# Unified JSON error shapes for every failure path (issue #100). No route
+# gains a responses= declaration, so the frozen OpenAPI snapshot stays put.
+register_error_handlers(app)
+
 # CORS：油猴抓取脚本（resualign-collector.user.js）运行在任意外部招聘网站
 # 页面上，用浏览器 fetch 跨源 POST /api/jobs/local-ingest（自定义
 # X-ResuAlign-Token 头会触发预检）。鉴权边界仍由 43 位随机 Token +
@@ -411,14 +418,17 @@ async def _limit_request_body_size(request: Request, call_next):
             if int(content_length) > _MAX_BODY_BYTES:
                 from fastapi.responses import JSONResponse
 
+                _rid = request_id_of(request)
                 return JSONResponse(
                     status_code=413,
                     content={
                         "detail": (
                             "Request body too large (max "
                             f"{_MAX_BODY_BYTES} bytes)"
-                        )
+                        ),
+                        "request_id": _rid,
                     },
+                    headers={"X-Request-Id": _rid},
                 )
         except ValueError:
             pass
@@ -428,12 +438,20 @@ async def _limit_request_body_size(request: Request, call_next):
 @app.middleware("http")
 async def _request_id_and_slow_log(request: Request, call_next):
     request_id = request.headers.get("X-Request-Id") or new_request_id()
+    # Ticket #100: bind the id for error handlers (state survives into
+    # ServerErrorMiddleware, where the ContextVar is already reset) and for
+    # structured logging (ticket #101 propagates it to worker threads).
+    request.state.request_id = request_id
+    _rid_token = set_request_id(request_id)
     import time as _time
 
-    start = _time.monotonic()
-    response = await call_next(request)
-    duration_ms = (_time.monotonic() - start) * 1000
-    response.headers["X-Request-Id"] = request_id
+    try:
+        start = _time.monotonic()
+        response = await call_next(request)
+        duration_ms = (_time.monotonic() - start) * 1000
+        response.headers["X-Request-Id"] = request_id
+    finally:
+        reset_request_id(_rid_token)
     extra = {
         "method": request.method,
         "path": request.url.path,
