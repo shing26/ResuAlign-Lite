@@ -220,6 +220,31 @@ class JobRegistry(_SqliteStore):
                 ).fetchall()
                 return [row["job_id"] for row in rows]
 
+    def stale_running_jobs(self, cutoff_ts: float) -> list[dict[str, Any]]:
+        """Running jobs whose started_at is at or before cutoff_ts.
+
+        Ticket #102 (watchdog): there is no heartbeat column, so "stuck" is
+        judged purely against the task-level wall-clock cap.
+        """
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT job_id, tenant_id, started_at FROM jobs "
+                    "WHERE status = 'running' AND started_at IS NOT NULL "
+                    "AND started_at <= ? "
+                    "ORDER BY started_at ASC, rowid ASC",
+                    (cutoff_ts,),
+                ).fetchall()
+        return [
+            {
+                "job_id": row["job_id"],
+                "tenant_id": row["tenant_id"],
+                "started_at": row["started_at"],
+            }
+            for row in rows
+        ]
+
     def get(
         self, job_id: str, tenant_id: str | None = None
     ) -> Optional[AnalysisJob]:
@@ -345,8 +370,14 @@ class JobRegistry(_SqliteStore):
                     extra={"job_id": job_id, "outcome": "succeeded"},
                 )
 
-    def fail(self, job_id: str, error: str, stage: str | None = None) -> None:
-        """Mark a job failed, optionally recording the failing pipeline stage."""
+    def fail(self, job_id: str, error: str, stage: str | None = None) -> bool:
+        """Mark a job failed, optionally recording the failing pipeline stage.
+
+        Returns True when this call performed the transition (ticket #102:
+        the watchdog must know whether a hung worker already reached a
+        terminal state; the conditional UPDATE keeps a late worker write from
+        overwriting the watchdog result).
+        """
         now = self._clock()
         with self._lock:
             self._ensure_initialized()
@@ -373,6 +404,7 @@ class JobRegistry(_SqliteStore):
                         "error": error,
                     },
                 )
+            return updated
 
     def cancel(self, job_id: str) -> bool:
         """Cancel a queued job; running/finished jobs cannot be canceled."""
