@@ -256,6 +256,7 @@ from .services import jobs as _jobs_service
 from .services import resumes as _resumes_service
 from .services import resume_optimize as _resume_optimize_service
 from .services import workbench as _workbench_service
+from .services import watchdog as _watchdog_service
 from .services.cost_guard import (
     check_daily_llm_cap,
     enforce_daily_llm_cap,
@@ -364,10 +365,15 @@ async def lifespan(_: FastAPI):
     register_daily_usage_recorder(record_daily_llm_usage)
     _backfill_diagnosis_snapshots()
     _recover_pending_jobs()
+    # Ticket #102: running-job watchdog (None when disabled via
+    # RESUALIGN_JOB_MAX_RUNTIME_S=0). Recovery ran first so restored jobs
+    # get their fresh request ids before any sweep can see them.
+    _watchdog_stop = _watchdog_service.start()
     try:
         yield
     finally:
-        pass
+        if _watchdog_stop is not None:
+            _watchdog_stop.set()
 
 
 app = FastAPI(title="ResuAlign API", version="0.3.0", lifespan=lifespan)
