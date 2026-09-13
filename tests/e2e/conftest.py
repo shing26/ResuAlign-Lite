@@ -85,7 +85,12 @@ def _wait_health(base_url: str, proc: subprocess.Popen, log_path: Path,
         try:
             urllib.request.urlopen(f"{base_url}/health", timeout=1).read()
             return
-        except urllib.error.URLError:
+        except (urllib.error.URLError, TimeoutError):
+            # TimeoutError is NOT a URLError subclass: uvicorn binds the
+            # socket before lifespan startup finishes, so the first probe can
+            # connect and then time out on the status line on a loaded
+            # machine. Treat it as "not ready yet" and keep polling instead
+            # of aborting the whole session.
             time.sleep(0.2)
     raise RuntimeError(f"server {base_url} did not become healthy in time")
 
