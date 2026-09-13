@@ -488,3 +488,29 @@ _Avoid_: job detail page, application form
 The prompt-level rewrite intensity for the tailor stage: `fine` (微调) keeps
 structure and wording, `medium` (重构, default) rewrites within the existing
 structure, and `coarse` (重塑) permits full restructure.
+
+## Agent 化（指挥台 / Agent Orchestration, 2026-09-14）
+
+**指挥台 (Command Deck)**
+产品内的 agent 操作员入口：一句自然语言指令驱动既有确定性流程，与工作台并列、同数据同队列——是给产品加席位，不是改造工作台。
+_Avoid_: 聊天机器人, 第二条对齐路径（2026-08 试点正死于「无真实入口的并行路径」）
+
+**授权档位 (Approval Tier)**
+agent 可用工具的三档授权：读档自由调用；写档只能经既有入口排队（受租户门、成本闸、看门狗约束）；审批档（采纳 diff、定稿、覆盖主简历、导出、删除）只能提议，人确认后才生效。
+_Avoid_: agent 直接定稿, 跳过审批档, 无上限的「管理员工具」
+
+**轨迹评测 (Trajectory Eval)**
+评 agent 一次会话的完整步骤序列而非只看终态：任务成功率、工具调用正确率、步数与成本上限。放 `benchmarks/agent/`，接 CI。
+_Avoid_: 只看终态（终态可能是编出来的调用凑巧走到的）
+
+**无编造率 (No-Fabrication Rate)**
+轨迹评测的核心指标：会话中不含无出处内容的比例；「不捏造事实」铁律在 agent 维度的延伸，对抗用例下必须 100%。
+_Avoid_: 用 Eval Score 高当无编造的证据
+
+**轨迹报价 (Trajectory Quote)**
+含写档步骤的 agent 指令在执行前向用户出示的两行预演卡：决策调用行（agent 桶余量，硬顶只罩这行）＋ 引擎调用行（与按钮路径共享的每日池余量，撞顶即既有的排队拒绝）。数字一律算术派生，不许模型口算。读档轨迹不设报价门；报价是事前知情，审批档是事后生效，两道门互不替代。
+_Avoid_: 只在「大轨迹」才弹报价（Q3 裁决否决）；把引擎行报成 agent 桶的死刑（它是别人家账本的行情）
+
+**agent 预算卡 (Agent Budget Card)**
+agent 循环决策调用的专属额度账本：轨迹起点原子预留、步界结算、退还未消费；agent 派生的引擎调用不在账上——走按钮路径同一共享池。帽值以「招牌演示不撞帽」标定（口径与红线见 ADR-0039）。
+_Avoid_: 把引擎调用计入 agent 桶（按钮花谁的池子，agent 按的就花谁的池子）；「撞顶次日自动续跑」（零自动语义，续跑=新指令+重新报价）
