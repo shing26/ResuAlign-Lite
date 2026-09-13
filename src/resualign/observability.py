@@ -65,7 +65,13 @@ def log_event(
     duration_ms: float | None = None,
     extra: dict[str, Any] | None = None,
 ) -> None:
-    """Emit a one-line JSON structured log record."""
+    """Emit a one-line JSON structured log record.
+
+    Ticket #101: when no explicit request_id is given the bound ContextVar
+    is used, so whole call chains correlate without touching call sites.
+    """
+    if request_id is None:
+        request_id = current_request_id()
     payload: dict[str, Any] = {
         "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
         "level": level,

@@ -15,6 +15,7 @@ import resualign.api as api_module
 from ...alignment_lifecycle import transition_alignment
 from ...job_library import _normalize_source_url, _text_dedupe_key
 from ...llm_usage import reset_llm_tenant, set_llm_tenant
+from ...observability import new_request_id, reset_request_id, set_request_id
 from ..schemas import JobImportRequest
 
 logger = logging.getLogger(__name__)
@@ -703,21 +704,32 @@ def _run_job(job_id: str) -> None:
     tenant at a time (an Ollama 7B node must not be thrashed). The gate is
     acquired before the global worker semaphore so a flooded tenant cannot
     occupy every global slot.
+
+    Ticket #101: the worker runs outside the request context, so restore the
+    job row's persisted request_id (minting one for pre-migration rows) for
+    the whole run — every structured log on this thread then correlates to
+    the triggering click.
     """
-    entry = api_module._payloads.get(job_id)
-    if entry is not None:
-        tenant_id = entry[3]
-    else:
-        stored = api_module._registry.get_payload(job_id)
-        if stored is None:
-            return
-        tenant_id = stored[1]
-    gate = _get_tenant_run_gate(tenant_id)
-    gate.acquire()
+    _request_id_token = set_request_id(
+        api_module._registry.request_id_for(job_id) or new_request_id()
+    )
     try:
-        _run_job_holding_gate(job_id)
+        entry = api_module._payloads.get(job_id)
+        if entry is not None:
+            tenant_id = entry[3]
+        else:
+            stored = api_module._registry.get_payload(job_id)
+            if stored is None:
+                return
+            tenant_id = stored[1]
+        gate = _get_tenant_run_gate(tenant_id)
+        gate.acquire()
+        try:
+            _run_job_holding_gate(job_id)
+        finally:
+            gate.release()
     finally:
-        gate.release()
+        reset_request_id(_request_id_token)
 
 
 def _run_job_holding_gate(job_id: str) -> None:

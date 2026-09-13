@@ -339,7 +339,10 @@ def _recover_pending_jobs() -> None:
     """Requeue queued/running jobs left behind by a previous process."""
     _recover_stale_alignments()
     for job_id in _registry.pending_job_ids():
-        _registry.requeue_interrupted(job_id)
+        # Ticket #101: recovered work is attributable to the restart, not to
+        # the original click — requeue mints a fresh request id (the requeued
+        # event carries recovered=True) and _run_job binds it from the row.
+        _registry.requeue_interrupted(job_id, request_id=new_request_id())
         logger.info("Recovering interrupted analysis job %s", job_id)
         threading.Thread(target=_run_job, args=(job_id,), daemon=True).start()
 

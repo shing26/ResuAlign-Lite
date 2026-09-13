@@ -392,6 +392,8 @@ def test_diagnosis_polling_contract_matches_workbench():
         "elapsed_seconds",
         "result",
         "error",
+        # Ticket #101: correlation id of the request that queued the job.
+        "request_id",
     }
     assert queued["status"] == "queued"
     assert queued["result"] is None
