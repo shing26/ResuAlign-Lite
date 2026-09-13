@@ -94,10 +94,15 @@ def resolve_config_for_role(
 ) -> dict[str, Any] | None:
     """Resolve a role to a node config dict, or None.
 
-    Uses ``resolve_node_for_role`` which returns the bound node, active node,
-    or None if no node exists at all.
+    Uses ``resolve_node_for_role`` which returns the bound node, usable
+    active node, or None (ticket #103: auto-disabled nodes are skipped for
+    the call chain while their bindings and admin views stay intact).
     """
-    node = node_store.resolve_node_for_role(tenant_id, role)
+    return _config_from_node(node_store.resolve_node_for_role(tenant_id, role))
+
+
+def _config_from_node(node: dict | None) -> dict[str, Any] | None:
+    """Project a resolved node dict onto the config shape (or None)."""
     if node is None:
         return None
     return {
@@ -107,6 +112,51 @@ def resolve_config_for_role(
         "base_url": node.get("base_url", ""),
         "disable_thinking": bool(node.get("disable_thinking", False)),
     }
+
+
+def usable_active_node(node_store: Any, tenant_id: str) -> dict | None:
+    """The tenant's active node that the call chain may serve with.
+
+    Ticket #103: breaker-aware selection shared by role_router fallbacks,
+    the engine role-mode decision, the pre-flight probe and the config
+    resolution callback. Duck-typed for node-store fakes in tests: stores
+    without breaker support keep ``get_active_node`` semantics.
+    """
+    usable = getattr(node_store, "get_usable_node", None)
+    if callable(usable):
+        return usable(tenant_id)
+    active = getattr(node_store, "get_active_node", None)
+    return active(tenant_id) if callable(active) else None
+
+
+def _report_call_outcome(
+    node_store: Any,
+    tenant_id: str,
+    node: dict | None,
+    *,
+    success: bool,
+    code: str | None = None,
+) -> None:
+    """Feed one real call result into the node breaker (ticket #103).
+
+    Telemetry must never break the call: any store without breaker support
+    (or a failing write) is swallowed with a warning, exactly like the
+    routers' probe best-effort.
+    """
+    node_id = (node or {}).get("node_id")
+    if not node_id:
+        return
+    try:
+        if success:
+            cb = getattr(node_store, "record_call_success", None)
+            if callable(cb):
+                cb(tenant_id, node_id)
+        else:
+            cb = getattr(node_store, "record_call_failure", None)
+            if callable(cb):
+                cb(tenant_id, node_id, code or "other")
+    except Exception:  # noqa: BLE001 - breaker must never fail the call
+        logger.exception("LLM breaker telemetry failed for node %s", node_id)
 
 
 def create_client_for_role(
@@ -169,7 +219,8 @@ def call_with_role(
     }
 
     # ---- Primary attempt with role node ----
-    resolved = resolve_config_for_role(node_store, tenant_id, role)
+    primary_node = node_store.resolve_node_for_role(tenant_id, role)
+    resolved = _config_from_node(primary_node)
     if resolved is not None:
         from .models import ResuAlignConfig
         primary_config = ResuAlignConfig(**resolved)
@@ -185,8 +236,13 @@ def call_with_role(
         )
         try:
             result = fn(client, **fn_kwargs)
+            _report_call_outcome(node_store, tenant_id, primary_node, success=True)
             return result, meta
         except LLMResponseError as exc:
+            _report_call_outcome(
+                node_store, tenant_id, primary_node,
+                success=False, code=getattr(exc, "code", "other"),
+            )
             logger.warning(
                 "Role %s primary node failed: %s; falling back to default",
                 role, exc,
@@ -194,6 +250,9 @@ def call_with_role(
             meta["error"] = str(exc)[:200]
             meta["fallback_used"] = True
         except Exception as exc:
+            _report_call_outcome(
+                node_store, tenant_id, primary_node, success=False, code="other"
+            )
             logger.warning(
                 "Role %s primary node unexpected error: %s; falling back to default",
                 role, exc,
@@ -204,10 +263,13 @@ def call_with_role(
             client.close()
 
     # ---- Fallback to default node ----
+    fallback_node: dict | None = None
     if default_config is not None:
         fallback_config = default_config
     else:
-        fallback_node = node_store.get_active_node(tenant_id)
+        # Ticket #103: breaker-filtered selection (never re-aim at a node
+        # the sweep just gave up on).
+        fallback_node = usable_active_node(node_store, tenant_id)
         if fallback_node is None:
             meta["error"] = "No default node available for fallback"
             raise LLMResponseError(meta["error"])
@@ -231,8 +293,13 @@ def call_with_role(
     )
     try:
         result = fn(client, **fn_kwargs)
+        _report_call_outcome(node_store, tenant_id, fallback_node, success=True)
         return result, meta
     except Exception as exc:
+        _report_call_outcome(
+            node_store, tenant_id, fallback_node,
+            success=False, code=getattr(exc, "code", "other"),
+        )
         meta["error"] = str(exc)[:200]
         raise
     finally:
@@ -271,7 +338,8 @@ def call_with_role_streaming(
     }
 
     # ---- Primary attempt with role node ----
-    resolved = resolve_config_for_role(node_store, tenant_id, role)
+    primary_node = node_store.resolve_node_for_role(tenant_id, role)
+    resolved = _config_from_node(primary_node)
     if resolved is not None:
         from .models import ResuAlignConfig
         primary_config = ResuAlignConfig(**resolved)
@@ -280,8 +348,16 @@ def call_with_role_streaming(
         client = OpenAIClient(primary_config, timeout=_role_timeout(role))
         try:
             result = stream_or_fallback_fn(client, **fn_kwargs)
+            _report_call_outcome(node_store, tenant_id, primary_node, success=True)
             return result, meta
         except (StreamConnectionError, LLMResponseError) as exc:
+            # A stalled stream is a transport-class failure; stream errors
+            # without a structured code count as "other" (breaker-set
+            # semantics, ticket #103).
+            _report_call_outcome(
+                node_store, tenant_id, primary_node,
+                success=False, code=getattr(exc, "code", "other"),
+            )
             logger.warning(
                 "Role %s primary stream failed: %s; falling back to default",
                 role, exc,
@@ -292,7 +368,7 @@ def call_with_role_streaming(
             client.close()
 
     # ---- Fallback to default node ----
-    fallback_node = node_store.get_active_node(tenant_id)
+    fallback_node = usable_active_node(node_store, tenant_id)
     if fallback_node is None:
         meta["error"] = "No default node available for fallback"
         raise LLMResponseError(meta["error"])
@@ -309,8 +385,13 @@ def call_with_role_streaming(
     client = OpenAIClient(fallback_config, timeout=_role_timeout(role))
     try:
         result = stream_or_fallback_fn(client, **fn_kwargs)
+        _report_call_outcome(node_store, tenant_id, fallback_node, success=True)
         return result, meta
     except Exception as exc:
+        _report_call_outcome(
+            node_store, tenant_id, fallback_node,
+            success=False, code=getattr(exc, "code", "other"),
+        )
         meta["error"] = str(exc)[:200]
         raise
     finally:

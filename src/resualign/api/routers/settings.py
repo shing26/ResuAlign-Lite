@@ -14,6 +14,7 @@ from ...config import (
 )
 from ...job_library import JOB_STATUSES
 from ...llm import _DEFAULT_PROVIDER_URLS
+from ...role_router import usable_active_node
 from ...settings_store import default_settings
 from ..deps import get_current_user
 from ..schemas import SettingsTestConnectionRequest, SettingsUpdateRequest
@@ -44,7 +45,11 @@ def _stored_llm_snapshot() -> dict[str, Any]:
     try:
         nodes = getattr(api_module, "_llm_nodes", None)
         if nodes is not None:
-            node = nodes.get_active_node("local")
+            # Ticket #103: breaker-filtered (a sole auto-disabled node must
+            # not stay primary — that keeps traffic off the broken node and
+            # lets use_local_fallback fire). Admin/display keeps
+            # get_active_node; only the serving path filters.
+            node = usable_active_node(nodes, "local")
             if node is not None:
                 return {
                     "provider": node.get("provider"),

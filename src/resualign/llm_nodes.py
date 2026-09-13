@@ -14,12 +14,16 @@ which ``store_base`` already keys by class name.
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from typing import Any
 
+from .observability import log_event
 from .secret_box import decrypt_value, encrypt_value
 from .store_base import UserStoreError, _SqliteStore
+
+logger = logging.getLogger(__name__)
 
 _LLM_NODES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS llm_nodes (
@@ -35,7 +39,9 @@ CREATE TABLE IF NOT EXISTS llm_nodes (
     updated_at REAL NOT NULL,
     last_test_status TEXT,
     last_test_latency_ms REAL,
-    last_test_at REAL
+    last_test_at REAL,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    auto_disabled INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_llm_nodes_tenant
     ON llm_nodes(tenant_id);
@@ -59,6 +65,8 @@ _NODE_FIELDS = (
     "last_test_latency_ms",
     "last_test_at",
     "disable_thinking",
+    "consecutive_failures",
+    "auto_disabled",
 )
 
 _EDITABLE_FIELDS = (
@@ -126,7 +134,138 @@ class LLMNodeStore(_SqliteStore):
             "ALTER TABLE llm_nodes ADD COLUMN "
             "disable_thinking INTEGER NOT NULL DEFAULT 0;",
         ),
+        # 5: ticket #103 自动熔断——真实调用/连通测试的确定性失败计数，
+        # 达阈值置 auto_disabled（调用链选节点过滤、管理路径照常可见）；
+        # 「测试连接」成功或显式激活即清零恢复。不做自动半开探测。
+        (
+            5,
+            "ALTER TABLE llm_nodes ADD COLUMN "
+            "consecutive_failures INTEGER NOT NULL DEFAULT 0; "
+            "ALTER TABLE llm_nodes ADD COLUMN "
+            "auto_disabled INTEGER NOT NULL DEFAULT 0;",
+        ),
     )
+
+    # ------------------------------------------------------------------
+    # Breaker (ticket #103)
+    # ------------------------------------------------------------------
+
+    BREAKER_THRESHOLD = 3
+    # LLMResponseError codes that say the node itself is not serving.
+    # rate_limit (429) is transient; parse/schema/empty are model-output
+    # quality issues, not node availability — none of them count.
+    BREAKER_COUNTED_CODES = frozenset(
+        {"timeout", "http", "auth", "quota", "other"}
+    )
+    # probe_llm_connection statuses that count (deterministic failure,
+    # aligned with the Phase A1 pre-flight classification); http_429 and
+    # other non-deterministic 4xx do not.
+    _PROBE_COUNTED_STATUSES = frozenset(
+        {"timeout", "network_error", "missing_key"}
+    )
+
+    @classmethod
+    def _probe_status_counts(cls, status: str) -> bool:
+        text = str(status or "")
+        if text in cls._PROBE_COUNTED_STATUSES:
+            return True
+        if text.startswith("http_"):
+            code = text[len("http_"):]
+            if code in ("401", "402", "403"):
+                return True
+            if code.startswith("5"):
+                return True
+        return False
+
+    @staticmethod
+    def _breaker_update(conn: Any, tenant_id: str, node_id: str, *, counted: bool) -> dict | None:
+        """Apply one breaker event; returns transition info or None.
+
+        Runs on the caller's connection (same lock as the public entry).
+        ``counted=True`` increments and may trip; ``False`` resets. The
+        returned dict reports whether THIS call caused a transition, so the
+        public methods log ``auto_disabled``/``recovered`` exactly once.
+        """
+        row = conn.execute(
+            "SELECT consecutive_failures, auto_disabled FROM llm_nodes "
+            "WHERE tenant_id = ? AND node_id = ?",
+            (tenant_id, node_id),
+        ).fetchone()
+        if row is None:
+            return None
+        was_disabled = bool(row["auto_disabled"])
+        if counted:
+            fails = int(row["consecutive_failures"]) + 1
+            disable = fails >= LLMNodeStore.BREAKER_THRESHOLD
+            conn.execute(
+                "UPDATE llm_nodes SET consecutive_failures = ?, "
+                "auto_disabled = ?, updated_at = updated_at "
+                "WHERE tenant_id = ? AND node_id = ?",
+                (fails, int(was_disabled or disable), tenant_id, node_id),
+            )
+            return {
+                "fails": fails,
+                "disabled_now": disable and not was_disabled,
+                "recovered": False,
+            }
+        conn.execute(
+            "UPDATE llm_nodes SET consecutive_failures = 0, "
+            "auto_disabled = 0, updated_at = updated_at "
+            "WHERE tenant_id = ? AND node_id = ?",
+            (tenant_id, node_id),
+        )
+        return {"fails": 0, "disabled_now": False, "recovered": was_disabled}
+
+    def _log_breaker_transition(
+        self, tenant_id: str, node_id: str, reason: str, outcome: dict
+    ) -> None:
+        if outcome is None:
+            return
+        if outcome["disabled_now"]:
+            log_event(
+                logger,
+                "llm_node.auto_disabled",
+                level="warning",
+                extra={
+                    "tenant_id": tenant_id,
+                    "node_id": node_id,
+                    "consecutive_failures": outcome["fails"],
+                    "threshold": self.BREAKER_THRESHOLD,
+                    "reason": reason,
+                },
+            )
+        elif outcome["recovered"]:
+            log_event(
+                logger,
+                "llm_node.recovered",
+                extra={"tenant_id": tenant_id, "node_id": node_id},
+            )
+
+    def record_call_failure(self, tenant_id: str, node_id: str, code: str) -> None:
+        """Feed one real LLM-call failure into the breaker (role_router).
+
+        Only node-availability codes count (see BREAKER_COUNTED_CODES).
+        Telemetry must never fail the call itself.
+        """
+        if code not in self.BREAKER_COUNTED_CODES:
+            return
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                outcome = self._breaker_update(
+                    conn, tenant_id, node_id, counted=True
+                )
+        self._log_breaker_transition(tenant_id, node_id, f"call:{code}", outcome)
+
+    def record_call_success(self, tenant_id: str, node_id: str) -> None:
+        """Any successful real call clears the breaker (auto-recover)."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                outcome = self._breaker_update(
+                    conn, tenant_id, node_id, counted=False
+                )
+        self._log_breaker_transition(tenant_id, node_id, "call:ok", outcome)
 
     # ------------------------------------------------------------------
     # Reads
@@ -205,9 +344,14 @@ class LLMNodeStore(_SqliteStore):
         if bound_id is not None:
             node = self.get_node(tenant_id, bound_id)
             if node is not None:
-                return node
-            self.delete_role_binding(tenant_id, role)
-        return self.get_active_node(tenant_id)
+                # Ticket #103: a bound but auto-disabled node is skipped for
+                # this run — but the binding survives (admin state); recovery
+                # or re-activation restores it untouched.
+                if not node.get("auto_disabled"):
+                    return node
+            else:
+                self.delete_role_binding(tenant_id, role)
+        return self.get_usable_node(tenant_id)
 
     def clear_role_bindings(self, tenant_id: str) -> None:
         with self._lock:
@@ -268,6 +412,24 @@ class LLMNodeStore(_SqliteStore):
                 ).fetchone()
         return self._row_to_dict(row) if row is not None else None
 
+    def get_usable_node(self, tenant_id: str) -> dict[str, Any] | None:
+        """Active node for the CALL CHAIN only (ticket #103 breaker).
+
+        Excludes auto-disabled nodes. Admin paths (list / activate /
+        delete-promotion / settings display) must keep using
+        ``get_active_node`` — the breaker filters serving, not truth.
+        """
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    f"SELECT {','.join(_NODE_FIELDS)} FROM llm_nodes "
+                    "WHERE tenant_id = ? AND is_active = 1 "
+                    "AND auto_disabled = 0 LIMIT 1",
+                    (tenant_id,),
+                ).fetchone()
+        return self._row_to_dict(row) if row is not None else None
+
     def record_node_health(
         self,
         tenant_id: str,
@@ -276,6 +438,10 @@ class LLMNodeStore(_SqliteStore):
         latency_ms: float | None,
     ) -> None:
         """Persist a connectivity-test outcome for the health badge.
+
+        Ticket #103: the same write point drives the breaker — ``ok`` clears
+        counter and auto-disable (manual recovery), deterministic probe
+        failures increment it; transient statuses only move the badge.
 
         Best-effort telemetry: a failed write must never fail the test
         request itself.
@@ -290,6 +456,16 @@ class LLMNodeStore(_SqliteStore):
                     "WHERE tenant_id = ? AND node_id = ?",
                     (status, latency_ms, time.time(), tenant_id, node_id),
                 )
+                outcome = None
+                if status == "ok":
+                    outcome = self._breaker_update(
+                        conn, tenant_id, node_id, counted=False
+                    )
+                elif self._probe_status_counts(status):
+                    outcome = self._breaker_update(
+                        conn, tenant_id, node_id, counted=True
+                    )
+        self._log_breaker_transition(tenant_id, node_id, f"probe:{status}", outcome)
 
     def count_nodes(self, tenant_id: str) -> int:
         with self._lock:
@@ -480,8 +656,12 @@ class LLMNodeStore(_SqliteStore):
                     "WHERE tenant_id = ? AND is_active = 1",
                     (now, tenant_id),
                 )
+                # Ticket #103: explicitly activating a node is the user
+                # asserting it should serve — clear breaker state.
                 conn.execute(
-                    "UPDATE llm_nodes SET is_active = 1, updated_at = ? "
+                    "UPDATE llm_nodes SET is_active = 1, "
+                    "consecutive_failures = 0, auto_disabled = 0, "
+                    "updated_at = ? "
                     "WHERE tenant_id = ? AND node_id = ?",
                     (now, tenant_id, node_id),
                 )
@@ -535,4 +715,6 @@ class LLMNodeStore(_SqliteStore):
             "last_test_latency_ms": row["last_test_latency_ms"],
             "last_test_at": row["last_test_at"],
             "disable_thinking": bool(row["disable_thinking"]),
+            "consecutive_failures": int(row["consecutive_failures"] or 0),
+            "auto_disabled": bool(row["auto_disabled"]),
         }
