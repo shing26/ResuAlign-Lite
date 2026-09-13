@@ -3281,11 +3281,18 @@ export function llmNodeCardHtml(node, lastTest) {
             : `<span class="badge badge-red" title="上次测试：${esc(lastStatus)}${when}${latency}">上次异常</span>`;
         })()
       : "";
+  /* #103 自动熔断徽标：连续失败达阈值的节点被临时禁用（调用链已回落），
+   * 禁用时优先于「上次异常」徽标——恢复路径（测试连通性）必须显性告知。 */
+  const autoDisabled = Boolean(n.auto_disabled);
+  const failCount = Number(n.consecutive_failures) || 0;
+  const autoDisabledBadge = autoDisabled
+    ? `<span class="badge badge-amber" data-node-auto-disabled title="连续失败 ${failCount} 次后已被自动禁用，对齐时已回落其他节点；点「测试连通性」成功后自动恢复">已自动禁用（连续失败 ${failCount} 次）</span>`
+    : "";
   return `
     <article class="llm-node-card${active ? " is-active" : ""}" data-llm-node-card data-node-id="${esc(nodeId)}">
       <div class="llm-node-card__head">
         <div class="llm-node-card__title">${esc(name)}</div>
-        ${healthBadge}
+        ${autoDisabled ? autoDisabledBadge : healthBadge}
         ${active ? '<span class="badge badge-green" data-node-active-badge>当前生效</span>' : ""}
       </div>
       <dl class="llm-node-card__meta">

@@ -14,7 +14,12 @@ from .jd_profiler import profile_jd
 from .llm import LLMClient, LLMResponseError, OpenAIClient, diagnose_resume
 from .llm_nodes import LLMNodeStore
 from .models import GapReport, Report, ResuAlignConfig, TailoredResume
-from .role_router import _role_timeout, call_with_role, is_parallel_safe
+from .role_router import (
+    _role_timeout,
+    call_with_role,
+    is_parallel_safe,
+    usable_active_node,
+)
 from .rule_diagnose import diagnose_resume_local
 from .tailor import tailor_resume, tailor_resume_map_reduce
 
@@ -268,7 +273,10 @@ def run(
     jd_client_owned = False
     tailor_client = client
     tailor_client_owned = False
-    use_roles = node_store is not None and llm_client is None and node_store.get_active_node(tenant_id) is not None
+    # Ticket #103: role mode needs a node the call chain may actually use —
+    # an auto-disabled active node means "serve without roles", matching the
+    # build_config fallback chain.
+    use_roles = node_store is not None and llm_client is None and usable_active_node(node_store, tenant_id) is not None
     try:
         def notify(stage: str, message: str) -> None:
             if on_stage is not None:

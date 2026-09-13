@@ -16,6 +16,7 @@ from ...alignment_lifecycle import transition_alignment
 from ...job_library import _normalize_source_url, _text_dedupe_key
 from ...llm_usage import reset_llm_tenant, set_llm_tenant
 from ...observability import new_request_id, reset_request_id, set_request_id
+from ...role_router import usable_active_node
 from ..schemas import JobImportRequest
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
     Returns ``(ok, message)``; ok=True means "proceed".
     """
     try:
-        node = api_module._llm_nodes.get_active_node(tenant_id)
+        node = usable_active_node(api_module._llm_nodes, tenant_id)
         provider = ''
         base_url = None
         if node is not None:
@@ -804,7 +805,7 @@ def _run_job_holding_gate(job_id: str) -> None:
                 return
             use_local_fallback = (
                 not config.is_llm_configured
-                and api_module._llm_nodes.get_active_node(tenant_id) is None
+                and usable_active_node(api_module._llm_nodes, tenant_id) is None
             )
             t0 = time.monotonic()
             if use_local_fallback:

@@ -208,6 +208,29 @@ test("llmNodeCardHtml renders the last test result on the card", () => {
   assert.match(result.textContent, /连接成功/);
 });
 
+test("llmNodeCardHtml shows auto-disabled badge (ticket #103) and suppresses stale health badge", () => {
+  const body = bodyFrom(
+    llmNodeCardHtml(
+      { ...NODE, auto_disabled: true, consecutive_failures: 3, last_test_status: "timeout" },
+      null,
+    ),
+  );
+  const disabled = body.querySelector("[data-node-auto-disabled]");
+  assert.ok(disabled, "auto-disabled badge rendered");
+  assert.match(disabled.textContent, /已自动禁用/);
+  assert.match(disabled.textContent, /连续失败 3 次/);
+  assert.match(disabled.title, /测试连通性/);
+  // The ambiguous "上次异常" health badge must yield to the breaker badge.
+  assert.equal(body.querySelector(".badge-red"), null);
+});
+
+test("llmNodeCardHtml shows no breaker badge for a healthy node", () => {
+  const body = bodyFrom(
+    llmNodeCardHtml({ ...NODE, auto_disabled: false, consecutive_failures: 0 }, null),
+  );
+  assert.equal(body.querySelector("[data-node-auto-disabled]"), null);
+});
+
 test("llmNodeCardHtml escapes name / provider / model / base_url", () => {
   const hostile = {
     node_id: 'n<script>',
