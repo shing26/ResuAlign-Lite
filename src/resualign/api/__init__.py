@@ -592,11 +592,63 @@ apply_resume_optimize = _optimize_router.apply_resume_optimize
 # Entry point for ``python -m resualign.api``
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+_DEV_ENV = "RESUALIGN_DEV"
+_DEV_TRUE = {"1", "true", "yes", "on"}
+
+
+def parse_entry_args(
+    argv: list[str] | None = None,
+    env: dict[str, str] | None = None,
+) -> dict[str, object]:
+    """Resolve host/port/dev for ``python -m resualign.api`` (ticket #99).
+
+    Production-shaped default: **no** file-watch reload. Development mode is
+    opt-in via ``--dev`` or ``RESUALIGN_DEV=1`` (env values follow the
+    RESUALIGN_PERSONAL_MODE bool style). Invalid ports raise via int().
+    """
+    import argparse
     import os
 
+    env = os.environ if env is None else env
+    parser = argparse.ArgumentParser(
+        prog="python -m resualign.api",
+        description="Run the ResuAlign API server.",
+    )
+    parser.add_argument("--host", default=env.get("RESUALIGN_HOST", "127.0.0.1"))
+    parser.add_argument(
+        "--port", type=int, default=int(env.get("RESUALIGN_PORT", "8000"))
+    )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        default=None,
+        help="Enable uvicorn autoreload for development.",
+    )
+    args = parser.parse_args(argv)
+    dev = bool(args.dev) if args.dev is not None else (
+        str(env.get(_DEV_ENV, "")).strip().lower() in _DEV_TRUE
+    )
+    return {"host": args.host, "port": args.port, "dev": dev}
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Run the API server (``python -m resualign.api``).
+
+    Ticket #99: reload is a dev affordance, never the delivered default;
+    log_config=None keeps the project dictConfig (import-time) in charge, so
+    uvicorn does not re-shape root logging into its own format.
+    """
     import uvicorn
 
-    host = os.environ.get("RESUALIGN_HOST", "127.0.0.1")
-    port = int(os.environ.get("RESUALIGN_PORT", "8000"))
-    uvicorn.run("resualign.api:app", host=host, port=port, reload=True)
+    entry = parse_entry_args(argv)
+    uvicorn.run(
+        "resualign.api:app",
+        host=str(entry["host"]),
+        port=int(entry["port"]),
+        reload=bool(entry["dev"]),
+        log_config=None,
+    )
+
+
+if __name__ == "__main__":
+    main()
