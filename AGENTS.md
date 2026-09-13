@@ -43,17 +43,48 @@ Do not run `git branch -D` on the affected branch before rebuilding the ref.
 Short hashes in the ref file are rejected as broken refs — always write the
 full 40-char object name.
 
-### Regression baselines (2026-08-31)
+### Regression baselines (2026-09-13, post prod-readiness #97-#103)
 
-- Backend: `PYTHONPATH=src python -m pytest tests/ -q` → **815 passed / 7 skipped**
+- Backend: `PYTHONPATH=src python -m pytest tests/ -q` → **967 passed / 7 skipped**
 - Frontend: `node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs`
-  → **486 passed**
-- Page probe: 8 pages, 0 console error (`.scratch/ra_probe_v2.py`, Playwright
-  chromium-1234). DeepSeek .env key is **402 unpaid** — the active LLM node is
+  → **485 passed**
+- Page probe: 8 routes, 0 console error. Playwright browser now
+  **chromium-1243** (chromium-1234 was removed). Gate variant
+  `.scratch/prod-readiness/gate_probe.py` points at an isolated 8003
+  instance (fresh `RESUALIGN_DATA_DIR`) so it never touches the user's 8000.
+- DeepSeek .env key is **402 unpaid** — the active LLM node is
   Ollama qwen2.5:7b; the workbench pre-flight probe (Phase A1) blocks
   definitive auth/quota failures and local-node connectivity failures with an
   actionable message before queueing (Phase E: local fast-fail, remote
   network/timeout non-blocking).
+
+### Production-readiness invariants (2026-09-13, spec #97)
+
+- **#100 error shape**: every HTTP error body is JSON; existing `detail` is
+  byte-preserved and a top-level `request_id` is appended; uncaught
+  exceptions → 500 `{code,message,request_id}` (never Starlette text, never
+  `str(exc)` passthrough — auth login/signup now return fixed 话术). Runtime
+  lock = `tests/test_error_contract.py`; OpenAPI snapshot is intentionally
+  **not** touched (grilling decision).
+- **#101 request_id**: `jobs` table migration 3 adds `request_id`;
+  `_run_job` restores the ContextVar from the row so job.* / llm logs share
+  one id; startup requeue mints a fresh id marked `recovered`. Any new API
+  enqueuing a job must run inside the request-id middleware (it binds state
+  + ContextVar) or the row stores `''`.
+- **#102 watchdog**: running jobs older than `RESUALIGN_JOB_MAX_RUNTIME_S`
+  (default 1800, 0=off) flip to the existing failed terminal via
+  `JobRegistry.fail` (conditional UPDATE → a late worker write cannot
+  overwrite). Only DB/board state is fixed; a truly hung worker still holds
+  its tenant gate (documented boundary, no gate timeout).
+- **#103 node breaker**: `llm_nodes` migration 5 adds
+  `consecutive_failures`/`auto_disabled`; threshold 3; counted call codes
+  `timeout/http/auth/quota/other` + counted probe statuses (see
+  `LLMNodeStore`), `429/parse/schema/empty` excluded. **Filtering lives only
+  in the call chain** (`get_usable_node`, `resolve_node_for_role`,
+  `role_router.usable_active_node`, engine `use_roles`, A1 pre-flight,
+  build_config callback); admin paths (list / activate / delete-promotion /
+  settings badge) keep `get_active_node`. Recovery = test ok / call success /
+  explicit activate; no auto half-open.
 
 ### Phase A-C invariants (2026-08-30)
 
