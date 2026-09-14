@@ -1,0 +1,103 @@
+{
+  "_readme": "Phase 0 被测单元 = (节点 × disable_thinking 变体 × 协议臂)，共 8 格（协议 §0）。本文件不存放任何密钥值：只写 api_key_env 变量名，密钥由 shell 环境注入。N1 的 base_url 是产品节点配置里的实际值，占位符不生效——开测前从 设置页 → 模型节点 抄过来并核对。status=n_a 的格保留在表里不删除（协议：节点不支持该字段时如实标 n/a，不静默缩表），runner 会跳过并在结果 JSON 记 skipped。",
+  "cells": [
+    {
+      "id": "n1-t-on-tools",
+      "node": "N1",
+      "variant": "thinking-disabled",
+      "arm": "tools",
+      "status": "planned",
+      "base_url": "https://REPLACE-WITH-NODE-CONFIG/v1",
+      "model": "meta/muse-glimmer-30b",
+      "api_key_env": "RESUALIGN_N1_API_KEY",
+      "temperature": 0,
+      "thinking": { "type": "disabled" },
+      "timeout_s": 90
+    },
+    {
+      "id": "n1-t-on-template",
+      "node": "N1",
+      "variant": "thinking-disabled",
+      "arm": "template",
+      "status": "planned",
+      "base_url": "https://REPLACE-WITH-NODE-CONFIG/v1",
+      "model": "meta/muse-glimmer-30b",
+      "api_key_env": "RESUALIGN_N1_API_KEY",
+      "temperature": 0,
+      "thinking": { "type": "disabled" },
+      "timeout_s": 90
+    },
+    {
+      "id": "n1-t-off-tools",
+      "node": "N1",
+      "variant": "thinking-default",
+      "arm": "tools",
+      "status": "planned",
+      "base_url": "https://REPLACE-WITH-NODE-CONFIG/v1",
+      "model": "meta/muse-glimmer-30b",
+      "api_key_env": "RESUALIGN_N1_API_KEY",
+      "temperature": 0,
+      "timeout_s": 90
+    },
+    {
+      "id": "n1-t-off-template",
+      "node": "N1",
+      "variant": "thinking-default",
+      "arm": "template",
+      "status": "planned",
+      "base_url": "https://REPLACE-WITH-NODE-CONFIG/v1",
+      "model": "meta/muse-glimmer-30b",
+      "api_key_env": "RESUALIGN_N1_API_KEY",
+      "temperature": 0,
+      "timeout_s": 90
+    },
+    {
+      "id": "n2-t-on-tools",
+      "node": "N2",
+      "variant": "thinking-disabled",
+      "arm": "tools",
+      "status": "n_a",
+      "reason": "ollama /v1 无 thinking 字段，该变体对本节点不存在；保留行不缩表（协议 §0）",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "model": "qwen2.5:7b",
+      "temperature": 0,
+      "thinking": { "type": "disabled" },
+      "timeout_s": 120
+    },
+    {
+      "id": "n2-t-on-template",
+      "node": "N2",
+      "variant": "thinking-disabled",
+      "arm": "template",
+      "status": "n_a",
+      "reason": "同上：ollama 不支持 thinking 字段",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "model": "qwen2.5:7b",
+      "temperature": 0,
+      "thinking": { "type": "disabled" },
+      "timeout_s": 120
+    },
+    {
+      "id": "n2-t-off-tools",
+      "node": "N2",
+      "variant": "thinking-default",
+      "arm": "tools",
+      "status": "ok",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "model": "qwen2.5:7b",
+      "temperature": 0,
+      "timeout_s": 120
+    },
+    {
+      "id": "n2-t-off-template",
+      "node": "N2",
+      "variant": "thinking-default",
+      "arm": "template",
+      "status": "ok",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "model": "qwen2.5:7b",
+      "temperature": 0,
+      "timeout_s": 120
+    }
+  ]
+}

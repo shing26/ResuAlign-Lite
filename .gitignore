@@ -37,6 +37,8 @@ reasonix.toml
 # Generated reports
 resualign-report-*.json
 benchmarks/results/
+# Phase 0 实测产物（逐 run 原始记录，不入库；封卷件是协议与 fixture，不是结果）
+benchmarks/agent/results/
 server.log
 server.err.log
 tmp-*.db
