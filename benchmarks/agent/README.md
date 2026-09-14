@@ -22,7 +22,7 @@
 | `harness/actor.py` | 完美模型演员（动作流与参考答文**从 fixture 自身的期望集/剧本推导**）+ 9 个违规注入器 |
 | `harness/probes.py` | P1–P6 自检（见下） |
 | `harness/runner.py` | 8 格实测驱动：attempt 分母聚合、协议 §1 等效线判定、封卷 hash 绑定、结果落 `results/` |
-| `harness/overlay_from_pack.py` | 从 v1.1 输入包 md 抽覆写行 → 写到**被 git 忽略**的 `.scratch/phase0/v11_overlay.jsonl`（绝不写 fixture） |
+| `harness/overlay_from_pack.py` | 从输入包 md 抽覆写行 → 写到**被 git 忽略**的 `.scratch/phase0/v11_overlay.jsonl`（绝不写 fixture）。v1.1 已封卷入库，此工具转为未来版本起草备用 |
 | `cells.example.json` | 8 格配置（节点 × thinking 变体 × 协议臂）；只写密钥**变量名** |
 
 ## 跑探针（改判分器后必跑，离线）
@@ -32,7 +32,7 @@ cd D:/ResuAlign-Lite
 python -m benchmarks.agent.harness.probes --verbose
 ```
 
-五探针各自钉住一件「不验就会静默出错」的事：
+六探针各自钉住一件「不验就会静默出错」的事：
 
 1. **P1 完美模型** — 30 行 × 两条代码路径（arm / direct）在 v1 与 v1.1 两套生效文本上全过，
    且 `harness_gap` 全空。演员跟着 fixture 走却过不了判分器 = fixture 或判分器有病。
@@ -43,12 +43,18 @@ python -m benchmarks.agent.harness.probes --verbose
 4. **P4 repair 记账** — ≤2 次无效输出可重试并通过，第 3 次判 `repair_over_cap`。
 5. **P6 臂语义** — 一条响应到底算不算「派发调用」：有剧本的行（MD/BS/SB）拿到
    `tool_calls` 一律派发（吞掉会造成静默死循环，把 harness 缺陷伪装成模型失败）；
-   填空题（SS 行，fixture 里没有观察剧本）拿到 `tool_calls` 记一次 repair 并保留轨迹，
-   **不派发**——否则等于让 harness 凭空造观察。散文/空内容不算答案。
+   填空题（SS 行，fixture 里没有观察剧本）拿到 `tool_calls` 记一次 repair（计入
+   steps、**不写入 actions**），**不派发**——否则等于让 harness 凭空造观察。散文/空内容不算答案。
 6. **P5 判分边界** — SS-05 弱判在 v1 过、收紧后在 v1.1 挂；题面作者括注（`（world…）`）
    v1 命中 6 处、v1.1 命中 0 处。
 
-当前状态：**6 项 9 组全绿**（v1 与 v1.1 overlay 两套）。
+基线来源（v1.1 封卷后确立）：**v1 = 封卷 git 对象** `git show f25a22f:…jsonl`
+（blob `f097c88c…` 钉死在探针里，基线被偷换会先于判分开火）；**v1.1 = 工作树
+生效视图**（`c92bf37` 纯追加 15 行同 id 覆写，last-wins）。append-only 封卷之后
+工作树里不存在纯 v1 文本，P3/P5 只能对 git 对象重放——「v1 会放过这三个替身」
+正是 §6 立洞的证据。
+
+当前状态：**6 项 9 组全绿**（封卷 v1 重放 + 工作树 v1.1）。
 
 ## 跑 8 格实测
 

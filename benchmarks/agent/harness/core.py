@@ -584,6 +584,22 @@ def git_blob_hash(relpath: str, rev: str = "HEAD") -> str:
         return "unavailable"
 
 
+def git_show_text(relpath: str, rev: str) -> str:
+    """Verbatim blob of `rev:relpath`. Once the seal moves append-only, the
+    working tree no longer holds older texts — sealed baselines live in git."""
+    import subprocess
+
+    out = subprocess.run(
+        ["git", "show", f"{rev}:{relpath}"],
+        cwd=str(AGENT_DIR.parent.parent),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    return out.stdout
+
+
 def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 

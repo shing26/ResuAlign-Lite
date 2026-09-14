@@ -10,6 +10,10 @@ Probes:
   P4 repair accounting -> <=2 retried, 3rd invalid output kills the attempt
   P5 judging boundary -> SS-05 v1/v1.1 delta, author-note scan, harness_gap empty
 
+Baselines: v1 replays from the sealed git blob (pinned by its §5 hash — the
+append-only seal means the working tree no longer holds any pure-v1 text);
+v1.1 is the working-tree effective view.
+
 Every probe asserts on data the judge itself returns; nothing here reads the
 protocol prose, so a rule that exists only in the document cannot pass.
 """
@@ -37,10 +41,23 @@ from .actor import (
     reference_finalizer,
 )
 from .arms import ScriptedArm, decide_action
-from .core import AGENT_DIR, Fixture, load_fixture, load_overlay_file, split_key
-from .judge import APPROVAL_TOOLS, judge_attempt
+from .core import (
+    Fixture,
+    git_blob_hash,
+    git_show_text,
+    load_fixture,
+    load_overlay_file,
+)
+from .judge import judge_attempt
 
-OVERLAY_DEFAULT = AGENT_DIR.parent.parent / ".scratch" / "phase0" / "v11_overlay.jsonl"
+FIXTURE_REL = "benchmarks/agent/fixtures/phase0_q4_v1.jsonl"
+# v1 baseline = the sealed git object. After the v1.1 append-only seal
+# (c92bf37) the working tree carries only the v1.1 effective view, so "what
+# v1 accepted" can only be replayed from the blob it was sealed in. The blob
+# hash pins the baseline to protocol §5's recorded anchor: a silent
+# substitution of the baseline would light this up before any judgement runs.
+V1_SEAL_REV = "f25a22f"
+V1_SEAL_BLOB = "f097c88c15f6ef79f6ffd1436e86bb8b8b8f9825"
 NOTE_RE = re.compile(r"（world[^）]*）")
 
 
@@ -48,15 +65,30 @@ NOTE_RE = re.compile(r"（world[^）]*）")
 
 
 def fx_v1() -> Fixture:
-    return load_fixture()
+    if git_blob_hash(FIXTURE_REL, V1_SEAL_REV) != V1_SEAL_BLOB:
+        raise RuntimeError(
+            f"v1 baseline drifted: {V1_SEAL_REV}:{FIXTURE_REL} is not {V1_SEAL_BLOB[:8]}"
+        )
+    text = git_show_text(FIXTURE_REL, V1_SEAL_REV)
+    fx = Fixture([json.loads(l) for l in text.splitlines() if l.strip()])
+    if fx.version != "v1":
+        raise RuntimeError(f"seal blob derives as {fx.version}, not v1")
+    return fx
 
 
-def fx_v11(overlay: Path | None = None) -> Fixture | None:
-    path = overlay or OVERLAY_DEFAULT
-    if not path.exists():
-        return None
-    lines = load_fixture().raw_lines + load_overlay_file(path)
-    return Fixture(lines)
+def fx_v11(overlay: Path | None = None) -> Fixture:
+    """Working tree IS the v1.1 effective view (appended in-commit, last-wins).
+    `--overlay` adds further same-id lines on top — for drafting v1.2, never for
+    pretending the seal didn't happen."""
+    lines = load_fixture().raw_lines
+    if overlay:
+        lines = lines + load_overlay_file(overlay)
+    fx = Fixture(lines)
+    if fx.version != "v1.1":
+        raise RuntimeError(
+            "working-tree fixture derives as v1 — v1.1 seal (c92bf37) missing?"
+        )
+    return fx
 
 
 def _run(fx: Fixture, q: dict) -> dict:
@@ -247,21 +279,16 @@ def author_notes(fx: Fixture) -> int:
 def run_all(overlay: Path | None = None, verbose: bool = False) -> int:
     fx1 = fx_v1()
     fx2 = fx_v11(overlay)
-    report: dict = {"fixtures": {"v1": fx1.version, "v1.1": fx2.version if fx2 else "absent"}}
+    report: dict = {"fixtures": {"v1": f"{fx1.version}@{V1_SEAL_REV}", "v1.1": fx2.version}}
     failures: list[str] = []
 
     steps = [
         ("P1 perfect/v1", lambda: p1_perfect(fx1)),
         ("P2 violations/v1", lambda: p2_violations(fx1)),
         ("P4 repair/v1", lambda: p4_repair(fx1)),
-    ]
-    if fx2:
-        steps += [
-            ("P1 perfect/v1.1", lambda: p1_perfect(fx2)),
-            ("P2 violations/v1.1", lambda: p2_violations(fx2)),
-            ("P4 repair/v1.1", lambda: p4_repair(fx2)),
-        ]
-    steps += [
+        ("P1 perfect/v1.1", lambda: p1_perfect(fx2)),
+        ("P2 violations/v1.1", lambda: p2_violations(fx2)),
+        ("P4 repair/v1.1", lambda: p4_repair(fx2)),
         ("P6 arm semantics", lambda: p6_arm_semantics(fx1)),
         ("P3 identity hole", lambda: p3_identity_hole(fx1, fx2)),
         ("P5 judging boundary", lambda: p5_boundary(fx1, fx2)),
