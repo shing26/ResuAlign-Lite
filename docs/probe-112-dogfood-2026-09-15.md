@@ -87,12 +87,20 @@ Java 生产级工程经验，简历无实证 → **按硬线记为「不能诚�
    把整份简历塞进 allowlist 等于自拆门禁——README 明确禁止并说明为何
    机器读不出这个作弊（只要求文件存在）。
 
-## 5. 结论与下一步
+## 5. 结论与落点（同日）
 
 - 形态假设在作者身上成立：一个 host agent + 两个文件就能跑完整闭环，
   无需 app、无需 key、无需服务；且**故意投毒的假建议确实被当场拦下**，
   这条就是 #113 视频的镜头脚本。
 - 本轮不产生任何需求线 (b)/(c) 结论（判据只看非作者首跑）。
-- 下一步：R1–R7 落到 SKILL.md/验证器 → 合成例（零个人信息）录视频 →
-  建 `truetailor` 公开仓（fixtures 迁为唯一事实源，主仓 vendor 副本 +
-  漂移锁）→ outreach，时钟自发布日起算。
+
+当日已落：R1–R8 进 SKILL.md 与验证器（R8 见 §3.1）；合成例
+`truetailor/examples/demoflow/` 跑成真链并渲染 59.8s 视频（#113）；
+`shing26/truetailor` 公开（MIT + v0.1.0 + CI 双 Python 绿），fixtures 与
+`gate.py` 迁为上游唯一事实源、主仓转 vendor + 哈希锁（#112）。
+**判据时钟 2026-09-15 → 2026-10-13**。
+
+仍待人工两步（文案与预填链接都在
+`docs/probe-112-outreach-2026-09-15.md`）：置顶 first-run feedback
+discussion（gh OAuth token 无 Discussions 写权限）、四渠道 outreach 发布。
+周 3-6 按剧本只做：回反馈、修首跑摩擦、#111 终端语义。

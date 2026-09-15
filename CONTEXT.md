@@ -551,12 +551,19 @@ _Avoid_: 口头「我用过了」当首跑；agent 转述或重打摘要（必�
 验证器落盘的 append-only JSONL 运行日志（时间戳、简历哈希、轮次、触发
 原因、采纳计数），用于证明 ADR-0040 (a) 合格例的因果链：第 n+1 轮的
 trigger 必须指向第 n 轮复评结论。狗食数据计入（2026-09-14 裁决）。
+_注_：轮次连续性由验证器自己判定并写入 `chain{prev_round,cites_prev}`
+（2026-09-15 R5），不再靠 agent 自觉声明；`resume_sha256` 跨轮不变即
+「同一份文本重放」，不算迭代证据。
 _Avoid_: 手填轮次凑数（无 JSONL 佐证不算）；无因果链的三轮手点
 
 **skill 探针 (Skill Probe)**
 掉头期主线：独立公开仓库（默认命名 `truetailor`）= prompt skill +
 单文件确定性验证器（stdlib 零依赖），在 app 之外验证「逐条可溯源改写」
 的需求。判据、时间盒与终态剧本见 ADR-0041 决定 4/9/10。
+_注_：仓库已于 2026-09-15 公开（`shing26/truetailor`，MIT），故
+`gate.py` 与黄金 fixtures 的**唯一事实源在上游**；主仓持 vendor 副本，
+由 `tests/fixtures/gate/VENDOR.json` 哈希清单 + `test_skill_vendor_lock.py`
+锁定，改规则须先改上游再同步。
 _Avoid_: 把探针当产品第一步（它是需求探针，过与死各有剧本）；证伪后
 另起第三渠道（决定 10 禁止）
 
