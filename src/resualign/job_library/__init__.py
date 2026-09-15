@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS library_jobs (
     last_alignment_error TEXT,
     diffs_json TEXT NOT NULL DEFAULT '[]',
     invalid_diffs_json TEXT NOT NULL DEFAULT '[]',
+    usable_diffs INTEGER NOT NULL DEFAULT 0,
     draft TEXT,
     eval_score_json TEXT,
     model TEXT,
@@ -320,6 +321,18 @@ class JobLibraryStore(_SqliteStore):
         (
             44,
             "ALTER TABLE library_jobs ADD COLUMN deadline TEXT;",
+        ),
+        # 45（#111 / ADR-0041 决定 5）：usable_diffs 计数——noop 过滤与 #74
+        # 门禁之后的有效 diff 数（无新状态）。驾驶舱「完成对齐」分子只数
+        # usable≥1；有缺口 usable=0 的分型（failed + no_output）由调用方
+        # 写前决策。存量按 diffs_json 长度回填（#110 实测：现库零-diff
+        # succeeded 全属无缺口型，回填不改变其徽章语义）。
+        (
+            45,
+            "ALTER TABLE library_jobs ADD COLUMN usable_diffs INTEGER "
+            "NOT NULL DEFAULT 0; "
+            "UPDATE library_jobs "
+            "SET usable_diffs = json_array_length(diffs_json);",
         ),
     )
 
@@ -1415,6 +1428,7 @@ class JobLibraryStore(_SqliteStore):
         prompt_version: str | None = None,
         alignment_status: str = "succeeded",
         last_alignment_error: str | None = None,
+        usable_diffs: int | None = None,
     ) -> Optional[dict[str, Any]]:
         """Persist a terminal alignment product for one library job.
 
@@ -1422,6 +1436,11 @@ class JobLibraryStore(_SqliteStore):
         a degraded tailor pass writes the reason here so the UI can show
         "诊断完成 · 改写未产出" instead of a bare zero-diff success. Pass
         None on normal runs to clear any stale hint.
+
+        ``usable_diffs`` (#111 / ADR-0041 决定 5): count of diffs that survive
+        the noop filter and #74 gate — defaults to ``len(diffs)`` because
+        callers pass only kept diffs here; the caller may pass an explicit
+        value when it also knows about blocked output.
         """
         if alignment_status not in (
             "idle",
@@ -1431,6 +1450,7 @@ class JobLibraryStore(_SqliteStore):
             "failed",
         ):
             raise UserStoreError(f"Invalid alignment_status: {alignment_status}")
+        usable = len(diffs or []) if usable_diffs is None else int(usable_diffs)
         now = time.time()
         with self._lock:
             self._ensure_initialized()
@@ -1448,7 +1468,8 @@ class JobLibraryStore(_SqliteStore):
                     "match_score = ?, match_score_detail_json = ?, "
                     "match_reason = ?, match_updated_at = ?, "
                     "alignment_status = ?, last_alignment_error = ?, "
-                    "diffs_json = ?, invalid_diffs_json = ?, draft = ?, "
+                    "diffs_json = ?, invalid_diffs_json = ?, "
+                    "usable_diffs = ?, draft = ?, "
                     "eval_score_json = ?, model = ?, prompt_version = ?, "
                     "generated_at = ?, updated_at = ? "
                     "WHERE job_id = ? AND tenant_id = ?",
@@ -1475,6 +1496,7 @@ class JobLibraryStore(_SqliteStore):
                         last_alignment_error,
                         json.dumps(diffs or [], ensure_ascii=False),
                         json.dumps(invalid_diffs or [], ensure_ascii=False),
+                        usable,
                         draft,
                         (
                             json.dumps(eval_score, ensure_ascii=False)
@@ -1817,6 +1839,31 @@ class JobLibraryStore(_SqliteStore):
             )
         except (TypeError, ValueError):
             match_score_detail = None
+        # #111 / ADR-0041 决定 5：usable_diffs 是持久列；has_gap 与
+        # alignment_reason 由投影派生（无新状态）——no_gap=无缺口零产出、
+        # no_output=有缺口零产出（后者终态即 failed，理由前缀在
+        # last_alignment_error）。前端徽章/驾驶舱分子据此分型，不再以
+        # alignment_status 单字段当「已对齐」绿灯。
+        usable_diffs = int(row["usable_diffs"] or 0)
+        try:
+            gap_report = (
+                json.loads(row["gap_report_json"])
+                if row["gap_report_json"]
+                else None
+            )
+        except (TypeError, ValueError):
+            gap_report = None
+        has_gap = bool(gap_report) and bool(
+            (gap_report.get("missing_keywords") or [])
+            or (gap_report.get("misaligned_emphasis") or [])
+        )
+        last_error = row["last_alignment_error"] or ""
+        if alignment_status == "succeeded" and usable_diffs == 0 and not has_gap:
+            alignment_reason: str | None = "no_gap"
+        elif alignment_status == "failed" and last_error.startswith("no_output"):
+            alignment_reason = "no_output"
+        else:
+            alignment_reason = None
         return {
             "job_id": row["job_id"],
             "tenant_id": row["tenant_id"],
@@ -1871,6 +1918,9 @@ class JobLibraryStore(_SqliteStore):
             "last_alignment_error": row["last_alignment_error"] or None,
             "diffs": json.loads(row["diffs_json"] or "[]"),
             "invalid_diffs": json.loads(row["invalid_diffs_json"] or "[]"),
+            "usable_diffs": usable_diffs,
+            "has_gap": has_gap,
+            "alignment_reason": alignment_reason,
             "draft": row["draft"],
             "eval_score": (
                 json.loads(row["eval_score_json"])

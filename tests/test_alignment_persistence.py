@@ -533,7 +533,13 @@ def test_eval_hallucination_blocks_diffs_into_invalid():
     persisted = client.get(
         f"/api/jobs/{job['job_id']}", headers=_auth_headers()
     ).json()
-    assert persisted["alignment_status"] == "succeeded"
+    # #111/ADR-0041 决定 5：本 job 有缺口（missing Redis）且全部拦截
+    # usable=0 → 质量失败就该红、可重跑（旧语义「拦截后仍 succeeded」废除）。
+    assert persisted["alignment_status"] == "failed"
+    assert persisted["usable_diffs"] == 0
+    assert persisted["has_gap"] is True
+    assert persisted["alignment_reason"] == "no_output"
+    assert persisted["last_alignment_error"].startswith("no_output: ")
     assert persisted["diffs"] == []
     assert len(persisted["invalid_diffs"]) == 1
     blocked = persisted["invalid_diffs"][0]

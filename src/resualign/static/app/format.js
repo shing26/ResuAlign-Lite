@@ -923,6 +923,44 @@ function matchDimensionHtml(detail) {
   }).join("");
 }
 
+/** Alignment badge (ticket #111 / ADR-0041 决定 5).
+ *
+ *  A `succeeded` badge no longer implies "已对齐". Three shapes:
+ *   - usable_diffs≥1 → 绿色「已对齐」
+ *   - usable_diffs=0 且无缺口 → 琥珀「无缺口 · 无需改写」(不是"已对齐")
+ *   - usable_diffs=0 且有缺口 → failed + no_output：红色「对齐失败 · 未产出建议」
+ *  服务端已把终态分型落进 alignment_reason/usable_diffs/has_gap；这里同时兼容
+ *  旧数据（仅有 diffs 长度时以 diffs 为准）。 */
+export function alignmentBadgeHtml(job) {
+  const status = job.alignment_status;
+  const usable =
+    typeof job.usable_diffs === "number"
+      ? job.usable_diffs
+      : (job.diffs || []).length;
+  const hasGap =
+    typeof job.has_gap === "boolean" ? job.has_gap : usable === 0;
+  const reason = job.alignment_reason;
+  if (status === "failed") {
+    const tip = String(job.last_alignment_error || "对齐失败，请到工作台重新运行").replace(
+      /^no_output:\s*/,
+    );
+    const label = reason === "no_output" ? "对齐失败 · 未产出建议" : "对齐失败";
+    return `<span class="badge badge-red" title="${esc(tip)}">${label}</span>`;
+  }
+  if (status === "succeeded") {
+    if (usable >= 1) return '<span class="badge badge-green">已对齐</span>';
+    if (reason === "no_gap" || !hasGap) {
+      return '<span class="badge badge-amber" title="该岗位无缺口，无需改写">无缺口 · 无需改写</span>';
+    }
+    // 有缺口却零产出，正常应已被服务端判 failed；旧数据行（无分型字段）
+    // 维持原「降级提示 vs 泛无建议」双色区分，防御性兜底。
+    return job.last_alignment_error
+      ? `<span class="badge badge-amber" title="${esc(String(job.last_alignment_error).replace(/^no_output:\s*/, ""))}">诊断完成 · 改写未产出</span>`
+      : '<span class="badge badge-amber" title="本次对齐未产出修改建议，可到工作台重新运行">无建议</span>';
+  }
+  return "";
+}
+
 function boardMatchBlock(job) {
   const detail = job.match_score_detail;
   const match = job.match_score != null ? Math.round(job.match_score) : null;
@@ -974,13 +1012,7 @@ export function boardCard(job, statuses = null) {
         <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
         ${jobCompletenessBadge(job)}
         ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
-        ${job.alignment_status === "succeeded" ? '<span class="badge badge-green">已对齐</span>' : ""}
-        ${job.alignment_status === "failed" ? `<span class="badge badge-red" title="${esc(job.last_alignment_error || "对齐失败，请到工作台重新运行")}">对齐失败</span>` : ""}
-        ${job.alignment_status === "succeeded" && !(job.diffs || []).length
-          ? (job.last_alignment_error
-              ? `<span class="badge badge-amber" title="${esc(job.last_alignment_error)}">诊断完成 · 改写未产出</span>`
-              : '<span class="badge badge-amber" title="本次对齐未产出修改建议，可到工作台重新运行">无建议</span>')
-          : ""}
+        ${alignmentBadgeHtml(job)}
       </div>
       <div class="board-card__timeline">
         ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}

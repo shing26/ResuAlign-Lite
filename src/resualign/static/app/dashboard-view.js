@@ -58,8 +58,17 @@ export async function renderDashboard(container) {
   const declined = toNumber(kpi.declined);
   const resumeList = Array.isArray(resumes) ? resumes : [];
 
+  /* #111 / ADR-0041 决定 5：「完成对齐」分子只数 usable≥1——零产出的
+   * succeeded（无缺口型）不再虚增完成率，「100%」从制度上不可达。 */
+  const jobUsable = (job) =>
+    typeof job.usable_diffs === "number"
+      ? job.usable_diffs
+      : (job.diffs || []).length;
   const alignedCount = jobs.filter(
-    (job) => job && job.alignment_status === "succeeded",
+    (job) => job && job.alignment_status === "succeeded" && jobUsable(job) >= 1,
+  ).length;
+  const noGapCount = jobs.filter(
+    (job) => job && job.alignment_status === "succeeded" && jobUsable(job) === 0,
   ).length;
   const completionRate =
     jobsTotal > 0 ? Math.round((alignedCount / jobsTotal) * 100) : 0;
@@ -96,7 +105,7 @@ export async function renderDashboard(container) {
     <div class="metric-cell" data-kpi="aligned">
       <div class="metric-label">已完成对齐</div>
       <div class="metric-value">${escAttr(alignedCount)} <span>/ ${escAttr(jobsTotal)}</span></div>
-      <div class="metric-hint">完成率 ${escAttr(completionRate)}%</div>
+      <div class="metric-hint">完成率 ${escAttr(completionRate)}%${noGapCount ? ` · 无缺口 ${escAttr(noGapCount)}` : ""}</div>
     </div>
     <div class="metric-cell" data-kpi="ats">
       <div class="metric-label">主简历 ATS</div>
