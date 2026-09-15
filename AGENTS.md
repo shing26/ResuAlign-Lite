@@ -52,11 +52,14 @@ full 40-char object name.
   **chromium-1243** (chromium-1234 was removed). Gate variant
   `.scratch/prod-readiness/gate_probe.py` points at an isolated 8003
   instance (fresh `RESUALIGN_DATA_DIR`) so it never touches the user's 8000.
-- DeepSeek .env key is **402 unpaid** — the active LLM node is
-  Ollama qwen2.5:7b; the workbench pre-flight probe (Phase A1) blocks
-  definitive auth/quota failures and local-node connectivity failures with an
-  actionable message before queueing (Phase E: local fast-fail, remote
-  network/timeout non-blocking).
+- DeepSeek .env key tests **ok** as of 2026-09-15 (was 402 unpaid in
+  September early-month); the active LLM node is `meta/muse-glimmer-30b`
+  via NVIDIA integrate API — 9 月真实对齐 4/5 零产出（假成功主症状，
+  见 #110 归因与派单 #115）。Ollama qwen2.5:7b 是已知能力地板
+  （批量对齐 8 连跑各出 1 diff）。Workbench pre-flight probe (Phase A1)
+  blocks definitive auth/quota failures and local-node connectivity
+  failures with an actionable message before queueing (Phase E: local
+  fast-fail, remote network/timeout non-blocking).
 
 ### Production-readiness invariants (2026-09-13, spec #97)
 
