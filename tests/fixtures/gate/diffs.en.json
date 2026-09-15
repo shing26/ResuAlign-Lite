@@ -1,0 +1,72 @@
+[
+  {
+    "diff_id": "e1-clean-modify",
+    "type": "modify",
+    "section": "Experience",
+    "original": "Ran the on-call rotation for 6 services and rewrote 11 runbooks.",
+    "proposed": "Carried 6 services through the on-call rotation and rewrote 11 runbooks into paths the team follows.",
+    "provenance": "Ran the on-call rotation for 6 services and rewrote 11 runbooks.",
+    "reason": "ownership framing, no new facts",
+    "confidence": "high"
+  },
+  {
+    "diff_id": "e2-midsentence-tool-invented",
+    "type": "modify",
+    "section": "Experience",
+    "original": "Built ETL jobs that moved 2 million claim rows per night into the analytics warehouse.",
+    "proposed": "Built Kafka-backed ETL jobs that moved 2 million claim rows per night into the analytics warehouse.",
+    "provenance": "Built ETL jobs that moved 2 million claim rows per night into the analytics warehouse.",
+    "reason": "regression lock: a title-case tool name mid-sentence used to pass the content check untouched",
+    "confidence": "high"
+  },
+  {
+    "diff_id": "e3-midsentence-employer-invented",
+    "type": "modify",
+    "section": "Experience",
+    "original": "Cut p95 tracking lookup from 780 ms to 210 ms with a Redis read cache and a rewritten route query.",
+    "proposed": "Cut p95 tracking lookup from 780 ms to 210 ms with a Redis read cache while on contract at Baseten",
+    "provenance": "Cut p95 tracking lookup from 780 ms to 210 ms with a Redis read cache and a rewritten route query.",
+    "reason": "regression lock: an employer the resume never names",
+    "confidence": "high"
+  },
+  {
+    "diff_id": "e4-sentence-start-is-prose",
+    "type": "modify",
+    "section": "Experience",
+    "original": "Cut p95 tracking lookup from 780 ms to 210 ms with a Redis read cache and a rewritten route query.",
+    "proposed": "Reduced p95 tracking lookup from 780 ms to 210 ms through a Redis read cache and a rewritten route query.",
+    "provenance": "Cut p95 tracking lookup from 780 ms to 210 ms with a Redis read cache and a rewritten route query.",
+    "reason": "false-positive lock: sentence-initial capitalization is grammar, not a name",
+    "confidence": "high"
+  },
+  {
+    "diff_id": "e5-capitalized-common-word",
+    "type": "modify",
+    "section": "Experience",
+    "original": "Built ETL jobs that moved 2 million claim rows per night into the analytics warehouse.",
+    "proposed": "Reporting every Monday, built ETL jobs that moved 2 million claim rows per night into the analytics warehouse.",
+    "provenance": "Built ETL jobs that moved 2 million claim rows per night into the analytics warehouse.",
+    "reason": "false-positive lock: weekday names are prose, not provenance",
+    "confidence": "medium"
+  },
+  {
+    "diff_id": "e6-allowlist-term",
+    "type": "modify",
+    "section": "Experience",
+    "original": "Cut p95 tracking lookup from 780 ms to 210 ms with a Redis read cache and a rewritten route query.",
+    "proposed": "Owned the p95 SLO for tracking lookups, cutting 780 ms to 210 ms with a Redis read cache and a rewritten route query.",
+    "provenance": "Cut p95 tracking lookup from 780 ms to 210 ms with a Redis read cache and a rewritten route query.",
+    "reason": "SLO is evidenced (a measured p95 owned through on-call) but never named; it enters through the JD allowlist only",
+    "confidence": "high"
+  },
+  {
+    "diff_id": "e7-misquoted-salvage",
+    "type": "modify",
+    "section": "Skills",
+    "original": "Load testing with Locust; CI on GitHub Actions",
+    "proposed": "Load testing with Locust run from CI on GitHub Actions, so capacity regressions surface before a release.",
+    "provenance": "Load testing with Locust and CI on GitHub Actions",
+    "reason": "quote misremembered ('and' for ';'): salvage must locate the real line and correct original",
+    "confidence": "medium"
+  }
+]

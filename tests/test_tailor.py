@@ -86,8 +86,33 @@ def test_tailor_diff_section_filled_from_llm():
     })
     # 内容级校验（#74）：proposed 的 FastAPI 必须在简历原文中有依据，
     # 否则会被拦截进 invalid_diffs 而非 diffs。
-    result = tailor_resume(mock, "Worked on backend with FastAPI", "Gap")
+    result = tailor_resume(
+        mock, "Worked on backend with FastAPI and Redis caching", "Gap"
+    )
     assert result.diffs[0].section == "项目经历"
+
+
+def test_tailor_blocks_unsourced_english_proper_noun():
+    """2026-09-15 狗食发现（#112 周 2）：#74 的专名检查只看缩写与驼峰，
+    英文简历里句中的 Title-case 专名（Java/Kafka/公司名）完全不查——
+    「Python dev」可以被改成「Built services using Java」并标成 verified。
+    现在句中大写词必须有出处，句首大写与常见英文词不算专名。"""
+    mock = MockLLM(result={
+        "sections": {},
+        "diffs": [{
+            "type": "modify",
+            "section": "项目经历",
+            "original": "Python dev built services.",
+            "proposed": "Built services using Java",
+            "reason": "JD asks for Java",
+            "confidence": "high",
+            "provenance": "Python dev built services.",
+        }],
+    })
+    result = tailor_resume(mock, "Python dev built services.", "Gap")
+    assert result.diffs == []
+    assert result.invalid_diffs[0].provenance_state == "fabricated"
+    assert "Java" in result.invalid_diffs[0].reason
 
 
 def test_tailor_diff_section_defaults_empty_when_absent():

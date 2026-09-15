@@ -1,0 +1,18 @@
+{
+  "note": "English-side golden scenarios. e2/e3 lock the mid-sentence proper-noun check (a title-case tool or employer the resume never names); e4/e5 lock the other direction, because grammar and weekday names must not be read as provenance claims. Canonical here; the ResuAlign app vendors a byte-identical copy.",
+  "expectations": [
+    {"diff_id": "e1-clean-modify", "verdict": "usable", "reason": "verified", "salvaged": false},
+    {"diff_id": "e2-midsentence-tool-invented", "verdict": "blocked", "reason": "fabricated", "salvaged": false,
+     "note": "Kafka-backed: the compound is one regex token, the name inside it is what needs a source"},
+    {"diff_id": "e3-midsentence-employer-invented", "verdict": "blocked", "reason": "fabricated", "salvaged": false},
+    {"diff_id": "e4-sentence-start-is-prose", "verdict": "usable", "reason": "verified", "salvaged": false,
+     "note": "a sentence-initial verb nobody used before it is grammar, not a claim"},
+    {"diff_id": "e5-capitalized-common-word", "verdict": "usable", "reason": "verified", "salvaged": false,
+     "note": "Monday is capitalized mid-sentence and names nothing"},
+    {"diff_id": "e6-allowlist-term", "verdict": "usable", "reason": "verified", "salvaged": false,
+     "note": "usable only with the allowlist; without it SLO is an unsupported term"},
+    {"diff_id": "e7-misquoted-salvage", "verdict": "usable", "reason": "verified", "salvaged": true,
+     "note": "quote remembered wrong ('and' for ';') — difflib salvage must land on the real line"}
+  ],
+  "summary": {"diffs": 7, "usable": 5, "blocked": {"missing": 0, "fabricated": 2, "noop": 0}}
+}

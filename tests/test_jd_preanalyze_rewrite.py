@@ -195,7 +195,7 @@ def test_tailor_add_without_source_goes_to_invalid_diffs():
                     {
                         "type": "modify",
                         "original": "Python dev",
-                        "proposed": "Built services using Java",
+                        "proposed": "Built services as a Python dev",
                         "reason": "match",
                         "confidence": "high",
                         "provenance_quote": "Python dev",

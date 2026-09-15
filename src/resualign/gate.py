@@ -1,20 +1,29 @@
-"""Deterministic provenance gate — stdlib-only single-file validator.
+"""Deterministic fabrication gate for resume tailoring — stdlib only.
 
-ADR-0041 决定 2/11: this module is the portable core of the truetailor
-skill probe. It mirrors the app's fail-closed gate chain (tailor.py
-parse_diff_with_provenance + #74 content check + A2 noop filter) with
-plain dicts and NO third-party imports, so the same file can ship inside
-a skill repo. Drift is locked by tests/test_gate.py parity tests over
-tests/fixtures/gate/ (canonical fixtures live here until the skill repo
-exists, then the skill repo owns them and the main repo vendors a copy).
+This is the portable core of the `true-tailor` skill: one file, no
+dependencies, no network. It mirrors the ResuAlign app's fail-closed gate
+chain (provenance parse + content check + noop filter) over plain dicts so
+that "we only suggest rewrites the resume can already support" is enforced
+by code instead of promised in prose.
 
-CLI contract (ADR-0041 决定 11):
+The app and the skill repo carry a byte-identical copy of this file. Drift
+is locked two ways: the shared golden fixtures (canonical in the skill
+repo's fixtures/, vendored here under tests/fixtures/gate/ with a hash
+manifest) and a parity test that runs the app's real gate chain over the
+same fixtures and demands the same verdicts.
+
+CLI contract:
     python gate.py --resume resume.md --diffs diffs.json \
-        [--allowlist jd.json|text] [--log run.jsonl] [--round N] \
-        [--trigger eval]
-stdout: one verdict line per diff + one machine-readable gate summary:
+        [--allowlist gap.json|text] [--log run.jsonl] [--round N] \
+        [--trigger eval:roundN-1]
+stdout: one verdict line per diff + one machine-readable summary line:
     GATE: N diffs / K blocked (missing=x, fabricated=y, noop=z) / resume-sha256=H
 exit: 0 ran (even with blocks), 2 usage/IO error.
+
+Append-only JSONL: one line per run with counts, the hashed resume, and a
+chain block saying whether the run really follows the previously logged
+round and cites it — the difference between "we iterated on this resume"
+as evidence and as a claim.
 """
 
 from __future__ import annotations
@@ -27,11 +36,36 @@ import re
 import sys
 from datetime import datetime, timezone
 
+# Placeholders the ResuAlign app writes into unfinished drafts
+# ("[待人工确认]" = needs human confirmation). Stripped before the content
+# check so a placeholder is never reported as a fabricated number; a no-op
+# for resumes that never contain that marker.
 _METRIC_PLACEHOLDER_RE = re.compile(r"\[[^\]\[]*待人工确认[^\]\[]*\]")
 _LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9.+#/-]*")
 _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _PROPER_NOUN_MIN_CHARS = 3
+_TOKEN_PART_RE = re.compile(r"[-/]")
+_SENTENCE_BREAK_RE = re.compile(r"[.!?:;\n]$")
+
+# Words that are legitimately capitalized mid-sentence in English resume
+# prose without naming a product, employer or tool. Everything else that is
+# capitalized mid-sentence must be findable in the source text: that is
+# where "Kafka" and "Acme" hide. The bias is deliberate — a visible false
+# block is recoverable, an invisible false pass is the whole claim failing.
+_ENTITY_STOP_WORDS = frozenset(
+    """
+    january february march april may june july august september october
+    november december monday tuesday wednesday thursday friday saturday
+    sunday senior junior lead staff principal engineer engineering
+    developer manager director team company client customer business
+    product project projects software services solutions experience
+    education skills summary highlights awards honors year month week
+    full part remote onsite hybrid north south east west university
+    college bachelor master doctor first second third current recent
+    global regional internal external public private open cross
+    """.split()
+)
 
 _FUZZY_MIN_QUOTE_CHARS = 12
 _FUZZY_COVERAGE_THRESHOLD = 0.85
@@ -181,27 +215,53 @@ def _unsupported_content(proposed: str, *supported_texts: str) -> list[str]:
     corpus_lower = corpus.lower()
     cjk_context = bool(_CJK_RE.search(text))
 
-    def _noun_candidate(token: str) -> bool:
+    def _at_sentence_start(index: int) -> bool:
+        before = text[:index].rstrip()
+        return not before or bool(_SENTENCE_BREAK_RE.search(before[-1:]))
+
+    def _noun_candidate(token: str, at_sentence_start: bool) -> bool:
         if token.upper() == token or any(c.isupper() for c in token[1:]):
-            return True
-        return cjk_context
+            return True  # acronym or mixed case: QPS, FastAPI, PyTorch
+        if cjk_context:
+            return True  # inside Chinese prose, a Latin word is a term
+        if not token[:1].isupper():
+            return False
+        # English prose capitalizes freely at the head of a sentence, so a
+        # leading "Built"/"Led" carries no signal; mid-sentence it names something.
+        if at_sentence_start or token.lower() in _ENTITY_STOP_WORDS:
+            return False
+        return True
 
     unsupported: list[str] = []
     for number in _NUMBER_RE.findall(text.replace(",", "")):
         if number not in corpus_numbers:
-            unsupported.append(f"数字 {number}")
+            unsupported.append(f"number {number}")
     seen_tokens: set[str] = set()
-    for token in _LATIN_TOKEN_RE.findall(text):
+    for match in _LATIN_TOKEN_RE.finditer(text):
+        token = match.group(0)
         key = token.lower()
         if key in seen_tokens:
             continue
         seen_tokens.add(key)
         if len(token) < _PROPER_NOUN_MIN_CHARS or token.islower():
             continue
-        if not _noun_candidate(token):
+        if key in corpus_lower:
             continue
-        if key not in corpus_lower:
-            unsupported.append(f"名称/术语 {token}")
+        # "Kafka-backed" is one regex token; the name inside it is what needs
+        # a source, and a resume that says Kafka should not block the compound.
+        parts = [
+            part
+            for part in _TOKEN_PART_RE.split(token)
+            if len(part) >= _PROPER_NOUN_MIN_CHARS and not part.islower()
+        ]
+        token_starts_sentence = _at_sentence_start(match.start())
+        for position, part in enumerate(parts or [token]):
+            part_at_start = token_starts_sentence and position == 0
+            if _noun_candidate(part, part_at_start) and (
+                part.lower() not in corpus_lower
+            ):
+                unsupported.append(f"term {part}")
+                break
     return unsupported
 
 
@@ -304,7 +364,7 @@ def verdict(item: dict, resume_text: str, jd_allowlist: str = "") -> dict:
     if diff_type == "add" and not original.strip():
         result["verdict"] = "blocked"
         result["reason"] = "missing"
-        result["detail"] = "add 缺支持句（original 必须逐字存在于简历）"
+        result["detail"] = "add without a supporting sentence: original must be verbatim resume text"
         return result
     # #119 parity: add-type diffs are content-checked too (anchor truth does
     # not certify the numbers/entities inside proposed).
@@ -313,17 +373,17 @@ def verdict(item: dict, resume_text: str, jd_allowlist: str = "") -> dict:
         if unsupported:
             result["verdict"] = "blocked"
             result["reason"] = "fabricated"
-            result["detail"] = "、".join(unsupported) + " 在简历原文中无依据"
+            result["detail"] = "; ".join(unsupported) + " has no source in the resume"
             return result
     if not valid:
         result["verdict"] = "blocked"
         result["reason"] = "missing"
-        result["detail"] = "provenance 引文无法在简历原文中定位"
+        result["detail"] = "provenance quote cannot be located in the resume"
         return result
     if _is_noop(diff_type, original, proposed):
         result["verdict"] = "blocked"
         result["reason"] = "noop"
-        result["detail"] = "original 与 proposed 逐字相同"
+        result["detail"] = "proposed is character-for-character the original"
         return result
     result["reason"] = "verified"
     return result
@@ -367,9 +427,46 @@ def append_log(
         "diffs": len(report["results"]),
         "usable": report["usable"],
         "blocked": report["blocked"],
+        "chain": chain_state(log_path, round_no, trigger),
     }
     with open(log_path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def last_logged_round(log_path: str) -> int | None:
+    """Round number of the last readable JSONL line, None if no log yet."""
+    try:
+        with open(log_path, encoding="utf-8") as fh:
+            previous = None
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    value = json.loads(line).get("round")
+                except ValueError:
+                    continue
+                if isinstance(value, int):
+                    previous = value
+            return previous
+    except OSError:
+        return None
+
+
+def chain_state(log_path: str, round_no: int, trigger: str) -> dict:
+    """Round-chain check against the log's tail (dogfood revision R5).
+
+    Round 1 with an empty log is trivially sound; any later round must be
+    the successor of the last logged round and name that round in its
+    trigger, which is what stops "round 7" from being pasted over a run
+    that never happened.
+    """
+    previous = last_logged_round(log_path)
+    if previous is None:
+        return {"prev_round": None, "cites_prev": True}
+    contiguous = round_no == previous + 1
+    cites = f"round{previous}" in (trigger or "")
+    return {"prev_round": previous, "cites_prev": contiguous and cites}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -407,7 +504,7 @@ def main(argv: list[str] | None = None) -> int:
         mark = "OK " if r["verdict"] == "usable" else "BLOCK"
         line = f"{mark} {r['diff_id']} [{r['type']}/{r.get('reason','')}] {r['detail']}"
         if r["salvaged"]:
-            line += "（引文已按原文校正）"
+            line += " (quote corrected to the source line)"
         print(line)
     print(report["summary"])
     if args.log:

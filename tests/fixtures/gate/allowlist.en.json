@@ -1,0 +1,18 @@
+{
+  "missing_keywords": [
+    "SLO",
+    "capacity reasoning",
+    "incident-to-steady-state ownership"
+  ],
+  "misaligned_emphasis": [
+    "Northwind work reads as feature delivery; the JD buys ownership of a service through incidents"
+  ],
+  "strength_matches": [
+    "FastAPI + PostgreSQL in production",
+    "measured latency work with a Redis cache"
+  ],
+  "business_scenarios": [
+    "peak load and degradation under real traffic"
+  ],
+  "jd_context": "The employer is buying latency and availability ownership, not ticket throughput."
+}

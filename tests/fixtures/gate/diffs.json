@@ -6,7 +6,7 @@
     "original": "负责订单服务的日常迭代，参与微服务拆分，使用 Java 与 Spring Boot",
     "proposed": "负责订单服务核心链路迭代，深度参与微服务拆分，基于 Java 与 Spring Boot 落地",
     "provenance": "负责订单服务的日常迭代，参与微服务拆分，使用 Java 与 Spring Boot",
-    "reason": "突出核心链路 ownership",
+    "reason": "foreground core-path ownership; no new facts",
     "confidence": "high"
   },
   {
@@ -16,7 +16,7 @@
     "original": "设计并实现了基于 Redis 的库存扣减方案，将超卖率降低到 0.01%",
     "proposed": "设计基于 Redis 的库存扣减方案，将超卖率降至 0.001%，并引入 Kubernetes 支撑弹性扩缩",
     "provenance": "设计并实现了基于 Redis 的库存扣减方案，将超卖率降低到 0.01%",
-    "reason": "量化强化",
+    "reason": "sharpen the metric and name a platform",
     "confidence": "high"
   },
   {
@@ -26,7 +26,7 @@
     "original": "参与大促值班，保障系统峰值 QPS 12000 的稳定运作",
     "proposed": "大促值班中保障峰值 QPS 12000 下的系统稳定运行",
     "provenance": "参与大促值班，保障系统峰值 QPS 12000 的稳定运作",
-    "reason": "动词前置",
+    "reason": "lead with the verb (quote is misquoted by one character)",
     "confidence": "medium"
   },
   {
@@ -36,7 +36,7 @@
     "original": "主导配置推送模块，支持万级实例秒级生效",
     "proposed": "主导配置推送模块，支持万级实例秒级生效",
     "provenance": "主导配置推送模块，支持万级实例秒级生效",
-    "reason": "自述无可用改动",
+    "reason": "self-described no-op",
     "confidence": "low"
   },
   {
@@ -46,7 +46,7 @@
     "original": "曾主导千万级日活推荐系统的整体重构与离线特征平台建设",
     "proposed": "主导推荐系统重构，沉淀离线特征平台",
     "provenance": "曾主导千万级日活推荐系统的整体重构与离线特征平台建设",
-    "reason": "补充项目",
+    "reason": "experience the resume never contains",
     "confidence": "high"
   },
   {
@@ -56,7 +56,7 @@
     "original": "",
     "proposed": "开源贡献：向 Apache 项目提交 PR",
     "provenance": "",
-    "reason": "新增亮点",
+    "reason": "add a highlight with no anchor at all",
     "confidence": "medium"
   },
   {
@@ -66,7 +66,7 @@
     "original": "主导配置推送模块，支持万级实例秒级生效",
     "proposed": "主导配置推送模块，支持万级实例秒级生效，兼顾高可用与容量规划",
     "provenance": "主导配置推送模块，支持万级实例秒级生效",
-    "reason": "在真实支持句基础上补充场景词",
+    "reason": "expand on a real supporting sentence",
     "confidence": "medium"
   },
   {
@@ -76,7 +76,7 @@
     "original": "主导配置推送模块，支持万级实例秒级生效",
     "proposed": "主导配置推送模块，引入 Kafka 削峰，支持万级实例秒级生效",
     "provenance": "主导配置推送模块，支持万级实例秒级生效",
-    "reason": "JD 明确 Kafka 技能要求（allowlist 来源）",
+    "reason": "Kafka comes from the JD allowlist, the only legitimate new-term source",
     "confidence": "medium"
   },
   {
@@ -86,7 +86,7 @@
     "original": "参与大促值班，保障系统峰值 QPS 12000 的稳定运行",
     "proposed": "参与大促值班，保障系统峰值 QPS 50000 的稳定运行",
     "provenance": "参与大促值班，保障系统峰值 QPS 12000 的稳定运行",
-    "reason": "#119 剧本：锚点与支持句都真实，但 proposed 数字无出处",
+    "reason": "anchor and supporting sentence are real, but the number is not",
     "confidence": "high"
   },
   {
@@ -96,7 +96,7 @@
     "original": "主导配置推送模块，支持万级实例秒级生效",
     "proposed": "主导配置推送模块，基于 Flink 实现实时下发，支持万级实例秒级生效",
     "provenance": "主导配置推送模块，支持万级实例秒级生效",
-    "reason": "#119 剧本：Flink 既不在简历也不在 JD allowlist",
+    "reason": "Flink appears in neither the resume nor the JD allowlist",
     "confidence": "high"
   }
 ]

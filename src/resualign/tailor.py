@@ -207,6 +207,22 @@ _LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9.+#/-]*")
 _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _PROPER_NOUN_MIN_CHARS = 3
+# 与 gate.py 同源（ADR-0041 漂移锁）：连字符/斜杠复合词拆分与句中大写判定
+_TOKEN_PART_RE = re.compile(r"[-/]")
+_SENTENCE_BREAK_RE = re.compile(r"[.!?:;\n]$")
+_ENTITY_STOP_WORDS = frozenset(
+    """
+    january february march april may june july august september october
+    november december monday tuesday wednesday thursday friday saturday
+    sunday senior junior lead staff principal engineer engineering
+    developer manager director team company client customer business
+    product project projects software services solutions experience
+    education skills summary highlights awards honors year month week
+    full part remote onsite hybrid north south east west university
+    college bachelor master doctor first second third current recent
+    global regional internal external public private open cross
+    """.split()
+)
 
 
 def _unsupported_content(
@@ -228,27 +244,54 @@ def _unsupported_content(
     # 驼峰（QPS/FastAPI），避免把措辞润色误判为编造。
     cjk_context = bool(_CJK_RE.search(text))
 
-    def _noun_candidate(token: str) -> bool:
+    def _at_sentence_start(index: int) -> bool:
+        before = text[:index].rstrip()
+        return not before or bool(_SENTENCE_BREAK_RE.search(before[-1:]))
+
+    def _noun_candidate(token: str, at_sentence_start: bool) -> bool:
         if token.upper() == token or any(c.isupper() for c in token[1:]):
-            return True
-        return cjk_context
+            return True  # 缩写/混合大写：QPS、FastAPI、PyTorch
+        if cjk_context:
+            return True  # 中文散文里的拉丁词即术语
+        if not token[:1].isupper():
+            return False
+        # 英文句首大写是语法而非专名信号；句中大写才命名了某个东西。
+        # 2026-09-15 狗食修正：此前英文句中 Title-case 专名（Kafka/Acme）
+        # 完全不查，是 #74 的漏口。
+        if at_sentence_start or token.lower() in _ENTITY_STOP_WORDS:
+            return False
+        return True
 
     unsupported: list[str] = []
     for number in _NUMBER_RE.findall(text.replace(",", "")):
         if number not in corpus_numbers:
             unsupported.append(f"数字 {number}")
     seen_tokens: set[str] = set()
-    for token in _LATIN_TOKEN_RE.findall(text):
+    for match in _LATIN_TOKEN_RE.finditer(text):
+        token = match.group(0)
         key = token.lower()
         if key in seen_tokens:
             continue
         seen_tokens.add(key)
         if len(token) < _PROPER_NOUN_MIN_CHARS or token.islower():
             continue
-        if not _noun_candidate(token):
+        if key in corpus_lower:
             continue
-        if key not in corpus_lower:
-            unsupported.append(f"名称/术语 {token}")
+        # 「Kafka-backed」是一个 regex token，需要出处的是里面的名字本身；
+        # 简历里已有 Kafka 时不该误拦复合词。
+        parts = [
+            part
+            for part in _TOKEN_PART_RE.split(token)
+            if len(part) >= _PROPER_NOUN_MIN_CHARS and not part.islower()
+        ]
+        token_starts_sentence = _at_sentence_start(match.start())
+        for position, part in enumerate(parts or [token]):
+            part_at_start = token_starts_sentence and position == 0
+            if _noun_candidate(part, part_at_start) and (
+                part.lower() not in corpus_lower
+            ):
+                unsupported.append(f"名称/术语 {part}")
+                break
     return unsupported
 
 

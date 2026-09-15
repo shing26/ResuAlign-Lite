@@ -1,10 +1,10 @@
 {
-  "note": "ADR-0041 决定 11 黄金 fixtures：编造/救回/noop 三类剧本的唯一事实源。skill 仓建立后迁移过去，主仓 vendor 副本；两侧裁决必须一致（tests/test_gate.py 漂移锁）。",
+  "note": "Golden fixtures: the single source of truth for how the gate must rule on fabrication, salvage, noop, add and allowlist scenarios. Canonical in the true-tailor skill repo (fixtures/); this app vendors a byte-identical copy under tests/fixtures/gate/ and tests/test_gate.py asserts that this file, the standalone gate.py and the app's real tailor gate chain all agree.",
   "expectations": [
     {"diff_id": "d1-clean-modify", "verdict": "usable", "reason": "verified", "salvaged": false},
     {"diff_id": "d2-fabricated-metric", "verdict": "blocked", "reason": "fabricated", "salvaged": false},
     {"diff_id": "d3-truncated-quote", "verdict": "usable", "reason": "verified", "salvaged": true,
-     "note": "尾字错引（行→作）：非逐字子串，走 difflib 模糊救回并校正 original 为整行"},
+     "note": "quote misquoted in its last character, so it is not a verbatim substring: difflib salvage locates the real line and rewrites original to it"},
     {"diff_id": "d4-noop", "verdict": "blocked", "reason": "noop", "salvaged": false},
     {"diff_id": "d5-invented-experience", "verdict": "blocked", "reason": "missing", "salvaged": false},
     {"diff_id": "d6-add-empty-original", "verdict": "blocked", "reason": "missing", "salvaged": false},
