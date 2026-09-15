@@ -35,19 +35,23 @@ def allowlist() -> str:
 
 
 def _app_flow_verdict(item: dict, resume_text: str, jd_support: str):
-    """Replicate the app's fail-closed chain from tailor.py (P1-4 block)
-    plus the A2 noop filter from api/services/jobs._is_noop_diff."""
-    from resualign.tailor import _unsupported_content, parse_diff_with_provenance
+    """Drive the REAL shared chain (tailor.gate_diff_items, strict) plus the
+    A2 noop filter exactly as the job layer applies it — the parity lock now
+    runs against live app code, not a duplicated flow (#119 review followup)."""
+    from resualign.api.services.jobs import _is_noop_diff
+    from resualign.tailor import gate_diff_items
 
-    diff, valid = parse_diff_with_provenance(item, resume_text)
-    if diff.type == "add" and not diff.original.strip():
-        return "blocked", "missing"
-    if diff.proposed and diff.type in {"modify", "remove"}:
-        if _unsupported_content(diff.proposed, resume_text, diff.original, jd_support):
-            return "blocked", "fabricated"
-    if not valid:
-        return "blocked", "missing"
-    if bool(diff.original) and diff.original == diff.proposed:
+    diffs, invalid = gate_diff_items([item], resume_text, jd_support)
+    if invalid:
+        state = invalid[0].provenance_state
+        return "blocked", "fabricated" if state == "fabricated" else "missing"
+    if _is_noop_diff(
+        {
+            "type": diffs[0].type,
+            "original": diffs[0].original,
+            "proposed": diffs[0].proposed,
+        }
+    ):
         return "blocked", "noop"
     return "usable", "verified"
 
@@ -95,6 +99,8 @@ class TestDriftLockParity:
             "d6-add-empty-original",
             "d7-add-with-support",
             "d8-allowlist-term",
+            "d9-add-fabricated-number",
+            "d10-add-fabricated-entity",
         ],
     )
     def test_gate_matches_tailor_chain(self, diff_id, resume_text, diffs, allowlist):
@@ -135,7 +141,7 @@ class TestCliContract:
         summary = [line for line in out.splitlines() if line.startswith("GATE:")]
         assert len(summary) == 1
         assert re.fullmatch(
-            r"GATE: 8 diffs / 4 blocked \(missing=2, fabricated=1, noop=1\) "
+            r"GATE: 10 diffs / 6 blocked \(missing=2, fabricated=3, noop=1\) "
             r"/ resume-sha256=[0-9a-f]{12}",
             summary[0],
         ), summary[0]
@@ -143,7 +149,7 @@ class TestCliContract:
         assert entry["round"] == 2
         assert entry["trigger"] == "eval:round1"
         assert entry["usable"] == 4
-        assert entry["blocked"] == {"missing": 2, "fabricated": 1, "noop": 1}
+        assert entry["blocked"] == {"missing": 2, "fabricated": 3, "noop": 1}
         assert len(entry["resume_sha256"]) == 64
 
     def test_missing_file_exits_2(self, tmp_path, capsys):

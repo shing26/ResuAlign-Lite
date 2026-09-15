@@ -78,5 +78,25 @@
     "provenance": "主导配置推送模块，支持万级实例秒级生效",
     "reason": "JD 明确 Kafka 技能要求（allowlist 来源）",
     "confidence": "medium"
+  },
+  {
+    "diff_id": "d9-add-fabricated-number",
+    "type": "add",
+    "section": "工作经历",
+    "original": "参与大促值班，保障系统峰值 QPS 12000 的稳定运行",
+    "proposed": "参与大促值班，保障系统峰值 QPS 50000 的稳定运行",
+    "provenance": "参与大促值班，保障系统峰值 QPS 12000 的稳定运行",
+    "reason": "#119 剧本：锚点与支持句都真实，但 proposed 数字无出处",
+    "confidence": "high"
+  },
+  {
+    "diff_id": "d10-add-fabricated-entity",
+    "type": "add",
+    "section": "项目经历",
+    "original": "主导配置推送模块，支持万级实例秒级生效",
+    "proposed": "主导配置推送模块，基于 Flink 实现实时下发，支持万级实例秒级生效",
+    "provenance": "主导配置推送模块，支持万级实例秒级生效",
+    "reason": "#119 剧本：Flink 既不在简历也不在 JD allowlist",
+    "confidence": "high"
   }
 ]

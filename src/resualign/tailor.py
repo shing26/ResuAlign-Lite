@@ -536,6 +536,51 @@ def parse_diff_with_provenance(
     return diff, valid
 
 
+def gate_diff_items(
+    items: list[dict],
+    resume_text: str,
+    jd_support: str,
+    strict_provenance: bool = True,
+    prompt_focus: str | None = None,
+) -> tuple[list[DiffItem], list[DiffItem]]:
+    """The shared fail-closed verdict chain (P1-4 + #74 + #119).
+
+    Order is contractual: parse/anchor -> add-empty-support -> content-level
+    check (all three types; #119 closed the add hole) -> strict anchor gate.
+    gate.py (skill probe) mirrors this chain verbatim; tests/test_gate.py
+    drives the parity drift lock THROUGH this function, so any change here
+    is judged against the same code the app runs. The A2 noop filter lives
+    in the job layer (api/services/jobs) and is applied by callers after.
+    """
+    diffs: list[DiffItem] = []
+    invalid_diffs: list[DiffItem] = []
+    for item in items:
+        diff, valid = parse_diff_with_provenance(
+            item, resume_text, prompt_focus=prompt_focus
+        )
+        if diff.type == "add" and not diff.original.strip():
+            invalid_diffs.append(diff)
+            continue
+        # 内容级校验（#74）：锚点真实但 proposed 编造数字/专名 → 直接拦截，
+        # 不进入 diffs（先于 strict 锚点门，编造内容不因非 strict 模式放行）。
+        # #119：add 型同样过内容校验——add 恰是编造最自然的载体，锚点与支持句
+        # 真实不代表 proposed 里的数字/专名有出处。
+        if diff.proposed and diff.type in {"modify", "remove", "add"}:
+            unsupported = _unsupported_content(
+                diff.proposed, resume_text, diff.original, jd_support
+            )
+            if unsupported:
+                invalid_diffs.append(_mark_unsupported(diff, unsupported))
+                continue
+        if not valid and strict_provenance:
+            invalid_diffs.append(diff)
+        else:
+            diffs.append(diff)
+            if not valid:
+                invalid_diffs.append(diff)
+    return diffs, invalid_diffs
+
+
 _SECTION_SPAN_RE = re.compile(
     r"^\s*(?:#{1,6}\s*)?(?:个人(?:信息|简介)|教育(?:背景|经历)|工作经历|"
     r"项目(?:经历|经验)|专业技能|技能清单|证书|荣誉|自我评价|"
@@ -660,35 +705,17 @@ def tailor_resume(
             "not present in the original resume."
         )
     result = _structured_or_json(client, system, user, TailoredResumeSchema)
-    diffs = []
-    invalid_diffs = []
     # P1-4（2026-09-06 安全审查）：fail-closed——未显式声明 strict_provenance
     # 的 client（鸭子类型/mock）一律按 strict 处理；真实 OpenAIClient 本就
     # 默认 True（llm.py）。
     strict_provenance = bool(getattr(client, "strict_provenance", True))
-    jd_support = _gap_support_text(gap_report_text)
-    for item in result.get("diffs", []):
-        diff, valid = parse_diff_with_provenance(
-            item, resume_text, prompt_focus=prompt_focus
-        )
-        if diff.type == "add" and not diff.original.strip():
-            invalid_diffs.append(diff)
-            continue
-        # 内容级校验（#74）：锚点真实但 proposed 编造数字/专名 → 直接拦截，
-        # 不进入 diffs（先于 strict 锚点门，编造内容不因非 strict 模式放行）。
-        if diff.proposed and diff.type in {"modify", "remove"}:
-            unsupported = _unsupported_content(
-                diff.proposed, resume_text, diff.original, jd_support
-            )
-            if unsupported:
-                invalid_diffs.append(_mark_unsupported(diff, unsupported))
-                continue
-        if not valid and strict_provenance:
-            invalid_diffs.append(diff)
-        else:
-            diffs.append(diff)
-            if not valid:
-                invalid_diffs.append(diff)
+    diffs, invalid_diffs = gate_diff_items(
+        result.get("diffs", []),
+        resume_text,
+        _gap_support_text(gap_report_text),
+        strict_provenance=strict_provenance,
+        prompt_focus=prompt_focus,
+    )
     return TailoredResume(
         sections=result.get("sections", {}),
         diffs=diffs,

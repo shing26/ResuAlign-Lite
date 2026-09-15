@@ -230,9 +230,14 @@ def allowlist_corpus(payload: str) -> str:
     return "\n".join(parts) if parts else (payload or "")
 
 
-def _is_noop(original: str, proposed: str) -> bool:
-    """Port of api/services/jobs._is_noop_diff (A2)."""
-    return bool(original) and original == proposed
+def _is_noop(diff_type: str, original: str, proposed: str) -> bool:
+    """Port of api/services/jobs._is_noop_diff (A2): modify/remove only,
+    whitespace-stripped comparison on both sides."""
+    if diff_type not in ("modify", "remove"):
+        return False
+    o = (original or "").strip()
+    p = (proposed or "").strip()
+    return bool(o) and o == p
 
 
 def resolve_provenance(
@@ -301,7 +306,9 @@ def verdict(item: dict, resume_text: str, jd_allowlist: str = "") -> dict:
         result["reason"] = "missing"
         result["detail"] = "add 缺支持句（original 必须逐字存在于简历）"
         return result
-    if proposed and diff_type in {"modify", "remove"}:
+    # #119 parity: add-type diffs are content-checked too (anchor truth does
+    # not certify the numbers/entities inside proposed).
+    if proposed and diff_type in {"modify", "remove", "add"}:
         unsupported = _unsupported_content(proposed, resume_text, original, jd_allowlist)
         if unsupported:
             result["verdict"] = "blocked"
@@ -313,7 +320,7 @@ def verdict(item: dict, resume_text: str, jd_allowlist: str = "") -> dict:
         result["reason"] = "missing"
         result["detail"] = "provenance 引文无法在简历原文中定位"
         return result
-    if _is_noop(original, proposed):
+    if _is_noop(diff_type, original, proposed):
         result["verdict"] = "blocked"
         result["reason"] = "noop"
         result["detail"] = "original 与 proposed 逐字相同"

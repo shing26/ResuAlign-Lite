@@ -9,7 +9,9 @@
     {"diff_id": "d5-invented-experience", "verdict": "blocked", "reason": "missing", "salvaged": false},
     {"diff_id": "d6-add-empty-original", "verdict": "blocked", "reason": "missing", "salvaged": false},
     {"diff_id": "d7-add-with-support", "verdict": "usable", "reason": "verified", "salvaged": false},
-    {"diff_id": "d8-allowlist-term", "verdict": "usable", "reason": "verified", "salvaged": false}
+    {"diff_id": "d8-allowlist-term", "verdict": "usable", "reason": "verified", "salvaged": false},
+    {"diff_id": "d9-add-fabricated-number", "verdict": "blocked", "reason": "fabricated", "salvaged": false},
+    {"diff_id": "d10-add-fabricated-entity", "verdict": "blocked", "reason": "fabricated", "salvaged": false}
   ],
-  "summary": {"diffs": 8, "usable": 4, "blocked": {"missing": 2, "fabricated": 1, "noop": 1}}
+  "summary": {"diffs": 10, "usable": 4, "blocked": {"missing": 2, "fabricated": 3, "noop": 1}}
 }
