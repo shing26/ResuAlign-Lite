@@ -43,11 +43,11 @@ Do not run `git branch -D` on the affected branch before rebuilding the ref.
 Short hashes in the ref file are rejected as broken refs — always write the
 full 40-char object name.
 
-### Regression baselines (2026-09-15, post probe week 2 #112)
+### Regression baselines (2026-09-16, post #111 usable_diffs 分型)
 
-- Backend: `PYTHONPATH=src python -m pytest tests/ -q` → **989 passed / 7 skipped**
+- Backend: `PYTHONPATH=src python -m pytest tests/ -q` → **995 passed / 7 skipped**
 - Frontend: `node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs`
-  → **485 passed**
+  → **489 passed**
 - Page probe: 8 routes, 0 console error. Playwright browser now
   **chromium-1243** (chromium-1234 was removed). Gate variant
   `.scratch/prod-readiness/gate_probe.py` points at an isolated 8003
@@ -107,6 +107,16 @@ of truth** for `gate.py` and the golden fixtures. This repo holds a vendor copy:
   build_config callback); admin paths (list / activate / delete-promotion /
   settings badge) keep `get_active_node`. Recovery = test ok / call success /
   explicit activate; no auto half-open.
+- **#111 usable_diffs 分型 (ADR-0041 决定 5)**: `library_jobs` migration 45
+  adds `usable_diffs` (backfilled from `diffs_json` length; first MIGRATIONS
+  script with an UPDATE). Terminal typing happens at the workbench SAVE site
+  (`services/jobs.py`, before `save_alignment`) — 有缺口 ∧ usable=0 →
+  `failed` + `last_alignment_error` prefix `no_output: ` (machine contract;
+  projection derives `alignment_reason`, never re-parse in UI); 无缺口 ∧
+  usable=0 → stays `succeeded`, badge 「无缺口 · 无需改写」. `analysis_ready`
+  unchanged. Dashboard 完成对齐 numerator counts `usable_diffs>=1` only;
+  legacy rows (no typing fields) keep the old 无建议/诊断完成 badges via the
+  fallback in `alignmentBadgeHtml`.
 
 ### Phase A-C invariants (2026-08-30)
 

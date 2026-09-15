@@ -229,13 +229,14 @@ def test_probe_http_402_blocks():
     assert "欠费" in msg
 
 
-# -- all-noop -----------------------------------------------------------------
+# -- all-noop / usable_diffs 分型 (ADR-0041 决定 5, #111) --------------------
+#
+# Phase E's old contract "a noop-only report must still succeed" is RETIRED:
+# 有缺口 ∧ usable=0 是质量失败（就该红、可重跑）；只有无缺口 ∧ usable=0
+# 才保 succeeded 且徽章为「无缺口 · 无需改写」（≠已对齐）。CI 锁：全 noop
+# 剧本绝不能再产出 succeeded+空 的「假成功」形态。
 
-def test_all_noop_still_succeeded():
-    """Phase E: a report with only noop diffs must still succeed
-    with 0 usable diffs and the noops in invalid_diffs."""
-    job = _create_job()
-    resume = _create_resume()
+def _noop_report(gap_missing=None):
     noop = DiffItem(
         type="modify",
         original="Python developer.",
@@ -244,18 +245,23 @@ def test_all_noop_still_succeeded():
         confidence="high",
         provenance="Python developer.",
     )
-    report = Report(
+    return Report(
         score=84,
         skills=["Python"],
         model="test-model",
         jd_profile=JDProfile(must_have_skills=["Python"]),
-        gap_report=GapReport(missing_keywords=["Redis"]),
+        gap_report=GapReport(missing_keywords=list(gap_missing or [])),
         tailored_resume=TailoredResume(
             sections={"experience": "Built FastAPI"},
             diffs=[noop],
         ),
         diffs=[noop],
     )
+
+
+def _run_noop_to_terminal(report):
+    job = _create_job()
+    resume = _create_resume()
     with patch("resualign.api._run_job"), patch(
         "resualign.api.build_config", return_value=_config()
     ):
@@ -273,10 +279,49 @@ def test_all_noop_still_succeeded():
     persisted = client.get(
         f"/api/jobs/{job['job_id']}", headers=_auth_headers()
     ).json()
-    assert persisted["alignment_status"] == "succeeded"
-    assert len(persisted["diffs"]) == 0, "noop-only must produce 0 usable diffs"
+    return persisted
+
+
+def test_all_noop_with_gaps_fails_as_no_output():
+    """#111: 有缺口 + usable=0 → failed，机读 reason no_output。"""
+    persisted = _run_noop_to_terminal(_noop_report(gap_missing=["Redis"]))
+    assert persisted["alignment_status"] == "failed"
+    assert persisted["usable_diffs"] == 0
+    assert persisted["has_gap"] is True
+    assert persisted["alignment_reason"] == "no_output"
+    assert persisted["last_alignment_error"].startswith("no_output:")
+    assert len(persisted["diffs"]) == 0, "noop 不得计入 usable diffs"
     assert len(persisted["invalid_diffs"]) == 1
-    assert persisted["invalid_diffs"][0]["original"] == "Python developer."
+
+
+def test_all_noop_without_gaps_succeeds_as_no_gap():
+    """#111: 无缺口 + usable=0 → 保 succeeded，reason no_gap（≠已对齐）。"""
+    persisted = _run_noop_to_terminal(_noop_report(gap_missing=[]))
+    assert persisted["alignment_status"] == "succeeded"
+    assert persisted["usable_diffs"] == 0
+    assert persisted["has_gap"] is False
+    assert persisted["alignment_reason"] == "no_gap"
+    assert len(persisted["diffs"]) == 0
+    assert len(persisted["invalid_diffs"]) == 1
+
+
+def test_noop_mixed_with_real_diff_is_green_with_count():
+    """混合场景：noop 折进 invalid，真实 diff 计 usable_diffs（分型不误伤）。"""
+    real = DiffItem(
+        type="modify",
+        original="Built FastAPI.",
+        proposed="Built a FastAPI service handling 1k rps.",
+        reason="量化",
+        confidence="high",
+        provenance="Built FastAPI.",
+    )
+    report = _noop_report(gap_missing=["Redis"])
+    report.diffs = [report.diffs[0], real]
+    report.tailored_resume.diffs = report.diffs
+    persisted = _run_noop_to_terminal(report)
+    assert persisted["alignment_status"] == "succeeded"
+    assert persisted["usable_diffs"] == 1
+    assert persisted["alignment_reason"] is None
 
 
 # -- per-tenant concurrency gate ---------------------------------------------

@@ -38,6 +38,20 @@ def _is_noop_diff(diff: dict[str, Any]) -> bool:
     return bool(original) and original == proposed
 
 
+def _report_has_gap(gap_report: Any) -> bool:
+    """#111 / ADR-0041 决定 5 分型谓词：缺口证据 = missing/misaligned 非空。
+
+    None/空报告一律视为「无缺口」——7B 摆烂与真无缺口数据同形，宁可保守
+    （零产出但无证据时保 succeeded + 「无缺口 · 无需改写」徽章，由换模型
+    引导兜底），也不凭猜把一轮 run 判成质量失败。
+    """
+    if not isinstance(gap_report, dict):
+        return False
+    return bool(gap_report.get("missing_keywords")) or bool(
+        gap_report.get("misaligned_emphasis")
+    )
+
+
 _LOCAL_HOST_PATTERN = re.compile(
     r'^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)$'
 )
@@ -986,6 +1000,21 @@ def _run_job_holding_gate(job_id: str) -> None:
                     )
                 else:
                     alignment_error = None
+                # ADR-0041 决定 5 分型甲（#111）：有缺口 ∧ usable=0 = 质量
+                # 失败——就该红、可重跑（旧语义「全 noop/全拦截仍 succeeded」
+                # 废除）。「no_output: 」前缀是机读契约，投影据此派生
+                # alignment_reason；无缺口 ∧ usable=0 维持 succeeded，
+                # 由前端渲染「无缺口 · 无需改写」。
+                alignment_status = "succeeded"
+                if not kept_diffs and _report_has_gap(result.get("gap_report")):
+                    alignment_status = "failed"
+                    alignment_error = (
+                        "no_output: "
+                        + (
+                            alignment_error
+                            or "该岗位存在能力/经验缺口，但本轮未产出任何可用改写建议"
+                        )
+                    )
                 try:
                     api_module._jobs.save_alignment(
                         tenant_id,
@@ -1008,9 +1037,10 @@ def _run_job_holding_gate(job_id: str) -> None:
                             f"tailor:{TAILOR_PROMPT_VERSION};"
                             f"eval:{EVALUATOR_PROMPT_VERSION}"
                         ),
-                        alignment_status='succeeded',
-                        # tailor 降级 / eval 幻觉拦截时把原因写进提示字段：
-                        # 前端橙色徽标与工作台说明都读这里。
+                        alignment_status=alignment_status,
+                        usable_diffs=len(kept_diffs),
+                        # tailor 降级 / eval 幻觉拦截 / no_output 分型时把原因
+                        # 写进提示字段：前端橙色徽标与工作台说明都读这里。
                         last_alignment_error=alignment_error,
                     )
                 except Exception:
@@ -1031,7 +1061,7 @@ def _run_job_holding_gate(job_id: str) -> None:
                                 tenant_id, library_job_id
                             ),
                             "alignment": {
-                                "status": "succeeded",
+                                "status": alignment_status,
                                 "stage": "done",
                                 "diffs": result.get("diffs") or [],
                                 "invalid_diffs": (
