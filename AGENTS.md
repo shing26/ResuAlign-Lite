@@ -80,6 +80,27 @@ of truth** for `gate.py` and the golden fixtures. This repo holds a vendor copy:
   commands against `D:\truetailor/examples/demoflow` and renders
   `docs/gate-demo.mp4` from the captured output (terminal replay, not a mock).
 
+### 探针判据：双线与预注册时钟 (2026-09-16, ADR-0042)
+
+ADR-0042 对 ADR-0041 决定 4/9/10 做了**限定性修正**（数值未改，只改时钟起点
+与线的划分）。执行任何探针相关动作前先读这一节：
+
+- **时钟起点 = 四渠道 outreach 全部发出当日**（原为转公开时刻 09-15）。
+  实际发出日期记在 `docs/probe-112-send-checklist-2026-09-16.md`。
+- 若 **09-23 24:00 前未全部发出** → 判据登记 `dist_not_executed`：
+  时钟不启动、判据保持 PENDING、**这不是证伪**，处置 = 先执行分发。
+- **判据两条独立线，不许互相顶替**：
+  - **探针线**（口径一字未改）= 非作者首跑 ≥5 例（各附门禁摘要行原样粘贴）
+    或 1 例外部完整合格链 = 过；≥100★ 或社区二创 = 强信号；4 周后 <2 例 = 证伪。
+  - **自用线**（口径 = ADR-0040 需求线 a）= 合格例 ≥3，基线 **1 例**
+    （09-15 狗食两跳链）。取证**只认验证器 JSONL**（`round` / `trigger` /
+    `chain` / `resume_sha256`）；`examples/demoflow` 合成例、截图、口头
+    复述一律不计；输入必须是作者**真实投递过**的岗位 JD。
+- **项目级归档 = 探针线证伪 ∧ 自用线 = 0**。探针线单独证伪只触发
+  「skill 线冻结、回 app-only」，不终结项目。
+- 护栏：两线阈值均不得中途重谈（要改须新开 ADR 并回答「为什么现在改」）；
+  自用线推进期间 **app 冻结令继续有效**，例外须逐项引用 ADR-0042 决定 6e。
+
 ### Production-readiness invariants (2026-09-13, spec #97)
 
 - **#100 error shape**: every HTTP error body is JSON; existing `detail` is
