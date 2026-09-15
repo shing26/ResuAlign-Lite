@@ -43,9 +43,9 @@ Do not run `git branch -D` on the affected branch before rebuilding the ref.
 Short hashes in the ref file are rejected as broken refs — always write the
 full 40-char object name.
 
-### Regression baselines (2026-09-13, post prod-readiness #97-#103)
+### Regression baselines (2026-09-15, post probe week 2 #112)
 
-- Backend: `PYTHONPATH=src python -m pytest tests/ -q` → **967 passed / 7 skipped**
+- Backend: `PYTHONPATH=src python -m pytest tests/ -q` → **989 passed / 7 skipped**
 - Frontend: `node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs`
   → **485 passed**
 - Page probe: 8 routes, 0 console error. Playwright browser now
@@ -60,6 +60,25 @@ full 40-char object name.
   blocks definitive auth/quota failures and local-node connectivity
   failures with an actionable message before queueing (Phase E: local
   fast-fail, remote network/timeout non-blocking).
+
+### Probe repo: truetailor owns the gate (2026-09-15, ADR-0041 week 2)
+
+`shing26/truetailor` (sibling checkout, usually `D:\truetailor`) is the **source
+of truth** for `gate.py` and the golden fixtures. This repo holds a vendor copy:
+
+- `src/resualign/gate.py` and `tests/fixtures/gate/*` must stay byte-identical to
+  upstream (LF-normalized sha256 in `tests/fixtures/gate/VENDOR.json`, asserted by
+  `tests/test_skill_vendor_lock.py`). A rule change goes upstream first, then a
+  re-sync commit here updates the manifest and `synced_from`.
+- `tailor.py` keeps its own copy of the content check for historical reasons;
+  `tests/test_gate.py::TestDriftLockParity` runs **every** fixture scenario in
+  both languages through `tailor.gate_diff_items`, so the two implementations
+  cannot diverge silently. Any new gate rule needs both edits plus a fixture.
+- Fixtures are the spec: a new scenario arrives as a diff entry + an
+  `expected*.json` line, and `python selftest.py` in the skill repo must pass.
+- Probe video (issue #113): `python scripts/probe_video.py` re-runs the real
+  commands against `D:\truetailor/examples/demoflow` and renders
+  `docs/gate-demo.mp4` from the captured output (terminal replay, not a mock).
 
 ### Production-readiness invariants (2026-09-13, spec #97)
 
