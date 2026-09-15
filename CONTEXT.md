@@ -195,9 +195,15 @@ A single atomic edit suggestion. Carries a type (add/modify/remove), the origina
 移入 `invalid_diffs`，`diffs` 只含真实改动。
 
 **无建议（badge）**
-`alignment_status === "succeeded"` 但 `diffs` 为空时的琥珀徽章文案，含义是
-"本次对齐未产出可用的修改建议"。全 noop 语义下 alignment 仍保持 succeeded，
-不自动触发章节级兜底重跑；用户可通过卡片「重新对齐」主动发起。
+零可用产出对齐的终端语义，按证据分型（ADR-0041 决定 5 裁决，实现走
+#111）：新增 `usable_diffs` 计数（noop 过滤与 #74 拦截后的有效 diff 数）。
+**有缺口但 usable=0 → `failed` + reason `no_output`**，可重跑；
+**无缺口（gap 报告为空）且 usable=0 → 保 `succeeded`**，徽章
+「无缺口 · 无需改写」，不得渲染为「已对齐」。驾驶舱「完成对齐」分子只数
+`usable_diffs≥1`，「100% 完成率」从制度上不可能出现。旧语义（全 noop 仍
+succeeded + 琥珀「无建议」徽章）自本裁决起废弃。
+_Avoid_: 拿「跑完没报错」当「产出了价值」；把「无缺口」当可信结论——
+小模型摆烂与真无缺口数据同形，徽章文案必须带换模型重跑引导
 
 **节点预检（LLM pre-flight probe）**
 对齐排队前对实际服务节点（激活节点，否则 .env/默认配置）做的一次 5s 最小
@@ -534,3 +540,28 @@ _Avoid_: 只在「大轨迹」才弹报价（Q3 裁决否决）；把引擎行�
 **agent 预算卡 (Agent Budget Card)**
 agent 循环决策调用的专属额度账本：轨迹起点原子预留、步界结算、退还未消费；agent 派生的引擎调用不在账上——走按钮路径同一共享池。帽值以「招牌演示不撞帽」标定（口径与红线见 ADR-0039）。
 _Avoid_: 把引擎调用计入 agent 桶（按钮花谁的池子，agent 按的就花谁的池子）；「撞顶次日自动续跑」（零自动语义，续跑=新指令+重新报价）
+
+**门禁摘要 (Gate Report)**
+skill 验证器每次运行输出的一行机器可读汇总：`N diffs / K blocked
+(missing/fabricated/noop) / sha256`。探针判据的唯一取证形式——非作者首跑
+报告必须附此行才算数（贴得出即真跑过，见 ADR-0041 决定 4）。
+_Avoid_: 口头「我用过了」当首跑；agent 转述或重打摘要（必须原样粘贴脚本输出）
+
+**合格例取证 (Qualifying Evidence)**
+验证器落盘的 append-only JSONL 运行日志（时间戳、简历哈希、轮次、触发
+原因、采纳计数），用于证明 ADR-0040 (a) 合格例的因果链：第 n+1 轮的
+trigger 必须指向第 n 轮复评结论。狗食数据计入（2026-09-14 裁决）。
+_Avoid_: 手填轮次凑数（无 JSONL 佐证不算）；无因果链的三轮手点
+
+**skill 探针 (Skill Probe)**
+掉头期主线：独立公开仓库（默认命名 `truetailor`）= prompt skill +
+单文件确定性验证器（stdlib 零依赖），在 app 之外验证「逐条可溯源改写」
+的需求。判据、时间盒与终态剧本见 ADR-0041 决定 4/9/10。
+_Avoid_: 把探针当产品第一步（它是需求探针，过与死各有剧本）；证伪后
+另起第三渠道（决定 10 禁止）
+
+**冻结令 (Freeze Order)**
+探针期内 app 一切新功能冻结（agent 化 Phase A/B、商业化 PRD、扩展期二、
+托管 demo），仅保留地基修复 #110/#111 与探针包两类工作。解冻条件唯一：
+探针判据「过」（ADR-0041 决定 1/9）。
+_Avoid_: 把体验债修复包装成地基工作绕开冻结；探针观察窗内做落地页或 demo
