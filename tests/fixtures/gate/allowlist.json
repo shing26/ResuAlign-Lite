@@ -1,0 +1,7 @@
+{
+  "missing_keywords": ["Kafka"],
+  "misaligned_emphasis": [],
+  "strength_matches": ["库存扣减"],
+  "business_scenarios": ["高并发场景"],
+  "jd_context": "电商交易方向，消息队列与削峰经验加分"
+}
