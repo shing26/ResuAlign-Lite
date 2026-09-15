@@ -173,7 +173,6 @@ def judge_multiset(fx: Fixture, q: dict, actions: list[dict], sim: Sim) -> list[
 
     # v1.1 SS6.1 rule 4: a call that hits no script key is an attempt failure
     if fx.unmatched_args_rule:
-        allowed = q.get("state") or {}
         for rec, a in zip(sim.calls, calls):
             if rec.get("errors"):
                 continue

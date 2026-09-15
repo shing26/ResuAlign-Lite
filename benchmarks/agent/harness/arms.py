@@ -21,7 +21,7 @@ import urllib.error
 import urllib.request
 
 from .core import Fixture, Sim, validate_call
-from .judge import APPROVAL_TOOLS, MAX_STEPS
+from .judge import MAX_STEPS
 
 TEMPLATE_SYSTEM = (
     "你只输出一个 JSON 对象，符合给定 schema，无其他文本。"

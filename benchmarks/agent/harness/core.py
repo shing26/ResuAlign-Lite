@@ -29,7 +29,7 @@ QUESTION_KINDS = ("ss", "md", "bs", "sb")
 
 def _load_lines(path: Path) -> list[dict]:
     raw = path.read_text(encoding="utf-8").splitlines()
-    return [json.loads(l) for l in raw if l.strip()]
+    return [json.loads(ln) for ln in raw if ln.strip()]
 
 
 def load_fixture(path: Path | None = None) -> "Fixture":
@@ -56,7 +56,7 @@ class Fixture:
             eff[key] = ln
         self.effective = eff
         self.meta = eff[("_meta", "_meta")] if ("_meta", "_meta") in eff else next(
-            l for l in lines if l.get("kind") == "_meta"
+            ln for ln in lines if ln.get("kind") == "_meta"
         )
         # real meta key carries the fixture id, not "_meta"
         for (k, v), ln in eff.items():
@@ -145,7 +145,6 @@ class Fixture:
     def audit_prompt_leakage(self) -> list[dict]:
         """fact_hiding / prompt_contract audit (v1.1 only; never a model failure)."""
         findings: list[dict] = []
-        never = self.prompt_contract.get("never", [])
         for q in self.questions:
             vis = self.visible_text(q)
             # hidden-field text must not leak into the prompt

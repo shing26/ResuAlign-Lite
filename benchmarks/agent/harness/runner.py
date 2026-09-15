@@ -23,7 +23,14 @@ import time
 from pathlib import Path
 
 from .arms import HttpArm
-from .core import AGENT_DIR, Fixture, content_hash, git_blob_hash, load_fixture, load_overlay_file
+from .core import (
+    AGENT_DIR,
+    Fixture,
+    content_hash,
+    git_blob_hash,
+    load_fixture,
+    load_overlay_file,
+)
 from .judge import judge_attempt
 
 RESULTS_DIR = AGENT_DIR / "results"

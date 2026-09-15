@@ -401,7 +401,6 @@ def reference_finalizer(fx: Fixture):
 
 def perfect_attempt(fx: Fixture, q: dict) -> dict:
     """Run the perfect plan through Sim so the conclusion can cite observations."""
-    from .arms import ScriptedArm
 
     plan, arm = perfect_plan(fx, q)
     sim = Sim(q, fx)

@@ -34,10 +34,8 @@ from .actor import (
     VIOLATIONS,
     _call,
     _rep,
-    args_for_key,
     perfect_attempt,
     perfect_plan,
-    planned_calls,
     reference_finalizer,
 )
 from .arms import ScriptedArm, decide_action
@@ -70,7 +68,7 @@ def fx_v1() -> Fixture:
             f"v1 baseline drifted: {V1_SEAL_REV}:{FIXTURE_REL} is not {V1_SEAL_BLOB[:8]}"
         )
     text = git_show_text(FIXTURE_REL, V1_SEAL_REV)
-    fx = Fixture([json.loads(l) for l in text.splitlines() if l.strip()])
+    fx = Fixture([json.loads(ln) for ln in text.splitlines() if ln.strip()])
     if fx.version != "v1":
         raise RuntimeError(f"seal blob derives as {fx.version}, not v1")
     return fx
@@ -279,7 +277,6 @@ def author_notes(fx: Fixture) -> int:
 def run_all(overlay: Path | None = None, verbose: bool = False) -> int:
     fx1 = fx_v1()
     fx2 = fx_v11(overlay)
-    report: dict = {"fixtures": {"v1": f"{fx1.version}@{V1_SEAL_REV}", "v1.1": fx2.version}}
     failures: list[str] = []
 
     steps = [
