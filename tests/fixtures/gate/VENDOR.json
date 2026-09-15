@@ -1,0 +1,17 @@
+{
+  "note": "Vendored from the true-tailor skill repo (ADR-0041 决定 11 漂移锁). This repo holds a copy, not the source of truth: rule changes land upstream first and arrive here by re-sync. Hashes are taken after CRLF->LF normalization so any checkout config compares equal. tests/test_skill_vendor_lock.py fails if a byte here drifts from the record.",
+  "upstream": "https://github.com/shing26/truetailor",
+  "synced_from": "9cfecde0f1be5471c0df28ca6723f9272064bac4",
+  "synced_at": "2026-09-15",
+  "files": {
+    "tests/fixtures/gate/allowlist.en.json": "22b7c6d8cd649eab14c5bd176c202bee1b7db545507f749d77ff306e7d1b1ccb",
+    "tests/fixtures/gate/allowlist.json": "a206ba2569b43d9ca30ed3b67dcd87b57b5661a469232e527bcae6facad65a7a",
+    "tests/fixtures/gate/diffs.en.json": "60fa9b05d5dfa16210164fe70dd6a1f67d927c7916985b0ea965f2a4edd73b11",
+    "tests/fixtures/gate/diffs.json": "d5403689fe229f7f1af6172e33cc8d3ddafc51dfe2686b0b81165c5f0ae67bb8",
+    "tests/fixtures/gate/expected.en.json": "4378efdfc02a587b12fbb81de395d77dfda6b124ad0ba81f05e06259ab96eddf",
+    "tests/fixtures/gate/expected.json": "68057eb877f6661c19631c09c7a8feead46125774136d7c8cbfc0b67ee55827d",
+    "tests/fixtures/gate/resume.en.md": "f1661f81c2b67c101b8c5f6eee2ce5693d56ab204d1c6aa9035ea09d8731c1a2",
+    "tests/fixtures/gate/resume.md": "f0f44e3de0bd71b625f1f6c313d36672876f831e2483aa15832eeb05665a4812",
+    "src/resualign/gate.py": "12fd7cac8c079a3eb7fa4a37c229a49cd73318fd3406390ae1be3965f2496b80"
+  }
+}

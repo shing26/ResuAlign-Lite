@@ -1,5 +1,10 @@
 # ResuAlign 求职工作台
 
+> 30 秒跑通的版本在 skill 仓 **[true-tailor](https://github.com/shing26/truetailor)**
+> （一个 SKILL.md + 一个 stdlib 门禁脚本，零安装、零服务）；本仓是它背后的持久化 app。
+> 门禁脚本 `src/resualign/gate.py` 与黄金 fixtures 是那边的 vendor 副本，
+> 改规则先改上游（`tests/fixtures/gate/VENDOR.json` + `tests/test_skill_vendor_lock.py`）。
+
 ResuAlign 是一个**本地优先**的求职工作台：把简历诊断、岗位库管理、单岗位
 对齐精修和投递闭环放进一个 FastAPI + Web UI。核心引擎与前端解耦——
 CLI 和 Web 共用同一套流水线；所有数据落在本地 SQLite，不依赖外部服务。
