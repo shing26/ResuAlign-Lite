@@ -1,7 +1,7 @@
 {
   "note": "Vendored from the true-tailor skill repo (ADR-0041 决定 11 漂移锁). This repo holds a copy, not the source of truth: rule changes land upstream first and arrive here by re-sync. Hashes are taken after CRLF->LF normalization so any checkout config compares equal. tests/test_skill_vendor_lock.py fails if a byte here drifts from the record.",
   "upstream": "https://github.com/shing26/truetailor",
-  "synced_from": "9cfecde0f1be5471c0df28ca6723f9272064bac4",
+  "synced_from": "8844476d16085fe726b9ec9e4c0a7620f6b27d2c",
   "synced_at": "2026-09-15",
   "files": {
     "tests/fixtures/gate/allowlist.en.json": "22b7c6d8cd649eab14c5bd176c202bee1b7db545507f749d77ff306e7d1b1ccb",
