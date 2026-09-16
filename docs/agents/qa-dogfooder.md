@@ -43,7 +43,7 @@ Harness 行为：
 
 ## 4. 产出物归属
 
-- 报告落地为 `docs/qa-dogfood-report-*.md`，模板沿用通用 QA Agent 的报告
+- 报告落地为 `docs/reports/qa-dogfood-report-*.md`，模板沿用通用 QA Agent 的报告
   模板。
 - 需要工程跟进的问题按 `docs/agents/triage-labels.md` 分诊，通过
   `gh` 写入 GitHub Issues（见 `docs/agents/issue-tracker.md`）。

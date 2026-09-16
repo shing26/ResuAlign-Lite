@@ -1,7 +1,3 @@
-from pathlib import Path
-
-import pytest
-
 # #117（派单 C）：pytest 流量绝不能落进真实实例的 data/logs/app.log——该文件
 # 是 #110/#116 归因的一手数据源，历史上被测试流量以 373:23 淹没。
 # _configure_logging 在 resualign.api 首次 import 时读取本变量；conftest 模块
@@ -9,6 +5,9 @@ import pytest
 # 用 setdefault：显式设置的 CI/调试环境仍可覆盖。
 import os
 import tempfile
+from pathlib import Path
+
+import pytest
 
 os.environ.setdefault(
     "RESUALIGN_LOG_DIR",

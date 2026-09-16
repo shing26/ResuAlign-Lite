@@ -18,6 +18,8 @@ data/logs/
 .codex/
 .reasonix/
 reasonix.toml
+.opencode/
+uv.lock
 
 # Local visual scratch previews
 /test.html
@@ -76,7 +78,7 @@ upd_tests.py
 .zcode/
 产品体验报告/
 docs/demo/
-# 根目录重复副本（规范版在 docs/upcv-clawjob-decomposition-2026-08-21.md）
+# 根目录重复副本（规范版已归档到 docs/reports/upcv-clawjob-decomposition-2026-08-21.md）
 /upcv-clawjob-decomposition-2026-08-21.md
 
 # Mimosa 本地安全钩子状态（绝不进库）
