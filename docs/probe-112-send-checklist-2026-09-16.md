@@ -18,6 +18,29 @@
 **09-23 24:00 前没发完 → 登记 `dist_not_executed`，时钟不启动、判据保持
 PENDING**（决定 2）。**这不是证伪**，处置是「先执行分发，再谈判据」。
 
+### 0.1 动手步骤（点哪、填哪）
+
+**开始前**：浏览器里确认已登录 `shing26`（GitHub）；HN / Reddit / V2EX / 即刻
+各自需要的账号见下——**没有账号的渠道先去注册**，不要跳到下一条（四条缺一，
+时钟就不启动）。
+
+| 步 | 去哪 | 填什么 | 做完 |
+|---|---|---|---|
+| 1 | 点 §1.1 的**预填链接** | 页面已带好「标题 + 正文 + Announcements 分类」，直接点 **Start discussion** | §1.1 打勾 + 填日期与 URL |
+| 2 | <https://news.ycombinator.com/submit>（未登录先 <https://news.ycombinator.com/login>；无账号需先注册） | **Title** = outreach §1 的 Title 行（66 字符版）；**URL** = `https://github.com/shing26/truetailor`；**Text 留空**——HN 只允许 URL 或 Text 二选一 | 提交后进条目页，把 outreach §1 的 **Body 作为首条评论**贴出；然后 §1.2 打勾 |
+| 3 | <https://www.reddit.com/r/ClaudeAI/submit> | 类型选 **Text**；标题与正文抄 outreach §2 | §1.3 打勾 |
+| 4 | <https://web.okjike.com> 发动态 | 正文抄 outreach §3（含两个话题标签，无独立标题字段） | §1.4 打勾 |
+| 5 | <https://www.v2ex.com/new> | 标题与正文抄 outreach §4；节点选「分享创造」（或 Claude） | §1.5 打勾 |
+
+**第 3 步（Reddit/即刻/V2EX）放在 HN 的次日**，不要与 HN 同分钟群发（纪律见 §2）。
+
+**四步齐了之后**：填 §1 末尾的汇总日期行 → §5 从 `PENDING` 改为「时钟已启动」，
+并算出截止 = 起点 + 28 天。
+
+**任一渠道打不开或发不出**（没账号、被限流、被杀帖）：**不要自己换渠道顶替**——
+渠道属于 ADR-0041 的「发布策略与渠道」，ADR-0042 明确没有改动它；替换需新开 ADR。
+把情况记在 §5 并说一声，由作者起草裁决。
+
 ---
 
 ## 1. 发送清单（每发一条：`[ ]` 改 `[x]`，填日期与 URL）
