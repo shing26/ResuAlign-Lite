@@ -8,12 +8,16 @@
 | 转公开时刻 | 2026-09-15 14:24 UTC（`gh repo edit --visibility public`） |
 | 首个 tag | `v0.1.0`，含 `docs/gate-demo.mp4`（59.8s，2026-09-15 14:27 UTC） |
 | CI | GitHub Actions `gate contract` 首推即绿（py3.9 + py3.12，selftest + demoflow 复算） |
-| Discussions | 已开；first-run feedback 讨论置顶在 Announcements |
+| Discussions 功能 | 已开（Announcements 分类可用）；first-run feedback 讨论**未发**，见下节 |
 | 主仓引流 | `README.md` 顶部一行 + 漂移锁告示（commit 2b01b93 / c5a7aa9） |
 
 **判据时钟**：ADR-0041 决定 4 的 4 周自 **2026-09-15** 起算，到
 **2026-10-13**。口径取「转公开时刻」而不是「outreach 全部发完」，
 因为把时钟往后挪对作者有利、对判据不利——宁可早停表。
+
+> ⚠️ **本段时钟口径已被 ADR-0042（2026-09-16）重锚，仅作为 09-15 发布事实存档**：
+> 判据时钟起点 = **四渠道 outreach 全部发出当日**（未发→`dist_not_executed`，
+> 非证伪）。执行口径以 `docs/probe-112-send-checklist-2026-09-16.md` 为准。
 
 ## 机器能做的都做了，剩两件要人点一下
 
@@ -74,7 +78,7 @@ in our own test suite: an English resume that said only "Python dev" was
 being rewritten to "Built services using Java" and marked verified, because
 the name check only looked at acronyms and camelCase. That is the kind of
 hole I expect the first comments to find, so: the README has a section
-called "What the gate does not do", and it is longer than the one above it.
+called "What the gate does not do", and it is as long as the one above it.
 
 It cannot catch an invented claim written in Chinese prose or in lowercase
 English, it has no idea whether a rewrite is worth making, and a zero-output
@@ -125,7 +129,7 @@ expected X / I saw Y + the GATE line, pinned in the repo's Discussions.
 ```
 把「不许编简历」这件事从提示词里拿出来，写成 500 行纯标准库的 Python。
 
-一周前我把 ResuAlign 整个掉头：app 冻结，只留一个 skill 文件 + 一个门禁脚本。
+上周我把 ResuAlign 整个掉头：app 冻结，只留一个 skill 文件 + 一个门禁脚本。
 理由很实在——市面上所有 tailoring 工具都靠模型承诺「不要编」，而它照样会写
 「用 Kafka 重构了管道」，因为 Kafka 是个放得进去的词。
 
@@ -156,7 +160,7 @@ block 的不许静默丢弃，也不许被 apply 写进稿子；每轮跑完往 
 这样「我们迭代优化过」是可核对的而不是一句描述。
 
 不用模型也能自己验：clone 下来 python selftest.py，17 个剧本打印裁决。
-MIT。README 里专门写了一节「门禁拦不住什么」，比能拦住什么那节还长。
+MIT。README 里专门写了一节「门禁拦不住什么」，和「能拦住什么」那节一样长。
 https://github.com/shing26/truetailor
 ```
 
