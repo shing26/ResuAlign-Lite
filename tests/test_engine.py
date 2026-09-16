@@ -64,7 +64,7 @@ def test_engine_jd_and_tailoring_use_extended_timeouts(monkeypatch):
         "Python dev resume",
         jd_text="Java backend",
     )
-    assert seen_timeouts == [45.0, 30.0, 90.0]
+    assert seen_timeouts == [45.0, 75.0, 90.0]
     assert seen_retries == [None, None, 1]
 
 
