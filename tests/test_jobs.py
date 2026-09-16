@@ -197,3 +197,51 @@ def test_migration_drops_legacy_tables(db_path):
     }
     conn.close()
     assert not tables & {"crawl_tasks", "blocker_queue", "job_refresh_events"}
+
+
+# -- #118：终态行归因保留 -----------------------------------------------------
+
+
+def _retention_registry(now, db_path):
+    """Small clocks so the 30d window is testable: ttl 60s, retention 3600s."""
+    return JobRegistry(
+        db_path=db_path,
+        max_jobs=100,
+        ttl_seconds=60,
+        terminal_retention_seconds=3600,
+        clock=lambda: now[0],
+    )
+
+
+def test_terminal_rows_survive_api_ttl_for_attribution(db_path):
+    """#118: succeeded 行过了 ttl 从 API 消失，但物理保留在 retention 窗口内
+    ——归因（成功率/零产出）有源可查，不再只剩会轮转的 app.log。"""
+    now = [100.0]
+    reg = _retention_registry(now, db_path)
+    job = reg.create({"resume_text": "r"}, _Config())
+    reg.mark_running(job.job_id)
+    reg.succeed(job.job_id, {"score": 80})
+
+    now[0] += 61  # past API ttl, far inside the retention window
+    assert reg.get(job.job_id) is None  # API view: expiry semantics unchanged
+    assert reg.snapshot(job.job_id) is None
+    assert len(reg) == 1, "terminal row must be physically retained (#118)"
+
+    reg.create({"resume_text": "r2"}, _Config())  # triggers purge
+    assert len(reg) == 2, "inside retention: purge must keep the terminal row"
+
+    now[0] += 3600  # beyond the (simulated) retention window
+    reg.create({"resume_text": "r3"}, _Config())
+    # r1 terminal-expired + r2 queued-expired both purge; only r3 remains.
+    assert len(reg) == 1
+
+
+def test_non_terminal_rows_still_purge_at_ttl(db_path):
+    """#118 boundary: queued/running rows keep the old purge semantics."""
+    now = [100.0]
+    reg = _retention_registry(now, db_path)
+    job = reg.create({"resume_text": "r"}, _Config())
+    now[0] += 61
+    assert reg.get(job.job_id) is None
+    reg.create({"resume_text": "r2"}, _Config())  # purge trigger
+    assert len(reg) == 1, "non-terminal expired row must be gone"

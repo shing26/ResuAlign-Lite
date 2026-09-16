@@ -22,6 +22,12 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_JOBS = 100
 DEFAULT_JOB_TTL_SECONDS = 60 * 60
+# #118（派单 D）：终态行物理保留 ≥30 天，作为「成功率/归因」类问题的一手
+# 数据源（#110 诊断时终态行已被 1h TTL 清成 0 行，归因只能靠会轮转的
+# app.log）。API 侧可见性仍由 ttl_seconds 决定（_get_current 过期即不可见），
+# 保留只延后物理删除；max_jobs 经 _enforce_cap 仍是行数硬顶。
+TERMINAL_RETENTION_SECONDS = 30 * 24 * 60 * 60
+_TERMINAL_STATUSES = ("succeeded", "failed", "canceled")
 INTERRUPTED_BY_RESTART = "Job interrupted by server restart"
 
 _SCHEMA = """
@@ -117,10 +123,12 @@ class JobRegistry(_SqliteStore):
         ttl_seconds: float = DEFAULT_JOB_TTL_SECONDS,
         clock: Callable[[], float] = time.time,
         db_path: str | Path | None = None,
+        terminal_retention_seconds: float = TERMINAL_RETENTION_SECONDS,
     ) -> None:
         super().__init__(db_path)
         self.max_jobs = max_jobs
         self.ttl_seconds = ttl_seconds
+        self.terminal_retention_seconds = terminal_retention_seconds
         self._clock = clock
 
     def create(
@@ -604,10 +612,15 @@ class JobRegistry(_SqliteStore):
             if row is None:
                 return None
             if self._is_expired(row["created_at"], now):
-                conn.execute(
-                    "DELETE FROM job_payloads WHERE job_id = ?", (job_id,)
-                )
-                conn.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+                # #118: expired TERMINAL rows stay invisible to the API but
+                # are physically retained for attribution (purge owns their
+                # deletion at terminal_retention_seconds); non-terminal rows
+                # keep the old read-time reclaim.
+                if row["status"] not in _TERMINAL_STATUSES:
+                    conn.execute(
+                        "DELETE FROM job_payloads WHERE job_id = ?", (job_id,)
+                    )
+                    conn.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
                 return None
             return self._row_to_analysis_job(row)
 
@@ -641,15 +654,24 @@ class JobRegistry(_SqliteStore):
         return now - created_at > self.ttl_seconds
 
     def _purge_expired(self, now: float) -> None:
+        # Non-terminal rows purge at ttl_seconds (unchanged); terminal rows
+        # only after TERMINAL_RETENTION_SECONDS (#118 attribution source).
+        term = ",".join("?" * len(_TERMINAL_STATUSES))
+        params = (*_TERMINAL_STATUSES, now - self.ttl_seconds,
+                  *_TERMINAL_STATUSES, now - self.terminal_retention_seconds)
         with self._connect() as conn:
             conn.execute(
                 "DELETE FROM job_payloads WHERE job_id IN ("
-                "SELECT job_id FROM jobs WHERE created_at < ?)",
-                (now - self.ttl_seconds,),
+                "SELECT job_id FROM jobs WHERE "
+                f"(status NOT IN ({term}) AND created_at < ?) "
+                f"OR (status IN ({term}) AND created_at < ?))",
+                params,
             )
             conn.execute(
-                "DELETE FROM jobs WHERE created_at < ?",
-                (now - self.ttl_seconds,),
+                f"DELETE FROM jobs WHERE "
+                f"(status NOT IN ({term}) AND created_at < ?) "
+                f"OR (status IN ({term}) AND created_at < ?)",
+                params,
             )
 
     def _enforce_cap(self) -> None:
