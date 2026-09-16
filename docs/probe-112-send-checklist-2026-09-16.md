@@ -40,6 +40,8 @@ https://github.com/shing26/truetailor/discussions/new?category=announcements&tit
 
 - [ ] 已发出 ｜ 日期：`____` ｜ URL：`____`
 - 标题 + 正文：`docs/probe-112-outreach-2026-09-15.md` **§1**（直接复制粘贴）
+- **先做前置**：置顶讨论必须已存在（HN 正文引用它）
+- **提交方式**：Title + URL（`https://github.com/shing26/truetailor`），Body 作为**首条评论**发出
 - 入口：<https://news.ycombinator.com/submit>
 
 ### 1.3 r/ClaudeAI
