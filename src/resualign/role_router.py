@@ -7,7 +7,7 @@ a single-call-fallback wrapper for the pipeline.
 
 Tiered timeouts (env overrides via ``RESUALIGN_ROLE_TIMEOUT_<ROLE>``):
 
-- profiler / gap_analyzer: 30s
+- profiler: 75s (was 30s; #116 甲案 after muse p95=43.9s) / gap_analyzer: 60s
 - diagnose: 45s
 - editor: 90s (heavier generation)
 - evaluator: 60s
@@ -27,10 +27,16 @@ logger = logging.getLogger(__name__)
 
 # Per-role timeout defaults (seconds). Environment variables override:
 # ``RESUALIGN_ROLE_TIMEOUT_DIAGNOSE``, ``RESUALIGN_ROLE_TIMEOUT_PROFILER``, etc.
+# #116（2026-09-16，用户裁决「甲」解锁 AIE 决策域调值）：app.log 6036 事件实测
+# muse-glimmer-30b p95=43.9s/max=124.3s、qwen2.5:7b p95=61.7s，而 ADR-0018 合并
+# 画像+缺口调用走 profiler——原 30s 线低于该模型 p95，结构性必超时（#110 的
+# 60.3s/71.7s 硬失败、#115 的零产出归因主因）。profiler 30→75（覆盖 71.7s 观测），
+# gap_analyzer 30→60；其余角色维持 AIE 表。最坏单发墙钟 45+75+90=210s，远低于
+# watchdog RESUALIGN_JOB_MAX_RUNTIME_S=1800。
 _ROLE_TIMEOUT_DEFAULTS: dict[str, float] = {
     "diagnose": 45.0,
-    "profiler": 30.0,
-    "gap_analyzer": 30.0,
+    "profiler": 75.0,
+    "gap_analyzer": 60.0,
     "editor": 90.0,
     "evaluator": 60.0,
 }
