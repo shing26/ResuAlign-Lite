@@ -43,9 +43,9 @@ Do not run `git branch -D` on the affected branch before rebuilding the ref.
 Short hashes in the ref file are rejected as broken refs — always write the
 full 40-char object name.
 
-### Regression baselines (2026-09-16, post #111 usable_diffs 分型)
+### Regression baselines (2026-09-16, post #111/#117/#118)
 
-- Backend: `PYTHONPATH=src python -m pytest tests/ -q` → **995 passed / 7 skipped**
+- Backend: `PYTHONPATH=src python -m pytest tests/ -q` → **997 passed / 7 skipped**
 - Frontend: `node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs`
   → **489 passed**
 - Page probe: 8 routes, 0 console error. Playwright browser now
@@ -138,6 +138,18 @@ ADR-0042 对 ADR-0041 决定 4/9/10 做了**限定性修正**（数值未改，�
   unchanged. Dashboard 完成对齐 numerator counts `usable_diffs>=1` only;
   legacy rows (no typing fields) keep the old 无建议/诊断完成 badges via the
   fallback in `alignmentBadgeHtml`.
+- **#117 test-log isolation**: `tests/conftest.py` top-level
+  `setdefault(RESUALIGN_LOG_DIR, <tmp>/resualign-pytest-logs)` before any
+  `resualign.api` import — real `data/logs/app.log` stays clean (verified
+  delta=0 per full run); e2e subprocesses inherit. Historical test traffic
+  (~71 lines) stays in the real log; filter by timestamp, do not rewrite it.
+- **#118 jobs terminal retention**: `JobRegistry(terminal_retention_seconds
+  =30d)` — `_purge_expired` purges non-terminal rows at `ttl_seconds` but
+  keeps succeeded/failed/canceled rows for the retention window; read path
+  `_get_current` lazy-deletes only NON-terminal expired rows (API expiry view
+  unchanged). Weekly success-rate queries: jobs terminal rows ×
+  `library_jobs.usable_diffs`. `max_jobs` cap still evicts terminal rows
+  (retention is an upper bound, not a guarantee).
 
 ### Phase A-C invariants (2026-08-30)
 
