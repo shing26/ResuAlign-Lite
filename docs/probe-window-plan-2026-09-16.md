@@ -11,7 +11,7 @@
 ## 0. 一屏结论
 
 1. **方向不需要再定**，两条线都已写进合同。缺的是执行：**四条 outreach 至今 0/4 发出**，
-   而分发窗口只剩 **7 天**（09-23 24:00 前发不完 → `dist_not_executed`）。
+   而分发窗口只剩 **6 天**（09-23 24:00 前发不完 → `dist_not_executed`）。
 2. **两条线的所有权都在你手里**：探针线靠四渠道发送（你的账号），
    自用线靠真实投递跑闭环（你的秋招）。机器能做的部分（文案、验证器、脚手架、材料）
    已就绪或本计划内可补完。
@@ -26,9 +26,9 @@
 
 | 项 | 实测值 | 判定 |
 |---|---|---|
-| truetailor（GitHub） | `created 09-15T14:16:06Z` / `pushed 09-15T14:38:46Z` / **0★ 0 fork 0 watcher** | 与「发布 17 小时后零曝光」一致 |
+| truetailor（GitHub） | `created 09-15T14:16:06Z` / `pushed 09-16T18:32:20Z`（P0-0 修复，HEAD `eea124d`）/ **0★ 0 fork 0 watcher** | 仍未暴露 |
 | truetailor discussions | `totalCount = 0` | 置顶 first-run 讨论**未发** |
-| 本地探针仓 `/d/truetailor` | HEAD `8844476`，与远端一致 | 可安全改动 |
+| 本地探针仓 `/d/truetailor` | HEAD `eea124d`，与远端一致 | P0-0 已落 |
 | 发布包完整度 | `SKILL.md` + `gate.py`(516 行) + `apply.py` + `selftest.py`(**17** 场景) + `docs/first-run-feedback.md` + `docs/gate-contract.md` + `docs/gate-demo.mp4` + `examples/` | 齐 |
 | 四渠道文案 | `docs/probe-112-outreach-2026-09-15.md` §1–§4 齐；**已扫，零未填占位符** | 可直接粘贴 |
 | 置顶讨论预填链接 | `docs/probe-112-send-checklist-2026-09-16.md` §1.1 | 点开即 Submit |
@@ -42,19 +42,23 @@
 > `gh api graphql -f query='{repository(owner:"shing26",name:"truetailor"){discussions{totalCount}}}'`、
 > `python selftest.py`（在探针仓）、`PYTHONPATH=src python -m pytest tests/ -q`。
 
+> **09-17 复核（发布后第 2 天）**：outreach **仍 0/4**、truetailor **仍 0★ / 0 discussion**
+> ——判据时钟**仍未启动**，`dist_not_executed` 线剩 **6 天**。
+> P0-0 已由代理侧完成（见下），**其余三项全部依赖作者账号，机器替代不了**。
+
 ---
 
-## 2. 关键路径：09-16 → 09-23（7 天）
+## 2. 关键路径：09-16 → 09-23 24:00
 
-### P0-0 发布前修正（**1 行，必须先做**）
+### P0-0 发布前修正 —— **✅ 已完成（09-17，commit `eea124d`）**
 
-- 位置：探针仓 `SKILL.md:222` —— 「it replays the **ten** golden scenarios」。
-- 改为 **seventeen**（或去掉数字）。理由：`README.md:35`、`SKILL.md:53`、HN 正文三处都写 17，
-  实测 `selftest.py` = **17 条唯一场景**（中文 d1–d10 ＋ 英文 e1–e7；打印 19 行 `ok` 是因为
-  2 条 allowlist 场景各多跑一次「无 allowlist 必须被拦」的负例校验，不是 19 条场景）。
-- 时机：**发帖前**。发帖后改会在观察窗内产生公开变更，且正好坐实「文档对不上」
-  这条最容易出现在首条评论里的质疑。
-- 性质：F2 类文案失实，属定位稿允许的「首跑摩擦」修复范围。
+- 已完成：探针仓 `SKILL.md:222` 的「the **ten** golden scenarios」→「the **seventeen**
+  golden scenarios」，09-17 推送至 truetailor main；远端 `SKILL.md:53` 与 `:222` 现均为 17。
+  修复**早于**四条 outreach，观察窗内不再有文案变更。
+- 原依据（留档）：`README.md:35`、`SKILL.md:53`、HN 正文三处都写 17，`SKILL.md:222` 是
+  英文场景集落地前的遗留；实测 `selftest.py` = **17 条唯一场景**（中文 d1–d10 ＋ 英文 e1–e7；
+  打印 19 行 `ok` 是因为 2 条 allowlist 场景各多跑一次「无 allowlist 必须被拦」的负例校验，
+  不是 19 条场景）。性质：F2 类文案失实，属定位稿允许的「首跑摩擦」修复范围。
 
 ### P0-1 置顶 first-run feedback discussion（约 30 秒）
 
