@@ -1,7 +1,7 @@
 # ResuAlign 2.0 Implementation Tickets
 
 Status: active (2026-08-04). Source of truth for sequencing is
-`docs/plan-2.0-optimization.md`; this file is the executable breakdown.
+`docs/plans/plan-2.0-optimization.md`; this file is the executable breakdown.
 
 ## Definition of done for every ticket
 

@@ -53,7 +53,7 @@
 ### 文档与 CI
 
 - ADR 体系完整，最近决策是 ADR-0025（移除 appraisal）与 ADR-0027（Job 唯一事实源）。
-- 但 `docs/roadmap-saas-workbench.md`、`docs/spec-2.0-*`、`docs/plan-2.0-*` 仍大量引用
+- 但 `docs/plans/roadmap-saas-workbench.md`、`docs/plans/spec-2.0-*`、`docs/plans/plan-2.0-*` 仍大量引用
   appraisal / Application，文档与当前实现不一致。
 - CI 三阶段：unit-contract → benchmark gate → Playwright smoke。
 
@@ -121,7 +121,7 @@
 
 ### Phase 5：文档与契约收口
 
-- 更新 `docs/roadmap-saas-workbench.md`、`docs/spec-2.0-*`、`docs/plan-2.0-*`，
+- 更新 `docs/plans/roadmap-saas-workbench.md`、`docs/plans/spec-2.0-*`、`docs/plans/plan-2.0-*`，
   删除或标注被 ADR-0025 / ADR-0027 取代的内容。
 - 新增一张“模块职责 + 唯一事实源”地图，避免 roadmap、spec、ADR 三处漂移。
 - 验收：仓库内对 appraisal / application 作为活跃功能的引用为零。

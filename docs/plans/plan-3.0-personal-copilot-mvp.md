@@ -2,9 +2,10 @@
 
 Status: Agreed via grilling (2026-08-17)
 Scope: 个人自托管求职工作台，本地一键启动优先
-Related: `docs/roadmap-saas-workbench.md`（SaaS 作为远期终点）、
-`docs/plan-2.0-ultimate-copilot-studio.md`（Split-Canvas 作为 UI 方向）、
-`docs/adr/0029-agent-orchestration-pilot.md`（agent 接入试点）
+Related: `docs/plans/roadmap-saas-workbench.md`（SaaS 作为远期终点）、
+`docs/plans/plan-2.0-ultimate-copilot-studio.md`（Split-Canvas 作为 UI 方向）、
+`docs/adr/0029-agent-orchestration-pilot.md`（ADR-0029 已删除且编号不复用，见
+ADR-0036 编号说明）
 
 ## 1. 产品定义
 

@@ -13,6 +13,8 @@ Five canonical triage roles use default labels (`needs-triage`, `needs-info`, `r
 ### Domain docs
 
 Single-context: root `CONTEXT.md` glossary + `docs/adr/` decisions. See `docs/agents/domain.md`.
+`docs/README.md` maps the docs tree (flat layer = live docs, `plans/` + `reports/` = archive)
+and says where each new document goes — read it before adding or moving a doc.
 
 ### QA agent
 

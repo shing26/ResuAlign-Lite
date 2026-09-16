@@ -1,6 +1,6 @@
 # ResuAlign 2.0 终极形态 Implementation Tickets
 
-Status: active (2026-08-04). Source of truth: `docs/plan-2.0-ultimate-copilot-studio.md`
+Status: active (2026-08-04). Source of truth: `docs/plans/plan-2.0-ultimate-copilot-studio.md`
 and `docs/adr/0021-copilot-splitstudio.md`.
 
 ## Definition of done for every ticket
