@@ -47,8 +47,14 @@ PENDING**（决定 2）。**这不是证伪**，处置是「先执行分发，�
 
 ### 1.1 置顶 first-run feedback discussion
 
-- [ ] 已发出 ｜ 日期：`____` ｜ URL：`____`
-- **预填链接**（点开即标题 + 正文 + Announcements 分类，直接 Submit）：
+- [x] 已发出 ｜ 日期：`2026-09-17` ｜ URL：<https://github.com/shing26/truetailor/discussions/1>
+- **实测登记（非自陈，2026-09-17 16:53 复验）**：
+  `pinnedDiscussions.totalCount = 1` → 讨论 `#1`
+  《First run? Tell me what broke (I expected X, I saw Y)》，
+  `createdAt 2026-09-16T19:21:37Z`（= 北京时间 **09-17 03:21**），
+  `pinnedBy shing26`，分类 **Announcements**，评论 **0**。
+  即：**已发出且已置顶**，P0-1 两个动作都完成（复验命令见 §6）。
+- **预填链接**（本次即用此链接发出；点开即标题 + 正文 + Announcements 分类，直接 Submit）：
 
 ```
 https://github.com/shing26/truetailor/discussions/new?category=announcements&title=First+run%3F+Tell+me+what+broke+%28I+expected+X%2C+I+saw+Y%29&body=I+am+the+author%2C+so+my+own+runs+prove+very+little.+Run+true-tailor+once+on+your+resume+%2B+one+real+JD%2C+then+reply+in+this+shape%3A%0A%0A++++I+expected%3A+%3Cwhat+you+thought+would+happen%3E%0A++++I+saw%3A++++++%3Cwhat+actually+happened%3E%0A++++Host%3A+++++++Claude+Code+%2F+Codex%2C+which+model%2C+which+OS%0A++++GATE%3A+++++++%3Cpaste+the+summary+line+verbatim%3E%0A%0AThe+GATE+line+matters+more+than+the+prose+because+it+cannot+be+embellished.+Full+protocol+and+what+happens+to+each+report%3A+docs%2Ffirst-run-feedback.md
@@ -84,6 +90,11 @@ https://github.com/shing26/truetailor/discussions/new?category=announcements&tit
 - 标题 + 正文：同文件 **§4**（节点：分享创造 / Claude）
 
 > ### 四条全部打勾的日期 = `____` ← **这就是判据时钟起点**
+
+> ### 进度（2026-09-17 16:53 复验）：**1/5 步**
+> - §1.1 置顶讨论 ✅ **已发已置顶**（这是**前置项**，不计入决定 1 的「四渠道」）
+> - §1.2–§1.5 四渠道 **0/4 全空** → **时钟起点仍为空白，判据保持 `PENDING`**（决定 1/2）
+> - 距 `dist_not_executed` 判定线 **2026-09-23 24:00** 剩 **6 天**（决定性期限，见 §0）
 
 ---
 
@@ -143,6 +154,29 @@ python gate.py ... --log tailoring.jsonl --round <N> --trigger <T>
 
 ## 5. 状态登记（只填一格）
 
-- [x] **`PENDING`** — 分发未完成，判据未启动 ← **当前状态（2026-09-16）**
+- [x] **`PENDING`** — 分发未完成，判据未启动 ← **当前状态（复核至 2026-09-17 16:53）**
 - [ ] 时钟已启动 ｜ 起点 = `____` ｜ 截止 = 起点 + 28 天 = `____`
 - [ ] **`dist_not_executed`** — 09-23 24:00 前未发完 ｜ 登记日期 `____`
+
+> 09-17 复核说明：置顶讨论（§1.1）已完成，但决定 1 的时钟挂在**四渠道**上，
+> 四渠道仍 0/4 → **状态格不变，`PENDING` 仍为唯一正确项**。
+> 进度细节见 §1 末尾的进度块；换格只发生在四渠道全部打勾（→ 时钟已启动）
+> 或 09-23 24:00 仍未发完（→ `dist_not_executed`）那一刻。
+
+---
+
+## 6. 复验命令（本页每个数字都可复跑）
+
+```bash
+# 讨论是否已发出 + 是否已置顶（两件事分开查，不要混为一谈）
+gh api graphql -f query='{repository(owner:"shing26",name:"truetailor"){discussions(first:5){totalCount nodes{number title createdAt category{name} comments{totalCount}}}}}'
+
+gh api graphql -f query='{repository(owner:"shing26",name:"truetailor"){pinnedDiscussions(first:10){totalCount nodes{discussion{number title} createdAt pinnedBy{login}}}}}'
+
+# 曝光度（探针线的另一侧：即使讨论发了，没分发照样 0★）
+gh api repos/shing26/truetailor --jq '{stars:.stargazers_count,forks:.forks_count,watchers:.subscribers_count,created:.created_at,pushed:.pushed_at}'
+```
+
+> 注：`Discussion` 类型**没有** `isPinned` 字段，`Mutation` 里也**没有** `pinDiscussion`
+> ——置顶状态只能通过 `Repository.pinnedDiscussions` 读，或在网页端手工置顶。
+> 复验时别用 `isPinned`（会报 `Field 'isPinned' doesn't exist on type 'Discussion'`）。
