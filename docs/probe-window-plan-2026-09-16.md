@@ -11,7 +11,8 @@
 ## 0. 一屏结论
 
 1. **方向不需要再定**，两条线都已写进合同。缺的是执行：**四条 outreach 至今 0/4 发出**，
-   而分发窗口只剩 **7 天**（09-23 24:00 前发不完 → `dist_not_executed`）。
+   而分发窗口只剩 **6 天**（09-23 24:00 前发不完 → `dist_not_executed`）。
+   前置项 **P0-1（置顶讨论）已完成**（09-17 复验：已发且已置顶）——它**不计入**决定 1 的这四条。
 2. **两条线的所有权都在你手里**：探针线靠四渠道发送（你的账号），
    自用线靠真实投递跑闭环（你的秋招）。机器能做的部分（文案、验证器、脚手架、材料）
    已就绪或本计划内可补完。
@@ -22,17 +23,17 @@
 
 ---
 
-## 1. 状态核对（2026-09-16 实测，非文档推断）
+## 1. 状态核对（2026-09-17 16:53 复跑，非文档推断）
 
 | 项 | 实测值 | 判定 |
 |---|---|---|
-| truetailor（GitHub） | `created 09-15T14:16:06Z` / `pushed 09-15T14:38:46Z` / **0★ 0 fork 0 watcher** | 与「发布 17 小时后零曝光」一致 |
-| truetailor discussions | `totalCount = 0` | 置顶 first-run 讨论**未发** |
-| 本地探针仓 `/d/truetailor` | HEAD `8844476`，与远端一致 | 可安全改动 |
+| truetailor（GitHub） | `created 09-15T14:16:06Z` / `pushed 09-16T18:32:20Z`（P0-0 修复，HEAD `eea124d`）/ **0★ 0 fork 0 watcher** | 仍未暴露 |
+| truetailor discussions | `totalCount = 1`；`pinnedDiscussions.totalCount = 1`（`#1`，`createdAt 2026-09-16T19:21:37Z` = 北京 09-17 03:21，`pinnedBy shing26`，Announcements，评论 0） | ✅ 置顶讨论**已发且已置顶** → **P0-1 完成** |
+| 本地探针仓 `/d/truetailor` | HEAD `eea124d`，与远端一致 | P0-0 已落 |
 | 发布包完整度 | `SKILL.md` + `gate.py`(516 行) + `apply.py` + `selftest.py`(**17** 场景) + `docs/first-run-feedback.md` + `docs/gate-contract.md` + `docs/gate-demo.mp4` + `examples/` | 齐 |
 | 四渠道文案 | `docs/probe-112-outreach-2026-09-15.md` §1–§4 齐；**已扫，零未填占位符** | 可直接粘贴 |
-| 置顶讨论预填链接 | `docs/probe-112-send-checklist-2026-09-16.md` §1.1 | 点开即 Submit |
-| outreach 进度 | **0 / 4**；状态 `PENDING` | 关键路径阻塞点 |
+| 置顶讨论预填链接 | `docs/probe-112-send-checklist-2026-09-16.md` §1.1 | 已用完（讨论 `#1` 即由它发出） |
+| outreach 进度 | **四渠道 0 / 4**（置顶讨论已完成，但按 ADR-0042 决定 1 不计入这四条）；状态 `PENDING` | 关键路径阻塞点 |
 | 自用线 | **1 例**（09-15 狗食两跳链，`d9a4e197…` → `88f04b27…`） | 目标 3 例，**还需 2 例** |
 | 主仓基线 | 后端 **997 passed / 7 skipped**；前端 **489 passed**；CI 三 stage 绿 | 今日实跑。**注意：定位稿写的 989/485 已过期** |
 | app 冻结令 | ADR-0041 决定 1 有效，ADR-0042 决定 6e 未解冻 | 有效 |
@@ -40,26 +41,55 @@
 
 > 核对方法（任何人可复跑）：`gh api repos/shing26/truetailor`、
 > `gh api graphql -f query='{repository(owner:"shing26",name:"truetailor"){discussions{totalCount}}}'`、
+> `gh api graphql -f query='{repository(owner:"shing26",name:"truetailor"){pinnedDiscussions(first:10){totalCount nodes{discussion{number title} createdAt pinnedBy{login}}}}}'`
+> （**置顶状态只能用这条读**：`Discussion.isPinned` 字段不存在，`pinDiscussion` mutation 也不存在）、
 > `python selftest.py`（在探针仓）、`PYTHONPATH=src python -m pytest tests/ -q`。
+
+> **09-17 复核（发布后第 2 天，16:53 复跑）**：置顶讨论**已发且已置顶**
+> （`#1`，`createdAt 2026-09-16T19:21:37Z` = 北京时间 09-17 03:21，`pinnedBy shing26`）
+> → **P0-1 完成**；但**四渠道仍 0/4**、truetailor **仍 0★ / 0 fork / 0 watcher**、
+> `discussions.comments = 0` —— **判据时钟仍未启动**，`dist_not_executed` 线剩 **6 天**。
+> P0-0 与 P0-1 均已完成；**剩余四项（HN、r/ClaudeAI、即刻、V2EX 的实际发送）全部依赖作者账号**，
+> 机器替代不了（HN 单独先发，隔日再发其余三渠道）。**分发窗口只剩 09-18~09-23。**
+
+> **发帖前机械复验（09-17 16:55 复跑，纯校验、零文案改动）**——四条发送文案可直接粘贴：
+>
+> | 校验项 | 结果 |
+> |---|---|
+> | HN Title 字符数 | **66** ≤ 80 上限 ✅（原稿 81 会被拒，已在 `8c4bee6` 改掉） |
+> | r/ClaudeAI 标题 | **112** ≤ 300 ✅ |
+> | V2EX 标题 | **40**（含「标题：」前缀；正文实为 37）✅ |
+> | 即刻 | 无独立标题字段，正文 41 字符首行 ✅ |
+> | 占位符扫描（`<…>` / TODO / XXX / TBD / 待填 / `___` / `{{}}`） | **0 命中** ✅ |
+> | 线上讨论正文 vs 预填链接 body | 484 字符，**逐字一致** ✅（作者 `shing26`，Announcements） |
+>
+> 校验方式：对 `docs/probe-112-outreach-2026-09-15.md` 做正则扫描；
+> 讨论正文用 `gh api graphql … discussion(number:1){title body author{login}}` 取回比对。
 
 ---
 
-## 2. 关键路径：09-16 → 09-23（7 天）
+## 2. 关键路径：09-16 → 09-23 24:00
 
-### P0-0 发布前修正（**1 行，必须先做**）
+### P0-0 发布前修正 —— **✅ 已完成（09-17，commit `eea124d`）**
 
-- 位置：探针仓 `SKILL.md:222` —— 「it replays the **ten** golden scenarios」。
-- 改为 **seventeen**（或去掉数字）。理由：`README.md:35`、`SKILL.md:53`、HN 正文三处都写 17，
-  实测 `selftest.py` = **17 条唯一场景**（中文 d1–d10 ＋ 英文 e1–e7；打印 19 行 `ok` 是因为
-  2 条 allowlist 场景各多跑一次「无 allowlist 必须被拦」的负例校验，不是 19 条场景）。
-- 时机：**发帖前**。发帖后改会在观察窗内产生公开变更，且正好坐实「文档对不上」
-  这条最容易出现在首条评论里的质疑。
-- 性质：F2 类文案失实，属定位稿允许的「首跑摩擦」修复范围。
+- 已完成：探针仓 `SKILL.md:222` 的「the **ten** golden scenarios」→「the **seventeen**
+  golden scenarios」，09-17 推送至 truetailor main；远端 `SKILL.md:53` 与 `:222` 现均为 17。
+  修复**早于**四条 outreach，观察窗内不再有文案变更。
+- 原依据（留档）：`README.md:35`、`SKILL.md:53`、HN 正文三处都写 17，`SKILL.md:222` 是
+  英文场景集落地前的遗留；实测 `selftest.py` = **17 条唯一场景**（中文 d1–d10 ＋ 英文 e1–e7；
+  打印 19 行 `ok` 是因为 2 条 allowlist 场景各多跑一次「无 allowlist 必须被拦」的负例校验，
+  不是 19 条场景）。性质：F2 类文案失实，属定位稿允许的「首跑摩擦」修复范围。
 
-### P0-1 置顶 first-run feedback discussion（约 30 秒）
+### P0-1 置顶 first-run feedback discussion —— **✅ 已完成（09-17，讨论 `#1`）**
 
-- 用清单 §1.1 的预填链接 → Submit。`gh` CLI token 无 Discussions 写权限，机器做不了。
-- 发完：清单 §1.1 打勾 + 填日期与 URL。
+- 已完成：用清单 §1.1 的预填链接发出，并**已置顶**。实测（2026-09-17 16:53）：
+  `pinnedDiscussions.totalCount = 1` → `#1`、`createdAt 2026-09-16T19:21:37Z`
+  （北京时间 09-17 03:21）、`pinnedBy shing26`、分类 Announcements、评论 0。
+  登记落在清单 §1.1；复验命令落在清单 **§6**。
+- 原说明（留档）：这一步机器做不了——`gh` CLI 的 OAuth token 无 Discussions 写权限；
+  且 GraphQL schema 里**没有** `pinDiscussion` mutation（只有 `pinIssue`），
+  置顶状态只能读、不能写。**置顶动作本身也必须是人工的。**
+- 下游影响：**P0-2 的前置条件已满足**（HN 正文引用本讨论），可以发 HN 了。
 
 ### P0-2 Hacker News — Show HN（**先发这个**）
 

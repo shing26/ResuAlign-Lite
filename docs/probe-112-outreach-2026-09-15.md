@@ -42,10 +42,19 @@ HN / r/ClaudeAI / 即刻 / V2EX 的登录态不在这台机器的工具链里，
 
 ## 1. Hacker News — Show HN
 
+> **提交方式（先看这段，不然会发错）**
+> 1. HN 的提交框只能 **「Title + URL」或「Title + Text」二选一**，不能同时填——所以
+>    Title 用下面那行，URL 填 `https://github.com/shing26/truetailor`。
+> 2. **提交成功后立刻把 Body 作为第一条评论贴出去**：这是 Show HN 的惯例，
+>    而且 Body 最后一句 "the discussion I pinned" 要求讨论区**先存在**——
+>    所以顺序必须是「置顶讨论 → HN」。
+> 3. 标题上限 **80 字符**；原稿 81 字符会被 HN 直接拒（`Title too long`），
+>    已改为下面这版（66 字符）。
+
 Title:
 
 ```
-Show HN: A resume-tailoring skill where the fabrication gate is a 500-line script
+Show HN: A resume-tailoring skill with a 500-line fabrication gate
 ```
 
 Body:
