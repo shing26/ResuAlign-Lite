@@ -203,3 +203,90 @@ test("radius tokens preserve component semantics", () => {
     assert.match(rule[1], new RegExp(`border-radius\\s*:\\s*var\\(${token}\\)\\s*;`));
   }
 });
+
+function shadowRules(css) {
+  const rules = [];
+  for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selector = match[1]
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!selector || selector.startsWith("@")) continue;
+    for (const declaration of match[2].matchAll(
+      /box-shadow\s*:\s*([^;{}]+)\s*;/g,
+    )) {
+      rules.push({
+        selector,
+        value: declaration[1].replace(/\s+/g, " ").trim(),
+      });
+    }
+  }
+  return rules;
+}
+
+test("business rules keep shadow on the canonical four-step scale", () => {
+  const businessCss = [
+    "reset",
+    "base",
+    "components",
+    "patterns",
+    "utilities",
+  ]
+    .map((layer) => extractLayerText(CSS, layer))
+    .join("\n");
+
+  const allowedFloatingSelector =
+    /(?:^|,\s*)\.(?:inline-suggestion__paper|toast|offer-celebration__card|command-palette__dialog|command-panel|filter-pop|opt-bubble|export-dock__menu|toolbar-more__menu|board-more__menu)$|\.modal(?!-)(?:\s|$)|\.board-card\.is-dragging$|\.tabs--rail button:hover::after$/;
+  const canonicalShadow = /var\(--shadow-(popover|modal|toast|drag)\)/;
+  const focusRing = /var\(--(?:ra-)?focus(?:-ring|-ring-error)?\)/;
+  const nonFloatingRing = /^(?:inset\b|0 0 0\b)/;
+  const disallowed = shadowRules(businessCss).filter(({ selector, value }) => {
+    if (/^(?:none|var\(--shadow-none\))$/.test(value)) return false;
+    if (canonicalShadow.test(value)) {
+      return !allowedFloatingSelector.test(selector);
+    }
+    if (focusRing.test(value)) return false;
+    return !nonFloatingRing.test(value);
+  });
+
+  assert.deepEqual(
+    disallowed,
+    [],
+    `non-canonical business box-shadow declarations: ${JSON.stringify(
+      disallowed,
+      null,
+      2,
+    )}`,
+  );
+});
+
+test("business rules do not use legacy card or alias shadow tokens", () => {
+  const businessCss = [
+    "reset",
+    "base",
+    "components",
+    "patterns",
+    "utilities",
+  ]
+    .map((layer) => extractLayerText(CSS, layer))
+    .join("\n");
+
+  assert.doesNotMatch(
+    businessCss,
+    /var\(--shadow(?:-\d|-(?:sm|inset))?(?=\s*[,)])/,
+  );
+  assert.doesNotMatch(businessCss, /var\(--(?:card-shadow-|ra-shadow-card)/);
+});
+
+test("shadow tokens publish four floating steps plus none", () => {
+  const tokens = extractLayerText(CSS, "tokens");
+  for (const name of [
+    "none",
+    "popover",
+    "modal",
+    "toast",
+    "drag",
+  ]) {
+    assert.match(tokens, new RegExp(`--shadow-${name}\\s*:`));
+  }
+});

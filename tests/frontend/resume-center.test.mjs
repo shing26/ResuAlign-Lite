@@ -104,7 +104,7 @@ test("styles.css: board-card hover is gated by prefers-reduced-motion", () => {
 test("styles.css: board-card drag state deepens the shadow", () => {
   const block = stylesCss.match(/\.board-card\.is-dragging\s*\{([^}]*)\}/s);
   assert.ok(block, ".board-card.is-dragging rule exists");
-  assert.match(block[1], /var\(--shadow-3\)/);
+  assert.match(block[1], /var\(--shadow-drag\)/);
 });
 
 test("styles.css: stats bar and funnel cards reuse dashboard KPI semantics", () => {

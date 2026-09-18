@@ -1,6 +1,6 @@
 # ResuAlign 前端 CSS 架构重构 · 批次施工单
 
-**状态**: B0/B1/B2a/B2b/B2c 已完成；B2d–B7 按 ADR-0050 逐批推进
+**状态**: B0/B1/B2a/B2b/B2c/B2d 已完成；B2e–B7 按 ADR-0050 逐批推进
 **日期**: 2026-09-18
 **依据**: ADR-0043（分层）/ ADR-0044（token）/ ADR-0045（图标）/
 ADR-0046（内联变量）/ ADR-0047（主题与主色）
@@ -293,3 +293,36 @@ ADR-0044 决定 11 已批准引入，施工时须一并确定：
 - 8 路由 DOM 度量：rail 224 / topbar 52 / 看板溢出 0 / 0 console error；
 - 16 张明暗截图完成目视检查，卡片、按钮、标签、抽屉、模态没有出现
   “全站同一圆角”或卡片明显比面板更圆的问题。
+
+---
+
+## 14. B2d 阴影收敛实作记录（2026-09-18）
+
+**范围**：只替换 `@layer reset/base/components/patterns/utilities` 中的
+`box-shadow`，不改 token 定义、打印覆盖或 JS/HTML 契约。
+
+**结果**：
+
+- 业务层 125 处 `box-shadow` 完成语义归位；
+- 其中 69 处卡片、面板、按钮、输入框、表头与静态容器归零为
+  `var(--shadow-none)`；
+- 16 处真实脱离文档流的元素只允许四档 canonical token：
+  `.inline-suggestion__paper` / 菜单 / 自绘 popover 使用
+  `var(--shadow-popover)`，`.modal` / 命令面板 / 抽屉 /
+  `.offer-celebration__card` 使用 `var(--shadow-modal)`，`.toast`
+  使用 `var(--shadow-toast)`，`.board-card.is-dragging` 使用
+  `var(--shadow-drag)`；
+- 30 处 `inset` / `0 0 0` 是状态环、选中环或左侧语义条，不属于浮层阴影，
+  原样保留；10 处焦点环继续走 `--focus` / `--focus-ring*`；
+- `--ra-shadow-card`、`--card-shadow-*`、`--shadow-1..4`、`--shadow-sm`
+  的业务引用归零；兼容别名仍保留到 B7 删除；
+- `--shadow-none` 补齐到浅色主题 token，明暗主题均为五档闭环；
+- 新增 `css-architecture.test.mjs` 守卫：业务层不得使用 legacy shadow
+  token，四档浮层阴影只允许出现在浮层 / 模态 / Toast / 拖拽选择器；
+- `resume-center.test.mjs` 的拖拽断言改为 `var(--shadow-drag)`；
+- 静态缓存版本 `v=40 → v=41`；
+- 前端全量 **500 passed / 0 failed**；
+- 后端全量 **997 passed / 7 skipped**；
+- 8 路由 DOM 度量：rail 224 / topbar 52 / 看板溢出 0 / 0 console error；
+- 16 张明暗截图完成目视检查，卡片、面板、表格靠描边和底阶区分，
+  下拉、模态、抽屉、Toast 仍保留脱离感。
