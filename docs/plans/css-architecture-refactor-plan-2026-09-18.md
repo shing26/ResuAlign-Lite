@@ -1,6 +1,6 @@
 # ResuAlign 前端 CSS 架构重构 · 批次施工单
 
-**状态**: B0/B1/B2a/B2b/B2c/B2d/B2e 已完成；B3–B7 按 ADR-0050 逐批推进
+**状态**: B0/B1/B2a/B2b/B2c/B2d/B2e/B3a 已完成；B3b–B7 按 ADR-0050 逐批推进
 **日期**: 2026-09-18
 **依据**: ADR-0043（分层）/ ADR-0044（token）/ ADR-0045（图标）/
 ADR-0046（内联变量）/ ADR-0047（主题与主色）
@@ -46,7 +46,7 @@ ADR-0046（内联变量）/ ADR-0047（主题与主色）
 | **B0** | 基线冻结：`git tag pre-css-refactor`；全量测试记录基线；6 页 × 明暗截图存档（`.scratch`，不入库）；**修 `resume-center.test.mjs` 那 2 条验证死定义的断言** | 无 | — | 基线必须全绿 | `resume-center` |
 | **B1**（已完成） | **加层序 + token 内联 + `!important` 归零**（三者同批）：① 文件顶部加 8 层 `@layer` 声明；② 现有规则按块归入各层（不改声明值）；③ `design-tokens.css` 内容内联进 `@layer tokens`；④ 迁移别名块**临时启用**（选择器写回 `:root`）；⑤ 100 处 `!important` 按第 3 节逐类归零。B1a/B1b 实作记录见 `docs/plans/b1-token-alias-bridge-2026-09-18.md` §7–§8 | reset…overrides | 单 commit revert | DOM 度量探针全通过；视觉与 B0 基线一致；`node --test` 全绿 | `adr0033` / `ux-regression` / `css-structure` / `alignment-gap` / `css-architecture` |
 | **B2** | 尺度收敛（5 个子批，逐维度独立）：②a 字号 63→8、②b 间距→4px 网格 11 档、②c 圆角 40→7、②d 阴影 70→4（废弃全部卡片阴影）、②e z-index→9 档 | components / patterns | **每维度单独 revert** | 每子批后 DOM 度量 + 逐页明暗截图比对 | `resume-center` |
-| **B3** | 颜色归位：508 hex + 299 rgba → token（含 `#fff`/`#000`）；删 9 处软失效硬编码 fallback；删 5 处装饰性渐变；`--match-soft` 补定义 | tokens + 全层 | 单 commit revert | 明暗双主题逐页截图；颜色字面量门禁归零 | 全部 CSS 测试 |
+| **B3** | 颜色归位：508 hex + 299 rgba → token（含 `#fff`/`#000`）；删 9 处软失效硬编码 fallback；删 5 处装饰性渐变；`--match-soft` 补定义。**B3a（已完成的视觉零变化半批）** = canonical 颜色桥前置 + `--shadow-ink` 基元 + 字面量棘轮；**B3b** = 业务规则替换、fallback/渐变清理、门禁归零 | tokens + 全层 | 单 commit revert | 明暗双主题逐页截图；颜色字面量门禁归零 | 全部 CSS 测试 |
 | **B4** | 原生控件改造：`appearance: none` + 自绘箭头 + 等高 + `outline` 焦点环 + `color-scheme` 同步 | base / components | 单 commit revert | 6 页控件截图（含 select 展开态）；Tier 1/2 判据逐处落点 | 无 |
 | **B5** | 图标替换：新增 `app/icons.js`；替换 2 处 emoji + `◐`/`✕` 图标化；`→` 逐个判定；`·`/`•`/`…` 改元素或 `::marker` | components | 单 commit revert | P0-1 正则零命中；交互态截图 | `adr0033`（emoji 正则） |
 | **B6** | 死代码清理：按 C1/C2/C3 三批判定后处置（499 个候选，**禁直接批量删**） | — | **按批 revert** | 逐页走查；发现「删了还活着」立即回滚 | 全部 |
@@ -352,3 +352,27 @@ ADR-0044 决定 11 已批准引入，施工时须一并确定：
 - 后端全量 **997 passed / 7 skipped**；
 - 8 路由 DOM 度量：rail 224 / topbar 52 / 看板溢出 0 / 0 console error；
 - 16 张明暗截图完成目视检查，菜单、模态、抽屉、看板和移动底栏层级正常。
+
+---
+
+## 16. B3a 颜色桥实作记录（2026-09-18）
+
+**范围**：只改 `@layer tokens`。把 legacy 颜色名到 canonical 语义的映射放在
+B1a 旧值重放**之前**，并新增 `--shadow-ink` 基元；业务规则、组件私有
+`--ls-*`、打印覆盖与 JS/HTML 契约均不动。B3a 不改变当前渲染，只建立 B3b
+可以逐条迁移的依据。
+
+**结果**：
+
+- 98 个 legacy 颜色名建立 canonical 映射；B1a migration replay 仍是最终
+  旧值宿主，visual-zero fallback pins 继续排在末尾；
+- `--shadow-ink: #000000` 进入 canonical token，预留给 B3b 的 rgba 黑色
+  阴影/遮罩迁移；
+- 业务规则颜色字面量棘轮：hex ≤ 207、rgb(a) ≤ 202、hsl(a) = 0；
+- 新增 `css-architecture.test.mjs` 两条守卫：颜色桥必须保持休眠顺序；
+  颜色字面量债务不得回涨；
+- 前端全量 **504 passed / 0 failed**；
+- 后端全量 **997 passed / 7 skipped**；
+- 8 路由 DOM 度量 JSON 与 B2e 基线完全相等；
+- 16 张明暗截图与 B2e 基线逐像素一致（0/16 差异）；
+- 静态缓存版本不变，仍为 `v=42`。

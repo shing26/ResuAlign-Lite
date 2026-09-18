@@ -141,6 +141,9 @@
   --z-popover:  60;  /* 模态之上仍需浮出的层（模态内的 select / tooltip） */
   --z-toast:    70;  /* 全局 Toast */
 
+  /* ---- 颜色基元 A1-identity（B3a 预置，不改现有渲染） ---- */
+  --shadow-ink: #000000; /* 阴影/遮罩的固定黑色基底；业务规则只通过 color-mix 使用 */
+
   /* ---- 栅格 A1-structure ---- */
   --rail-w:           224px; /* 终值（ADR-0044 决定 10）：4px 网格倍数、1440 宽屏多出
                                 16px 内容宽。实测现状生效值为 230px（v3.1 层）；
@@ -686,6 +689,111 @@
   --ra-paper-ink:     var(--paper-ink);
   --ra-paper-rule:    var(--paper-line);
   --ra-paper-accent:  var(--paper-accent);
+}
+
+  /* B3a color bridge: legacy names map to canonical semantics, but this block
+     precedes the B1a migration replay. Every name that still owns a legacy
+     value therefore keeps that value until B3b migrates the business rules.
+     Component-private --ls-* stay local to .live-sheet. */
+:root {
+  --accent-2: var(--accent);
+  --amber: var(--warn);
+  --amber-soft: var(--warn-soft);
+  --amber-token: var(--warn);
+  --app-bg: var(--bg-canvas);
+  --apple-amber: var(--warn);
+  --apple-bg: var(--bg-canvas);
+  --apple-blue: var(--accent);
+  --apple-green: var(--success);
+  --apple-red: var(--danger);
+  --apple-surface-1: var(--surface-1);
+  --apple-surface-2: var(--surface-2);
+  --apple-surface-3: var(--surface-3);
+  --bg: var(--bg-canvas);
+  --bg-header: var(--surface-rail);
+  --bg-inset: var(--surface-inset);
+  --bg-rail: var(--surface-rail);
+  --bg-rail-soft: var(--surface-2);
+  --border: var(--line);
+  --border-glass: var(--line);
+  --border-soft: var(--line-subtle);
+  --border-strong: var(--line-strong);
+  --brand: var(--accent);
+  --brand-soft: var(--accent-soft);
+  --btn-danger-hover: var(--danger-soft);
+  --btn-outline-hover-border: var(--line-strong);
+  --btn-secondary-hover: var(--accent-soft);
+  --card: var(--surface-1);
+  --card-border-hover: var(--line-strong);
+  --code-bg: var(--surface-2);
+  --diff-modify-bg: var(--info-soft);
+  --diff-modify-ink: var(--info);
+  --dot-applied: var(--accent);
+  --dot-draft: var(--text-tertiary);
+  --dot-interview: var(--info);
+  --dot-offer: var(--success);
+  --dot-withdrawn: var(--danger);
+  --emerald: var(--success);
+  --error: var(--danger);
+  --error-deep: var(--danger);
+  --error-soft: var(--danger-soft);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+  --focus-ring-error: 0 0 0 3px color-mix(in srgb, var(--danger) 24%, transparent);
+  --glass-border: var(--line);
+  --glass-surface: var(--surface-1);
+  --green: var(--success);
+  --green-soft: var(--success-soft);
+  --ink: var(--text-primary);
+  --ink-2: var(--text-secondary);
+  --ink-strong: var(--text-primary);
+  --match: var(--ord-3);
+  --match-high: var(--ord-5);
+  --match-low: var(--ord-1);
+  --match-mid: var(--ord-3);
+  --muted: var(--text-secondary);
+  --neutral: var(--text-tertiary);
+  --neutral-soft: var(--surface-2);
+  --panel: var(--surface-2);
+  --pending: var(--warn);
+  --pending-deep: var(--warn);
+  --pending-soft: var(--warn-soft);
+  --primary: var(--accent);
+  --primary-active: var(--accent-active);
+  --primary-dark: var(--accent-hover);
+  --primary-hover: var(--accent-hover);
+  --primary-soft: var(--accent-soft);
+  --provenance: var(--info);
+  --purple-token: var(--info);
+  --ra-action: var(--accent);
+  --ra-action-fill: var(--accent);
+  --ra-action-hover: var(--accent-hover);
+  --ra-action-soft: var(--accent-soft);
+  --ra-raised: var(--surface-3);
+  --red: var(--danger);
+  --red-soft: var(--danger-soft);
+  --success-deep: var(--success);
+  --surface: var(--surface-1);
+  --surface-error: var(--danger-soft);
+  --surface-glass: var(--surface-1);
+  --surface-glass-deep: var(--surface-1);
+  --surface-info: var(--info-soft);
+  --surface-panel: var(--surface-1);
+  --surface-pending: var(--warn-soft);
+  --surface-primary: var(--surface-1);
+  --surface-raised: var(--surface-2);
+  --surface-subtle: var(--surface-2);
+  --surface-success: var(--success-soft);
+  --surface-teal: var(--accent-soft);
+  --surface-tint: var(--surface-2);
+  --teal: var(--accent);
+  --teal-hover: var(--accent-hover);
+  --teal-soft: var(--accent-soft);
+  --text: var(--text-primary);
+  --text-muted: var(--text-secondary);
+  --warning: var(--warn);
+  --warning-soft: var(--warn-soft);
+  --workbench-bg: var(--surface-2);
+  --workbench-bg-deep: var(--surface-1);
 }
 
   /* B1a migration bridge: the exact legacy global token cascade, replayed

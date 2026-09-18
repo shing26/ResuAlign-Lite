@@ -370,3 +370,64 @@ test("z-index tokens preserve layering semantics", () => {
     );
   }
 });
+
+test("B3a color bridge stays dormant ahead of the legacy replay", () => {
+  const tokens = extractLayerText(CSS, "tokens");
+  const canonical = tokens.indexOf("--accent:        #0E7C8F");
+  const bridge = tokens.indexOf("B3a color bridge");
+  const legacyReplay = tokens.indexOf("B1a migration bridge");
+  const fallbackPins = tokens.indexOf("B1a visual-zero pins");
+
+  assert.ok(canonical >= 0, "canonical light accent must exist");
+  assert.ok(bridge > canonical, "B3a bridge must follow canonical color tokens");
+  assert.ok(
+    legacyReplay > bridge,
+    "legacy replay must follow B3a so it still owns the rendered values",
+  );
+  assert.ok(
+    fallbackPins > legacyReplay,
+    "fallback pins must remain the final token authority",
+  );
+
+  for (const [legacy, canonicalName] of [
+    ["--bg", "--bg-canvas"],
+    ["--surface", "--surface-1"],
+    ["--border", "--line"],
+    ["--primary", "--accent"],
+    ["--error", "--danger"],
+    ["--green", "--success"],
+  ]) {
+    assert.match(
+      tokens.slice(bridge, legacyReplay),
+      new RegExp(`${legacy}:\\s*var\\(${canonicalName}\\)`),
+    );
+  }
+
+  assert.doesNotMatch(
+    tokens.slice(bridge, legacyReplay),
+    /--ls-(?:bg|ink|line|muted|add-bg)/,
+    "component-private live-sheet tokens must stay local",
+  );
+});
+
+test("B3a freezes business color-literal debt until B3b", () => {
+  const businessCss = [
+    "reset",
+    "base",
+    "components",
+    "patterns",
+    "utilities",
+    "overrides",
+  ]
+    .map((layer) => extractLayerText(CSS, layer))
+    .join("\n")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+
+  const hex = businessCss.match(/#[0-9a-fA-F]{3,8}\b/g) || [];
+  const rgb = businessCss.match(/rgba?\([^)]*\)/g) || [];
+  const hsl = businessCss.match(/hsla?\([^)]*\)/g) || [];
+
+  assert.ok(hex.length <= 207, `hex literal debt regressed: ${hex.length}`);
+  assert.ok(rgb.length <= 202, `rgb literal debt regressed: ${rgb.length}`);
+  assert.equal(hsl.length, 0, "hsl literals must stay out of business rules");
+});
