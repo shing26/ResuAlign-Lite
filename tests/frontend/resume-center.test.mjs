@@ -79,19 +79,19 @@ function winningBlock(css, selector) {
   return winner ? winner.body : null;
 }
 
-test("styles.css: board-column effective rule uses the ra-* surface tokens", () => {
+test("styles.css: board-column effective rule uses canonical surface tokens", () => {
   const block = winningBlock(stylesCss, ".board-column");
   assert.ok(block, ".board-column rule exists");
-  assert.match(block, /var\(--ra-surface-3\)/);
-  assert.match(block, /var\(--ra-border-hairline\)/);
+  assert.match(block, /var\(--surface-inset\)/);
+  assert.match(block, /var\(--line-faint\)/);
   assert.match(block, /box-shadow:\s*none/);
 });
 
-test("styles.css: board-card hover effective rule uses ra-* hover tokens", () => {
+test("styles.css: board-card hover effective rule uses canonical hover tokens", () => {
   const hover = winningBlock(stylesCss, ".board-card:hover");
   assert.ok(hover, ".board-card:hover rule exists");
-  assert.match(hover, /var\(--ra-surface-hover\)/);
-  assert.match(hover, /var\(--ra-border-strong\)/);
+  assert.match(hover, /var\(--surface-hover\)/);
+  assert.match(hover, /var\(--line-strong\)/);
 });
 
 test("styles.css: board-card hover is gated by prefers-reduced-motion", () => {
@@ -114,7 +114,7 @@ test("styles.css: stats bar and funnel cards reuse dashboard KPI semantics", () 
   assert.match(base[1], /var\(--info\)/);
   const warning = stylesCss.match(/\.board-stats-card--warning::before\s*\{([^}]*)\}/s);
   const success = stylesCss.match(/\.board-stats-card--success::before\s*\{([^}]*)\}/s);
-  assert.ok(warning && /var\(--warning\)/.test(warning[1]), "warning funnel card uses --warning");
+  assert.ok(warning && /var\(--warn\)/.test(warning[1]), "warning funnel card uses --warn");
   assert.ok(success && /var\(--success\)/.test(success[1]), "success funnel card uses --success");
 });
 
@@ -464,21 +464,21 @@ test("optimizeModuleHtml renders failed cards without accept buttons", () => {
 test("styles.css: optimize diff rows use success/danger accents", () => {
   const add = stylesCss.match(/\.optimize-diff--add\s*\{([^}]*)\}/s);
   assert.ok(add, ".optimize-diff--add rule exists");
-  assert.match(add[1], /var\(--ra-success/);
+  assert.match(add[1], /var\(--success/);
   const remove = stylesCss.match(/\.optimize-diff--remove\s*\{([^}]*)\}/s);
   assert.ok(remove, ".optimize-diff--remove rule exists");
-  assert.match(remove[1], /var\(--ra-danger/);
+  assert.match(remove[1], /var\(--danger/);
   assert.match(remove[1], /line-through/);
 });
 
 test("styles.css: accepted module and JD chip reuse success accent", () => {
   const accepted = stylesCss.match(/\.optimize-module\.is-accepted\s*\{([^}]*)\}/s);
   assert.ok(accepted, ".optimize-module.is-accepted rule exists");
-  assert.match(accepted[1], /var\(--ra-success/);
+  assert.match(accepted[1], /var\(--success/);
   const chip = stylesCss.match(/\.chip--matched\s*\{([^}]*)\}/s);
   assert.ok(chip, ".chip--matched rule exists");
-  assert.match(chip[1], /var\(--ra-success/);
+  assert.match(chip[1], /var\(--success/);
   const failed = stylesCss.match(/\.optimize-module--failed\s*\{([^}]*)\}/s);
   assert.ok(failed, ".optimize-module--failed rule exists");
-  assert.match(failed[1], /var\(--ra-danger/);
+  assert.match(failed[1], /var\(--danger/);
 });

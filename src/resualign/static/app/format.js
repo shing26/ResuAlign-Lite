@@ -1108,7 +1108,7 @@ export function renderBatchMatrixHtml(batch) {
     return `<div class="batch-progress">${rows.map(batchStatusBadge).join("")}</div>`;
   }
   const barColor = (score) =>
-    score >= 75 ? "var(--success)" : score >= 55 ? "var(--warning)" : "var(--danger)";
+    score >= 75 ? "var(--success)" : score >= 55 ? "var(--warn)" : "var(--danger)";
   const bars = rows
     .filter((row) => row.summary && row.summary.score != null)
     .map((row) => {
@@ -2836,7 +2836,7 @@ export function atsHealthScoreLevel(score) {
   return "待提升";
 }
 
-/** ATS 卡片视觉 tone：high / mid / low，对应 --success / --warning / --danger。 */
+/** ATS 卡片视觉 tone：high / mid / low，对应 --success / --warn / --danger。 */
 export function atsHealthTone(score) {
   if (score == null) return "low";
   if (score >= 85) return "high";

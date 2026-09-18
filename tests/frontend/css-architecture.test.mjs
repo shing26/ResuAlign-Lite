@@ -2,7 +2,7 @@
  * unlayered override waves or reintroduces scattered !important rules. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,6 +11,169 @@ const CSS = readFileSync(
   join(here, "../../src/resualign/static/styles.css"),
   "utf8",
 );
+const APP_DIR = join(here, "../../src/resualign/static/app");
+const SOURCE_TEXT = [
+  CSS,
+  readFileSync(join(here, "../../src/resualign/static/index.html"), "utf8"),
+  ...readdirSync(APP_DIR)
+    .filter((name) => name.endsWith(".js"))
+    .map((name) => readFileSync(join(APP_DIR, name), "utf8")),
+].join("\n");
+
+const RUNTIME_INJECTED_TOKENS = new Set([
+  "--c",
+  "--d",
+  "--delay",
+  "--score",
+  "--x",
+]);
+
+/* Zero-reference token API frozen at the B7 cutover. These names remain
+ * intentionally available to component layers; adding another dormant token
+ * must fail G6 so dead contract surface cannot keep growing silently. */
+const DECLARED_ZERO_REF_API = new Set(
+  `
+--accent-faint
+--bg-app
+--board-col-max
+--board-col-min
+--btn-danger-bg
+--btn-danger-fg
+--btn-fs
+--btn-fw
+--btn-ghost-bg-hover
+--btn-ghost-fg
+--btn-h-lg
+--btn-h-md
+--btn-h-sm
+--btn-primary-bg
+--btn-primary-bg-active
+--btn-primary-bg-hover
+--btn-primary-fg
+--btn-radius
+--btn-secondary-bg
+--btn-secondary-fg
+--btn-secondary-line
+--card-bg
+--card-line
+--card-line-hover
+--card-pad
+--card-radius
+--col-gap
+--col-gap-wide
+--content-max
+--control-h-xs
+--drawer-w
+--dur-instant
+--empty-body-fg
+--empty-drop-line
+--empty-min-h
+--empty-pad
+--empty-title-fg
+--field-bg
+--field-bg-disabled
+--field-fg
+--field-h-sm
+--field-help-fg
+--field-help-fs
+--field-label-fg
+--field-label-fs
+--field-line
+--field-line-error
+--field-line-hover
+--field-placeholder
+--field-radius
+--focus-ring
+--font-cjk
+--font-num
+--form-max
+--fw-announce
+--fw-read
+--glow-soft
+--glyph-check
+--glyph-chevron-down
+--glyph-search
+--gutter
+--gutter-wide
+--gutter-xwide
+--hit-expand
+--ic-2xs
+--ic-gap
+--ic-lg
+--ic-md
+--ic-stroke
+--info-line
+--inspector-w
+--kanban-gap
+--kanban-head-h
+--lead-hero
+--lead-normal
+--lead-relaxed
+--lead-snug
+--lead-tight
+--line-accent
+--modal-w-lg
+--modal-w-md
+--nav-item-bg-hover
+--nav-item-bg-on
+--nav-item-fg
+--nav-item-fg-on
+--nav-item-h
+--nav-item-line-on
+--num-weight-bump
+--ord-2
+--ord-4
+--overlay-bg
+--overlay-line
+--overlay-radius
+--panel-head-h
+--panel-head-line
+--paper-accent
+--paper-grid
+--paper-ink-2
+--rail-w-compact
+--scrim
+--sheet-max
+--skeleton-bg
+--skeleton-hi
+--space-0
+--space-hairline
+--surface-active
+--table-head-fg
+--table-head-h
+--table-row-h
+--table-row-h-dense
+--table-row-line
+--tag-fs
+--tag-h
+--tag-pad-x
+--tag-radius
+--text-disabled
+--toast-w
+--topbar-bg
+--topbar-line
+--track-caps
+--track-loose
+--track-normal
+--track-tight
+--warn-line
+--z-drawer
+  `.trim().split(/\s+/),
+);
+
+function customPropertyNames(text) {
+  return [
+    ...text
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .matchAll(/(--[\w-]+)\s*:/g),
+  ].map((match) => match[1]);
+}
+
+function variableReferences(text) {
+  return [...text.matchAll(/\bvar\(\s*(--[\w-]+)/g)].map(
+    (match) => match[1],
+  );
+}
 
 function indexesOf(regex) {
   return [...CSS.matchAll(regex)].map((match) => match.index ?? 0);
@@ -238,7 +401,7 @@ test("business rules keep shadow on the canonical four-step scale", () => {
   const allowedFloatingSelector =
     /(?:^|,\s*)\.(?:inline-suggestion__paper|toast|offer-celebration__card|command-palette__dialog|command-panel|filter-pop|opt-bubble|export-dock__menu|toolbar-more__menu|board-more__menu)$|\.modal(?!-)(?:\s|$)|\.board-card\.is-dragging$|\.tabs--rail button:hover::after$/;
   const canonicalShadow = /var\(--shadow-(popover|modal|toast|drag)\)/;
-  const focusRing = /var\(--(?:ra-)?focus(?:-ring|-ring-error)?\)/;
+  const focusRing = /var\(--focus-(?:ring(?:-error)?|shadow)\)/;
   const nonFloatingRing = /^(?:inset\b|0 0 0\b)/;
   const disallowed = shadowRules(businessCss).filter(({ selector, value }) => {
     if (/^(?:none|var\(--shadow-none\))$/.test(value)) return false;
@@ -371,13 +534,54 @@ test("z-index tokens preserve layering semantics", () => {
   }
 });
 
-test("B3b activates the canonical color namespace", () => {
+test("B7 keeps one canonical color namespace", () => {
   const tokens = extractLayerText(CSS, "tokens");
   assert.match(tokens, /--accent:\s*#0E7C8F/, "canonical light accent");
-  assert.match(tokens, /B3 color cutover/, "legacy aliases resolve to canonical names");
-  assert.match(tokens, /--primary:\s*var\(--accent\)/);
-  assert.match(tokens, /--surface:\s*var\(--surface-1\)/);
-  assert.match(tokens, /--border:\s*var\(--line\)/);
+  assert.match(tokens, /--warn:\s*#96650C/, "canonical warning color");
+  assert.doesNotMatch(tokens, /--ra-[\w-]+\s*:/, "no migration aliases remain");
+  assert.doesNotMatch(tokens, /--(?:primary|surface|border|warning)\s*:/);
+});
+
+test("G4 every variable reference resolves or is an explicit runtime injection", () => {
+  const defined = new Set(customPropertyNames(CSS));
+  const unresolved = [
+    ...new Set(
+      variableReferences(SOURCE_TEXT).filter(
+        (name) =>
+          !defined.has(name) && !RUNTIME_INJECTED_TOKENS.has(name),
+      ),
+    ),
+  ].sort();
+
+  assert.deepEqual(unresolved, []);
+  assert.deepEqual(
+    [...defined].filter((name) => name.startsWith("--ra-")),
+    [],
+    "migration aliases must not remain in the stylesheet",
+  );
+});
+
+test("G6 dormant token API stays frozen", () => {
+  const definitions = new Set(
+    customPropertyNames(extractLayerText(CSS, "tokens")),
+  );
+  const referenced = new Set(variableReferences(SOURCE_TEXT));
+  const zeroReference = [...definitions]
+    .filter((name) => !referenced.has(name))
+    .sort();
+
+  assert.deepEqual(
+    zeroReference.filter((name) => !DECLARED_ZERO_REF_API.has(name)),
+    [],
+    "new zero-reference tokens must be consumed or explicitly added to the frozen API",
+  );
+  assert.deepEqual(
+    [...DECLARED_ZERO_REF_API].filter(
+      (name) => !zeroReference.includes(name),
+    ),
+    [],
+    "remove tokens from DECLARED_ZERO_REF_API once they gain a reference",
+  );
 });
 
 test("business rules contain no color literals", () => {
@@ -446,7 +650,7 @@ test("B4 native selects use one theme-aware self-drawn chevron", () => {
   assert.match(tokens, /--select-chevron-dark:\s*url\(/, "dark chevron token");
   assert.match(
     tokens,
-    /:root\[data-theme="dark"\][\s\S]*?--select-chevron:\s*var\(--select-chevron-dark\)/,
+    /\[data-theme="dark"\][\s\S]*?--select-chevron:\s*var\(--select-chevron-dark\)/,
     "dark theme must swap the chevron token",
   );
 

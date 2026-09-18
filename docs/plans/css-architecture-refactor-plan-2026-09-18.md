@@ -1,6 +1,7 @@
 # ResuAlign 前端 CSS 架构重构 · 批次施工单
 
-**状态**: B0/B1/B2a/B2b/B2c/B2d/B2e/B3a/B3b/B4/B5 已完成；B6–B7 按 ADR-0050 逐批推进
+**状态**: B0–B7 已完成；B6 只保留经运行时证据确证的 C1/C2 清理，B7 已删除迁移别名块
+并补齐守卫测试
 **日期**: 2026-09-18
 **依据**: ADR-0043（分层）/ ADR-0044（token）/ ADR-0045（图标）/
 ADR-0046（内联变量）/ ADR-0047（主题与主色）
@@ -49,8 +50,8 @@ ADR-0046（内联变量）/ ADR-0047（主题与主色）
 | **B3** | 颜色归位：508 hex + 299 rgba → token（含 `#fff`/`#000`）；删 9 处软失效硬编码 fallback；删 5 处装饰性渐变；`--match-soft` 补定义。**B3a（已完成的视觉零变化半批）** = canonical 颜色桥前置 + `--shadow-ink` 基元 + 字面量棘轮；**B3b** = 业务规则替换、fallback/渐变清理、门禁归零 | tokens + 全层 | 单 commit revert | 明暗双主题逐页截图；颜色字面量门禁归零 | 全部 CSS 测试 |
 | **B4** | 原生控件改造：`appearance: none` + 自绘箭头 + 等高 + `outline` 焦点环 + `color-scheme` 同步 | base / components | 单 commit revert | 6 页控件截图（含 select 展开态）；Tier 1/2 判据逐处落点 | 无 |
 | **B5** | 图标替换：新增 `app/icons.js`；替换 2 处 emoji + `◐`/`✕` 图标化；`→` 逐个判定；`·`/`•`/`…` 改元素或 `::marker` | components | 单 commit revert | P0-1 正则零命中；交互态截图 | `adr0033`（emoji 正则） |
-| **B6** | 死代码清理：按 C1/C2/C3 三批判定后处置（499 个候选，**禁直接批量删**） | — | **按批 revert** | 逐页走查；发现「删了还活着」立即回滚 | 全部 |
-| **B7** | **删除迁移别名块** + 落地守卫测试 | tokens | 单 commit revert | 全量测试 + 全页 DOM 度量 + 走查 | 全部 |
+| **B6**（已完成） | 死代码清理：C1 确证死类删除、C2 匹配徽章语义类修正；未取得运行时证据的候选不删 | — | **按批 revert** | 逐页走查；发现「删了还活着」立即回滚 | 全部 |
+| **B7**（已完成） | **删除迁移别名块** + 落地守卫测试 | tokens | 单 commit revert | 全量测试 + 全页 DOM 度量 + 走查 | 全部 |
 
 ### B0 必做的 2 条断言修正
 
@@ -472,3 +473,43 @@ B1a 旧值重放**之前**，并新增 `--shadow-ink` 基元；业务规则、�
 - DOM 度量：8 路由 rail 224 / topbar 52 / 看板溢出 0；
 - 截图存 `.scratch/css-refactor-b5/`，图标探针原始报告存
   `.scratch/b5-icon-report.json`。
+
+---
+
+## 20. B6 死代码分批清理实作记录（2026-09-18）
+
+**范围**：只处理已由运行时 DOM 与源码引用双重确证的候选；未取得运行时证据的
+499 个候选不批量删除。C1/C2 各自单独提交，保留按批回滚能力。
+
+**结果**：
+
+- `153effd refactor(css): B6 C1 清理确证死类`：删除 1082 行无 DOM 命中、
+  无 JS/HTML 引用的样式，保留动态生成类与组件私有 token；
+- `f2034b7 fix(frontend): B6 C2 修正匹配徽章语义类`：把匹配徽章从
+  `badge-green/amber/red` 改为与匹配分语义一致的 `match-badge--high/mid/low`，
+  同步格式层测试与工作台测试；
+- B6 后全量前端与后端测试保持全绿，未发现「删了还活着」的运行时回归。
+
+---
+
+## 21. B7 删除迁移别名块与守卫测试实作记录（2026-09-18）
+
+**范围**：删除 B1a 建立的 `--ra-*` 兼容块，把所有静态资产引用机械迁移到
+canonical 无前缀 token；只保留一个 `[hidden]` `!important` 豁免，并把 B7
+安全边界写进 `css-architecture.test.mjs`。
+
+**结果**：
+
+- `src/resualign/static/` 下 `--ra-*` 引用为 0，迁移别名定义块为 0；
+- canonical 无前缀 token 单一命名空间生效；`--accent-deep` 软引用删除，
+  confetti / score 运行时变量补上 token 或语义 fallback；
+- 保留 8 层 `@layer` 架构与唯一 `!important`；`styles.css` 减少约 23KB；
+- `G4` 守卫：每个 `var(--x)` 必须命中定义或运行时注入白名单；
+- `G6` 守卫：当前保留但尚未消费的公共 token API 已冻结，新增静默零引用会失败；
+- 旧测试契约改为 canonical：`resume-center`、`ux-regression`、
+  `css-architecture` 不再要求 `--ra-*` 别名存在；
+- 前端全量：**515 passed / 0 failed**；
+- 后端全量：**997 passed / 7 skipped**；
+- `8006` 隔离实例 DOM 度量：8 路由 rail 224 / topbar 52 / 看板溢出 0 /
+  0 console error；与 B1b 最终候选指标逐字段一致；
+- 静态缓存版本 `v=45 → v=46`。

@@ -121,8 +121,8 @@ test("P0-A: rail 导航项最终 color 必须走主题感知 token，而不是�
   assert.ok(winner, "rail 导航默认态缺少 color 声明");
   assert.match(
     winner.color,
-    /--ra-text-secondary/,
-    `默认态胜出规则必须声明 --ra-text-secondary。` +
+    /--text-secondary/,
+    `默认态胜出规则必须声明 --text-secondary。` +
       `实际胜出：${winner.sel} { color: ${winner.color} }` +
       `（特异性 ${winner.spec.join(",")}）。` +
       `若胜出者是更具体的暗色 shell 白字规则，说明修复选择器特异性不足` +
@@ -135,12 +135,12 @@ test("P1-D: 设置页 bento 卡标签最终 color 必须走主题感知 token", 
   assert.ok(decl, ".settings-bento__label 缺少 color 声明");
   assert.match(
     decl.color,
-    /--ra-text-secondary/,
+    /--text-secondary/,
     "bento 标签不能落在暗色块 rgba(255,255,255,.4) 上（2026-08-28 走查 P1-D）",
   );
 });
 
-test("护栏: 浅色主题 --ra-text-secondary 经 canonical alias 后满足 WCAG AA ≥ 4.5:1", () => {
+test("护栏: 浅色主题 canonical --text-secondary 满足 WCAG AA ≥ 4.5:1", () => {
   const lum = (hex) => {
     const [r, g, b] = [0, 2, 4].map((i) => {
       const v = parseInt(hex.slice(i, i + 2), 16) / 255;
@@ -153,11 +153,6 @@ test("护栏: 浅色主题 --ra-text-secondary 经 canonical alias 后满足 WCA
     return (a + 0.05) / (b + 0.05);
   };
   const tokens = extractLayerText(STYLES, "tokens");
-  assert.match(
-    tokens,
-    /--ra-text-secondary:\s*var\(--text-secondary\)/,
-    "--ra-text-secondary 必须指向 canonical --text-secondary",
-  );
   const value = tokens.match(/--text-secondary:\s*(#[0-9a-fA-F]{6})/);
   assert.ok(value, "canonical --text-secondary 必须定义十六进制值");
   assert.ok(
