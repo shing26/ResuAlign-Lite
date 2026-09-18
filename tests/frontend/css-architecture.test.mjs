@@ -102,3 +102,42 @@ test("business rules keep the canonical eight-step font scale", () => {
     assert.match(tokens, new RegExp(`--text-${name}\\s*:`));
   }
 });
+
+test("business rules keep spacing on the canonical 4px grid", () => {
+  const canvases = [
+    "reset",
+    "base",
+    "components",
+    "patterns",
+    "utilities",
+  ];
+  const spacing = canvases
+    .map((layer) => extractLayerText(CSS, layer))
+    .join("\n")
+    .match(
+      /(?:margin(?:-(?:top|right|bottom|left))?|padding(?:-(?:top|right|bottom|left))?|gap|row-gap|column-gap)\s*:\s*[^;{}]+;/g,
+    ) || [];
+
+  const allowed = new Set(["0", "0px", "-0px", "1px", "-1px"]);
+  const disallowed = spacing.filter((declaration) => {
+    const dimensions = declaration.match(/-?\d+(?:\.\d+)?(?:px|rem)\b/g) || [];
+    return dimensions.some((value) => !allowed.has(value));
+  });
+  assert.deepEqual(disallowed, []);
+
+  const tokens = extractLayerText(CSS, "tokens");
+  for (const name of [
+    "space-1",
+    "space-2",
+    "space-3",
+    "space-4",
+    "space-5",
+    "space-6",
+    "space-8",
+    "space-10",
+    "space-12",
+    "space-16",
+  ]) {
+    assert.match(tokens, new RegExp(`--${name}\\s*:`));
+  }
+});
