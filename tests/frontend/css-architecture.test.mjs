@@ -141,3 +141,65 @@ test("business rules keep spacing on the canonical 4px grid", () => {
     assert.match(tokens, new RegExp(`--${name}\\s*:`));
   }
 });
+
+test("business rules keep radius on the canonical seven-step scale", () => {
+  const canvases = [
+    "reset",
+    "base",
+    "components",
+    "patterns",
+    "utilities",
+  ];
+  const radii = canvases
+    .map((layer) => extractLayerText(CSS, layer))
+    .join("\n")
+    .match(/border-radius\s*:\s*[^;{}]+;/g) || [];
+
+  const disallowed = radii.filter((declaration) =>
+    /(?:\d+(?:\.\d+)?(?:px|rem)|--radius-(?:4|6|8)\b|--ra-radius-)/.test(
+      declaration,
+    ),
+  );
+  assert.deepEqual(disallowed, []);
+
+  const tokens = extractLayerText(CSS, "tokens");
+  for (const name of ["xs", "sm", "md", "lg", "xl", "2xl", "pill"]) {
+    assert.match(tokens, new RegExp(`--radius-${name}\\s*:`));
+  }
+});
+
+test("radius tokens preserve component semantics", () => {
+  const businessCss = [
+    "reset",
+    "base",
+    "components",
+    "patterns",
+    "utilities",
+  ]
+    .map((layer) => extractLayerText(CSS, layer))
+    .join("\n");
+
+  const expected = new Map([
+    [".icon-btn", "--radius-md"],
+    [".card", "--radius-lg"],
+    [".board-column", "--radius-lg"],
+    [".settings-bento__card", "--radius-lg"],
+    [".live-sheet-line", "--radius-sm"],
+    [".panel", "--radius-xl"],
+    [".drawer", "--radius-xl"],
+    [".modal", "--radius-2xl"],
+    [".export-dock__menu", "--radius-lg"],
+  ]);
+
+  for (const [selector, token] of expected) {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const rule = businessCss.match(
+      new RegExp(
+        `(?:^|,)\\s*${escaped}\\s*(?:,[^{}]*)?\\{([^}]*)\\}`,
+        "ms",
+      ),
+    );
+    assert.ok(rule, `missing rule for ${selector}`);
+    assert.match(rule[1], new RegExp(`border-radius\\s*:\\s*var\\(${token}\\)\\s*;`));
+  }
+});

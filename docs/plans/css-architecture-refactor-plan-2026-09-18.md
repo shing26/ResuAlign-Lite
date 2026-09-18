@@ -1,6 +1,6 @@
 # ResuAlign 前端 CSS 架构重构 · 批次施工单
 
-**状态**: B0/B1/B2a/B2b 已完成；B2c–B7 按 ADR-0050 逐批推进
+**状态**: B0/B1/B2a/B2b/B2c 已完成；B2d–B7 按 ADR-0050 逐批推进
 **日期**: 2026-09-18
 **依据**: ADR-0043（分层）/ ADR-0044（token）/ ADR-0045（图标）/
 ADR-0046（内联变量）/ ADR-0047（主题与主色）
@@ -269,3 +269,27 @@ ADR-0044 决定 11 已批准引入，施工时须一并确定：
 - 修复截图暴露的看板四维标签回归：容器查询下
   `.match-dim > span:first-child` 改为不换行 flex，避免「硬技能 / 弱项」
   被挤成竖排。
+
+---
+
+## 13. B2c 圆角收敛实作记录（2026-09-18）
+
+**范围**：只替换 `@layer reset/base/components/patterns/utilities` 中的
+`border-radius` 字面量与旧命名入口，不改 token 定义、打印覆盖或 JS/HTML 契约。
+
+**结果**：
+
+- 191 处圆角声明归位到 `--radius-xs/sm/md/lg/xl/2xl/pill`；
+- 业务层不再出现裸 px/rem、`--radius-4/6/8` 或 `--ra-radius-*`；
+- 归位按交互语义而非原数值机械就近：卡片 / 看板列 / 下拉 `lg`，
+  面板 / 抽屉 `xl`，模态 / 命令面板 `2xl`，普通控件 `md`，
+  只有胶囊、状态点、进度条等使用 `pill`；
+- 修正了两类脚本初稿误判：方形 `.icon-btn` 回到 `md`；普通
+  `.settings-bento__card`、`.llm-node-card`、`.card`、`.board-column`
+  保持 `lg`，不再因原值 12/16px 被动升到 `xl/2xl`；
+- 新增 `css-architecture.test.mjs` 的圆角 token 和关键组件语义守卫；
+- 静态缓存版本 `v=39 → v=40`；
+- 前端全量 **497 passed / 0 failed**；
+- 8 路由 DOM 度量：rail 224 / topbar 52 / 看板溢出 0 / 0 console error；
+- 16 张明暗截图完成目视检查，卡片、按钮、标签、抽屉、模态没有出现
+  “全站同一圆角”或卡片明显比面板更圆的问题。
