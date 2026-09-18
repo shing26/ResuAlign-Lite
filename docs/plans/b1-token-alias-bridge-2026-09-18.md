@@ -1,6 +1,6 @@
 # B1 施工单（续）：token 别名桥与分层
 
-**状态**: 待施工（B0 已完成，见 ADR-0049；本单是 B1 的可执行细化）
+**状态**: B1a/B1b 已完成（2026-09-18，见 ADR-0049 与本文 §7–§8）
 **日期**: 2026-09-18
 **依据**: ADR-0043（分层）/ ADR-0044（token 收敛）/ ADR-0047（默认浅色）/
 ADR-0049（解冻与 B0 基线）
@@ -331,3 +331,54 @@ B1a 已按「单层 tokens + 旧令牌原序重放」实施，实作中修正了
 - 前端 `node --test --test-concurrency=1 ...`：**489 passed / 0 failed**；
 - 后端 `PYTHONPATH=src python -m pytest tests/ -q`：**997 passed / 7 skipped**；
 - DOM 度量探针：8 路由 0 console error，rail 224 / topbar 52 / 看板溢出 0。
+
+---
+
+## 8. B1b 实作记录（2026-09-18）
+
+B1b 已按「24 段归层 + `!important` 归零」实施。试跑发现原施工单里的语义归层表
+不能直接照搬：`Phase 17` 虽名为 overlay，却早于后续全部 components 波次；
+把它放进 `overrides` 会让早期规则反向压过后来开发波次，rail / nav 立即出现
+大面积 DOM 回归。
+
+### 8.1 实际层序策略
+
+为保持 B1a 的最终渲染，B1b 采用保守但可验证的层序：
+
+1. `reset`：`*` 重置与唯一保留的 `[hidden]` 守卫；
+2. `tokens`：canonical tokens 与迁移兼容块，保持 B1a 不变；
+3. `base`：Phase 0–16 基础规则；
+4. `components`：Phase 17 起的全部样式波次，保持源码顺序与选择器特异性；
+5. `overrides`：从旧位置抽出的 `@media print` 与
+   `prefers-reduced-motion` 兼容块。
+
+这样做的原因是 CSS 的层间优先级先于选择器特异性。若把后续波次拆到不同层，
+`.tabs--rail button.nav-btn` 这类依赖特异性、而非 `!important` 的历史胜负关系
+会被层序改写。B2–B7 后续迁移规则时再按真实职责拆入 `layout` / `utilities`。
+
+### 8.2 `!important` 归零
+
+100 处降至 **1** 处，唯一命中原 `[hidden]` 守卫。其余处理：
+
+- `@media print` 与旧 `prefers-reduced-motion` 块统一移入 `overrides`，
+  避免低优先级 `*` 选择器被后续组件规则压过；
+- v3.1 壳层最终规则曾依赖 `!important` 压过更具体的 `.app-rail.rail`；
+  归零后把选择器改为 `.app-rail.rail, .sidebar`，保留原获胜关系；
+- 不放宽 `overrides` 层的职责边界，不新增构建步骤。
+
+### 8.3 实际验收结果
+
+- `@layer` 声明唯一且顺序为
+  `reset, tokens, base, layout, components, patterns, utilities, overrides`；
+- `!important` = **1**，唯一命中 `[hidden]` 白名单；
+- B1a → B1b 的 8 路由全量 DOM 快照（可见节点 rect / fontSize /
+  lineHeight / color / background / border）**0 差异**；
+- DOM 度量探针：8 路由 0 console error，rail 224 / topbar 52 / 看板溢出 0；
+- 16 张明暗截图与 B1a 前基线逐页比对：14 张逐像素一致；`jobs-light` 仅 62 个
+  像素差（max=1），`resume-light` 为 0.62% 抗锯齿差异（max=4）；
+- reduced-motion / print 计算样式探针：B1a 与 B1b **逐字段一致**；
+- 新增 `tests/frontend/css-architecture.test.mjs`，锁定层序、token 层唯一性、
+  `!important` 门禁与媒体块归宿；
+- 前端 `node --test --test-concurrency=1 ...`：**493 passed / 0 failed**；
+- 后端 `PYTHONPATH=src python -m pytest tests/ -q`：**997 passed / 7 skipped**；
+- 静态缓存版本 `v=36 → v=37`。

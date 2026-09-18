@@ -1,6 +1,6 @@
 # ResuAlign 前端 CSS 架构重构 · 批次施工单
 
-**状态**: 待施工（受 ADR-0042 冻结令约束，须解冻后执行）
+**状态**: B0/B1 已完成；B2–B7 待 ADR-0042 冻结令后续解冻
 **日期**: 2026-09-18
 **依据**: ADR-0043（分层）/ ADR-0044（token）/ ADR-0045（图标）/
 ADR-0046（内联变量）/ ADR-0047（主题与主色）
@@ -44,7 +44,7 @@ ADR-0046（内联变量）/ ADR-0047（主题与主色）
 | 批 | 内容 | 落点层 | 回滚粒度 | 验证动作 | 触及测试 |
 |---|---|---|---|---|---|
 | **B0** | 基线冻结：`git tag pre-css-refactor`；全量测试记录基线；6 页 × 明暗截图存档（`.scratch`，不入库）；**修 `resume-center.test.mjs` 那 2 条验证死定义的断言** | 无 | — | 基线必须全绿 | `resume-center` |
-| **B1** | **加层序 + token 内联 + `!important` 归零**（三者同批）：① 文件顶部加 8 层 `@layer` 声明；② 现有规则按块归入各层（不改声明值）；③ `design-tokens.css` 内容内联进 `@layer tokens`；④ 迁移别名块**临时启用**（选择器写回 `:root`）；⑤ 100 处 `!important` 按第 3 节逐类归零 | reset…overrides | 单 commit revert | DOM 度量探针全通过；视觉与 B0 基线一致；`node --test` 全绿 | `adr0033` / `ux-regression` / `css-structure` / `alignment-gap` |
+| **B1**（已完成） | **加层序 + token 内联 + `!important` 归零**（三者同批）：① 文件顶部加 8 层 `@layer` 声明；② 现有规则按块归入各层（不改声明值）；③ `design-tokens.css` 内容内联进 `@layer tokens`；④ 迁移别名块**临时启用**（选择器写回 `:root`）；⑤ 100 处 `!important` 按第 3 节逐类归零。B1a/B1b 实作记录见 `docs/plans/b1-token-alias-bridge-2026-09-18.md` §7–§8 | reset…overrides | 单 commit revert | DOM 度量探针全通过；视觉与 B0 基线一致；`node --test` 全绿 | `adr0033` / `ux-regression` / `css-structure` / `alignment-gap` / `css-architecture` |
 | **B2** | 尺度收敛（5 个子批，逐维度独立）：②a 字号 63→8、②b 间距→4px 网格 11 档、②c 圆角 40→7、②d 阴影 70→4（废弃全部卡片阴影）、②e z-index→9 档 | components / patterns | **每维度单独 revert** | 每子批后 DOM 度量 + 逐页明暗截图比对 | `resume-center` |
 | **B3** | 颜色归位：508 hex + 299 rgba → token（含 `#fff`/`#000`）；删 9 处软失效硬编码 fallback；删 5 处装饰性渐变；`--match-soft` 补定义 | tokens + 全层 | 单 commit revert | 明暗双主题逐页截图；颜色字面量门禁归零 | 全部 CSS 测试 |
 | **B4** | 原生控件改造：`appearance: none` + 自绘箭头 + 等高 + `outline` 焦点环 + `color-scheme` 同步 | base / components | 单 commit revert | 6 页控件截图（含 select 展开态）；Tier 1/2 判据逐处落点 | 无 |

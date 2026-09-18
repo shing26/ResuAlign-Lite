@@ -1245,6 +1245,7 @@ html.dark, :root[data-theme="dark"], html.dark :root {
 }
 }
 
+@layer reset {
 *,
 *::before,
 *::after {
@@ -1258,11 +1259,9 @@ html.dark, :root[data-theme="dark"], html.dark :root {
 }
 
 /* =================================================================== */
-/* 设计 token（合并收敛：#8）                                            */
-/* 单一基础 :root = 浅色最终生效值（原 Phase0-16 基础 + Phase18 motion/  */
-/* card + T5 重定义 + :root[data-theme="light"] 覆盖 + Phase20），       */
-/* 单一 [data-theme="dark"] = 深色最终生效值（原 T5 dark + Phase20 dark）。*/
-/* 原 :root[data-theme="light"] 块值已并入本基础块（差异见注释），已删除。 */
+}
+
+@layer base {
 /* =================================================================== */
 
 :root {
@@ -2542,167 +2541,16 @@ body.modal-open #app-router-view {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}
+
 
 #print-root {
   display: none;
 }
 
-@media print {
-  @page {
-    size: A4;
-    margin: 12mm;
-  }
 
-  body > *:not(#print-root) {
-    display: none !important;
-  }
-
-  #print-root {
-    display: block !important;
-    color: #111;
-    background: #fff;
-  }
-
-  #print-root h1 {
-    margin: 0 0 14px;
-    font-size: 1.35rem;
-  }
-
-  #print-root button,
-  #print-root [data-action] {
-    display: none !important;
-  }
-
-  #print-root .panel {
-    border: none;
-    box-shadow: none;
-    padding: 0;
-  }
-
-  #print-root .cmp-column {
-    max-height: none;
-    overflow: visible;
-    background: #fff;
-    border: none;
-    padding: 0;
-  }
-
-  #print-root .cmp-grid,
-  #print-root .card {
-    break-inside: avoid;
-  }
-
-  #print-root .diagnosis-columns,
-  #print-root .diagnosis-list li {
-    break-inside: avoid;
-  }
-
-  #print-root .final-draft-panel {
-    break-inside: avoid;
-  }
-
-  #print-root .draft-preview {
-    max-height: none;
-    overflow: visible;
-    background: #fff;
-    border: none;
-    padding: 0;
-  }
-
-  #print-root .resume-doc {
-    /* 黄金核心 2：A4 打印收敛——10.5pt 标准求职中文字阶 + 1.5 行高 */
-    font-size: 10.5pt;
-    line-height: 1.5;
-  }
-
-  #print-root .resume-doc :is(p, li) {
-    /* 4px 项目间距：段落/列表项之间紧凑不粘连 */
-    margin-top: 0;
-    margin-bottom: 4px;
-  }
-
-  #print-root .resume-doc ul,
-  #print-root .resume-doc ol {
-    margin-top: 2px;
-    margin-bottom: 4px;
-    padding-left: 1.25em;
-  }
-
-  #print-root .resume-doc h1 {
-    margin: 0 0 8px;
-    font-size: 16pt;
-  }
-
-  #print-root .resume-doc h2 {
-    margin: 8px 0 4px;
-    font-size: 12pt;
-  }
-
-  #print-root .resume-doc h3 {
-    margin: 6px 0 3px;
-    font-size: 11pt;
-  }
-
-  /* 黄金核心 2：单页收敛——超长内容分级压缩（配合 printTarget 加的 class） */
-  #print-root.print-compact .resume-doc {
-    font-size: 10pt;
-    line-height: 1.42;
-  }
-
-  #print-root.print-compact .resume-doc :is(p, li) {
-    margin-bottom: 3px;
-  }
-
-  #print-root.print-compact--tight .resume-doc {
-    font-size: 9.5pt;
-    line-height: 1.36;
-  }
-
-  #print-root.print-compact--tight .resume-doc :is(p, li) {
-    margin-bottom: 2px;
-  }
-
-  #print-root.print-compact--ultra .resume-doc {
-    font-size: 9pt;
-    line-height: 1.3;
-  }
-
-  #print-root.print-compact--ultra .resume-doc :is(p, li) {
-    margin-bottom: 1px;
-  }
-
-  /* 任何压缩档位都禁止额外分页，保证收敛在 1 页 */
-  #print-root.print-compact *,
-  #print-root.print-compact--tight *,
-  #print-root.print-compact--ultra * {
-    break-inside: auto;
-    page-break-inside: auto;
-  }
-
-  #print-root .resume-doc h2,
-  #print-root .resume-doc h3,
-  #print-root .resume-doc li,
-  #print-root .resume-doc p {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-
-  #print-root .resume-doc h2,
-  #print-root .resume-doc h3 {
-    break-after: avoid;
-    page-break-after: avoid;
-  }
 }
 
+@layer components {
 /* =================================================================== */
 /* Phase 17: visual redesign overlay                                    */
 /* =================================================================== */
@@ -3927,55 +3775,12 @@ table.data th {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
 
-  .btn.is-loading::before {
-    animation: none;
-    border-right-color: currentColor;
-  }
+
+
 }
 
-@media print {
-  #print-root .panel,
-  #print-root .card {
-    border: none;
-    border-top: 0;
-    border-left: 0;
-    box-shadow: none;
-    background: #fff;
-    padding: 0;
-  }
-
-  #print-root .cmp-column,
-  #print-root .draft-preview,
-  #print-root .pre {
-    max-height: none;
-    overflow: visible;
-    background: #fff;
-    border: none;
-    box-shadow: none;
-    padding: 0;
-  }
-
-  #print-root .diff-add,
-  #print-root .diff-remove,
-  #print-root .diff-modify,
-  #print-root .badge,
-  #print-root .opt-badge,
-  #print-root .score-ring {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-}
-
+@layer components {
 /* =================================================================== */
 /* Phase 18: card system + component motion overlay                     */
 /* （token 定义已并入文件顶部基础 :root，此处仅保留规则层）              */
@@ -4614,7 +4419,7 @@ select {
   .motion-stagger > *,
   .cmp-column .cmp-line,
   .card .diff-line {
-    animation-delay: 0ms !important;
+    animation-delay: 0ms;
   }
 
   .app-main,
@@ -4639,76 +4444,9 @@ select {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
 
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-delay: 0ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
 
-  .card,
-  .cmp-line,
-  .diff-line,
-  .toast,
-  .skeleton.is-shimmer,
-  .empty-state,
-  .empty-state .actions,
-  .empty-state .actions .btn-primary {
-    animation: none !important;
-    transition: none !important;
-    transform: none !important;
-    opacity: 1 !important;
-  }
 
-  .skeleton.is-shimmer {
-    opacity: 0.7;
-  }
-
-  .btn.is-loading::before {
-    animation: none;
-    border-right-color: currentColor;
-  }
-
-  .progress-fill {
-    transition: none !important;
-  }
-}
-
-@media print {
-  .toast-region,
-  .modal-backdrop {
-    display: none !important;
-  }
-
-  #print-root,
-  #print-root *,
-  #print-root *::before,
-  #print-root *::after {
-    animation: none !important;
-    transition: none !important;
-    transform: none !important;
-    opacity: 1 !important;
-  }
-
-  #print-root .panel-card,
-  #print-root .card-base,
-  #print-root .final-draft-panel.is-saved::before {
-    border: none !important;
-    border-top: 0 !important;
-    border-left: 0 !important;
-    box-shadow: none !important;
-    background: #fff !important;
-    padding: 0 !important;
-  }
-
-  .skeleton {
-    display: none !important;
-  }
-}
 
 /* T4 pipeline board */
 .pipeline-board {
@@ -4812,12 +4550,7 @@ select {
   box-shadow: var(--shadow-2);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .board-card:hover {
-    transform: none;
-    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
-  }
-}
+
 
 .board-card--pending {
   border-left: 3px solid #f59e0b;
@@ -5079,7 +4812,9 @@ select {
     grid-template-columns: 1fr;
   }
 }
+}
 
+@layer components {
 /* =================================================================== */
 /* T5 design tokens + three-column workbench                            */
 /* （token 定义已并入文件顶部基础 :root 与 [data-theme="dark"]，          */
@@ -5220,32 +4955,17 @@ body.is-printing #app-router-view,
 body.is-printing .app-rail,
 body.is-printing .topbar,
 body.is-printing .toast-region {
-  display: none !important;
+  display: none;
 }
 
 body.is-printing #print-root {
   display: block;
 }
 
-@media print {
-  body.is-printing #app-router-view,
-  body.is-printing .app-rail,
-  body.is-printing .topbar,
-  body.is-printing .toast-region {
-    display: none !important;
-  }
 
-  body.is-printing #print-root {
-    display: block !important;
-  }
-
-  #print-root button,
-  #print-root [data-action],
-  #print-root .btn {
-    display: none !important;
-  }
 }
 
+@layer components {
 /* =================================================================== */
 /* Phase 20: Copilot command bar + Split-Canvas Optimizer              */
 /* （token 定义已并入文件顶部基础 :root 与 [data-theme="dark"]，          */
@@ -6191,12 +5911,10 @@ body.command-palette-open {
   border-radius: var(--radius-6);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .split-step.is-active .split-step__dot {
-    animation: none;
-  }
+
 }
 
+@layer components {
 /* =================================================================== */
 /* #11 新用户三步引导卡 + 面试/下一步到期提醒（全部使用现有 token）       */
 /* =================================================================== */
@@ -6289,7 +6007,9 @@ body.command-palette-open {
 .split-pane .final-draft-panel {
   margin-bottom: 0;
 }
+}
 
+@layer components {
 /* ------------------------------------------------------------------ */
 /* F1/B7 评估开关（设置页 + 工作台 per-run 勾选）                        */
 /* ------------------------------------------------------------------ */
@@ -6311,7 +6031,9 @@ label.eval-option,
   flex: 0 0 auto;
   margin: 0;
 }
+}
 
+@layer components {
 /* =================================================================== */
 /* Sprint 1: Dashboard + header job quick selector + ⌘K suggestions     */
 /* （全部使用现有 token，不新增顶层 :root 变量）                         */
@@ -6592,7 +6314,9 @@ label.eval-option,
     flex-basis: 100%;
   }
 }
+}
 
+@layer components {
 /* =================================================================== */
 /* Sprint 2: 三栏工作台 22/48/30 + Live Sheet（右栏定稿实时预览）          */
 /* （全部使用现有 token + 类作用域变量，不新增顶层 :root 变量）            */
@@ -6785,7 +6509,9 @@ label.eval-option,
     padding: 14px 16px 20px;
   }
 }
+}
 
+@layer components {
 /* =================================================================== */
 /* Sprint 4: 岗位库漏斗统计条（T2）+ 简历中心 65/35 / ATS / 版本时间线（T3）  */
 /* =================================================================== */
@@ -7123,7 +6849,9 @@ body.resume-inline-editing .resume-sheet__doc {
   gap: 6px;
   margin-top: 6px;
 }
+}
 
+@layer components {
 /* =================================================================== */
 /* Sprint 5: 系统设置全量升级 —— Bento 概览 / LLM 节点 / 护栏 / 规则        */
 /* （全部使用现有 token + 类作用域变量，不新增顶层 :root 变量）            */
@@ -7443,7 +7171,9 @@ body.resume-inline-editing .resume-sheet__doc {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+}
 
+@layer components {
 /* ==========================================================================
    ResuAlign v2.0 - Apple Native Visual Patch (追加到文件最底部)
    ========================================================================== */
@@ -7451,56 +7181,57 @@ body.resume-inline-editing .resume-sheet__doc {
 /* 1. 全局阶梯暗黑背景与字阶 */
 
 body, html {
-  background-color: var(--app-bg) !important;
-  color: rgba(255, 255, 255, 0.92) !important;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", sans-serif !important;
+  background-color: var(--app-bg);
+  color: rgba(255, 255, 255, 0.92);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", sans-serif;
 }
 
 /* 2. 64px 顶栏与侧边栏苹果暗色 */
 .topbar, header {
-  background-color: #1a1a1e !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background-color: #1a1a1e;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .app-rail, .sidebar {
-  background-color: #1a1a1e !important;
-  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background-color: #1a1a1e;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* 3. 卡片与 5 列看板沉降底色 */
 .app-card, .apple-card, .card {
-  background-color: #232328 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 12px !important;
+  background-color: #232328;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
 }
 
 .kanban-column, .kanban-col {
-  background-color: #161619 !important;
-  border: 1px solid rgba(255, 255, 255, 0.05) !important;
-  border-radius: 16px !important;
+  background-color: #161619;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
 }
 
 /* 4. 低饱和度 Diff 对比框 */
 .diff-ins, ins {
-  background-color: rgba(50, 215, 75, 0.08) !important;
-  border: 1px solid rgba(50, 215, 75, 0.22) !important;
-  color: #93ecaa !important;
-  text-decoration: none !important;
+  background-color: rgba(50, 215, 75, 0.08);
+  border: 1px solid rgba(50, 215, 75, 0.22);
+  color: #93ecaa;
+  text-decoration: none;
 }
 
 .diff-del, del {
-  background-color: rgba(255, 69, 58, 0.08) !important;
-  border: 1px solid rgba(255, 69, 58, 0.2) !important;
-  color: #ffb0ab !important;
+  background-color: rgba(255, 69, 58, 0.08);
+  border: 1px solid rgba(255, 69, 58, 0.2);
+  color: #ffb0ab;
 }
 
 /* 5. 原生下拉菜单暗色修复 */
 select option {
-  background-color: #232328 !important;
-  color: #ffffff !important;
+  background-color: #232328;
+  color: #ffffff;
+}
 }
 
-
+@layer components {
 /* ==========================================================================
    Apple Native Aesthetic (v2.0 shell) - override layer
    Keeps every component class used by the JS renderers intact; this layer
@@ -7667,7 +7398,9 @@ select option {
   .lg\\:col-span-7 { grid-column: span 7 / span 7; }
   .lg\\:col-span-5 { grid-column: span 5 / span 5; }
 }
+}
 
+@layer components {
 /* ==========================================================================
    ResuAlign v2.1 - Apple sidebar + 52px topbar + jobs top bar
    (追加在 Apple Native override 层之后，保持桌面端与模板 1:1)
@@ -8147,7 +7880,9 @@ select option {
     justify-content: flex-start;
   }
 }
+}
 
+@layer components {
 /* ==========================================================================
    Shell 1:1 utility layer (v2 redesign)
    Shell + layout utilities without a Tailwind CDN dependency.
@@ -8539,7 +8274,9 @@ select option {
     grid-column: span 12 / span 12;
   }
 }
+}
 
+@layer components {
 /* ==========================================================================
    v2 preview final polish: missing utilities + Settings bento/node cards.
    Kept at the very end so it wins over every earlier layer.
@@ -8645,39 +8382,39 @@ select option {
   .dash-grid,
   .resume-grid,
   .settings-grid-2 {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: 1fr;
   }
 
   .dash-grid > *,
   .resume-grid > *,
   .settings-grid-2 > * {
-    grid-column: 1 / -1 !important;
+    grid-column: 1 / -1;
   }
 
   .wb-grid.split-layout,
   .split-layout,
   .wb-grid {
-    display: block !important;
-    grid-template-columns: none !important;
+    display: block;
+    grid-template-columns: none;
   }
 
   .split-layout .split-pane {
-    width: 100% !important;
-    grid-column: auto !important;
-    border-right: 0 !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+    width: 100%;
+    grid-column: auto;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .split-layout .split-pane[data-wb-pane="diff"] {
-    display: none !important;
+    display: none;
   }
 
   .split-layout .split-pane[data-wb-pane="diff"].is-active {
-    display: block !important;
+    display: block;
   }
 
   .split-canvas .wb-mobile-tabs {
-    display: flex !important;
+    display: flex;
   }
 
   .app-shell {
@@ -8772,7 +8509,9 @@ select option {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+}
 
+@layer components {
 /* ================================================================
    v3 preview layer
    Apple dark shell, five-view structures and float styling.
@@ -10022,7 +9761,7 @@ html {
  * hidden 属性）时恢复如下 flex 布局；属性态隐藏由全局 [hidden] 兜底。 */
 body:not(.resume-inline-editing) .resume-editor.hidden,
 body:not(.resume-inline-editing) .resume-inline-edit.hidden {
-  display: none !important;
+  display: none;
 }
 
 .resume-editor textarea,
@@ -10487,7 +10226,7 @@ button:active:not(:disabled),
 }
 
 .command-palette.overlay[hidden] {
-  display: none !important;
+  display: none;
 }
 
 .command-panel {
@@ -10634,14 +10373,7 @@ summary,
     opacity 180ms ease;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation: none !important;
-    transition: none !important;
-  }
-}
+
 
 @media (max-width: 900px) {
   .app-shell {
@@ -10868,7 +10600,9 @@ summary,
 .app-shell {
   margin: 0;
 }
+}
 
+@layer components {
 /* ============================================================
    v3 detail refinement layer
    ============================================================ */
@@ -11698,7 +11432,9 @@ details > summary::-webkit-details-marker,
   font-size: 12px;
   line-height: 1.55;
 }
+}
 
+@layer components {
 /* ==========================================================================
    ResuAlign v3.1 - 消费者视觉刷新（默认浅色 / 暗色可切）
    ========================================================================== */
@@ -11736,11 +11472,11 @@ html.dark,
   /* 纸张保持白纸 */
 }
 
-/* ---- 3. 壳层压平：压过 v2.0 硬编码深色的 !important ---- */
+/* ---- 3. 壳层压平：压过 v2.0 硬编码深色的 ---- */
 body {
-  background-color: var(--app-bg) !important;
-  color: var(--ra-text-primary) !important;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif !important;
+  background-color: var(--app-bg);
+  color: var(--ra-text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
 }
 
 body.app-shell {
@@ -11749,34 +11485,34 @@ body.app-shell {
 
 .topbar,
 header {
-  background-color: var(--ra-surface-1) !important;
-  border-bottom: 1px solid var(--ra-border) !important;
+  background-color: var(--ra-surface-1);
+  border-bottom: 1px solid var(--ra-border);
 }
 
-.app-rail,
+.app-rail.rail,
 .sidebar {
-  background-color: var(--ra-surface-1) !important;
-  border-right: 1px solid var(--ra-border) !important;
+  background-color: var(--ra-surface-1);
+  border-right: 1px solid var(--ra-border);
 }
 
 .app-card,
 .apple-card,
 .card {
-  background-color: var(--ra-surface-2) !important;
-  border: 1px solid var(--ra-border) !important;
-  border-radius: 12px !important;
+  background-color: var(--ra-surface-2);
+  border: 1px solid var(--ra-border);
+  border-radius: 12px;
 }
 
 .kanban-column,
 .kanban-col {
-  background-color: color-mix(in srgb, var(--ra-surface-3) 55%, transparent) !important;
-  border: 1px solid var(--ra-border) !important;
-  border-radius: 16px !important;
+  background-color: color-mix(in srgb, var(--ra-surface-3) 55%, transparent);
+  border: 1px solid var(--ra-border);
+  border-radius: 16px;
 }
 
 select option {
-  background-color: var(--ra-surface-2) !important;
-  color: var(--ra-text-primary) !important;
+  background-color: var(--ra-surface-2);
+  color: var(--ra-text-primary);
 }
 
 /* 滚动条跟随主题 */
@@ -11793,17 +11529,17 @@ select option {
 /* 低饱和 diff 高亮跟随主题色 */
 .diff-ins,
 ins {
-  background-color: color-mix(in srgb, var(--ra-success) 10%, transparent) !important;
-  border: 1px solid color-mix(in srgb, var(--ra-success) 30%, transparent) !important;
-  color: var(--ra-success) !important;
-  text-decoration: none !important;
+  background-color: color-mix(in srgb, var(--ra-success) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ra-success) 30%, transparent);
+  color: var(--ra-success);
+  text-decoration: none;
 }
 
 .diff-del,
 del {
-  background-color: color-mix(in srgb, var(--ra-danger) 10%, transparent) !important;
-  border: 1px solid color-mix(in srgb, var(--ra-danger) 30%, transparent) !important;
-  color: var(--ra-danger) !important;
+  background-color: color-mix(in srgb, var(--ra-danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ra-danger) 30%, transparent);
+  color: var(--ra-danger);
 }
 
 .diff-char-ins {
@@ -12083,7 +11819,7 @@ select,
 
 .a4-paper .resume-doc table,
 .a4-paper .resume-doc blockquote {
-  border-color: var(--paper-rule, #e2e8f0) !important;
+  border-color: var(--paper-rule, #e2e8f0);
 }
 
 /* ---- 8. 来源徽标 / 匹配分徽标行内图标 ---- */
@@ -12131,7 +11867,7 @@ select,
 }
 
 .rail-quota[hidden] {
-  display: none !important;
+  display: none;
 }
 
 .rail-quota__head {
@@ -12389,7 +12125,7 @@ select,
   }
 
   .wb-mobile-tabs {
-    display: none !important;
+    display: none;
   }
 }
 
@@ -12407,6 +12143,9 @@ select,
     width: 100vw;
   }
 }
+}
+
+@layer components {
 /* ================================================================
    AI 优化（xzjobs 式模块化润色）—— 简历中心详情面板
    ================================================================ */
@@ -12660,7 +12399,9 @@ select,
   background: var(--pending-soft);
   color: var(--pending-deep);
 }
+}
 
+@layer components {
 /* ================================================================
    R5 前端收尾（expert-team-20260825）
    P1-2 词表联动触控基线 / P1-3 驾驶舱失败标识 / P1-4 移动端可达性最小集
@@ -12741,7 +12482,9 @@ select,
     scroll-padding-bottom: 76px;
   }
 }
+}
 
+@layer components {
 /* ==========================================================================
    UX 走查修复（2026-08-28，ADR-0033「默认浅色」收尾）：
    1) rail 导航在浅色毛玻璃底上仍用暗色 shell 的白色文字（.tabs--rail button
@@ -12836,7 +12579,9 @@ select,
   max-height: calc(100vh - 300px);
   min-height: 120px;
 }
+}
 
+@layer components {
 /* ------------------------------------------------------------------ */
 /* 投递复盘 (#/review)                                                  */
 /* ------------------------------------------------------------------ */
@@ -12998,4 +12743,325 @@ select,
 .review-annotate__select {
   flex: 0 0 auto;
   max-width: 160px;
+}
+}
+
+@layer overrides {
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+  }
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  body > *:not(#print-root) {
+    display: none;
+  }
+
+  #print-root {
+    display: block;
+    color: #111;
+    background: #fff;
+  }
+
+  #print-root h1 {
+    margin: 0 0 14px;
+    font-size: 1.35rem;
+  }
+
+  #print-root button,
+  #print-root [data-action] {
+    display: none;
+  }
+
+  #print-root .panel {
+    border: none;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  #print-root .cmp-column {
+    max-height: none;
+    overflow: visible;
+    background: #fff;
+    border: none;
+    padding: 0;
+  }
+
+  #print-root .cmp-grid,
+  #print-root .card {
+    break-inside: avoid;
+  }
+
+  #print-root .diagnosis-columns,
+  #print-root .diagnosis-list li {
+    break-inside: avoid;
+  }
+
+  #print-root .final-draft-panel {
+    break-inside: avoid;
+  }
+
+  #print-root .draft-preview {
+    max-height: none;
+    overflow: visible;
+    background: #fff;
+    border: none;
+    padding: 0;
+  }
+
+  #print-root .resume-doc {
+    /* 黄金核心 2：A4 打印收敛——10.5pt 标准求职中文字阶 + 1.5 行高 */
+    font-size: 10.5pt;
+    line-height: 1.5;
+  }
+
+  #print-root .resume-doc :is(p, li) {
+    /* 4px 项目间距：段落/列表项之间紧凑不粘连 */
+    margin-top: 0;
+    margin-bottom: 4px;
+  }
+
+  #print-root .resume-doc ul,
+  #print-root .resume-doc ol {
+    margin-top: 2px;
+    margin-bottom: 4px;
+    padding-left: 1.25em;
+  }
+
+  #print-root .resume-doc h1 {
+    margin: 0 0 8px;
+    font-size: 16pt;
+  }
+
+  #print-root .resume-doc h2 {
+    margin: 8px 0 4px;
+    font-size: 12pt;
+  }
+
+  #print-root .resume-doc h3 {
+    margin: 6px 0 3px;
+    font-size: 11pt;
+  }
+
+  /* 黄金核心 2：单页收敛——超长内容分级压缩（配合 printTarget 加的 class） */
+  #print-root.print-compact .resume-doc {
+    font-size: 10pt;
+    line-height: 1.42;
+  }
+
+  #print-root.print-compact .resume-doc :is(p, li) {
+    margin-bottom: 3px;
+  }
+
+  #print-root.print-compact--tight .resume-doc {
+    font-size: 9.5pt;
+    line-height: 1.36;
+  }
+
+  #print-root.print-compact--tight .resume-doc :is(p, li) {
+    margin-bottom: 2px;
+  }
+
+  #print-root.print-compact--ultra .resume-doc {
+    font-size: 9pt;
+    line-height: 1.3;
+  }
+
+  #print-root.print-compact--ultra .resume-doc :is(p, li) {
+    margin-bottom: 1px;
+  }
+
+  /* 任何压缩档位都禁止额外分页，保证收敛在 1 页 */
+  #print-root.print-compact *,
+  #print-root.print-compact--tight *,
+  #print-root.print-compact--ultra * {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+
+  #print-root .resume-doc h2,
+  #print-root .resume-doc h3,
+  #print-root .resume-doc li,
+  #print-root .resume-doc p {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #print-root .resume-doc h2,
+  #print-root .resume-doc h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
+  }
+
+  .btn.is-loading::before {
+    animation: none;
+    border-right-color: currentColor;
+  }
+}
+
+@media print {
+  #print-root .panel,
+  #print-root .card {
+    border: none;
+    border-top: 0;
+    border-left: 0;
+    box-shadow: none;
+    background: #fff;
+    padding: 0;
+  }
+
+  #print-root .cmp-column,
+  #print-root .draft-preview,
+  #print-root .pre {
+    max-height: none;
+    overflow: visible;
+    background: #fff;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  #print-root .diff-add,
+  #print-root .diff-remove,
+  #print-root .diff-modify,
+  #print-root .badge,
+  #print-root .opt-badge,
+  #print-root .score-ring {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    animation-delay: 0ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+  }
+
+  .card,
+  .cmp-line,
+  .diff-line,
+  .toast,
+  .skeleton.is-shimmer,
+  .empty-state,
+  .empty-state .actions,
+  .empty-state .actions .btn-primary {
+    animation: none;
+    transition: none;
+    transform: none;
+    opacity: 1;
+  }
+
+  .skeleton.is-shimmer {
+    opacity: 0.7;
+  }
+
+  .btn.is-loading::before {
+    animation: none;
+    border-right-color: currentColor;
+  }
+
+  .progress-fill {
+    transition: none;
+  }
+}
+
+@media print {
+  .toast-region,
+  .modal-backdrop {
+    display: none;
+  }
+
+  #print-root,
+  #print-root *,
+  #print-root *::before,
+  #print-root *::after {
+    animation: none;
+    transition: none;
+    transform: none;
+    opacity: 1;
+  }
+
+  #print-root .panel-card,
+  #print-root .card-base,
+  #print-root .final-draft-panel.is-saved::before {
+    border: none;
+    border-top: 0;
+    border-left: 0;
+    box-shadow: none;
+    background: #fff;
+    padding: 0;
+  }
+
+  .skeleton {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-card:hover {
+    transform: none;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  }
+}
+
+@media print {
+  body.is-printing #app-router-view,
+  body.is-printing .app-rail,
+  body.is-printing .topbar,
+  body.is-printing .toast-region {
+    display: none;
+  }
+
+  body.is-printing #print-root {
+    display: block;
+  }
+
+  #print-root button,
+  #print-root [data-action],
+  #print-root .btn {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .split-step.is-active .split-step__dot {
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none;
+    transition: none;
+  }
+}
 }
