@@ -34,19 +34,64 @@ const stylesCss = readFileSync(
   "utf8",
 );
 
-test("styles.css: board-column uses the sinking surface (surface-tint + inset shadow)", () => {
-  const block = stylesCss.match(/\.board-column\s*\{([^}]*)\}/s);
+/**
+ * 按真实级联取「生效规则体」：先比特异性，特异性相同则取源码靠后者。
+ *
+ * 2026-09-18（B0，ADR-0048）：原实现用 `stylesCss.match(/…/)`（不带 g）只拿
+ * 第一个匹配，于是 `.board-column` / `.board-card:hover` 读到的是被后文覆盖的
+ * 死定义，护栏常年绿灯而线上早已是另一套值。这里改为显式建模级联。
+ */
+function specificity(sel) {
+  const s = String(sel).trim();
+  const ids = (s.match(/#[\w-]+/g) || []).length;
+  const classes =
+    (s.match(/\.[\w-]+/g) || []).length +
+    (s.match(/\[[^\]]*\]/g) || []).length +
+    (s.match(/:(?!:)[\w-]+/g) || []).length;
+  const pseudoEls = (s.match(/::[\w-]+/g) || []).length;
+  const elements =
+    (s.replace(/::[\w-]+/g, " ").match(/(^|[\s>+~])[a-zA-Z][\w-]*/g) || [])
+      .length + pseudoEls;
+  return [ids, classes, elements];
+}
+
+function winningBlock(css, selector) {
+  let winner = null;
+  let order = 0;
+  for (const m of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    for (const part of m[1].split(",")) {
+      if (part.trim() !== selector) continue;
+      const candidate = {
+        body: m[2],
+        spec: specificity(selector),
+        order: order++,
+      };
+      if (
+        !winner ||
+        candidate.spec.join() > winner.spec.join() ||
+        (candidate.spec.join() === winner.spec.join() &&
+          candidate.order > winner.order)
+      ) {
+        winner = candidate;
+      }
+    }
+  }
+  return winner ? winner.body : null;
+}
+
+test("styles.css: board-column effective rule uses the ra-* surface tokens", () => {
+  const block = winningBlock(stylesCss, ".board-column");
   assert.ok(block, ".board-column rule exists");
-  assert.match(block[1], /var\(--surface-tint\)/);
-  assert.match(block[1], /var\(--line\)/);
-  assert.match(block[1], /inset 0 1px/);
+  assert.match(block, /var\(--ra-surface-3\)/);
+  assert.match(block, /var\(--ra-border-hairline\)/);
+  assert.match(block, /box-shadow:\s*none/);
 });
 
-test("styles.css: board-card hover lifts with translateY and shadow", () => {
-  const hover = stylesCss.match(/\.board-card:hover\s*\{([^}]*)\}/s);
+test("styles.css: board-card hover effective rule uses ra-* hover tokens", () => {
+  const hover = winningBlock(stylesCss, ".board-card:hover");
   assert.ok(hover, ".board-card:hover rule exists");
-  assert.match(hover[1], /translateY\(-2px\)/);
-  assert.match(hover[1], /var\(--shadow-2\)/);
+  assert.match(hover, /var\(--ra-surface-hover\)/);
+  assert.match(hover, /var\(--ra-border-strong\)/);
 });
 
 test("styles.css: board-card hover is gated by prefers-reduced-motion", () => {
