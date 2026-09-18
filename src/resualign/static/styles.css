@@ -8923,10 +8923,11 @@ html {
 }
 
 .board-column {
-  /* ADR-0048: 5 列在可视宽内均分；允许收缩，第 5 列不再被裁。 */
-  flex: 1 1 200px;
+  /* ADR-0048 决定 6/8: 桌面端均分，窄屏不把列压到不可读——保底 220px 后
+     交给 .board 横向滚动，而不是把卡片挤成 122px 宽 / 626px 高。 */
+  flex: 1 1 220px;
   max-width: 320px;
-  min-width: 0;
+  min-width: 220px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -10570,6 +10571,7 @@ details > summary::-webkit-details-marker,
 }
 
 .board-match {
+  container-type: inline-size;
   display: grid;
   gap: 8px;
   margin-top: 10px;
@@ -10581,6 +10583,24 @@ details > summary::-webkit-details-marker,
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
+}
+
+/* ADR-0048 决定 7：五列看板的单列实宽在 220–260px 之间时，四维并排会把
+   标签拆成竖排、进度条压成 0。按卡片容器实宽降级为 2×2，而不是靠视口宽度猜。 */
+@container (max-width: 419px) {
+  .board-match__dims {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* 标签块独占一行，进度条占满下一行——避免「标签 + 弱项徽标」把轨道压成 0px。 */
+  .match-dim {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 4px;
+  }
+
+  .match-dim__track {
+    grid-column: 1 / -1;
+  }
 }
 
 .match-dim {
