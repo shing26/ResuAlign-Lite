@@ -16,6 +16,31 @@ function indexesOf(regex) {
   return [...CSS.matchAll(regex)].map((match) => match.index ?? 0);
 }
 
+function extractLayerText(css, layerName) {
+  const marker = new RegExp(`@layer\\s+${layerName}\\s*\\{`, "g");
+  const bodies = [];
+  let match;
+  while ((match = marker.exec(css))) {
+    const start = match.index + match[0].length - 1;
+    let depth = 0;
+    let end = -1;
+    for (let i = start; i < css.length; i += 1) {
+      if (css[i] === "{") depth += 1;
+      if (css[i] === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    assert.notEqual(end, -1, `layer ${layerName} must be closed`);
+    bodies.push(css.slice(start + 1, end));
+    marker.lastIndex = end + 1;
+  }
+  return bodies.join("\n");
+}
+
 test("css declares the canonical eight-layer order exactly once", () => {
   const matches = CSS.match(
     /^@layer\s+reset,\s*tokens,\s*base,\s*layout,\s*components,\s*patterns,\s*utilities,\s*overrides;/gm,
@@ -47,4 +72,33 @@ test("legacy print and reduced-motion compatibility lives in overrides", () => {
   assert.ok(printIndexes.length > 0);
   assert.ok(printIndexes.every((index) => index > overrides));
   assert.ok(motionIndexes.filter((index) => index > overrides).length >= 5);
+});
+
+test("business rules keep the canonical eight-step font scale", () => {
+  const canvases = [
+    "reset",
+    "base",
+    "components",
+    "patterns",
+    "utilities",
+  ];
+  const raw = canvases
+    .map((layer) => extractLayerText(CSS, layer))
+    .join("\n")
+    .match(/font-size\s*:\s*[0-9]+(?:\.[0-9]+)?(?:px|rem)\s*;/g);
+  assert.equal(raw, null);
+
+  const tokens = extractLayerText(CSS, "tokens");
+  for (const name of [
+    "2xs",
+    "xs",
+    "sm",
+    "base",
+    "lg",
+    "xl",
+    "2xl",
+    "3xl",
+  ]) {
+    assert.match(tokens, new RegExp(`--text-${name}\\s*:`));
+  }
 });
