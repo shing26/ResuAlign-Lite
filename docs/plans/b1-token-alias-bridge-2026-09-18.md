@@ -223,3 +223,66 @@ woff2 与 OFL 许可文件都没有。B1 若写入 `@font-face`，浏览器会�
 
 `.scratch/b1_build.py` 已包含 token 摘取、主题块改写、别名桥与归层的全部逻辑，
 B1a/B1b 可直接复用它拆出的两半。
+
+---
+
+## 6. B1a 执行规格（已取证，可直接施工）
+
+### 6.1 定义点范围（`.scratch/b1a_inventory.py` 实测）
+
+| 作用域 | 定义点 | 处置 |
+|---|---|---|
+| `:root` / `[data-theme=*]` / `html.dark` 等全局选择器 | **约 505 处** | 全部摘除，迁入 `@layer tokens` |
+| 组件私有（`.live-sheet`、`.page-header--*`、`.score-ring--*`、`.motion-stagger > *`、`.card .diff-line`） | 约 26 处 | **保持原位不动** |
+
+关键数字：
+
+- 定义点总数 **531**
+- **153 个名字在多个位置重复定义**（`--accent` 有 4 处：`31@:root`、`247@[data-theme=dark]`、
+  `10896@:root`、`10979@:root[data-theme=dark]`）
+- 绝大多数 token 名在新旧两套系统里**同时存在且值不同**——这是 B1a 必须解决的核心冲突
+
+### 6.2 B1a 的正确形态
+
+```css
+@layer tokens {
+  /* ① 设计 token：按 ADR-0047 改写为「默认浅色 + [data-theme=dark]」 */
+  …
+  /* ② 迁移兼容块：原样保留全部全局旧 token 定义（505 处），顺序在后 */
+  …
+  /* ③ 别名桥：把没有新旧冲突的旧名指向新 canonical 名 */
+  …
+}
+```
+
+要点：
+
+1. **只有一个 `@layer` 语句 + 一个 `@layer tokens {}`**，其余规则完全不分层、
+   不改变位置 —— 因此 `!important` 语义与源码顺序都不变；
+2. 兼容块必须排在设计 token **之后**，让未迁移的规则继续解析到当前渲染值；
+3. 输出必须是「视觉零变化」：DOM 度量 + 16 张截图逐页比对；
+4. 组件私有 token 不进本层。
+
+### 6.3 已验证的步骤 A/B 不可拆，但 B1a 是安全半批
+
+§5 试跑证明的是「归层 + 新 token」一起做会崩。B1a 只做「摘全局 token + 建单层
+`@layer tokens`」，不引入第二个层，因此绕开了那条冲突。
+
+### 6.4 B1a 的已知代价（必须记录）
+
+因为新旧系统在 153 个名字上冲突，B1a 完成后的 `@layer tokens` 里会**同时存在
+两套同名定义**，其中新 token 对冲突名暂时是「被后写的兼容块遮蔽」状态。
+这不是缺陷，是迁移窗口的预期形态：
+
+- 未迁移规则 → 解析到兼容块里的当前值（视觉不变）；
+- 新写的规则 → 直接用新 canonical 名，等旧规则逐条迁完后兼容块自然缩小；
+- **B1b/B7 删除兼容块的判据**：`styles.css` 中冲突名的引用数降到 0
+  （可用 `.scratch/css_token_inventory.py` 复算）。
+
+### 6.5 验收
+
+- `@layer` 语句恰好 1 条、`@layer tokens {}` 块恰好 1 个；
+- DOM 度量 8 路由与 B0 基线一致（rail 224 / topbar 52 / 看板溢出 0 / 0 console error）；
+- 16 张截图与 `.scratch/css-refactor-baseline/` 逐页一致；
+- 前端 489 passed、后端 997 passed / 7 skipped 不降；
+- 全局 token 定义点从原段落迁出后，原位置不再残留 `--*:` 定义。
