@@ -432,3 +432,90 @@ test("decorative dual-color gradients stay out of business rules", () => {
     /linear-gradient\(\s*180deg,\s*var\(--workbench-bg-deep\)/,
   );
 });
+
+test("B4 native selects use one theme-aware self-drawn chevron", () => {
+  const tokens = extractLayerText(CSS, "tokens");
+  const businessCss = [
+    "base",
+    "components",
+  ]
+    .map((layer) => extractLayerText(CSS, layer))
+    .join("\n");
+
+  assert.match(tokens, /--select-chevron-light:\s*url\(/, "light chevron token");
+  assert.match(tokens, /--select-chevron-dark:\s*url\(/, "dark chevron token");
+  assert.match(
+    tokens,
+    /:root\[data-theme="dark"\][\s\S]*?--select-chevron:\s*var\(--select-chevron-dark\)/,
+    "dark theme must swap the chevron token",
+  );
+
+  const appearance = declarationsFor(
+    businessCss,
+    ":root select:not([multiple])",
+    "appearance",
+  );
+  const arrow = declarationsFor(
+    businessCss,
+    ":root select:not([multiple])",
+    "background-image",
+  );
+  const position = declarationsFor(
+    businessCss,
+    ":root select:not([multiple])",
+    "background-position",
+  );
+
+  assert.ok(appearance.includes("none"), "native appearance must be removed");
+  assert.ok(arrow.includes("var(--select-chevron)"), "select must use the arrow token");
+  assert.ok(
+    position.includes("right var(--space-3) center"),
+    "arrow must reserve the canonical right inset",
+  );
+});
+
+test("B4 native controls keep select heights on the control scale", () => {
+  const businessCss = [
+    "base",
+    "components",
+  ]
+    .map((layer) => extractLayerText(CSS, layer))
+    .join("\n");
+
+  for (const selector of [
+    "select",
+    ".board-sort select",
+    ".board-status-select",
+    ".header-job-select",
+  ]) {
+    const values = declarationsFor(businessCss, selector, "min-height");
+    assert.ok(values.length > 0, `missing min-height for ${selector}`);
+    assert.ok(
+      values.every((value) => value.startsWith("var(--")),
+      `${selector} must use a canonical height token, got ${values.join(", ")}`,
+    );
+  }
+});
+
+test("B4 native controls keep one outline focus ring", () => {
+  const businessCss = [
+    "base",
+    "components",
+  ]
+    .map((layer) => extractLayerText(CSS, layer))
+    .join("\n");
+
+  assert.match(
+    businessCss,
+    /:root\s+:is\(input,\s*select,\s*textarea\):focus-visible[\s\S]*?outline:\s*var\(--focus-ring-outline\)/,
+  );
+  assert.match(
+    businessCss,
+    /outline-offset:\s*var\(--focus-ring-offset\)/,
+  );
+  assert.match(
+    businessCss,
+    /:root select option\s*\{[\s\S]*?color-scheme:\s*inherit/,
+    "native option popup must inherit the active color scheme",
+  );
+});

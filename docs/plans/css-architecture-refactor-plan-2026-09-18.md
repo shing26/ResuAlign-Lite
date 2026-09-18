@@ -1,6 +1,6 @@
 # ResuAlign 前端 CSS 架构重构 · 批次施工单
 
-**状态**: B0/B1/B2a/B2b/B2c/B2d/B2e/B3a/B3b 已完成；B4–B7 按 ADR-0050 逐批推进
+**状态**: B0/B1/B2a/B2b/B2c/B2d/B2e/B3a/B3b/B4 已完成；B5–B7 按 ADR-0050 逐批推进
 **日期**: 2026-09-18
 **依据**: ADR-0043（分层）/ ADR-0044（token）/ ADR-0045（图标）/
 ADR-0046（内联变量）/ ADR-0047（主题与主色）
@@ -403,3 +403,39 @@ B1a 旧值重放**之前**，并新增 `--shadow-ink` 基元；业务规则、�
   B3b 降至 114 项；无新增 console error；
 - 16 张明暗截图完成目视检查；浅色主按钮、深色设置页、岗位看板与复盘页
   均正常，主色切到冷青后信息层级仍成立。
+
+---
+
+## 18. B4 原生控件改造实作记录（2026-09-18）
+
+**范围**：按 ADR-0050 决定 1 完成 B4 的 Tier 1 必做项；不引入 Tier 2
+自绘 listbox，不改 JS、路由或表单契约。`index.html` 静态缓存版本
+`v=43 → v=44`。
+
+**结果**：
+
+- 文本类 `input`、`textarea`、`select` 统一进入 `appearance: none` /
+  `-webkit-appearance: none` 的原生控件入口；
+- 新增主题感知 `--select-chevron-light` / `--select-chevron-dark` 与
+  `--select-chevron` bridge token；所有单值 `select` 使用自绘 16px 下箭头，
+  不再依赖浏览器原生箭头；
+- `select` 的默认高度统一为 `--control-h-md`（32px）；岗位库排序从
+  30px 归位，看板状态不再用 40px 视觉高度，头部岗位选择保持
+  `--control-h-lg`（36px）；
+- 控件焦点环统一改为 2px `outline: var(--focus-ring-outline)` +
+  `offset: var(--focus-ring-offset)`；删除输入框、选择器、卡片和行内编辑器的
+  无替代 `outline: none` 路径；
+- `color-scheme` 同步落地到控件与 `option`：浅色原生弹层为白底深字，
+  深色原生弹层为黑底浅字；移动端控件字号提升到 16px，触屏命中区提升到
+  `--hit-min`（44px）；
+- 数字输入 spinner 使用显式 `appearance: textfield` 与 WebKit 伪元素归零；
+- `css-architecture.test.mjs` 新增 3 条守卫：主题箭头 token、select 高度
+  canonical 化、outline 焦点环与 `option` 色彩方案；
+- 前端全量 **509 passed / 0 failed**；
+- 后端全量 **997 passed / 7 skipped**；
+- 同数据 8 路由 × 明暗对比度探针仍为 **114 项**，无新增 console error；
+- 8 路由 DOM 度量：rail 224 / topbar 52 / 看板溢出 0；
+- 6 组控件状态截图覆盖设置、岗位库、工作台：浅/深焦点环均为 2px 实线，
+  原生 `select` 展开态可捕获，浅色与深色 option 面板均正确；
+- 390px 触摸视口复验：三页 `select` 高度 44px、字号 16px、
+  `scrollWidth === innerWidth`，无横向溢出。

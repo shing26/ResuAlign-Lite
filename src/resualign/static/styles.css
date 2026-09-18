@@ -1108,6 +1108,22 @@ html.dark, :root[data-theme="dark"], html.dark :root {
     --workbench-bg: var(--surface-2);
     --workbench-bg-deep: var(--surface-1);
   }
+
+  /* B4 native controls: one theme-aware chevron for every native select.
+     The B1 migration replay above still owns --glyph-chevron-down, so this
+     batch adds a separate bridge token and can be removed independently in B7. */
+  :root {
+    color-scheme: light;
+    --select-chevron-light: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236A7381' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6.25 8 10.25l4-4'/%3E%3C/svg%3E");
+    --select-chevron-dark: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%237E8894' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6.25 8 10.25l4-4'/%3E%3C/svg%3E");
+    --select-chevron: var(--select-chevron-light);
+  }
+
+  :root[data-theme="dark"],
+  :root.dark {
+    color-scheme: dark;
+    --select-chevron: var(--select-chevron-dark);
+  }
 }
 
 @layer reset {
@@ -1216,8 +1232,8 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 a:focus-visible {
-  outline: none;
-  box-shadow: var(--focus);
+  outline: var(--focus-ring-outline);
+  outline-offset: var(--focus-ring-offset);
 }
 
 textarea {
@@ -1576,10 +1592,14 @@ select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-3);
+  min-height: var(--field-h-md);
+  padding: 0 var(--space-3);
   background: var(--surface-hover);
   color: var(--ink);
   min-width: 0;
+  line-height: 1;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 input[type="number"] {
@@ -1592,10 +1612,6 @@ select:disabled,
 button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-
-select {
-  min-height: 36px;
 }
 
 .filter-bar select,
@@ -3068,7 +3084,7 @@ input[type="password"],
 input[type="search"],
 textarea,
 select {
-  min-height: 38px;
+  min-height: var(--field-h-md);
   padding: var(--space-2) var(--space-3);
   background: var(--surface-hover);
   border: 1px solid var(--border);
@@ -3096,9 +3112,7 @@ input[type="password"]:focus,
 input[type="search"]:focus,
 textarea:focus,
 select:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: var(--focus-ring);
+  border-color: var(--field-line-focus);
 }
 
 input.is-invalid,
@@ -3113,6 +3127,12 @@ select[aria-invalid="true"] {
 }
 
 select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right var(--space-3) center;
+  background-size: var(--ic-sm) var(--ic-sm);
   padding-right: var(--space-8);
 }
 
@@ -3707,8 +3727,8 @@ table.data th {
 
 .card-hover-soft:focus-visible,
 .card-interactive:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: var(--focus-ring-outline);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .card-interactive {
@@ -4619,7 +4639,7 @@ select {
 
   .board-status-select {
     flex-basis: 100%;
-    min-height: 44px;
+    min-height: var(--hit-min);
     font-size: var(--text-14);
   }
 
@@ -4951,7 +4971,6 @@ body.is-printing #print-root {
   min-height: 44px;
   max-height: 220px;
   border: 0;
-  outline: 0;
   resize: none;
   background: transparent;
   color: var(--ink);
@@ -5554,9 +5573,9 @@ body.command-palette-open {
 }
 
 .bullet-editor:focus {
-  outline: none;
+  outline: var(--focus-ring-outline);
+  outline-offset: var(--focus-ring-offset);
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
 .diff-card__reason {
@@ -5913,8 +5932,8 @@ label.eval-option,
 .header-job-select {
   min-width: 180px;
   max-width: 280px;
-  min-height: 36px;
-  padding: var(--space-2) var(--space-3);
+  min-height: var(--control-h-lg);
+  padding: 0 var(--space-3);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -5930,7 +5949,8 @@ label.eval-option,
 }
 
 .header-job-select:focus-visible {
-  box-shadow: var(--focus);
+  outline: var(--focus-ring-outline);
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* --- Dashboard KPI 卡网格 --- */
@@ -10027,7 +10047,7 @@ input[type="search"],
 select,
 textarea,
 .field-input {
-  min-height: 32px;
+  min-height: var(--field-h-md);
   padding: 0 var(--space-3);
   background: var(--ra-surface-3);
   border: 1px solid var(--ra-border);
@@ -10052,8 +10072,7 @@ input:focus,
 select:focus,
 textarea:focus {
   border-color: color-mix(in srgb, var(--ra-action) 65%, transparent);
-  box-shadow: var(--ra-focus);
-  outline: 0;
+  box-shadow: none;
 }
 
 ::placeholder {
@@ -10065,9 +10084,10 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 summary:focus-visible {
-  outline: 0;
+  outline: var(--focus-ring-outline);
+  outline-offset: var(--focus-ring-offset);
   border-color: color-mix(in srgb, var(--ra-action) 65%, transparent);
-  box-shadow: var(--ra-focus);
+  box-shadow: none;
 }
 
 button:active:not(:disabled),
@@ -10996,7 +11016,7 @@ details > summary::-webkit-details-marker,
 }
 
 .board-sort select {
-  min-height: 30px;
+  min-height: var(--control-h-md);
   max-width: 160px;
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--border);
@@ -12065,12 +12085,12 @@ select,
   border: 1px solid var(--ra-border);
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-3);
-  outline: none;
 }
 
 .optimize-jd-input:focus {
   border-color: var(--accent);
-  box-shadow: var(--ra-focus);
+  outline: var(--focus-ring-outline);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .optimize-overview {
@@ -12279,7 +12299,7 @@ select,
 
 /* P1-2 (02-UID ③-2/④ .select--vocab)：岗位卡状态下拉触控 ≥40px */
 .board-status-select {
-  min-height: var(--touch-min-safe, 40px);
+  min-height: var(--control-h-md);
   padding: var(--space-2) var(--space-3);
 }
 
@@ -12613,6 +12633,57 @@ select,
 .review-annotate__select {
   flex: 0 0 auto;
   max-width: 160px;
+}
+
+/* B4 native-control entry. These selectors sit at the end of the components
+   layer so older component waves cannot reintroduce a browser-painted arrow. */
+:root select:not([multiple]) {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right var(--space-3) center;
+  background-size: var(--ic-sm) var(--ic-sm);
+  padding-right: var(--space-8);
+}
+
+:root select option {
+  background-color: var(--surface-3);
+  color: var(--text-primary);
+  color-scheme: inherit;
+}
+
+:root :is(input, select, textarea):focus-visible,
+:root :is(button, summary):focus-visible {
+  outline: var(--focus-ring-outline);
+  outline-offset: var(--focus-ring-offset);
+}
+
+:root input[type="checkbox"],
+:root input[type="radio"] {
+  accent-color: var(--accent);
+}
+
+:root input[type="number"] {
+  appearance: textfield;
+}
+
+:root input[type="number"]::-webkit-inner-spin-button,
+:root input[type="number"]::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  :root :is(input, select, textarea) {
+    font-size: var(--text-lg);
+  }
+}
+
+@media (pointer: coarse) {
+  :root :is(select, input:not([type="checkbox"]):not([type="radio"]), textarea) {
+    min-height: var(--hit-min);
+  }
 }
 }
 
