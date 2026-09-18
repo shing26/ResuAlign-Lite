@@ -371,46 +371,16 @@ test("z-index tokens preserve layering semantics", () => {
   }
 });
 
-test("B3a color bridge stays dormant ahead of the legacy replay", () => {
+test("B3b activates the canonical color namespace", () => {
   const tokens = extractLayerText(CSS, "tokens");
-  const canonical = tokens.indexOf("--accent:        #0E7C8F");
-  const bridge = tokens.indexOf("B3a color bridge");
-  const legacyReplay = tokens.indexOf("B1a migration bridge");
-  const fallbackPins = tokens.indexOf("B1a visual-zero pins");
-
-  assert.ok(canonical >= 0, "canonical light accent must exist");
-  assert.ok(bridge > canonical, "B3a bridge must follow canonical color tokens");
-  assert.ok(
-    legacyReplay > bridge,
-    "legacy replay must follow B3a so it still owns the rendered values",
-  );
-  assert.ok(
-    fallbackPins > legacyReplay,
-    "fallback pins must remain the final token authority",
-  );
-
-  for (const [legacy, canonicalName] of [
-    ["--bg", "--bg-canvas"],
-    ["--surface", "--surface-1"],
-    ["--border", "--line"],
-    ["--primary", "--accent"],
-    ["--error", "--danger"],
-    ["--green", "--success"],
-  ]) {
-    assert.match(
-      tokens.slice(bridge, legacyReplay),
-      new RegExp(`${legacy}:\\s*var\\(${canonicalName}\\)`),
-    );
-  }
-
-  assert.doesNotMatch(
-    tokens.slice(bridge, legacyReplay),
-    /--ls-(?:bg|ink|line|muted|add-bg)/,
-    "component-private live-sheet tokens must stay local",
-  );
+  assert.match(tokens, /--accent:\s*#0E7C8F/, "canonical light accent");
+  assert.match(tokens, /B3 color cutover/, "legacy aliases resolve to canonical names");
+  assert.match(tokens, /--primary:\s*var\(--accent\)/);
+  assert.match(tokens, /--surface:\s*var\(--surface-1\)/);
+  assert.match(tokens, /--border:\s*var\(--line\)/);
 });
 
-test("B3a freezes business color-literal debt until B3b", () => {
+test("business rules contain no color literals", () => {
   const businessCss = [
     "reset",
     "base",
@@ -421,13 +391,44 @@ test("B3a freezes business color-literal debt until B3b", () => {
   ]
     .map((layer) => extractLayerText(CSS, layer))
     .join("\n")
-    .replace(/\/\*[\s\S]*?\*\//g, "");
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/--[\w-]+\s*:\s*[^;]+;/g, "");
 
-  const hex = businessCss.match(/#[0-9a-fA-F]{3,8}\b/g) || [];
-  const rgb = businessCss.match(/rgba?\([^)]*\)/g) || [];
-  const hsl = businessCss.match(/hsla?\([^)]*\)/g) || [];
+  const literals = businessCss.match(
+    /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/g,
+  ) || [];
+  assert.deepEqual(literals, []);
+});
 
-  assert.ok(hex.length <= 207, `hex literal debt regressed: ${hex.length}`);
-  assert.ok(rgb.length <= 202, `rgb literal debt regressed: ${rgb.length}`);
-  assert.equal(hsl.length, 0, "hsl literals must stay out of business rules");
+test("live-sheet keeps its component-private dark-paper constants", () => {
+  const businessCss = extractLayerText(CSS, "components");
+  const liveSheet = businessCss.match(/\.live-sheet\s*{([^}]*)}/)?.[1] || "";
+
+  assert.match(liveSheet, /--ls-bg:\s*#0d1420/);
+  assert.match(liveSheet, /--ls-bg-2:\s*#111b2b/);
+  assert.match(liveSheet, /--ls-ink:\s*#dbe4ef/);
+  assert.match(liveSheet, /--ls-muted:\s*#8fa1b0/);
+  assert.doesNotMatch(liveSheet, /--ls-bg-2:\s*var\(--/);
+});
+
+test("decorative dual-color gradients stay out of business rules", () => {
+  const businessCss = [
+    "reset",
+    "base",
+    "components",
+    "patterns",
+    "utilities",
+    "overrides",
+  ]
+    .map((layer) => extractLayerText(CSS, layer))
+    .join("\n");
+
+  assert.doesNotMatch(
+    businessCss,
+    /linear-gradient\(\s*(?:135deg|90deg),\s*var\(--primary\),\s*var\(--teal\)/,
+  );
+  assert.doesNotMatch(
+    businessCss,
+    /linear-gradient\(\s*180deg,\s*var\(--workbench-bg-deep\)/,
+  );
 });

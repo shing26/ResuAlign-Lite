@@ -31,6 +31,31 @@ const STYLES_RAW = readFileSync(
 /* 注释剥离后的样式表：级联/token 解析统一用它，避免注释里的选择器字样干扰 */
 const STYLES = STYLES_RAW.replace(/\/\*[\s\S]*?\*\//g, "");
 
+function extractLayerText(css, layerName) {
+  const marker = new RegExp(`@layer\\s+${layerName}\\s*\\{`, "g");
+  const bodies = [];
+  let match;
+  while ((match = marker.exec(css))) {
+    const start = match.index + match[0].length - 1;
+    let depth = 0;
+    let end = -1;
+    for (let index = start; index < css.length; index += 1) {
+      if (css[index] === "{") depth += 1;
+      if (css[index] === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          end = index;
+          break;
+        }
+      }
+    }
+    assert.notEqual(end, -1, `layer ${layerName} must be closed`);
+    bodies.push(css.slice(start + 1, end));
+    marker.lastIndex = end + 1;
+  }
+  return bodies.join("\n");
+}
+
 /* ---------- 护栏 1：CSS 级联（P0-A / P1-D / P2-D 同根因） ---------- */
 
 /** CSS 特异性 (id, class/属性/伪类, 元素/伪元素)。 */
@@ -115,7 +140,7 @@ test("P1-D: 设置页 bento 卡标签最终 color 必须走主题感知 token", 
   );
 });
 
-test("护栏: 浅色主题 --ra-text-secondary 实际值对白底满足 WCAG AA ≥ 4.5:1", () => {
+test("护栏: 浅色主题 --ra-text-secondary 经 canonical alias 后满足 WCAG AA ≥ 4.5:1", () => {
   const lum = (hex) => {
     const [r, g, b] = [0, 2, 4].map((i) => {
       const v = parseInt(hex.slice(i, i + 2), 16) / 255;
@@ -127,16 +152,17 @@ test("护栏: 浅色主题 --ra-text-secondary 实际值对白底满足 WCAG AA 
     const [a, b] = [lum(fg), lum(bg)].sort((x, y) => y - x);
     return (a + 0.05) / (b + 0.05);
   };
-  // 浅色 ra 壳层 token 块以 --ra-canvas（浅色画布色）为标记；暗色主题由
-  // html.dark/[data-theme=dark] 高特异性块覆盖。解析该块里
-  // --ra-text-secondary 的真实色值——token 改坏时护栏直接报警。
-  const rootBlocks = [...STYLES.matchAll(/:root\s*{([^}]*)}/g)].map((m) => m[1]);
-  const lightBlock = [...rootBlocks].reverse().find((b) => b.includes("--ra-canvas")) || "";
-  const value = lightBlock.match(/--ra-text-secondary:\s*(#[0-9a-fA-F]{6})/);
-  assert.ok(value, "浅色 :root 块必须定义十六进制 --ra-text-secondary");
+  const tokens = extractLayerText(STYLES, "tokens");
+  assert.match(
+    tokens,
+    /--ra-text-secondary:\s*var\(--text-secondary\)/,
+    "--ra-text-secondary 必须指向 canonical --text-secondary",
+  );
+  const value = tokens.match(/--text-secondary:\s*(#[0-9a-fA-F]{6})/);
+  assert.ok(value, "canonical --text-secondary 必须定义十六进制值");
   assert.ok(
     ratio(value[1].slice(1), "ffffff") >= 4.5,
-    `--ra-text-secondary=${value[1]} 对白底对比度必须 ≥ 4.5:1`,
+    `canonical --text-secondary=${value[1]} 对白底对比度必须 ≥ 4.5:1`,
   );
 });
 

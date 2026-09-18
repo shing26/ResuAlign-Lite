@@ -21,16 +21,15 @@ function readApp(name) {
 }
 
 /* ------------------------------------------------------------------ */
-/* 决策1：Slate + Indigo 配色，默认浅色，暗色下 A4 纸保持白底        */
+/* 决策1 已被 ADR-0047 取代：冷青强调色，A4 纸恒白                  */
 /* ------------------------------------------------------------------ */
 
-test("styles.css light token override layer is Slate + Indigo", () => {
+test("styles.css canonical tokens use the cold-teal light accent", () => {
   const css = readStatic("styles.css");
-  /* v3.1 覆盖层（文件末尾高优先级 :root 块）是最终生效值 */
-  assert.match(css, /:root\s*\{[\s\S]*--primary:\s*#4f46e5/i, "light primary = Indigo #4F46E5");
-  assert.match(css, /:root\s*\{[\s\S]*--primary-hover:\s*#4338ca/i, "light primary hover = Indigo #4338CA");
-  assert.match(css, /:root\s*\{[\s\S]*--primary-soft:\s*#eef2ff/i, "light primary soft = Indigo 50");
-  assert.match(css, /:root\s*\{[\s\S]*--bg:\s*#f8fafc/i, "light canvas = Slate 50");
+  assert.match(css, /:root\s*\{[\s\S]*--accent:\s*#0E7C8F/i, "light accent = #0E7C8F");
+  assert.match(css, /:root\s*\{[\s\S]*--accent-hover:\s*#0C6D7E/i, "light hover = #0C6D7E");
+  assert.match(css, /:root\s*\{[\s\S]*--accent-soft:\s*#E2F3F6/i, "light soft = #E2F3F6");
+  assert.match(css, /:root\s*\{[\s\S]*--bg-canvas:\s*#F7F8FA/i, "light canvas = #F7F8FA");
   assert.match(css, /html\.dark[\s\S]*--paper-bg:\s*#ffffff/i, "dark keeps A4 paper white");
 });
 
@@ -98,8 +97,8 @@ test("UI templates no longer ship emoji glyphs (warning/check/cross)", () => {
 /* 静态缓存版本                                                        */
 /* ------------------------------------------------------------------ */
 
-test("index.html bumps static cache version to v=42", () => {
+test("index.html bumps static cache version to v=43", () => {
   const html = readStatic("index.html");
-  assert.match(html, /\/static\/styles\.css\?v=42/);
-  assert.match(html, /\/static\/app\/main\.js\?v=42/);
+  assert.match(html, /\/static\/styles\.css\?v=43/);
+  assert.match(html, /\/static\/app\/main\.js\?v=43/);
 });
