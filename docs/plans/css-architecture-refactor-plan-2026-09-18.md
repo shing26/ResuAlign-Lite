@@ -1,7 +1,7 @@
 # ResuAlign 前端 CSS 架构重构 · 批次施工单
 
-**状态**: B0–B7 已完成；B6 只保留经运行时证据确证的 C1/C2 清理，B7 已删除迁移别名块
-并补齐守卫测试
+**状态**: B0–B8 已完成；B6 只保留经运行时证据确证的 C1/C2 清理，B7 已删除迁移别名块
+并补齐守卫测试，B8 已补齐自托管字体资产
 **日期**: 2026-09-18
 **依据**: ADR-0043（分层）/ ADR-0044（token）/ ADR-0045（图标）/
 ADR-0046（内联变量）/ ADR-0047（主题与主色）
@@ -513,3 +513,39 @@ canonical 无前缀 token；只保留一个 `[hidden]` `!important` 豁免，并
 - `8006` 隔离实例 DOM 度量：8 路由 rail 224 / topbar 52 / 看板溢出 0 /
   0 console error；与 B1b 最终候选指标逐字段一致；
 - 静态缓存版本 `v=45 → v=46`。
+
+---
+
+## 22. B8 自托管字体资产实作记录（2026-09-18）
+
+**范围**：把 B1 标注为待办的自托管字体补齐；只改静态资产、字体声明和缓存版本，
+不改业务规则、后端、路由或数据契约。CJK 继续使用系统字体栈，不引入体积很大的
+CJK webfont，这是既定决策而非缺失。
+
+**结果**：
+
+- 新增 `src/resualign/static/fonts/`：
+  - `inter-latin-wght-normal.woff2`，48,256 bytes，SHA256
+    `3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62`；
+  - `jetbrains-mono-latin-wght-normal.woff2`，40,404 bytes，SHA256
+    `18be452724bfdc236c074ca94a249a7f41a86752c7d04ab258ce9ed5651f6a7e`；
+  - `LICENSE-Inter.txt`，SHA256
+    `5b9321a4298cfeb6b34354164a1c3afc3db114569984c502b9b35d988fd58c57`；
+  - `LICENSE-JetBrainsMono.txt`，SHA256
+    `b2fe5e8987594e9ffd1d2ca52a2f5d73eb8335243893c5d6254b5ad69269591d`；
+- 字体来源为 Fontsource 5.3.0 Latin variable WOFF2；字体文件与 OFL 1.1
+  许可文本均入仓，禁止远程字体 CDN；
+- `@font-face` 落在 `@layer tokens` 顶部，均使用 `font-display: swap`：
+  Inter Variable 权重 `100 900`，JetBrains Mono 权重 `100 800`；
+- `--font-ui` 以 `Inter Variable` 起头，`--font-mono` / `--font-num`
+  使用 `JetBrains Mono`，后面保留系统栈兜底；
+- 新增 `tests/frontend/fonts.test.mjs`：锁定二进制 SHA256、WOFF2 签名、
+  本地 URL、两项 `font-display`、允许的字体权重和 OFL 许可；
+- 静态缓存版本 `v=46 → v=47`；
+- 前端全量：**519 passed / 0 failed**；
+- 后端全量：**997 passed / 7 skipped**；
+- `8006` 隔离实例 DOM 度量：8 路由 rail 224 / topbar 52 / 看板溢出 0 /
+  0 console error；两个 WOFF2 均返回 200，
+  `document.fonts.check('13px "Inter Variable"')` 与
+  `document.fonts.check('13px "JetBrains Mono"')` 均为 `true`，
+  `document.body` 实际使用 Inter Variable。

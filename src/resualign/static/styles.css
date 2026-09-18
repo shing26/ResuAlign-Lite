@@ -1,14 +1,12 @@
 @layer reset, tokens, base, layout, components, patterns, utilities, overrides;
 
 @layer tokens {
-/* B1a: canonical design tokens are inlined ahead of the migration bridge.
-   Light is the default theme; [data-theme="dark"] / html.dark explicitly remap it.
-   The legacy declarations below win for every name they already own, so this
-   batch changes the token architecture without changing current rendering. */
+/* B7: canonical tokens are the single token namespace. Light is the default
+   theme; [data-theme="dark"] / html.dark explicitly remap it. */
 /* =====================================================================
    ResuAlign · Design Tokens
    ---------------------------------------------------------------------
-   视觉方向：Linear 式高密度工作台（Product 寄存器 / Web 平台 / 深色为默认设计面）
+   视觉方向：Linear 式高密度工作台（Product 寄存器 / Web 平台 / 浅色默认）
    交付形态：原生 CSS 自定义属性，零构建（无 Sass / PostCSS / Tailwind）
    承载形态：施工时本文件内容内联进 src/resualign/static/styles.css 顶部的
    @layer tokens；不新增第二份 <link>，也不使用 @import（ADR-0043 决定 6）。
@@ -23,6 +21,32 @@
      B-slot       组件别名（指向 A 层，不新造字面量）
      C-extension  本项目专属扩展（序数色阶、纸面语义）
    ===================================================================== */
+
+/* Self-hosted text fonts. Sources and licenses:
+   - Inter Variable 5.3.0: @fontsource-variable/inter
+   - JetBrains Mono 5.3.0: @fontsource-variable/jetbrains-mono
+   Both are SIL Open Font License 1.1; see the matching LICENSE-*.txt. */
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("/static/fonts/inter-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("/static/fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
 /* =====================================================================
    1. 主题无关常量（明暗都不变；在 :root 声明一次，[data-theme="light"] 不重声明）
@@ -41,9 +65,8 @@
                       上述系统字体在中文排版上均为高质量正文字面。
        - --font-mono  自托管 JetBrains Mono（OFL），只为「数字必须等宽对齐」
                       这一功能需求存在（分数 / 计数 / 日期 / 成本）。
-     【施工落点】B1 在 @layer tokens 顶部补两个 @font-face：Inter Variable
-     与 JetBrains Mono，woff2 与 OFL 许可文件放 src/resualign/static/fonts/。
-     font-display 取值与许可文件命名见施工单 §8；禁止远程字体 CDN。
+     @font-face 已落在本层顶部；woff2 与 OFL 许可文件位于
+     src/resualign/static/fonts/，font-display: swap；禁止远程字体 CDN。
      禁止：把 --font-ui 直接写成 sans-serif 或 system-ui 了事（等同无品牌字体决策）。 */
   --font-ui: "Inter Variable", "Inter", "PingFang SC", "HarmonyOS Sans SC", "MiSans",
              "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
