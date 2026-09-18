@@ -5880,27 +5880,12 @@ select option {
 
 .uppercase { text-transform: uppercase; }
 
-.text-\[10px\] { font-size: var(--text-2xs); }
-.text-\[11px\] { font-size: var(--text-2xs); }
-.text-\[11\.5px\] { font-size: var(--text-2xs); }
-.text-\[12px\] { font-size: var(--text-xs); }
-.text-\[14px\] { font-size: var(--text-base); }
-
-.p-2\.5 { padding: var(--space-3); }
-
-.px-2\.5 { padding-left: var(--space-3); padding-right: var(--space-3); }
-.px-3\.5 { padding-left: var(--space-4); padding-right: var(--space-4); }
-
-.space-y-1\.5 > * + * { margin-top: var(--space-2); }
-.space-y-3\.5 > * + * { margin-top: var(--space-4); }
-
 .flex { display: flex; }
 .items-center { align-items: center; }
 .justify-between { justify-content: space-between; }
 .grid { display: grid; }
 
 .h-full { height: 100%; }
-.h-1\.5 { height: 6px; }
 .block { display: block; }
 .inline-block { display: inline-block; }
 
@@ -6540,35 +6525,7 @@ select option {
   overscroll-behavior: contain;
 }
 
-.w-1\.5 { width: 6px; }
-.h-1\.5 { height: 6px; }
-
 .bg-appbg { background-color: var(--bg-canvas); }
-
-.bg-surface2\/60 { background-color: color-mix(in srgb, var(--shadow-ink) 60%, transparent); }
-.bg-surface1\/30 { background-color: color-mix(in srgb, var(--bg-canvas) 30%, transparent); }
-.bg-surface1\/40 { background-color: color-mix(in srgb, var(--shadow-ink) 40%, transparent); }
-.bg-surface1\/60 { background-color: color-mix(in srgb, var(--shadow-ink) 60%, transparent); }
-.bg-appleblue\/90 { background-color: color-mix(in srgb, var(--accent) 90%, transparent); }
-
-.bg-applered\/10 { background-color: color-mix(in srgb, var(--danger) 10%, transparent); }
-.bg-applered\/20 { background-color: color-mix(in srgb, var(--danger) 20%, transparent); }
-.bg-appleamber\/10 { background-color: color-mix(in srgb, var(--warn) 10%, transparent); }
-.bg-appleamber\/20 { background-color: color-mix(in srgb, var(--warn) 20%, transparent); }
-.bg-applegreen\/10 { background-color: color-mix(in srgb, var(--success) 10%, transparent); }
-.bg-applegreen\/20 { background-color: color-mix(in srgb, var(--success) 20%, transparent); }
-.bg-black\/15 { background-color: color-mix(in srgb, var(--shadow-ink) 15%, transparent); }
-.bg-black\/20 { background-color: color-mix(in srgb, var(--shadow-ink) 20%, transparent); }
-.bg-black\/25 { background-color: color-mix(in srgb, var(--shadow-ink) 25%, transparent); }
-.bg-black\/30 { background-color: color-mix(in srgb, var(--shadow-ink) 30%, transparent); }
-.bg-black\/40 { background-color: color-mix(in srgb, var(--shadow-ink) 40%, transparent); }
-.bg-white\/5 { background-color: color-mix(in srgb, var(--text-primary) 5%, transparent); }
-.bg-white\/10 { background-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
-.bg-white\/20 { background-color: color-mix(in srgb, var(--text-primary) 20%, transparent); }
-.bg-white\/25 { background-color: color-mix(in srgb, var(--text-primary) 25%, transparent); }
-.bg-white\/30 { background-color: color-mix(in srgb, var(--text-primary) 30%, transparent); }
-.bg-white\/\[0\.06\] { background-color: color-mix(in srgb, var(--text-primary) 6%, transparent); }
-.bg-white\/\[0\.08\] { background-color: color-mix(in srgb, var(--text-primary) 8%, transparent); }
 
 .border { border-width: 1px; }
 
@@ -6576,30 +6533,10 @@ select option {
 .border-b { border-bottom-width: 1px; }
 .border-t { border-top-width: 1px; }
 
-.border-white\/5 { border-color: color-mix(in srgb, var(--text-primary) 5%, transparent); }
-.border-white\/10 { border-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
-.border-white\/20 { border-color: color-mix(in srgb, var(--text-primary) 20%, transparent); }
-.border-white\/\[0\.04\] { border-color: color-mix(in srgb, var(--text-primary) 4%, transparent); }
-.border-white\/\[0\.06\] { border-color: color-mix(in srgb, var(--text-primary) 6%, transparent); }
-.border-white\/\[0\.08\] { border-color: color-mix(in srgb, var(--text-primary) 8%, transparent); }
-.border-appleblue\/20 { border-color: color-mix(in srgb, var(--accent) 20%, transparent); }
-.border-applered\/20 { border-color: color-mix(in srgb, var(--danger) 20%, transparent); }
-.border-applered\/40 { border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
-.border-appleamber\/20 { border-color: color-mix(in srgb, var(--warn) 20%, transparent); }
-.border-applegreen\/20 { border-color: color-mix(in srgb, var(--success) 20%, transparent); }
 .text-white { color: var(--text-on-solid); }
-.text-white\/20 { color: color-mix(in srgb, var(--text-primary) 20%, transparent); }
-.text-white\/30 { color: color-mix(in srgb, var(--text-primary) 30%, transparent); }
-.text-white\/40 { color: color-mix(in srgb, var(--text-primary) 40%, transparent); }
-.text-white\/45 { color: color-mix(in srgb, var(--text-primary) 45%, transparent); }
-.text-white\/50 { color: color-mix(in srgb, var(--text-primary) 50%, transparent); }
-.text-white\/60 { color: color-mix(in srgb, var(--text-primary) 60%, transparent); }
-.text-white\/70 { color: color-mix(in srgb, var(--text-primary) 70%, transparent); }
-.text-white\/80 { color: color-mix(in srgb, var(--text-primary) 80%, transparent); }
 .text-white\/90 { color: color-mix(in srgb, var(--text-primary) 90%, transparent); }
 
 .text-\[13px\] { font-size: var(--text-sm); line-height: 1.5; }
-.text-\[15px\] { font-size: var(--text-base); line-height: 1.5; }
 
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .select-none { user-select: none; }
@@ -6607,23 +6544,8 @@ select option {
 .relative { position: relative; }
 .absolute { position: absolute; }
 .fixed { position: fixed; }
-.left-2\.5 { left: 10px; }
-.right-2\.5 { right: 10px; }
 
 .p-1 { padding: var(--space-1); }
-
-.p-3\.5 { padding: var(--space-4); }
-.px-1\.5 { padding-left: var(--space-2); padding-right: var(--space-2); }
-
-.px-2\.5 { padding-left: var(--space-3); padding-right: var(--space-3); }
-
-.px-3\.5 { padding-left: var(--space-4); padding-right: var(--space-4); }
-
-.py-0\.5 { padding-top: var(--space-1); padding-bottom: var(--space-1); }
-
-.py-1\.5 { padding-top: var(--space-2); padding-bottom: var(--space-2); }
-
-.py-2\.5 { padding-top: var(--space-3); padding-bottom: var(--space-3); }
 
 .flex-1 { flex: 1 1 0%; }
 .flex-col { flex-direction: column; }
@@ -6632,53 +6554,19 @@ select option {
 .items-center { align-items: center; }
 
 .justify-between { justify-content: space-between; }
-.gap-1\.5 { gap: var(--space-2); }
 
-.space-x-1\.5 > * + * { margin-left: var(--space-2); }
-
-.space-x-2\.5 > * + * { margin-left: var(--space-3); }
 .space-x-3 > * + * { margin-left: var(--space-3); }
-
-.space-y-1\.5 > * + * { margin-top: var(--space-2); }
-
-.space-y-2\.5 > * + * { margin-top: var(--space-3); }
-
-.space-y-3\.5 > * + * { margin-top: var(--space-4); }
-
-.grid-cols-\[1fr_2fr_1fr\] { grid-template-columns: 1fr 2fr 1fr; }
 
 .overflow-hidden { overflow: hidden; }
 .rounded { border-radius: var(--radius-sm); }
 
 .transition { transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease; }
-.hover\:bg-white\/10:hover { background-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
-.hover\:bg-white\/20:hover { background-color: color-mix(in srgb, var(--text-primary) 20%, transparent); }
-.hover\:bg-white\/\[0\.06\]:hover { background-color: color-mix(in srgb, var(--text-primary) 6%, transparent); }
-.hover\:bg-appleblue\/90:hover { background-color: color-mix(in srgb, var(--accent) 90%, transparent); }
-.hover\:border-white\/25:hover { border-color: color-mix(in srgb, var(--text-primary) 25%, transparent); }
-.hover\:border-applered\/40:hover { border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
-.hover\:text-white:hover { color: var(--text-on-solid); }
-.hover\:underline:hover { text-decoration: underline; }
-.placeholder-white\/30::placeholder { color: color-mix(in srgb, var(--text-primary) 30%, transparent); }
-.focus\:outline-none:focus { outline: none; }
 
 @keyframes preview-pulse {
   50% { opacity: 0.5; }
 }
 
 .hidden { display: none; }
-
-@media (min-width: 640px) {
-  .sm\:inline { display: inline; }
-}
-
-@media (min-width: 768px) {
-  .md\:flex { display: flex; }
-}
-
-@media (min-width: 1024px) {
-  .lg\:block { display: block; }
-}
 
 @media (max-width: 640px) {
   .kpi-grid,
@@ -6708,16 +6596,7 @@ select option {
    Kept at the very end so it wins over every earlier layer.
    ========================================================================== */
 
-.mt-0\.5 { margin-top: var(--space-1); }
 .h-screen { height: 100vh; }
-
-.w-2\.5 { width: 10px; }
-.h-2\.5 { height: 10px; }
-
-.max-h-\[500px\] { max-height: 500px; }
-
-.bg-appleblue\/10 { background-color: color-mix(in srgb, var(--accent) 10%, transparent); }
-.bg-appleblue\/20 { background-color: color-mix(in srgb, var(--accent) 20%, transparent); }
 
 .settings-bento {
   grid-template-columns: repeat(4, minmax(0, 1fr));
