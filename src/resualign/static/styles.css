@@ -1,3 +1,1250 @@
+@layer reset, tokens, base, layout, components, patterns, utilities, overrides;
+
+@layer tokens {
+/* B1a: canonical design tokens are inlined ahead of the migration bridge.
+   Light is the default theme; [data-theme="dark"] / html.dark explicitly remap it.
+   The legacy declarations below win for every name they already own, so this
+   batch changes the token architecture without changing current rendering. */
+/* =====================================================================
+   ResuAlign · Design Tokens
+   ---------------------------------------------------------------------
+   视觉方向：Linear 式高密度工作台（Product 寄存器 / Web 平台 / 深色为默认设计面）
+   交付形态：原生 CSS 自定义属性，零构建（无 Sass / PostCSS / Tailwind）
+   承载形态：施工时本文件内容内联进 src/resualign/static/styles.css 顶部的
+   @layer tokens；不新增第二份 <link>，也不使用 @import（ADR-0043 决定 6）。
+   本文件是**颜色字面量的唯一来源**。design-tokens.css 之外，
+   src/resualign/static/ 下任何文件不得再出现 #hex / rgb() / hsl() 字面量
+   （含 JS 模板里的内联 style 字符串）。检查方式见 03_设计系统与布局方案.md 第 9 节。
+
+   分层（四层 Token 架构）：
+     A1-identity  品牌身份：底阶 / 前景 / 强调色 / 字体   —— 变更极少
+     A1-structure 结构：字号 / 间距 / 圆角 / 栅格        —— 产品重构时变更
+     A2           有默认值的结构或语义                    —— 可被主题重映射
+     B-slot       组件别名（指向 A 层，不新造字面量）
+     C-extension  本项目专属扩展（序数色阶、纸面语义）
+   ===================================================================== */
+
+
+/* =====================================================================
+   1. 主题无关常量（明暗都不变；在 :root 声明一次，[data-theme="light"] 不重声明）
+   ===================================================================== */
+
+:root {
+  /* ---- 字体族 A1-identity -------------------------------------------------
+     寄存器说明：Product 寄存器按 reference/design-commands.md §1「字体一族往往够用」，
+     本项目定「一族 UI 字体 + 一族等宽数字字体」两个字体族，不引入展示字体。
+     离线约束：本产品本地运行、数据不出本地，禁止引用远程字体 CDN（会产生外部请求
+     且在离线时字体回退不可控）。因此：
+       - --font-ui    Latin 用自托管 Inter Variable（OFL），随包放 /static/fonts/
+       - --font-cjk   中文用系统 CJK 字体栈（PingFang SC / HarmonyOS Sans /
+                      MiSans / Microsoft YaHei / Noto Sans CJK）。CJK webfont
+                      单字重 8–16MB，离线工具不值得付这个体积与解码成本；
+                      上述系统字体在中文排版上均为高质量正文字面。
+       - --font-mono  自托管 JetBrains Mono（OFL），只为「数字必须等宽对齐」
+                      这一功能需求存在（分数 / 计数 / 日期 / 成本）。
+     【施工落点】B1 在 @layer tokens 顶部补两个 @font-face：Inter Variable
+     与 JetBrains Mono，woff2 与 OFL 许可文件放 src/resualign/static/fonts/。
+     font-display 取值与许可文件命名见施工单 §8；禁止远程字体 CDN。
+     禁止：把 --font-ui 直接写成 sans-serif 或 system-ui 了事（等同无品牌字体决策）。 */
+  --font-ui: "Inter Variable", "Inter", "PingFang SC", "HarmonyOS Sans SC", "MiSans",
+             "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-cjk: "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI",
+              "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Mono", Consolas,
+               "Liberation Mono", monospace;
+  /* 数字专用栈：分数 / 计数 / 金额 / 日期。tabular-nums 必须与 --font-mono 同时启用。 */
+  --font-num: "JetBrains Mono", "Inter Variable", "PingFang SC", monospace;
+
+  /* ---- 字号阶 A1-structure（8 级；Product 寄存器步进比 ≈1.12–1.14，固定 rem） ----
+     根字号 16px。DENSE 区（UI chrome）用 11–14px；READ 区（JD 原文 / 简历正文 /
+     差异内容）用 16px 起，保证长文本可读性。两套不混用：chrome 不得 >14px，
+     reading 不得 <15px。
+     【与架构方案对齐】档数与命名采用 02_架构方案_CSS.md §2.4-F 的 8 档
+     （2xs/xs/sm/base/lg/xl/2xl/3xl），最大档 24px。原 32px 档已取消：
+     Product 寄存器 + 密度 7 下 24px 足以承担 KPI 与主分数，少一档更符合收敛目标。 */
+  --text-2xs: 0.6875rem; /* 11px  仅：徽标内文字、图表刻度、meter 内数值 */
+  --text-xs:  0.75rem;   /* 12px  元数据、表格表头、字段标签、次级说明 */
+  --text-sm:  0.8125rem; /* 13px  UI 默认：按钮、导航、卡片标题、表单输入 */
+  --text-base:0.875rem;  /* 14px  面板正文、区块标题 */
+  --text-lg:  1rem;      /* 16px  READ 区正文（JD / 简历 / 差异条目） */
+  --text-xl:  1.125rem;  /* 18px  区块主标题 */
+  --text-2xl: 1.25rem;   /* 20px  页面标题（顶栏 h2） */
+  --text-3xl: 1.5rem;    /* 24px  KPI 数值 / 主分数（上限） */
+
+  /* ---- 行高 A1-structure（随字号反比） ---- */
+  --lead-hero:     1.2;   /* 24px 以上数值/标题 */
+  --lead-tight:    1.3;   /* 18–20px 标题 */
+  --lead-snug:     1.45;  /* 13–14px UI 正文 */
+  --lead-normal:   1.55;  /* 16px READ 区正文（CJK 需要更松） */
+  --lead-relaxed:  1.7;   /* 长文本 / 简历段落 */
+
+  /* ---- 字重 A1-structure（三级：Read / Emphasize / Announce） ---- */
+  --fw-read:     400; /* 正文、说明、描述 */
+  --fw-emphasize:500; /* 按钮文字、表头、字段标签、小标题 */
+  --fw-announce: 600; /* 页面标题、面板标题、KPI 数值 */
+
+  /* ---- 字间距 A1-structure ----
+     全大写拉丁（KPI 单位、表头英文缩写）必须 >=0.06em；中文标题不得用正字距。
+     本产品大量中文，因此「大写追踪标签」不作为主要层级手段（避免 AI 语法）。 */
+  --track-tight:  -0.011em; /* 16px 以上标题 */
+  --track-normal: 0;
+  --track-loose:  0.01em;   /* 11–12px 小字 */
+  --track-caps:   0.07em;   /* 全大写拉丁标签 */
+
+  /* ---- 间距阶 A1-structure（4px 基准网格；仅允许下列值） ----
+     现状：styles.css 已有 --space-1..--space-12 定义但零引用。本次重新裁定刻度
+     并要求新代码真的使用；同时禁止 5/7/9/11/13/15/22/30 等非标值。 */
+  --space-0:  0;
+  --space-1:  4px;   /* 图标与文字、徽标内边距 */
+  --space-2:  8px;   /* 同组元素（按钮组、chip 组） */
+  --space-3:  12px;  /* 表单元素之间、卡片内块间距 */
+  --space-4:  16px;  /* 卡片内边距、栅格 gutter */
+  --space-5:  20px;  /* 面板内边距 */
+  --space-6:  24px;  /* 区块之间 */
+  --space-8:  32px;  /* 大区块之间、空态内边距 */
+  --space-10: 40px;  /* 页面级留白 */
+  --space-12: 48px;  /* 最大留白（空态 / 大屏区块） */
+  --space-16: 64px;  /* 仅用于空态呼吸与大屏顶部偏移 */
+  --space-hairline: 1px;
+
+  /* ---- 圆角阶 A1-structure ----
+     Linear 式：小圆角。卡片上限 12px（禁止 >=24px 的「AI 过度圆滑」）。 */
+  --radius-xs:   2px;    /* meter 轨道、进度条、tab 指示条 */
+  --radius-sm:   4px;    /* 徽标 / 标签 / chip */
+  --radius-md:   6px;    /* 按钮 / 输入框 / 自绘 select —— 主力档 */
+  --radius-lg:   8px;    /* 卡片 / 看板列 / 下拉面板（= 架构方案 --ra-radius-card） */
+  --radius-xl:   12px;   /* 面板 / 抽屉（= 架构方案 --ra-radius-panel） */
+  --radius-2xl:  16px;   /* 模态 / 命令面板（= 架构方案 --ra-radius-modal） */
+  --radius-pill: 999px;  /* 仅：胶囊标签、头像、开关、计数徽标 */
+
+  /* ---- 动效 A1-structure（禁止弹跳 / 弹性缓动） ---- */
+  --dur-instant: 80ms;   /* 按钮按下、开关切换 */
+  --dur-fast:   120ms;   /* hover / focus / 选中态 */
+  --dur-base:   160ms;   /* 下拉展开、Toast 进入、抽屉滑入（收敛值 150–200ms） */
+  --dur-slow:   240ms;   /* 跨区布局变化、看板列折叠 */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);    /* 通用 */
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);  /* 进入 */
+  --ease-in-out:   cubic-bezier(0.4, 0, 0.2, 1);   /* 跨屏 / 位移 */
+  /* 缓动禁令：禁止任何 bounce / elastic / back 类回弹曲线（即控制点带负值或
+     超出 [0,1] 的曲线）。允许的缓动曲线只有上面三条。
+     位移方向必须与语义一致：进入从 8px 内滑入，不是从 40px 弹入。 */
+
+  /* ---- 层级刻度 A1-structure ----
+     现状 12 个散值（-1/1/5/20/30/40/50/60/80/90/200/300）收敛为 8 级并命名。 */
+  --z-below:    -1;  /* 装饰背景（网格线、纹理），不接事件 */
+  --z-base:      0;
+  --z-sticky:   10;  /* 页头、看板列头、表格表头 */
+  --z-rail:     20;  /* 左侧导航栏 */
+  --z-dropdown: 30;  /* 自绘 select 面板、菜单、popover */
+  --z-drawer:   40;  /* 侧滑抽屉 */
+  --z-modal:    50;  /* 居中模态及其遮罩 */
+  --z-popover:  60;  /* 模态之上仍需浮出的层（模态内的 select / tooltip） */
+  --z-toast:    70;  /* 全局 Toast */
+
+  /* ---- 栅格 A1-structure ---- */
+  --rail-w:           224px; /* 终值（ADR-0044 决定 10）：4px 网格倍数、1440 宽屏多出
+                                16px 内容宽。实测现状生效值为 230px（v3.1 层）；
+                                alignment-gap.test.mjs:121 锁定的 240px 命中的是被覆盖定义。
+                                该测试须改为断言 .app-rail 必须引用 --rail-w。 */
+  --rail-w-compact:   64px;  /* 1024–1279 仅图标模式 */
+  --content-max:      1560px;/* 主内容最大宽度；超过此值内容居中，不再拉宽 */
+  --gutter:           16px;  /* <1280 */
+  --gutter-wide:      20px;  /* >=1280 */
+  --gutter-xwide:     24px;  /* >=1440 */
+  --col-gap:          16px;  /* 12 列栅格列间距 */
+  --col-gap-wide:     20px;  /* >=1440 */
+  --board-col-min:    228px; /* 看板列最小宽（1440 下 5×228+4×16=1204 可容纳） */
+  --board-col-max:    320px;
+  --sheet-max:        794px; /* A4 @96dpi 精确宽度，简历预览不再随视口拉宽 */
+  --inspector-w:      320px; /* 工作台 / 简历中心右侧检查器固定宽 */
+  --form-max:         880px; /* 设置页字段行最大宽（超出即失控） */
+
+  /* ---- 控件高度 A1-structure ----
+     现状按钮并存 36/38/40/44 四种高度 → 裁到 4 档（24/28/32/36）。 */
+  --control-h-xs: 24px; /* 表格行内图标按钮、看板卡片右上角动作 */
+  --control-h-sm: 28px; /* 工具栏、次级按钮、紧凑输入框 */
+  --control-h-md: 32px; /* 默认按钮 / 输入框 / select */
+  --control-h-lg: 36px; /* 页面级主操作（每屏至多一个） */
+
+  /* ---- 命中区 A2（触摸最小 44×44；视觉可小于此，用 padding 或 ::after 扩大） ---- */
+  --hit-min: 44px;
+  --hit-expand: 8px; /* 视觉 28px 控件向四周扩展 8px 达到 44px 的做法 */
+
+  /* ---- 焦点环 A1-identity（现状 7 处 outline:none 造成键盘焦点丢失） ----
+     【与架构方案对齐】采用 `outline` 而非 `box-shadow`（02_架构方案_CSS.md §2.4-I）。
+     理由：box-shadow 焦点环会被任意 overflow:hidden 祖先裁切（本产品大量使用），
+     且在 Windows 高对比 / forced-colors 模式下不渲染；outline 两者皆可。
+     禁止 box-shadow 焦点环。 */
+  --focus-ring-w: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color: var(--accent);
+  --focus-ring-outline: var(--focus-ring-w) solid var(--focus-ring-color);
+  --focus-ring: var(--focus-ring-outline); /* 组件统一引用此别名 */
+
+  /* ---- 图标 A1-structure ----
+     尺寸三档（16 / 20 / 24）+ 一个受限例外 12px（仅 meter / 徽标内部）。
+     描边统一 1.75（24 网格基准），随 viewBox 等比缩放；fill: none; currentColor。 */
+  --ic-2xs: 12px; /* 受限：仅进度条内对勾、徽标内警示 */
+  --ic-sm:  16px; /* 行内：与 13–14px 文字并排、表格单元格内 */
+  --ic-md:  20px; /* 按钮内、导航项、字段前缀 */
+  --ic-lg:  24px; /* 独立图标位、空态、页头动作 */
+  --ic-stroke: 1.75;
+  --ic-gap: var(--space-1); /* 图标与文字的间距 */
+
+  /* ---- 主题无关的「纸面」语义（C-extension） ----
+     A4 简历预览、打印根、导出 PDF 的预览面。纸张恒为白纸黑字，
+     不随 app 主题切换 —— 它是「文档」语义，不是「界面表面」语义。
+     [data-theme="light"] 中禁止重声明这些 token。 */
+  --paper-bg:     #FFFFFF;
+  --paper-ink:    #14171C;
+  --paper-ink-2:  #4C5561;
+  --paper-line:   #D6DAE1;
+  --paper-accent: #0E7C8F;
+  /* 纸面网格/参考线（仅 --paper-bg 上使用） */
+  --paper-grid:   #EDEFF3;
+}
+
+:root{
+
+  /* 中性底阶：反相 —— 浅色下「越靠近用户越亮」 */
+  --bg-app:        #EFEFF2;
+  --bg-canvas:     #F7F8FA;
+  --surface-1:     #FFFFFF;
+  --surface-2:     #F7F8FA;
+  --surface-3:     #FFFFFF;
+  --surface-4:     #F2F3F6;
+  --surface-inset: #F4F5F8;
+  --surface-rail:  #F0F1F4;
+  --surface-hover:  rgba(15, 18, 22, 0.038);
+  --surface-active: rgba(15, 18, 22, 0.068);
+
+  /* 描边阶 */
+  --line-faint:  #EDEFF3;
+  --line-subtle: #E2E5EA;
+  --line:        #D6DAE1;
+  --line-strong: #BFC5CE;
+  --line-accent: #5FA9B7;
+
+  /* 前景阶 */
+  --text-primary:   #14171C;
+  --text-secondary: #4C5561;
+  --text-tertiary:  #6A7381;
+  --text-faint:     #99A1AC;
+  --text-disabled:  #B6BCC5;
+  --text-on-accent: #FFFFFF;
+  --text-on-solid:  #FFFFFF;
+
+  /* 强调色：浅底上需要更深的实底才能承载白字（#0E7C8F on #FFF = 4.9:1） */
+  --accent:        #0E7C8F;
+  --accent-hover:  #0C6D7E;
+  --accent-active: #0A5F6E;
+  --accent-text:   #0B6C7D;
+  --accent-soft:   #E2F3F6;
+  --accent-faint:  #F0F9FB;
+  --accent-line:   #8CCBD6;
+  --accent-on:     #FFFFFF;
+
+  /* 状态色：为浅底重新取值（深色主题的那组在浅底上对比度不足） */
+  --success:      #1A7F4B;
+  --success-soft: #E7F5EC;
+  --success-line: #A8D9BC;
+  --warn:         #96650C;
+  --warn-soft:    #FBF2DF;
+  --warn-line:    #E3C684;
+  --danger:       #C0392F;
+  --danger-soft:  #FCEBE9;
+  --danger-line:  #EDB7B2;
+  --info:         #1F6FB8;
+  --info-soft:    #E7F1FA;
+  --info-line:    #A9CBEA;
+
+  /* 序数色阶：hue 顺序与语义完全不变，只调 lightness 以适配白底 */
+  --ord-1: #C4393F;
+  --ord-2: #B5641F;
+  --ord-3: #8F7314;
+  --ord-4: #4F7D22;
+  --ord-5: #1A7F4B;
+  --ord-track: #E7EAEF;
+  --match-soft: var(--ord-track); /* 匹配徽标软底；浅色主题同步 */
+
+  /* 效果色 */
+  --scrim:     rgba(15, 18, 22, 0.32);
+  --glow-soft: rgba(14, 124, 143, 0.10);
+
+  /* 阴影阶：浅底阴影用低透明度、更紧的扩散 */
+  --shadow-popover: 0 8px 24px -6px rgba(15, 18, 22, 0.14), 0 1px 2px rgba(15, 18, 22, 0.06);
+  --shadow-modal:   0 16px 48px -12px rgba(15, 18, 22, 0.18), 0 2px 6px rgba(15, 18, 22, 0.06);
+  --shadow-toast:   0 6px 20px -6px rgba(15, 18, 22, 0.16);
+  --shadow-drag:    0 12px 28px -8px rgba(15, 18, 22, 0.20);
+
+  /* 图形：浅底上的下箭头与搜索图标需要更深的描边色 */
+  --glyph-chevron-down: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236A7381' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6.25 8 10.25l4-4'/%3E%3C/svg%3E");
+  --glyph-check: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23FFFFFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.5 8.5 3 3 6-6.5'/%3E%3C/svg%3E");
+  --glyph-search: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236A7381' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='7' cy='7' r='4.25'/%3E%3Cpath d='m10.5 10.5 3 3'/%3E%3C/svg%3E");
+}
+
+[data-theme="dark"]{
+
+  /* ---- 中性底阶 A1-identity ----
+     带极微量冷色偏移（趋向强调色 hue），避免死灰。每一阶只有一个用途。 */
+  --bg-app:        #08090B; /* 应用最底层（rail 与画布之外的窗口底） */
+  --bg-canvas:     #0B0D11; /* 视图滚动区底色 = 页面背景。所有 content 的基准面 */
+  --surface-1:     #101317; /* 一级表面：卡片、面板、看板列托盘 */
+  --surface-2:     #15181E; /* 二级表面：卡内嵌块、表头、行 hover 的静态底 */
+  --surface-3:     #1A1E25; /* 三级表面：浮层底（popover / dropdown / modal / drawer / toast） */
+  --surface-4:     #20242C; /* 四级表面：浮层内部控件底、listbox 选中项 */
+  --surface-inset: #0C0E12; /* 凹陷面：JD 原文、代码块、A4 纸面外槽 */
+  --surface-rail:  #0A0C0F; /* 左侧导航栏底（比 canvas 更暗，压出层级） */
+  /* 仅有的两个透明叠加色：只允许作为「瞬态交互叠加层」，铺在某个 surface 之上，
+     禁止作为元素的基础填充色。现状 19 处 rgba(255,255,255,.08) 等一并收敛至此。 */
+  --surface-hover:  rgba(255, 255, 255, 0.040); /* hover 底 */
+  --surface-active: rgba(255, 255, 255, 0.070); /* pressed 底 */
+
+  /* ---- 描边阶 A1-identity（承担全部层级职责） ---- */
+  --line-faint:  #14171C; /* 区内行分隔：表格行、列表项、字段行 */
+  --line-subtle: #1C2027; /* 卡内嵌块边框、虚线落区 */
+  --line:        #252A32; /* 默认描边：卡片 / 面板 / 输入框 / 看板列 */
+  --line-strong: #333944; /* 强调描边：hover 边框、分组下沿 */
+  --line-accent: #1F7F90; /* 选中/激活的 1px 环（替代发光边框） */
+
+  /* ---- 前景阶 A1-identity ---- */
+  --text-primary:   #E6EAF0; /* 标题、正文、数据值。不用 #fff */
+  --text-secondary: #9BA5B4; /* 次级文字、字段标签、表头 */
+  --text-tertiary:  #7E8894; /* 三级：辅助说明、时间戳、计数单位（对 surface-1 对比度 5.15:1） */
+  --text-faint:     #5A626C; /* 仅：分隔符、图标描边、装饰。不作正文（对比度 3.0:1） */
+  --text-disabled:  #454C56; /* 禁用态文字 */
+  --text-on-accent: #04242B; /* 强调色实底上的前景（深色主题下为深色，保障 5.8:1） */
+  --text-on-solid:  #08090B; /* 亮色实底（如序数色实底）上的前景 */
+
+  /* ---- 强调色 A1-identity ----
+     单一强调色，冷青（hue ≈ 190）。用于：主操作、当前选中、链接、focus、
+     以及数据语义的「命中级」标记。每屏可见强调色使用 <=2 处。
+     全系统零渐变：本项目不提供任何 gradient token。 */
+  --accent:        #1FA8BC; /* 实底（主按钮、选中指示条） */
+  --accent-hover:  #2CBACF;
+  --accent-active: #178EA0;
+  --accent-text:   #4FC3D4; /* 深底上作为「文字色」使用（比实底更亮，保证 >=4.5:1） */
+  --accent-soft:   #0B333B; /* 淡底：选中行、active 导航项背景 */
+  --accent-faint:  #072127; /* 更淡：hover 预填、行内高亮 */
+  --accent-line:   #1F7F90; /* 强调描边 */
+  --accent-on:     #04242B; /* 强调实底上的前景（= --text-on-accent 语义别名） */
+
+  /* ---- 状态色 A2（离散状态专用） ----
+     只渲染为三种语法：6px 圆点 / 1px 描边徽标 / 细边框着色。
+     禁止把状态色用于 meter 填充（meter 属于序数语义，见 --ord-*）。 */
+  --success:      #3FB950; /* 成功、已完成、已验证 */
+  --success-soft: #0E2A18;
+  --success-line: #1E5B31;
+  --warn:         #D9A43C; /* 警告、待处理、临期 */
+  --warn-soft:    #2B2210;
+  --warn-line:    #6B511C;
+  --danger:       #F0555C; /* 错误、失败、删除、超期 */
+  --danger-soft:  #2E1417;
+  --danger-line:  #6E2226;
+  --info:         #4E9BF0; /* 中性提示（与 --accent 明确区分：info 是蓝，accent 是青） */
+  --info-soft:    #10233B;
+  --info-line:    #23496F;
+
+  /* ---- 序数色阶 C-extension（数值即语义） ----
+     统一服务所有「0–100 连续数值」：简历匹配分、ATS 分、技能覆盖率、
+     对齐完成度、四维匹配分。五档，语义固定，不得按视觉喜好换色。
+     渲染语法固定为两种：meter 填充 / 数值文字着色。禁止作为徽标实底。
+     与状态色的关系：状态色管「是什么」，序数色管「有多好」；两者不共用 token。 */
+  --ord-1: #E0525A; /* 0–39   严重不匹配 */
+  --ord-2: #DE7A3C; /* 40–59  偏低 */
+  --ord-3: #D2A33C; /* 60–74  中等 */
+  --ord-4: #86B24E; /* 75–84  良好 */
+  --ord-5: #3FB950; /* 85–100 优秀 */
+  --ord-track: #191D23; /* meter 轨道底 */
+  --match-soft: var(--ord-track); /* 匹配徽标软底；不新增色相，作为 C-extension 组件别名 */
+
+  /* ---- 效果色 A2（<1% 表面积） ---- */
+  --scrim:      rgba(0, 0, 0, 0.55);   /* 模态/抽屉遮罩 */
+  --glow-soft:  rgba(31, 168, 188, 0.10); /* 唯一允许的光晕：聚焦/选中底纹，<=10% */
+
+  /* ---- 阴影阶 A2（Linear 式：极度克制） ----
+     允许使用场景（穷举，不得扩用）：
+       1) --shadow-popover  脱离文档流的下拉/菜单/自绘 select 面板
+       2) --shadow-modal    模态、抽屉
+       3) --shadow-toast    全局 Toast
+       4) --shadow-drag     拖拽中的看板卡片
+     禁止使用场景：卡片、面板、看板列、按钮、输入框、导航栏、表头。
+     以上一律以 --line 描边 + 底阶亮度差建立层级。 */
+  --shadow-none:    none;
+  --shadow-popover: 0 8px 24px -6px rgba(0, 0, 0, 0.55);
+  --shadow-modal:   0 16px 48px -12px rgba(0, 0, 0, 0.68);
+  --shadow-toast:   0 6px 20px -6px rgba(0, 0, 0, 0.50);
+  --shadow-drag:    0 12px 28px -8px rgba(0, 0, 0, 0.60);
+
+  /* ---- 字体：数字栈在深色下需升一档字重（暗底亮字感知重量下降） ---- */
+  --num-weight-bump: 0; /* 深色主题不需字重补偿（对比度足够） */
+
+  /* ---- 自绘控件图形（data URI 是色值字面量的合法居所，本文件内） ----
+     select 下箭头：覆盖原生控件外观的关键一步 */
+  --glyph-chevron-down: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%237E8894' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6.25 8 10.25l4-4'/%3E%3C/svg%3E");
+  --glyph-check: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23080B0C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.5 8.5 3 3 6-6.5'/%3E%3C/svg%3E");
+  --glyph-search: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%237E8894' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='7' cy='7' r='4.25'/%3E%3Cpath d='m10.5 10.5 3 3'/%3E%3C/svg%3E");
+}
+
+:root {
+  /* 导航（左侧 rail） */
+  --nav-item-h:       32px;
+  --nav-item-fg:      var(--text-secondary);
+  --nav-item-fg-on:   var(--text-primary);
+  --nav-item-bg-hover:var(--surface-hover);
+  --nav-item-bg-on:   var(--accent-soft);
+  --nav-item-line-on: var(--accent);
+
+  /* 页头 */
+  --topbar-h:      52px;
+  --topbar-bg:     var(--bg-canvas);
+  --topbar-line:   var(--line-faint);
+
+  /* 按钮 */
+  --btn-h-sm:      var(--control-h-sm);
+  --btn-h-md:      var(--control-h-md);
+  --btn-h-lg:      var(--control-h-lg);
+  --btn-radius:    var(--radius-md);
+  --btn-fs:        var(--text-sm);
+  --btn-fw:        var(--fw-emphasize);
+  --btn-primary-bg:      var(--accent);
+  --btn-primary-fg:      var(--accent-on);
+  --btn-primary-bg-hover:var(--accent-hover);
+  --btn-primary-bg-active:var(--accent-active);
+  --btn-secondary-bg:      var(--surface-2);
+  --btn-secondary-fg:      var(--text-primary);
+  --btn-secondary-line:    var(--line);
+  --btn-ghost-fg:          var(--text-secondary);
+  --btn-ghost-bg-hover:    var(--surface-hover);
+  --btn-danger-bg:         var(--danger-soft);
+  --btn-danger-fg:         var(--danger);
+
+  /* 输入 / 自绘 select */
+  --field-h-sm:     var(--control-h-sm);
+  --field-h-md:     var(--control-h-md);
+  --field-radius:   var(--radius-md);
+  --field-bg:       var(--surface-1);
+  --field-bg-disabled: var(--surface-2);
+  --field-fg:       var(--text-primary);
+  --field-placeholder: var(--text-faint);
+  --field-line:     var(--line);
+  --field-line-hover:  var(--line-strong);
+  --field-line-focus:  var(--accent-line);
+  --field-line-error:  var(--danger);
+  --field-label-fs: var(--text-xs);
+  --field-label-fg: var(--text-secondary);
+  --field-help-fs:  var(--text-xs);
+  --field-help-fg:  var(--text-tertiary);
+
+  /* 卡片 / 面板 */
+  --card-bg:        var(--surface-1);
+  --card-line:      var(--line);
+  --card-line-hover:var(--line-strong);
+  --card-radius:    var(--radius-lg);
+  --card-pad:       var(--space-4);
+  --panel-head-h:   40px;
+  --panel-head-line:var(--line-faint);
+
+  /* 徽标 / 标签 */
+  --tag-h:      20px;
+  --tag-radius: var(--radius-sm);
+  --tag-fs:     var(--text-2xs);
+  --tag-pad-x:  var(--space-2);
+
+  /* 表格 */
+  --table-head-h:   32px;
+  --table-row-h:    36px;
+  --table-row-h-dense: 32px;
+  --table-head-fg:  var(--text-tertiary);
+  --table-row-line: var(--line-faint);
+
+  /* 看板 */
+  --kanban-head-h:  36px;
+  --kanban-gap:     var(--space-3);
+
+  /* 空态 */
+  --empty-min-h:   160px;
+  --empty-pad:     var(--space-8);
+  --empty-title-fg:var(--text-secondary);
+  --empty-body-fg: var(--text-tertiary);
+  --empty-drop-line: var(--line-subtle);
+
+  /* 加载 */
+  --skeleton-bg:  var(--surface-2);
+  --skeleton-hi:  var(--surface-4);
+
+  /* 浮层 */
+  --overlay-bg:   var(--surface-3);
+  --overlay-line: var(--line);
+  --overlay-radius: var(--radius-xl);
+  --drawer-w:     400px;
+  --modal-w-md:   520px;
+  --modal-w-lg:   680px;
+  --toast-w:      320px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 1ms;
+    --dur-fast: 1ms;
+    --dur-base: 1ms;
+    --dur-slow: 1ms;
+  }
+}
+
+:root{
+
+  /* ---- 表面 --ra-surface-* ----
+     语义映射（架构参照名 → 本文件 canonical 名）：
+       --ra-surface-1 = 侧栏 / 顶栏「休止面」 → --surface-rail
+       --ra-surface-2 = 卡片 / 抬升面        → --surface-1
+       --ra-surface-3 = 凹陷面               → --surface-inset
+     设计裁定：看板列**承载卡片，属抬升面**，用 --surface-1（--ra-surface-2），
+     不归入凹陷档——否则「列底」与「输入框」读作同一层，卡片失去悬浮感。 */
+  --ra-canvas:           var(--bg-canvas);
+  --ra-surface-1:        var(--surface-rail);
+  --ra-surface-2:        var(--surface-1);
+  --ra-surface-3:        var(--surface-inset);
+  --ra-surface-raised:   var(--surface-2);   /* 卡内嵌块 / 表头（本文件扩展） */
+  --ra-surface-overlay:  var(--surface-3);   /* 浮层底（本文件扩展） */
+  --ra-surface-overlay-2:var(--surface-4);   /* 浮层内控件（本文件扩展） */
+  --ra-surface-hover:    var(--surface-hover);
+  --ra-surface-active:   var(--surface-active);
+  --ra-surface-selected: var(--accent-faint);
+
+  /* ---- 描边 --ra-border* ---- */
+  --ra-border-hairline: var(--line-faint);
+  --ra-border-soft:     var(--line-subtle);
+  --ra-border:          var(--line);
+  --ra-border-strong:   var(--line-strong);
+  --ra-border-on-accent:var(--line-accent);
+  --ra-border-focus:    var(--accent);       /* 焦点环改用 outline，色值取强调色 */
+
+  /* ---- 文本 --ra-text-* ---- */
+  --ra-text-primary:   var(--text-primary);
+  --ra-text-secondary: var(--text-secondary); /* 架构 §9 标注：此名被测试锁定，必须保留 */
+  --ra-text-tertiary:  var(--text-tertiary);
+  --ra-text-faint:     var(--text-faint);
+  --ra-text-disabled:  var(--text-disabled);
+  --ra-text-on-accent: var(--text-on-accent);
+  --ra-text-inverse:   var(--text-on-solid);
+
+  /* ---- 强调色 --ra-accent* ----
+     架构把 accent 拆成「唯一强调色 / 填充态 / 悬停 / 软底 / 软底上的文字」五件套；
+     本文件对应拆为 accent-text（文字与线条用）/ accent（实底填充）。 */
+  --ra-accent:        var(--accent-text);  /* 作为纯色在文字、图标、描边上使用 */
+  --ra-accent-fill:   var(--accent);       /* 作为按钮等实底填充 */
+  --ra-accent-hover:  var(--accent-hover);
+  --ra-accent-active: var(--accent-active);
+  --ra-accent-soft:   var(--accent-soft);
+  --ra-accent-faint:  var(--accent-faint);
+  --ra-accent-ink:    var(--accent-text);  /* 软底之上的文字色 */
+  --ra-accent-on:     var(--accent-on);    /* 实底之上的文字色 */
+
+  /* ---- 语义状态色 --ra-<state> / -soft / -ink ----
+     架构用 -ink 表示「软底之上的文字色」；本文件中状态色本身即可安全用作
+     深色底上的文字/图标/圆点色，故 -ink 与主色同名。 */
+  --ra-success:      var(--success);
+  --ra-success-soft: var(--success-soft);
+  --ra-success-ink:  var(--success);
+  --ra-success-line: var(--success-line);
+  --ra-warning:      var(--warn);
+  --ra-warning-soft: var(--warn-soft);
+  --ra-warning-ink:  var(--warn);
+  --ra-warning-line: var(--warn-line);
+  --ra-danger:       var(--danger);
+  --ra-danger-soft:  var(--danger-soft);
+  --ra-danger-ink:   var(--danger);
+  --ra-danger-line:  var(--danger-line);
+  --ra-info:         var(--info);
+  --ra-info-soft:    var(--info-soft);
+  --ra-info-ink:     var(--info);
+  --ra-info-line:    var(--info-line);
+
+  /* ---- 数据语义：匹配分 / 看板五态点色 ----
+     架构给 3 档（high/mid/low）；本文件实现为 5 档序数色阶（--ord-1..5），
+     3 档名作为聚合别名指向 5 档中的代表值。已与架构裁定并结案：保留 5 档为
+     设计决策（3 档下 75 分与 60 分会同色、失去分辨力），3 档名仅作兼容聚合
+     （见方案 §10.3 第 3 条，状态为「已裁定」）。 */
+  --ra-match-high: var(--ord-5);   /* 85–100 */
+  --ra-match-mid:  var(--ord-3);   /* 60–84 聚合 */
+  --ra-match-low:  var(--ord-1);   /* 0–59 聚合 */
+  /* 5 档精细档（推荐前端直接用这一组做 meter 与数值着色） */
+  --ra-match-1: var(--ord-1);
+  --ra-match-2: var(--ord-2);
+  --ra-match-3: var(--ord-3);
+  --ra-match-4: var(--ord-4);
+  --ra-match-5: var(--ord-5);
+  --ra-match-track: var(--ord-track);
+  /* 看板五态点色：不新增色相，用「中性 + 强调 + 3 语义」五种可区分组合 */
+  --ra-stage-draft:     var(--text-tertiary); /* 未投递：中性 */
+  --ra-stage-applied:   var(--accent);        /* 已投递：强调色 */
+  --ra-stage-interview: var(--info);          /* 面试中 */
+  --ra-stage-offer:     var(--success);       /* 已 Offer */
+  --ra-stage-withdrawn: var(--danger);        /* 放弃 */
+
+  /* ---- 间距 --ra-space-*（迁移别名；canonical 阶梯为 4px 整数倍） ----
+     2 / 6 / 10px 三档只在本别名块内保留原值，用于存量 CSS 的机械比对；
+     canonical 阶梯（--space-*）不含微步，验收项 M7 保持「间距为 4px 整数倍」。 */
+  --ra-space-2:  2px;                        /* 微步（无对应语义 token） */
+  --ra-space-4:  var(--space-1);             /* 4 */
+  --ra-space-6:  6px;                        /* 微步 */
+  --ra-space-8:  var(--space-2);             /* 8 */
+  --ra-space-10: 10px;                       /* 微步 */
+  --ra-space-12: var(--space-3);             /* 12 */
+  --ra-space-16: var(--space-4);             /* 16 */
+  --ra-space-20: var(--space-5);             /* 20 */
+  --ra-space-24: var(--space-6);             /* 24 */
+  --ra-space-32: var(--space-8);             /* 32 */
+  --ra-space-48: var(--space-12);            /* 48 */
+  --ra-stroke:   1px;                        /* 1px 是描边宽度，不是间距 */
+
+  /* ---- 圆角 --ra-radius-* ---- */
+  --ra-radius-inline:  var(--radius-sm);     /* 4px */
+  --ra-radius-control: var(--radius-md);     /* 6px */
+  --ra-radius-card:    var(--radius-lg);     /* 8px */
+  --ra-radius-panel:   var(--radius-xl);     /* 12px */
+  --ra-radius-modal:   var(--radius-2xl);    /* 16px */
+  --ra-radius-pill:    var(--radius-pill);
+  --ra-radius-circle:  50%;
+
+  /* ---- 字号 --ra-text-<size>（8 档，与本文件一一对应） ---- */
+  --ra-text-2xs:  var(--text-2xs);
+  --ra-text-xs:   var(--text-xs);
+  --ra-text-sm:   var(--text-sm);
+  --ra-text-base: var(--text-base);
+  --ra-text-lg:   var(--text-lg);
+  --ra-text-xl:   var(--text-xl);
+  --ra-text-2xl:  var(--text-2xl);
+  --ra-text-3xl:  var(--text-3xl);
+
+  /* ---- 字体族与行高 ---- */
+  --ra-font-ui:     var(--font-ui);
+  --ra-font-cjk:    var(--font-cjk);
+  --ra-font-mono:   var(--font-mono);
+  --ra-font-num:    var(--font-num);
+  --ra-leading-hero:    var(--lead-hero);
+  --ra-leading-tight:   var(--lead-tight);
+  --ra-leading-snug:    var(--lead-snug);
+  --ra-leading-normal:  var(--lead-normal);
+  --ra-leading-relaxed: var(--lead-relaxed);
+
+  /* ---- 阴影 --ra-shadow-*（4 档 + 焦点环；卡片阴影全废） ---- */
+  --ra-shadow-popover: var(--shadow-popover);
+  --ra-shadow-modal:   var(--shadow-modal);
+  --ra-shadow-toast:   var(--shadow-toast);  /* 架构扩展档；也可复用 popover */
+  --ra-shadow-drag:    var(--shadow-drag);   /* 拖拽中卡片；也可复用 modal */
+  --ra-shadow-inset:   inset 0 1px 0 rgba(0, 0, 0, 0.20); /* 看板列下沉，被测试锁定需保留 */
+
+  /* ---- z-index --ra-z-*（canonical 9 档；tooltip 为 popover 的有限别名） ---- */
+  --ra-z-below:    var(--z-below);
+  --ra-z-base:     var(--z-base);
+  --ra-z-sticky:   var(--z-sticky);
+  --ra-z-rail:     var(--z-rail);
+  --ra-z-dropdown: var(--z-dropdown);
+  --ra-z-drawer:   var(--z-drawer);
+  --ra-z-modal:    var(--z-modal);
+  --ra-z-popover:  var(--z-popover);
+  --ra-z-toast:    var(--z-toast);
+  --ra-z-tooltip:  calc(var(--z-toast) + 10);
+
+  /* ---- 控件高度 --ra-control-*（4 档 + 触屏命中下限） ---- */
+  --ra-control-xs:    var(--control-h-xs);     /* 24px 本文件扩展：表格行内 / 卡片角标动作 */
+  --ra-control-sm:    var(--control-h-sm);     /* 28px */
+  --ra-control-md:    var(--control-h-md);     /* 32px 默认 */
+  --ra-control-lg:    var(--control-h-lg);     /* 36px 页面级主操作 */
+  --ra-hit-min:       var(--hit-min);          /* 44px 触摸下限 */
+
+  /* ---- 图标 --ra-icon-* ----
+     架构三档 16/20/24；本文件另有受限例外 12px（仅 meter 与徽标内）。 */
+  --ra-icon-inline:     var(--ic-sm);   /* 16px */
+  --ra-icon-control:    var(--ic-md);   /* 20px */
+  --ra-icon-standalone: var(--ic-lg);   /* 24px */
+  --ra-icon-micro:      var(--ic-2xs);  /* 12px 受限例外 */
+  --ra-icon-stroke:     var(--ic-stroke);
+  --ra-icon-gap:        var(--ic-gap);
+
+  /* ---- 动效 --ra-dur-* / --ra-ease-* ---- */
+  --ra-dur-instant: var(--dur-instant);
+  --ra-dur-fast:    var(--dur-fast);
+  --ra-dur-base:    var(--dur-base);
+  --ra-dur-slow:    var(--dur-slow);
+  --ra-ease-standard: var(--ease-standard);
+  --ra-ease-out:      var(--ease-out);
+  --ra-ease-in-out:   var(--ease-in-out);
+
+  /* ---- 栅格 --ra-shell-*（rail 采用 ADR-0044 终值 224px） ---- */
+  --ra-shell-rail:         var(--rail-w);        /* 224px */
+  --ra-shell-rail-compact: var(--rail-w-compact);
+  --ra-shell-content-max:  var(--content-max);
+  --ra-shell-gutter:       var(--gutter);
+  --ra-shell-topbar:       52px;
+
+  /* ---- 纸面语义（不参与命名空间收敛，两边同名） ---- */
+  --ra-paper-bg:      var(--paper-bg);
+  --ra-paper-ink:     var(--paper-ink);
+  --ra-paper-rule:    var(--paper-line);
+  --ra-paper-accent:  var(--paper-accent);
+}
+
+  /* B1a migration bridge: the exact legacy global token cascade, replayed
+     in source order. Existing names keep current values; names absent from
+     this block (notably the activated --ra-* comparison aliases above)
+     resolve through canonical tokens until their call sites migrate. */
+:root {
+  --bg: #f3f6fa;              /* T5 原 #f4f7fb，light attr 覆盖为 #f3f6fa */
+  --surface: #ffffff;
+  --surface-2: #f2f5f9;       /* T5 原 #f1f5f9，light attr 覆盖 */
+  --text: #17212b;
+  --muted: #4d5c6c;           /* T5 原 #5f6f7d，light attr 覆盖 */
+  --border: #d5dde7;          /* T5 原 #d7dfe9，light attr 覆盖 */
+  --accent: #2563eb;
+  --accent-2: #0f766e;
+  --danger: #dc2626;          /* light attr 生效值；原 Phase20 :root 的 #b42318
+                                 被 :root[data-theme="light"] 特异性压制，仅无属性状态可见 */
+  --success: #16a34a;
+  --rail-w: 224px;
+  --topbar-h: 52px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.07), 0 1px 1px rgba(15, 23, 42, 0.05);
+  --transition-fast: 140ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  --bg-canvas: var(--bg);
+  --bg-inset: var(--surface-2);
+  --bg-rail: #101b2c;
+  --bg-rail-soft: #1b2b40;
+  --bg-header: #101b2c;
+  --surface-panel: var(--surface);
+  --surface-raised: var(--surface);
+  --surface-tint: var(--surface-2);
+  --surface-success: #ecfdf5;
+  --surface-pending: #fffbeb;
+  --surface-error: #fef2f2;
+  --surface-info: #eff6ff;
+  --surface-teal: #ecfdf8;
+  --ink-strong: var(--text);
+  --ink: #1e293b;
+  --ink-2: #334155;
+  --text-muted: var(--muted);
+  --text-faint: #77869a;      /* T5 原 #94a3b8，light attr 覆盖 */
+  --border-strong: #a3b1c2;   /* T5 原 #aab8c8，light attr 覆盖 */
+  --border-soft: #e6edf5;
+  --brand: #c2410c;
+  --brand-soft: #fdeae5;
+  --primary: var(--accent);
+  --primary-hover: #1d4ed8;
+  --primary-active: #1e40af;
+  --primary-soft: #e3edfd;
+  --teal: var(--accent-2);
+  --teal-hover: #0b5f58;
+  --teal-soft: #dff4f0;
+  --success-soft: #e6f5ec;
+  --success-deep: #14532d;
+  --pending: #b45309;
+  --pending-soft: #fffbeb;
+  --pending-deep: #92400e;
+  --error: var(--danger);
+  --error-soft: #fef2f2;
+  --error-deep: #991b1b;
+  --info: #2563eb;
+  --info-soft: #eff6ff;
+  --info-deep: #1e3a8a;
+  --neutral: #64748b;
+  --neutral-soft: #eef2f6;
+  --warning: #b45309;         /* Phase20 */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, "Courier New", monospace;
+  --text-11: 0.75rem;
+  --text-12: 0.75rem;
+  --text-13: 0.8125rem;
+  --text-14: 0.875rem;
+  --text-15: 0.9375rem;
+  --text-16: 1rem;
+  --text-18: 1.125rem;
+  --text-20: 1.25rem;
+  --text-24: 1.5rem;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --radius-xs: 4px;
+  --radius-pill: 999px;
+  --radius-4: 4px;            /* Phase20 */
+  --radius-6: 6px;            /* Phase20 */
+  --radius-8: 8px;            /* Phase20 */
+  --shadow-1: 0 1px 2px rgba(23, 34, 46, 0.06), 0 1px 1px rgba(23, 34, 46, 0.04);
+  --shadow-2: 0 4px 12px rgba(23, 34, 46, 0.09);
+  --shadow-3: 0 10px 24px rgba(23, 34, 46, 0.13);
+  --shadow-4: 0 18px 50px rgba(15, 22, 32, 0.3);
+  --focus-ring: 0 0 0 3px rgba(22, 86, 232, 0.28);
+  --focus-ring-error: 0 0 0 3px rgba(180, 35, 24, 0.24);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-settle: 260ms;
+  --dur-enter: 220ms;
+  --dur-enter-max: 320ms;
+  --dur-progress: 400ms;
+  --dur-loading: 900ms;
+  --dur-toast: 240ms;
+  --dur-stagger: 30ms;
+  --dur-stagger-mobile: 20ms;
+  --ease-standard: var(--ease);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+  --ease-linear: linear;
+  --move-0: 2px;
+  --move-1: 4px;
+  --move-2: 6px;
+  --move-3: 8px;
+  --move-4: 12px;
+  --move-scale-hover: 1.01;
+  --move-scale-active: 0.99;
+  --move-scale-entrance: 0.985;
+  --stagger-step: 28ms;
+  --card-bg-rest: var(--surface-panel);
+  --card-bg-raised: var(--surface-raised);
+  --card-bg-inset: var(--surface-tint);
+  --card-border-rest: var(--border);
+  --card-border-hover: #b7c3d0;
+  --card-border-selected: var(--primary);
+  --card-radius-rest: var(--radius-md);
+  --card-radius-inner: var(--radius-sm);
+  --card-pad-lg: 18px;
+  --card-pad-md: 16px;
+  --card-pad-sm: 12px;
+  --card-gap: 12px;
+  --card-gap-lg: 14px;
+  --card-shadow-rest: var(--shadow-1);
+  --card-shadow-hover: var(--shadow-2);
+  --card-shadow-lift: 0 6px 16px rgba(23, 34, 46, 0.12);
+  --card-shadow-selected: 0 0 0 3px rgba(22, 86, 232, 0.22), var(--shadow-2);
+  --card-shadow-active: inset 0 1px 0 rgba(23, 34, 46, 0.04), var(--shadow-1);
+  --card-lift-distance: 2px;
+  --card-transition: border-color 140ms var(--ease), box-shadow 180ms var(--ease), transform 140ms var(--ease);
+  --touch-min: 44px;
+  --touch-min-safe: 40px;
+  --glass-surface: rgba(255, 255, 255, 0.82);
+  --glass-border: rgba(15, 23, 42, 0.1);
+  --glass-blur: 14px;
+  --surface-glass: rgba(255, 255, 255, 0.82);
+  --surface-glass-deep: rgba(255, 255, 255, 0.92);
+  --border-glass: rgba(15, 23, 42, 0.1);
+  --workbench-bg: #eef2f7;
+  --workbench-bg-deep: #f7f9fc;
+  --emerald: #059669;
+  --amber-token: #d97706;
+  --purple-token: #7c3aed;
+  --match: #2563eb;
+  --match-high: #16a34a;
+  --match-mid: #d97706;
+  --match-low: #b42318;
+  --provenance: #7c3aed;
+  --line: var(--border);
+  --line-strong: var(--border-strong);
+  --primary-dark: var(--primary-hover);
+  --amber: var(--pending);
+  --amber-soft: var(--pending-soft);
+  --red: var(--error);
+  --red-soft: var(--error-soft);
+  --green: var(--success);
+  --green-soft: var(--success-soft);
+  --radius: var(--radius-lg);
+  --shadow: var(--shadow-sm);
+  --focus: 0 0 0 3px rgba(37, 99, 235, 0.28);
+  --panel: #edf1f6;           /* 原仅 :root[data-theme="light"] 定义 */
+  --card: #ffffff;            /* 原仅 :root[data-theme="light"] 定义 */
+  --surface-hover: #f8fafc;
+  --code-bg: #eef2f6;
+  --btn-secondary-hover: #dce8fd;
+  --btn-outline-hover-border: #b9c6d4;
+  --btn-danger-hover: #fbdcd8;
+  --dot-draft: #94a3b8;
+  --dot-applied: #2563eb;
+  --dot-interview: #d97706;
+  --dot-offer: #16a34a;
+  --dot-withdrawn: #64748b;
+  --diff-modify-bg: #e0f2fe;
+  --diff-modify-ink: #1e3a8a;
+  }
+[data-theme="dark"] {
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --surface-2: #243248;
+  --text: #e8eef6;
+  --muted: #94a3b8;
+  --border: #334155;
+  --accent: #60a5fa;
+  --accent-2: #2dd4bf;
+  --danger: #f87171;
+  --success: #4ade80;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.22);
+  --transition-fast: 140ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  --bg-canvas: var(--bg);
+  --bg-inset: var(--surface-2);
+  --bg-rail: #0b1220;
+  --bg-rail-soft: #16233a;
+  --bg-header: #0b1220;
+  --surface-panel: var(--surface);
+  --surface-raised: #263348;
+  --surface-tint: var(--surface-2);
+  --surface-success: #123526;
+  --surface-pending: #3a2e17;
+  --surface-error: #3a1d1d;
+  --surface-info: #1b2d4d;
+  --surface-teal: #113b34;
+  --ink-strong: var(--text);
+  --ink: #dbe4ef;
+  --ink-2: #c1cddc;
+  --text-muted: var(--muted);
+  --text-faint: #64748b;
+  --border-strong: #4b5a6f;
+  --border-soft: #27364a;
+  --brand: #f97316;
+  --primary: var(--accent);
+  --primary-hover: #3b82f6;
+  --primary-active: #2563eb;
+  --primary-soft: #1d3154;
+  --teal: var(--accent-2);
+  --teal-hover: #5eead4;
+  --teal-soft: #113b34;
+  --success-soft: #123526;
+  --success-deep: #86efac;
+  --pending: #fbbf24;
+  --pending-soft: #3a2e17;
+  --pending-deep: #fcd34d;
+  --error: var(--danger);
+  --error-soft: #3a1d1d;
+  --error-deep: #fca5a5;
+  --info: #93c5fd;
+  --info-soft: #1b2d4d;
+  --info-deep: #bfdbfe;
+  --neutral: #94a3b8;
+  --neutral-soft: #243248;
+  --warning: #fbbf24;         /* Phase20 dark */
+  --glass-surface: rgba(15, 23, 42, 0.82);
+  --glass-border: rgba(148, 163, 184, 0.22);
+  --surface-glass: rgba(22, 30, 49, 0.65);
+  --surface-glass-deep: rgba(7, 10, 16, 0.6);
+  --border-glass: rgba(255, 255, 255, 0.08);
+  --workbench-bg: #0b0f19;
+  --workbench-bg-deep: #0d1420;
+  --emerald: #10b981;
+  --amber-token: #f59e0b;
+  --purple-token: #8b5cf6;
+  --match: #60a5fa;
+  --match-high: #4ade80;
+  --match-mid: #fbbf24;
+  --match-low: #f87171;
+  --provenance: #a78bfa;
+  --panel: var(--surface-2);
+  --card: var(--surface);
+  --radius: var(--radius-lg);
+  --shadow: var(--shadow-sm);
+  --line: var(--border);
+  --line-strong: var(--border-strong);
+  --amber: var(--pending);
+  --amber-soft: var(--pending-soft);
+  --red: var(--error);
+  --red-soft: var(--error-soft);
+  --green: var(--success);
+  --green-soft: var(--success-soft);
+  --focus: 0 0 0 3px rgba(96, 165, 250, 0.34);
+  --surface-hover: #263348;
+  --code-bg: #243248;
+  --btn-secondary-hover: #2b3d5c;
+  --btn-outline-hover-border: #4b5a6f;
+  --btn-danger-hover: #4a2525;
+  --dot-draft: #94a3b8;
+  --dot-applied: #60a5fa;
+  --dot-interview: #fbbf24;
+  --dot-offer: #4ade80;
+  --dot-withdrawn: #7d8ba0;
+  --diff-modify-bg: #1b2d4d;
+  --diff-modify-ink: #bfdbfe;
+  }
+@media (max-width: 640px) {
+:root {
+    --dur-stagger: 20ms;
+    --dur-stagger-mobile: 20ms;
+  }
+}
+@media (max-width: 390px) {
+:root {
+    --dur-enter: 180ms;
+    --dur-enter-max: 180ms;
+    --dur-stagger: 0ms;
+    --dur-stagger-mobile: 0ms;
+    --move-0: 1px;
+    --move-1: 2px;
+    --move-2: 3px;
+    --move-3: 4px;
+    --move-4: 6px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+:root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-settle: 0ms;
+    --dur-enter: 0ms;
+    --dur-enter-max: 0ms;
+    --dur-progress: 0ms;
+    --dur-loading: 0ms;
+    --dur-toast: 0ms;
+    --dur-stagger: 0ms;
+    --dur-stagger-mobile: 0ms;
+    --move-0: 0px;
+    --move-1: 0px;
+    --move-2: 0px;
+    --move-3: 0px;
+    --move-4: 0px;
+    --transition-fast: 0ms;
+  }
+}
+:root {
+  --app-bg: #121214;
+  --surface-primary: #1a1a1e;
+  --surface-panel: #232328;
+  --surface-subtle: #161619;
+  --apple-blue: #007aff;
+  --apple-green: #32d74b;
+  --apple-red: #ff453a;
+  --apple-amber: #ff9f0a;
+  --apple-bg: #121214;
+  --apple-surface-1: #1a1a1e;
+  --apple-surface-2: #232328;
+  --apple-surface-3: #161619;
+  --apple-blue: #007aff;
+  --apple-green: #32d74b;
+  --apple-red: #ff453a;
+  --apple-amber: #ff9f0a;
+  --apple-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", sans-serif;
+  --apple-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+html.dark, :root[data-theme="dark"], html.dark :root {
+  --bg-canvas: var(--apple-bg);
+  --bg: var(--apple-bg);
+  --surface: var(--apple-surface-1);
+  --surface-2: var(--apple-surface-2);
+  --surface-panel: var(--apple-surface-1);
+  --surface-raised: var(--apple-surface-2);
+  --surface-tint: var(--apple-surface-3);
+  --bg-rail: #101012;
+  --bg-rail-soft: #17171b;
+  --bg-header: #101012;
+  --border: rgba(255,255,255,0.1);
+  --border-soft: rgba(255,255,255,0.06);
+  --border-strong: rgba(255,255,255,0.16);
+  --ink: #f2f2f7;
+  --ink-strong: #ffffff;
+  --ink-2: #d0d0d8;
+  --text-muted: rgba(255,255,255,0.55);
+  --brand: var(--apple-blue);
+  --primary: var(--apple-blue);
+  --primary-hover: #3395ff;
+  --primary-active: #0071e3;
+  --success: var(--apple-green);
+  --success-soft: rgba(50,215,75,0.12);
+  --warning: var(--apple-amber);
+  --warning-soft: rgba(255,159,10,0.12);
+  --error: var(--apple-red);
+  --error-soft: rgba(255,69,58,0.12);
+  --info: #64d2ff;
+  --info-soft: rgba(100,210,255,0.12);
+  --teal: #30d0c0;
+  --teal-soft: rgba(48,208,192,0.12);
+  --shadow-1: 0 2px 8px rgba(0,0,0,0.25);
+  --shadow-2: 0 4px 16px rgba(0,0,0,0.35);
+  --shadow-3: 0 8px 28px rgba(0,0,0,0.45);
+  --radius-lg: 12px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
+  }
+:root {
+  --ra-canvas: #121214;
+  --ra-surface-1: #1a1a1e;
+  --ra-surface-2: #232328;
+  --ra-surface-3: #161619;
+  --ra-surface-hover: #28282d;
+  --ra-border-hairline: rgba(255, 255, 255, 0.06);
+  --ra-border: rgba(255, 255, 255, 0.10);
+  --ra-border-strong: rgba(255, 255, 255, 0.18);
+  --ra-text-primary: rgba(255, 255, 255, 0.92);
+  --ra-text-secondary: rgba(255, 255, 255, 0.64);
+  --ra-text-tertiary: rgba(255, 255, 255, 0.45);
+  --ra-text-faint: rgba(255, 255, 255, 0.30);
+  --ra-action: #007aff;
+  --ra-action-fill: #0071e3;
+  --ra-action-hover: #0060df;
+  --ra-action-soft: rgba(0, 122, 255, 0.12);
+  --ra-success: #32d74b;
+  --ra-warning: #ff9f0a;
+  --ra-danger: #ff453a;
+  --ra-info: #64d2ff;
+  --ra-shadow-card: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --ra-shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.40);
+  --ra-shadow-modal: 0 18px 50px rgba(0, 0, 0, 0.50);
+  --ra-focus: 0 0 0 3px rgba(0, 122, 255, 0.28);
+  --ra-radius-inline: 6px;
+  --ra-radius-control: 8px;
+  --ra-radius-card: 12px;
+  --ra-radius-panel: 12px;
+  --ra-radius-modal: 16px;
+  --ra-radius-pill: 999px;
+  --ra-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  --ra-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+  --bg: #f8fafc;
+  --bg-canvas: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --surface-panel: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-tint: #f1f5f9;
+  --surface-hover: #eef2f6;
+  --text: #0f172a;
+  --ink: #0f172a;
+  --ink-2: #334155;
+  --ink-strong: #0f172a;
+  --muted: #64748b;
+  --text-muted: #64748b;
+  --text-faint: #94a3b8;
+  --border: #e2e8f0;
+  --border-soft: #eef2f6;
+  --border-strong: #cbd5e1;
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+  --accent: #4f46e5;
+  --accent-2: #0d9488;
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-active: #3730a3;
+  --primary-soft: #eef2ff;
+  --info: #2563eb;
+  --info-soft: #eff6ff;
+  --match: #4f46e5;
+  --bg-rail: #ffffff;
+  --bg-rail-soft: #f8fafc;
+  --bg-header: #ffffff;
+  --app-bg: #f8fafc;
+  --surface-primary: #ffffff;
+  --apple-bg: #f8fafc;
+  --apple-surface-1: #ffffff;
+  --apple-surface-2: #f1f5f9;
+  --apple-surface-3: #eef2f6;
+  --apple-blue: #4f46e5;
+  --ra-canvas: #f8fafc;
+  --ra-surface-1: #ffffff;
+  --ra-surface-2: #f1f5f9;
+  --ra-surface-3: #e2e8f0;
+  --ra-surface-hover: #eef2f6;
+  --ra-raised: #ffffff;
+  --ra-border-hairline: #eef2f6;
+  --ra-border: #e2e8f0;
+  --ra-border-strong: #cbd5e1;
+  --ra-text-primary: #0f172a;
+  --ra-text-secondary: #475569;
+  --ra-text-tertiary: #64748b;
+  --ra-text-faint: #94a3b8;
+  --ra-action: #4f46e5;
+  --ra-action-fill: #4338ca;
+  --ra-action-hover: #4338ca;
+  --ra-action-soft: rgba(79, 70, 229, 0.1);
+  --ra-success: #16a34a;
+  --ra-warning: #d97706;
+  --ra-danger: #dc2626;
+  --ra-info: #2563eb;
+  --ra-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --ra-shadow-popover: 0 8px 24px rgba(15, 23, 42, 0.12);
+  --ra-shadow-modal: 0 18px 50px rgba(15, 23, 42, 0.16);
+  --paper-bg: #ffffff;
+  --paper-ink: #1e293b;
+  --paper-muted: #475569;
+  --paper-rule: #e2e8f0;
+  }
+:root[data-theme="dark"] {
+  --bg: #0b1120;
+  --bg-canvas: #0b1120;
+  --surface: #1e293b;
+  --surface-2: #16203a;
+  --surface-panel: #1e293b;
+  --surface-raised: #1e293b;
+  --surface-tint: #16203a;
+  --surface-hover: #263348;
+  --text: #f1f5f9;
+  --ink: #e2e8f0;
+  --ink-2: #cbd5e1;
+  --ink-strong: #f1f5f9;
+  --muted: #94a3b8;
+  --text-muted: #94a3b8;
+  --text-faint: #64748b;
+  --border: #33415a;
+  --border-soft: #27364a;
+  --border-strong: #4b5a6f;
+  --line: #33415a;
+  --line-strong: #4b5a6f;
+  --accent: #818cf8;
+  --primary: #818cf8;
+  --primary-hover: #a5b4fc;
+  --primary-active: #6366f1;
+  --primary-soft: rgba(129, 140, 248, 0.14);
+  --info: #93c5fd;
+  --info-soft: rgba(96, 165, 250, 0.14);
+  --match: #93c5fd;
+  --bg-rail: #0b1120;
+  --bg-rail-soft: #16233a;
+  --bg-header: #0b1120;
+  --app-bg: #0b1120;
+  --surface-primary: #1e293b;
+  --apple-bg: #0b1120;
+  --apple-surface-1: #0b1120;
+  --apple-surface-2: #1e293b;
+  --apple-surface-3: #16203a;
+  --apple-blue: #818cf8;
+  --ra-canvas: #0b1120;
+  --ra-surface-1: #0b1120;
+  --ra-surface-2: #1e293b;
+  --ra-surface-3: #16203a;
+  --ra-surface-hover: #25334c;
+  --ra-raised: #26364d;
+  --ra-border-hairline: rgba(148, 163, 184, 0.14);
+  --ra-border: rgba(148, 163, 184, 0.22);
+  --ra-border-strong: rgba(148, 163, 184, 0.34);
+  --ra-text-primary: #f1f5f9;
+  --ra-text-secondary: #cbd5e1;
+  --ra-text-tertiary: #94a3b8;
+  --ra-text-faint: #64748b;
+  --ra-action: #818cf8;
+  --ra-action-fill: #6366f1;
+  --ra-action-hover: #a5b4fc;
+  --ra-action-soft: rgba(129, 140, 248, 0.14);
+  --ra-success: #4ade80;
+  --ra-warning: #fbbf24;
+  --ra-danger: #f87171;
+  --ra-info: #93c5fd;
+  --ra-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.22);
+  --ra-shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --ra-shadow-modal: 0 18px 50px rgba(0, 0, 0, 0.5);
+  --paper-bg: #ffffff;
+  --paper-ink: #1e293b;
+  --paper-muted: #475569;
+  --paper-rule: #e2e8f0;
+  }
+
+/* B1a visual-zero pins: these names were referenced before this batch but
+   had no global definition, so call sites used the inline fallback. Keep the
+   fallback value visible until those call sites migrate to canonical tokens. */
+:root {
+  --match-soft: var(--surface-info);
+  --ra-accent: #6366f1;
+}
+}
+
 *,
 *::before,
 *::after {
@@ -22,334 +1269,61 @@
   color-scheme: light;
 
   /* ---- T5 原始通道（light attr 生效值） ---- */
-  --bg: #f3f6fa;              /* T5 原 #f4f7fb，light attr 覆盖为 #f3f6fa */
-  --surface: #ffffff;
-  --surface-2: #f2f5f9;       /* T5 原 #f1f5f9，light attr 覆盖 */
-  --text: #17212b;
-  --muted: #4d5c6c;           /* T5 原 #5f6f7d，light attr 覆盖 */
-  --border: #d5dde7;          /* T5 原 #d7dfe9，light attr 覆盖 */
-  --accent: #2563eb;
-  --accent-2: #0f766e;
-  --danger: #dc2626;          /* light attr 生效值；原 Phase20 :root 的 #b42318
-                                 被 :root[data-theme="light"] 特异性压制，仅无属性状态可见 */
-  --success: #16a34a;
   /* ADR-0048（ADR-0042 决定 6e 逐项例外）：应用外壳尺度 canonical token。
      B1 迁入 @layer tokens 时只需搬移本块，不必再追散落的魔法数字。 */
-  --rail-w: 224px;
-  --topbar-h: 52px;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.07), 0 1px 1px rgba(15, 23, 42, 0.05);
-  --transition-fast: 140ms cubic-bezier(0.2, 0.7, 0.2, 1);
 
   /* 背景分层 */
-  --bg-canvas: var(--bg);
-  --bg-inset: var(--surface-2);
-  --bg-rail: #101b2c;
-  --bg-rail-soft: #1b2b40;
-  --bg-header: #101b2c;
 
   /* 表面分层 */
-  --surface-panel: var(--surface);
-  --surface-raised: var(--surface);
-  --surface-tint: var(--surface-2);
-  --surface-success: #ecfdf5;
-  --surface-pending: #fffbeb;
-  --surface-error: #fef2f2;
-  --surface-info: #eff6ff;
-  --surface-teal: #ecfdf8;
 
   /* 文字 */
-  --ink-strong: var(--text);
-  --ink: #1e293b;
-  --ink-2: #334155;
-  --text-muted: var(--muted);
-  --text-faint: #77869a;      /* T5 原 #94a3b8，light attr 覆盖 */
 
   /* 边框 */
-  --border-strong: #a3b1c2;   /* T5 原 #aab8c8，light attr 覆盖 */
-  --border-soft: #e6edf5;
 
   /* 品牌与主行动色 */
-  --brand: #c2410c;
-  --brand-soft: #fdeae5;
-  --primary: var(--accent);
-  --primary-hover: #1d4ed8;
-  --primary-active: #1e40af;
-  --primary-soft: #e3edfd;
-  --teal: var(--accent-2);
-  --teal-hover: #0b5f58;
-  --teal-soft: #dff4f0;
 
   /* 语义色 */
-  --success-soft: #e6f5ec;
-  --success-deep: #14532d;
-  --pending: #b45309;
-  --pending-soft: #fffbeb;
-  --pending-deep: #92400e;
-  --error: var(--danger);
-  --error-soft: #fef2f2;
-  --error-deep: #991b1b;
-  --info: #2563eb;
-  --info-soft: #eff6ff;
-  --info-deep: #1e3a8a;
-  --neutral: #64748b;
-  --neutral-soft: #eef2f6;
-  --warning: #b45309;         /* Phase20 */
 
   /* 字体 */
-  --font-ui: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, "Courier New", monospace;
 
   /* #10 小字下限 12px：--text-11 是唯一低于 12px 的文字 token，从 11px 上调 */
-  --text-11: 0.75rem;
-  --text-12: 0.75rem;
-  --text-13: 0.8125rem;
-  --text-14: 0.875rem;
-  --text-15: 0.9375rem;
-  --text-16: 1rem;
-  --text-18: 1.125rem;
-  --text-20: 1.25rem;
-  --text-24: 1.5rem;
 
   /* 间距、圆角、阴影 */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 20px;
-  --space-6: 24px;
-  --space-8: 32px;
-  --space-12: 48px;
-  --radius-xs: 4px;
-  --radius-pill: 999px;
-  --radius-4: 4px;            /* Phase20 */
-  --radius-6: 6px;            /* Phase20 */
-  --radius-8: 8px;            /* Phase20 */
-  --shadow-1: 0 1px 2px rgba(23, 34, 46, 0.06), 0 1px 1px rgba(23, 34, 46, 0.04);
-  --shadow-2: 0 4px 12px rgba(23, 34, 46, 0.09);
-  --shadow-3: 0 10px 24px rgba(23, 34, 46, 0.13);
-  --shadow-4: 0 18px 50px rgba(15, 22, 32, 0.3);
-  --focus-ring: 0 0 0 3px rgba(22, 86, 232, 0.28);
-  --focus-ring-error: 0 0 0 3px rgba(180, 35, 24, 0.24);
 
-  --dur-fast: 120ms;
-  --dur-base: 180ms;
-  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 
   /* ---- Phase 18: motion tokens（原独立 :root 块并入） ---- */
-  --dur-settle: 260ms;
-  --dur-enter: 220ms;
-  --dur-enter-max: 320ms;
-  --dur-progress: 400ms;
-  --dur-loading: 900ms;
-  --dur-toast: 240ms;
-  --dur-stagger: 30ms;
-  --dur-stagger-mobile: 20ms;
-  --ease-standard: var(--ease);
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
-  --ease-linear: linear;
-  --move-0: 2px;
-  --move-1: 4px;
-  --move-2: 6px;
-  --move-3: 8px;
-  --move-4: 12px;
-  --move-scale-hover: 1.01;
-  --move-scale-active: 0.99;
-  --move-scale-entrance: 0.985;
-  --stagger-step: 28ms;
 
   /* ---- Phase 18: card tokens ---- */
-  --card-bg-rest: var(--surface-panel);
-  --card-bg-raised: var(--surface-raised);
-  --card-bg-inset: var(--surface-tint);
-  --card-border-rest: var(--border);
-  --card-border-hover: #b7c3d0;
-  --card-border-selected: var(--primary);
-  --card-radius-rest: var(--radius-md);
-  --card-radius-inner: var(--radius-sm);
-  --card-pad-lg: 18px;
-  --card-pad-md: 16px;
-  --card-pad-sm: 12px;
-  --card-gap: 12px;
-  --card-gap-lg: 14px;
-  --card-shadow-rest: var(--shadow-1);
-  --card-shadow-hover: var(--shadow-2);
-  --card-shadow-lift: 0 6px 16px rgba(23, 34, 46, 0.12);
-  --card-shadow-selected: 0 0 0 3px rgba(22, 86, 232, 0.22), var(--shadow-2);
-  --card-shadow-active: inset 0 1px 0 rgba(23, 34, 46, 0.04), var(--shadow-1);
-  --card-lift-distance: 2px;
-  --card-transition: border-color 140ms var(--ease), box-shadow 180ms var(--ease), transform 140ms var(--ease);
-  --touch-min: 44px;
-  --touch-min-safe: 40px;
 
   /* ---- Phase 20: glass / workbench / match tokens（浅色值） ---- */
-  --glass-surface: rgba(255, 255, 255, 0.82);
-  --glass-border: rgba(15, 23, 42, 0.1);
-  --glass-blur: 14px;
-  --surface-glass: rgba(255, 255, 255, 0.82);
-  --surface-glass-deep: rgba(255, 255, 255, 0.92);
-  --border-glass: rgba(15, 23, 42, 0.1);
-  --workbench-bg: #eef2f7;
-  --workbench-bg-deep: #f7f9fc;
-  --emerald: #059669;
-  --amber-token: #d97706;
-  --purple-token: #7c3aed;
-  --match: #2563eb;
-  --match-high: #16a34a;
-  --match-mid: #d97706;
-  --match-low: #b42318;
-  --provenance: #7c3aed;
 
   /* 旧变量别名，兼容存量规则 */
-  --line: var(--border);
-  --line-strong: var(--border-strong);
-  --primary-dark: var(--primary-hover);
-  --amber: var(--pending);
-  --amber-soft: var(--pending-soft);
-  --red: var(--error);
-  --red-soft: var(--error-soft);
-  --green: var(--success);
-  --green-soft: var(--success-soft);
-  --radius: var(--radius-lg);
-  --shadow: var(--shadow-sm);
-  --focus: 0 0 0 3px rgba(37, 99, 235, 0.28);
-  --panel: #edf1f6;           /* 原仅 :root[data-theme="light"] 定义 */
-  --card: #ffffff;            /* 原仅 :root[data-theme="light"] 定义 */
 
   /* 语义 hover/代码/状态点 token（AX6：暗色主题下不再用硬编码浅色） */
-  --surface-hover: #f8fafc;
-  --code-bg: #eef2f6;
-  --btn-secondary-hover: #dce8fd;
-  --btn-outline-hover-border: #b9c6d4;
-  --btn-danger-hover: #fbdcd8;
-  --dot-draft: #94a3b8;
-  --dot-applied: #2563eb;
-  --dot-interview: #d97706;
-  --dot-offer: #16a34a;
-  --dot-withdrawn: #64748b;
-  --diff-modify-bg: #e0f2fe;
-  --diff-modify-ink: #1e3a8a;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
 
   /* T5 dark 原始通道 */
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --surface-2: #243248;
-  --text: #e8eef6;
-  --muted: #94a3b8;
-  --border: #334155;
-  --accent: #60a5fa;
-  --accent-2: #2dd4bf;
-  --danger: #f87171;
-  --success: #4ade80;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.22);
-  --transition-fast: 140ms cubic-bezier(0.2, 0.7, 0.2, 1);
 
   /* 背景分层 */
-  --bg-canvas: var(--bg);
-  --bg-inset: var(--surface-2);
-  --bg-rail: #0b1220;
-  --bg-rail-soft: #16233a;
-  --bg-header: #0b1220;
 
   /* 表面分层 */
-  --surface-panel: var(--surface);
-  --surface-raised: #263348;
-  --surface-tint: var(--surface-2);
-  --surface-success: #123526;
-  --surface-pending: #3a2e17;
-  --surface-error: #3a1d1d;
-  --surface-info: #1b2d4d;
-  --surface-teal: #113b34;
 
   /* 文字 */
-  --ink-strong: var(--text);
-  --ink: #dbe4ef;
-  --ink-2: #c1cddc;
-  --text-muted: var(--muted);
-  --text-faint: #64748b;
 
   /* 边框 */
-  --border-strong: #4b5a6f;
-  --border-soft: #27364a;
 
   /* 品牌与主行动色 */
-  --brand: #f97316;
-  --primary: var(--accent);
-  --primary-hover: #3b82f6;
-  --primary-active: #2563eb;
-  --primary-soft: #1d3154;
-  --teal: var(--accent-2);
-  --teal-hover: #5eead4;
-  --teal-soft: #113b34;
 
   /* 语义色 */
-  --success-soft: #123526;
-  --success-deep: #86efac;
-  --pending: #fbbf24;
-  --pending-soft: #3a2e17;
-  --pending-deep: #fcd34d;
-  --error: var(--danger);
-  --error-soft: #3a1d1d;
-  --error-deep: #fca5a5;
-  --info: #93c5fd;
-  --info-soft: #1b2d4d;
-  --info-deep: #bfdbfe;
-  --neutral: #94a3b8;
-  --neutral-soft: #243248;
-  --warning: #fbbf24;         /* Phase20 dark */
 
   /* Phase 20 dark: glass / workbench / match tokens */
-  --glass-surface: rgba(15, 23, 42, 0.82);
-  --glass-border: rgba(148, 163, 184, 0.22);
-  --surface-glass: rgba(22, 30, 49, 0.65);
-  --surface-glass-deep: rgba(7, 10, 16, 0.6);
-  --border-glass: rgba(255, 255, 255, 0.08);
-  --workbench-bg: #0b0f19;
-  --workbench-bg-deep: #0d1420;
-  --emerald: #10b981;
-  --amber-token: #f59e0b;
-  --purple-token: #8b5cf6;
-  --match: #60a5fa;
-  --match-high: #4ade80;
-  --match-mid: #fbbf24;
-  --match-low: #f87171;
-  --provenance: #a78bfa;
 
   /* 别名（dark 值） */
-  --panel: var(--surface-2);
-  --card: var(--surface);
-  --radius: var(--radius-lg);
-  --shadow: var(--shadow-sm);
-  --line: var(--border);
-  --line-strong: var(--border-strong);
-  --amber: var(--pending);
-  --amber-soft: var(--pending-soft);
-  --red: var(--error);
-  --red-soft: var(--error-soft);
-  --green: var(--success);
-  --green-soft: var(--success-soft);
-  --focus: 0 0 0 3px rgba(96, 165, 250, 0.34);
 
   /* 语义 hover/代码/状态点 token（dark 值） */
-  --surface-hover: #263348;
-  --code-bg: #243248;
-  --btn-secondary-hover: #2b3d5c;
-  --btn-outline-hover-border: #4b5a6f;
-  --btn-danger-hover: #4a2525;
-  --dot-draft: #94a3b8;
-  --dot-applied: #60a5fa;
-  --dot-interview: #fbbf24;
-  --dot-offer: #4ade80;
-  --dot-withdrawn: #7d8ba0;
-  --diff-modify-bg: #1b2d4d;
-  --diff-modify-ink: #bfdbfe;
 }
 
 /* #10 中文排版：显式 16px 基准 + 正文行高 1.7（后续 T5 body 块保持同一套值） */
@@ -3595,10 +4569,6 @@ select {
 }
 
 @media (max-width: 640px) {
-  :root {
-    --dur-stagger: 20ms;
-    --dur-stagger-mobile: 20ms;
-  }
 
   .btn,
   .segmented button,
@@ -3640,17 +4610,6 @@ select {
 }
 
 @media (max-width: 390px) {
-  :root {
-    --dur-enter: 180ms;
-    --dur-enter-max: 180ms;
-    --dur-stagger: 0ms;
-    --dur-stagger-mobile: 0ms;
-    --move-0: 1px;
-    --move-1: 2px;
-    --move-2: 3px;
-    --move-3: 4px;
-    --move-4: 6px;
-  }
 
   .motion-stagger > *,
   .cmp-column .cmp-line,
@@ -3681,23 +4640,6 @@ select {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root {
-    --dur-fast: 0ms;
-    --dur-base: 0ms;
-    --dur-settle: 0ms;
-    --dur-enter: 0ms;
-    --dur-enter-max: 0ms;
-    --dur-progress: 0ms;
-    --dur-loading: 0ms;
-    --dur-toast: 0ms;
-    --dur-stagger: 0ms;
-    --dur-stagger-mobile: 0ms;
-    --move-0: 0px;
-    --move-1: 0px;
-    --move-2: 0px;
-    --move-3: 0px;
-    --move-4: 0px;
-  }
 
   *,
   *::before,
@@ -4268,12 +5210,6 @@ select,
   gap: 6px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --transition-fast: 0ms;
-  }
-
-}
 
 /* Print / PDF export contract */
 #print-root {
@@ -6513,17 +7449,6 @@ body.resume-inline-editing .resume-sheet__doc {
    ========================================================================== */
 
 /* 1. 全局阶梯暗黑背景与字阶 */
-:root {
-  --app-bg: #121214;
-  --surface-primary: #1a1a1e;
-  --surface-panel: #232328;
-  --surface-subtle: #161619;
-  
-  --apple-blue: #007aff;
-  --apple-green: #32d74b;
-  --apple-red: #ff453a;
-  --apple-amber: #ff9f0a;
-}
 
 body, html {
   background-color: var(--app-bg) !important;
@@ -6582,59 +7507,8 @@ select option {
    re-maps the design tokens to the Apple palette and adds the unified
    app-shell look (rail / topbar / nav / scrollbar / select).
    ========================================================================== */
-:root {
-  --apple-bg: #121214;
-  --apple-surface-1: #1a1a1e;
-  --apple-surface-2: #232328;
-  --apple-surface-3: #161619;
-  --apple-blue: #007aff;
-  --apple-green: #32d74b;
-  --apple-red: #ff453a;
-  --apple-amber: #ff9f0a;
-  --apple-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", sans-serif;
-  --apple-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-}
 
 /* Dark shell is the single delivered aesthetic (index.html carries class=dark). */
-html.dark, :root[data-theme="dark"], html.dark :root {
-  --bg-canvas: var(--apple-bg);
-  --bg: var(--apple-bg);
-  --surface: var(--apple-surface-1);
-  --surface-2: var(--apple-surface-2);
-  --surface-panel: var(--apple-surface-1);
-  --surface-raised: var(--apple-surface-2);
-  --surface-tint: var(--apple-surface-3);
-  --bg-rail: #101012;
-  --bg-rail-soft: #17171b;
-  --bg-header: #101012;
-  --border: rgba(255,255,255,0.1);
-  --border-soft: rgba(255,255,255,0.06);
-  --border-strong: rgba(255,255,255,0.16);
-  --ink: #f2f2f7;
-  --ink-strong: #ffffff;
-  --ink-2: #d0d0d8;
-  --text-muted: rgba(255,255,255,0.55);
-  --brand: var(--apple-blue);
-  --primary: var(--apple-blue);
-  --primary-hover: #3395ff;
-  --primary-active: #0071e3;
-  --success: var(--apple-green);
-  --success-soft: rgba(50,215,75,0.12);
-  --warning: var(--apple-amber);
-  --warning-soft: rgba(255,159,10,0.12);
-  --error: var(--apple-red);
-  --error-soft: rgba(255,69,58,0.12);
-  --info: #64d2ff;
-  --info-soft: rgba(100,210,255,0.12);
-  --teal: #30d0c0;
-  --teal-soft: rgba(48,208,192,0.12);
-  --shadow-1: 0 2px 8px rgba(0,0,0,0.25);
-  --shadow-2: 0 4px 16px rgba(0,0,0,0.35);
-  --shadow-3: 0 8px 28px rgba(0,0,0,0.45);
-  --radius-lg: 12px;
-  --radius-md: 10px;
-  --radius-sm: 8px;
-}
 
 body {
   font-family: var(--apple-font);
@@ -7904,40 +8778,6 @@ select option {
    Apple dark shell, five-view structures and float styling.
    Appended as an override layer; existing data-* contracts stay intact.
    ================================================================ */
-:root {
-  --ra-canvas: #121214;
-  --ra-surface-1: #1a1a1e;
-  --ra-surface-2: #232328;
-  --ra-surface-3: #161619;
-  --ra-surface-hover: #28282d;
-  --ra-border-hairline: rgba(255, 255, 255, 0.06);
-  --ra-border: rgba(255, 255, 255, 0.10);
-  --ra-border-strong: rgba(255, 255, 255, 0.18);
-  --ra-text-primary: rgba(255, 255, 255, 0.92);
-  --ra-text-secondary: rgba(255, 255, 255, 0.64);
-  --ra-text-tertiary: rgba(255, 255, 255, 0.45);
-  --ra-text-faint: rgba(255, 255, 255, 0.30);
-  --ra-action: #007aff;
-  --ra-action-fill: #0071e3;
-  --ra-action-hover: #0060df;
-  --ra-action-soft: rgba(0, 122, 255, 0.12);
-  --ra-success: #32d74b;
-  --ra-warning: #ff9f0a;
-  --ra-danger: #ff453a;
-  --ra-info: #64d2ff;
-  --ra-shadow-card: 0 2px 8px rgba(0, 0, 0, 0.25);
-  --ra-shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.40);
-  --ra-shadow-modal: 0 18px 50px rgba(0, 0, 0, 0.50);
-  --ra-focus: 0 0 0 3px rgba(0, 122, 255, 0.28);
-  --ra-radius-inline: 6px;
-  --ra-radius-control: 8px;
-  --ra-radius-card: 12px;
-  --ra-radius-panel: 12px;
-  --ra-radius-modal: 16px;
-  --ra-radius-pill: 999px;
-  --ra-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
-  --ra-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
-}
 
 html {
   color-scheme: dark;
@@ -10871,83 +11711,16 @@ details > summary::-webkit-details-marker,
   color-scheme: light;
 
   /* 基础 token（Slate + Indigo） */
-  --bg: #f8fafc;
-  --bg-canvas: #f8fafc;
-  --surface: #ffffff;
-  --surface-2: #f1f5f9;
-  --surface-panel: #ffffff;
-  --surface-raised: #ffffff;
-  --surface-tint: #f1f5f9;
-  --surface-hover: #eef2f6;
-  --text: #0f172a;
-  --ink: #0f172a;
-  --ink-2: #334155;
-  --ink-strong: #0f172a;
-  --muted: #64748b;
-  --text-muted: #64748b;
-  --text-faint: #94a3b8;
-  --border: #e2e8f0;
-  --border-soft: #eef2f6;
-  --border-strong: #cbd5e1;
-  --line: #e2e8f0;
-  --line-strong: #cbd5e1;
 
   /* 主行动色（Indigo） */
-  --accent: #4f46e5;
-  --accent-2: #0d9488;
-  --primary: #4f46e5;
-  --primary-hover: #4338ca;
-  --primary-active: #3730a3;
-  --primary-soft: #eef2ff;
-  --info: #2563eb;
-  --info-soft: #eff6ff;
-  --match: #4f46e5;
 
   /* rail / header */
-  --bg-rail: #ffffff;
-  --bg-rail-soft: #f8fafc;
-  --bg-header: #ffffff;
 
   /* Apple 兼容 token（.bg-appbg / .text-appleblue / .bg-surface1 等工具类） */
-  --app-bg: #f8fafc;
-  --surface-primary: #ffffff;
-  --apple-bg: #f8fafc;
-  --apple-surface-1: #ffffff;
-  --apple-surface-2: #f1f5f9;
-  --apple-surface-3: #eef2f6;
-  --apple-blue: #4f46e5;
 
   /* ra 壳层 token */
-  --ra-canvas: #f8fafc;
-  --ra-surface-1: #ffffff;
-  --ra-surface-2: #f1f5f9;
-  --ra-surface-3: #e2e8f0;
-  --ra-surface-hover: #eef2f6;
-  --ra-raised: #ffffff;
-  --ra-border-hairline: #eef2f6;
-  --ra-border: #e2e8f0;
-  --ra-border-strong: #cbd5e1;
-  --ra-text-primary: #0f172a;
-  --ra-text-secondary: #475569;
-  --ra-text-tertiary: #64748b;
-  --ra-text-faint: #94a3b8;
-  --ra-action: #4f46e5;
-  --ra-action-fill: #4338ca;
-  --ra-action-hover: #4338ca;
-  --ra-action-soft: rgba(79, 70, 229, 0.1);
-  --ra-success: #16a34a;
-  --ra-warning: #d97706;
-  --ra-danger: #dc2626;
-  --ra-info: #2563eb;
-  --ra-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.06);
-  --ra-shadow-popover: 0 8px 24px rgba(15, 23, 42, 0.12);
-  --ra-shadow-modal: 0 18px 50px rgba(15, 23, 42, 0.16);
 
   /* 纸质 token（A4 纸张在任意主题下保持白纸语义） */
-  --paper-bg: #ffffff;
-  --paper-ink: #1e293b;
-  --paper-muted: #475569;
-  --paper-rule: #e2e8f0;
 }
 
 /* ---- 2. 暗色：高特异性 token 重映射 ---- */
@@ -10955,78 +11728,12 @@ html.dark,
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #0b1120;
-  --bg-canvas: #0b1120;
-  --surface: #1e293b;
-  --surface-2: #16203a;
-  --surface-panel: #1e293b;
-  --surface-raised: #1e293b;
-  --surface-tint: #16203a;
-  --surface-hover: #263348;
-  --text: #f1f5f9;
-  --ink: #e2e8f0;
-  --ink-2: #cbd5e1;
-  --ink-strong: #f1f5f9;
-  --muted: #94a3b8;
-  --text-muted: #94a3b8;
-  --text-faint: #64748b;
-  --border: #33415a;
-  --border-soft: #27364a;
-  --border-strong: #4b5a6f;
-  --line: #33415a;
-  --line-strong: #4b5a6f;
 
-  --accent: #818cf8;
-  --primary: #818cf8;
-  --primary-hover: #a5b4fc;
-  --primary-active: #6366f1;
-  --primary-soft: rgba(129, 140, 248, 0.14);
-  --info: #93c5fd;
-  --info-soft: rgba(96, 165, 250, 0.14);
-  --match: #93c5fd;
 
-  --bg-rail: #0b1120;
-  --bg-rail-soft: #16233a;
-  --bg-header: #0b1120;
 
-  --app-bg: #0b1120;
-  --surface-primary: #1e293b;
-  --apple-bg: #0b1120;
-  --apple-surface-1: #0b1120;
-  --apple-surface-2: #1e293b;
-  --apple-surface-3: #16203a;
-  --apple-blue: #818cf8;
 
-  --ra-canvas: #0b1120;
-  --ra-surface-1: #0b1120;
-  --ra-surface-2: #1e293b;
-  --ra-surface-3: #16203a;
-  --ra-surface-hover: #25334c;
-  --ra-raised: #26364d;
-  --ra-border-hairline: rgba(148, 163, 184, 0.14);
-  --ra-border: rgba(148, 163, 184, 0.22);
-  --ra-border-strong: rgba(148, 163, 184, 0.34);
-  --ra-text-primary: #f1f5f9;
-  --ra-text-secondary: #cbd5e1;
-  --ra-text-tertiary: #94a3b8;
-  --ra-text-faint: #64748b;
-  --ra-action: #818cf8;
-  --ra-action-fill: #6366f1;
-  --ra-action-hover: #a5b4fc;
-  --ra-action-soft: rgba(129, 140, 248, 0.14);
-  --ra-success: #4ade80;
-  --ra-warning: #fbbf24;
-  --ra-danger: #f87171;
-  --ra-info: #93c5fd;
-  --ra-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.22);
-  --ra-shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.4);
-  --ra-shadow-modal: 0 18px 50px rgba(0, 0, 0, 0.5);
 
   /* 纸张保持白纸 */
-  --paper-bg: #ffffff;
-  --paper-ink: #1e293b;
-  --paper-muted: #475569;
-  --paper-rule: #e2e8f0;
 }
 
 /* ---- 3. 壳层压平：压过 v2.0 硬编码深色的 !important ---- */
@@ -12292,4 +12999,3 @@ select,
   flex: 0 0 auto;
   max-width: 160px;
 }
-

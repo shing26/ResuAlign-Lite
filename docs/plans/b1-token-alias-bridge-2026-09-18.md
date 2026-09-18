@@ -228,16 +228,16 @@ B1a/B1b 可直接复用它拆出的两半。
 
 ## 6. B1a 执行规格（已取证，可直接施工）
 
-### 6.1 定义点范围（`.scratch/b1a_inventory.py` 实测）
+### 6.1 定义点范围（`.scratch/b1a_inventory.py` 实测，§7.1 已修正）
 
 | 作用域 | 定义点 | 处置 |
 |---|---|---|
-| `:root` / `[data-theme=*]` / `html.dark` 等全局选择器 | **约 505 处** | 全部摘除，迁入 `@layer tokens` |
+| `:root` / `[data-theme=*]` / `html.dark` 等全局选择器 | **519 处** | 全部摘除，迁入 `@layer tokens` |
 | 组件私有（`.live-sheet`、`.page-header--*`、`.score-ring--*`、`.motion-stagger > *`、`.card .diff-line`） | 约 26 处 | **保持原位不动** |
 
 关键数字：
 
-- 定义点总数 **531**
+- 定义点总数 **545**（旧脚本漏记 14 条带注释声明，见 §7.1）
 - **153 个名字在多个位置重复定义**（`--accent` 有 4 处：`31@:root`、`247@[data-theme=dark]`、
   `10896@:root`、`10979@:root[data-theme=dark]`）
 - 绝大多数 token 名在新旧两套系统里**同时存在且值不同**——这是 B1a 必须解决的核心冲突
@@ -286,3 +286,48 @@ B1a/B1b 可直接复用它拆出的两半。
 - 16 张截图与 `.scratch/css-refactor-baseline/` 逐页一致；
 - 前端 489 passed、后端 997 passed / 7 skipped 不降；
 - 全局 token 定义点从原段落迁出后，原位置不再残留 `--*:` 定义。
+
+---
+
+## 7. B1a 实作记录（2026-09-18）
+
+B1a 已按「单层 tokens + 旧令牌原序重放」实施，实作中修正了两处施工单口径：
+
+### 7.1 定义点数量修正：505 → 519
+
+§6.1 的 505 来自只匹配「分号结尾」的清单脚本，漏掉了 14 条带行尾注释或
+跨行注释的声明，例如：
+
+```css
+--danger: #dc2626; /* light attr 生效值；原 Phase20 :root 的 #b42318
+                      被 :root[data-theme="light"] 特异性压制 */
+```
+
+实际总数是 **545 个定义点 = 519 个全局 + 26 个组件私有**。B1a 迁移的是 519
+个全局定义点；组件私有 26 个保持原位。
+
+### 7.2 视觉零变化的两条 fallback pin
+
+旧 CSS 有两个名字曾被引用但没有全局定义，调用点依赖内联 fallback：
+
+| 名字 | 旧 fallback | B1a 处理 |
+|---|---|---|
+| `--match-soft` | `var(--surface-info)` | 兼容块末尾 pin 回旧 fallback；避免匹配徽标底色提前切换 |
+| `--ra-accent` | `#6366f1` | 兼容块末尾 pin 回旧 fallback；等调用点迁移后再切 canonical |
+
+这两条不是 canonical 决策，只是 B1a 的视觉零变化护栏；调用点迁完后删除。
+
+### 7.3 实际验收结果
+
+- `@layer` 声明 1 条、`@layer tokens {}` 1 个；
+- 519 个全局 token 定义点迁入 `@layer tokens`，26 个组件私有定义点原位保留；
+- `:root` 自定义属性逐值快照：浅色 228 个、深色 229 个，改动前后** 0 missing /
+  0 changed**；新层额外提供浅色 +302、深色 +304 个 canonical / alias 名；
+- DOM 结构对账：8 路由、全部可见节点的 rect / fontSize / lineHeight /
+  color / background / border 快照一致；
+- 16 张截图：除一处运行时自动打开 toast 外无样式差异；
+- `!important` 仍为 100，B1a 不触碰该门禁；B1b 与 24 段归层同批处理；
+- 静态缓存版本 `v=35 → v=36`。
+- 前端 `node --test --test-concurrency=1 ...`：**489 passed / 0 failed**；
+- 后端 `PYTHONPATH=src python -m pytest tests/ -q`：**997 passed / 7 skipped**；
+- DOM 度量探针：8 路由 0 console error，rail 224 / topbar 52 / 看板溢出 0。
