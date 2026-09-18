@@ -666,7 +666,8 @@ test("jobApplyLinkHtml renders 去投递 or 补链接", () => {
     source_url: "https://example.com/jobs/1",
   });
   assert.match(withUrl, /data-action="open-source-url" data-url="https:\/\/example.com\/jobs\/1"/);
-  assert.match(withUrl, /去投递 ↗/);
+  assert.match(withUrl, /data-icon="external-link"/);
+  assert.match(withUrl, /去投递/);
 
   const missing = jobApplyLinkHtml({ job_id: "j2" });
   assert.match(missing, /data-action="open-job-detail" data-id="j2"/);

@@ -11,6 +11,7 @@
 /* Sprint 5: 复用 settings-form.js 的掩码纯函数（maskApiKey），该模块无
  * DOM/fetch 依赖且不 import 本模块，不会产生循环依赖。 */
 import { maskApiKey } from "./settings-form.js";
+import { icon } from "./icons.js";
 
 /* ------------------------------------------------------------------ */
 /* HTML escaping                                                       */
@@ -581,7 +582,7 @@ export function workbenchProgressPipelineHtml(session) {
         .map(
           (step) => `
         <div class="workbench-live-progress__step ${step.done ? "is-done" : ""} ${step.active ? "is-active" : ""} ${step.failed ? "is-failed" : ""}" data-progress-step="${esc(step.key)}">
-          <span class="workbench-live-progress__dot" aria-hidden="true">${step.done ? ICON_PROGRESS_CHECK : step.failed ? "×" : step.active ? "…" : "·"}</span>
+          <span class="workbench-live-progress__dot" aria-hidden="true">${step.done ? ICON_PROGRESS_CHECK : step.failed ? ICON_PROGRESS_X : step.active ? ICON_PROGRESS_ACTIVE : ICON_PROGRESS_IDLE}</span>
           <div class="workbench-live-progress__copy">
             <span class="workbench-live-progress__label">${esc(step.label)}</span>
             ${step.detail ? `<span class="workbench-live-progress__detail">${esc(step.detail)}</span>` : step.failed ? `<span class="workbench-live-progress__detail">未完成：${esc(failureNote)}</span>` : step.idle ? `<span class="workbench-live-progress__detail">未开始</span>` : ""}
@@ -682,18 +683,21 @@ export function stageStepper(session) {
     </div>`;
 }
 
-/* ADR-0033 决策9：emoji 全部替换为 16px 线性 SVG 图标（紧凑场景用 --sm 变体）。 */
-const ICON_CHECK = '<svg class="ic ic--sm" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3L13 4.5"/></svg>';
-const ICON_X = '<svg class="ic ic--sm" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 4 8 8"/><path d="m12 4-8 8"/></svg>';
-const ICON_WARN = '<svg class="ic" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.2 14.3 13H1.7L8 2.2z"/><path d="M8 6.3v3.2"/><path d="M8 11.6v.1"/></svg>';
-const ICON_PROGRESS_CHECK = '<svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3L13 4.5"/></svg>';
+/* ADR-0045: all functional icons come from the shared Lucide factory. */
+const ICON_CHECK = icon("check", 13);
+const ICON_X = icon("x", 13);
+const ICON_WARN = icon("triangle-alert", 16);
+const ICON_PROGRESS_CHECK = icon("check", 12);
+const ICON_PROGRESS_X = icon("x", 12);
+const ICON_PROGRESS_ACTIVE = icon("loader-circle", 12);
+const ICON_PROGRESS_IDLE = icon("dot", 12);
 
 /* 来源徽标内联图标：verified=盾牌，其余=警示三角。 */
 function provenanceBadgeIcon(stateKey) {
   if (stateKey === "verified") {
-    return '<svg class="provenance-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8 13 3.6v4.1c0 3.2-2.1 5.6-5 6.5-2.9-.9-5-3.3-5-6.5V3.6L8 1.8z"/><path d="m5.8 8 1.5 1.5 2.9-3"/></svg>';
+    return icon("shield-check", 12, "provenance-icon");
   }
-  return '<svg class="provenance-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.2 14.3 13H1.7L8 2.2z"/><path d="M8 6.3v3.2"/><path d="M8 11.6v.1"/></svg>';
+  return icon("triangle-alert", 12, "provenance-icon");
 }
 
 export function diffCard(diff, index, jobId) {
@@ -763,8 +767,8 @@ export function diffCard(diff, index, jobId) {
       <div class="diff-card__actions" data-diff-actions>
         ${invalid ? "" : `<button class="btn btn-primary btn-sm" data-action="accept-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_CHECK} 采纳</button>`}
         <button class="btn btn-ghost btn-sm" data-action="reject-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_X} 跳过</button>
-        <button class="btn btn-secondary btn-sm" data-action="polish-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}" data-instruction="quantified">${invalid ? "↻ 重试此条" : "AI 润色"}</button>
-        ${invalid ? "" : `<button class="btn btn-ghost btn-sm" data-action="toggle-bullet-edit" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">✏️ 编辑</button>`}
+        <button class="btn btn-secondary btn-sm" data-action="polish-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}" data-instruction="quantified">${invalid ? `${icon("rotate-ccw", 16)} 重试此条` : "AI 润色"}</button>
+        ${invalid ? "" : `<button class="btn btn-ghost btn-sm" data-action="toggle-bullet-edit" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${icon("pencil", 16)} 编辑</button>`}
       </div>
     </article>`;
 }
@@ -871,7 +875,7 @@ export function exportDock(jobId, job = {}) {
       : "";
   return `
     <details class="export-dock" data-export-dock>
-      <summary class="btn btn-secondary btn-sm export-dock__trigger">导出 ▾</summary>
+      <summary class="btn btn-secondary btn-sm export-dock__trigger">导出 ${icon("chevron-down", 16)}</summary>
       <div class="export-dock__menu">
         <button class="btn btn-secondary btn-sm" type="button" data-action="export-final-draft" data-id="${esc(jobId)}"${finalDisabled}>导出 PDF</button>
         <button class="btn btn-secondary btn-sm" type="button" data-action="export-final-draft-md" data-id="${esc(jobId)}"${finalDisabled}>导出 Markdown</button>
@@ -886,7 +890,7 @@ function boardMoreMenu(job) {
   const id = esc(job.job_id);
   return `
     <details class="board-more" aria-label="更多操作">
-      <summary class="board-more__trigger" aria-label="更多操作" title="更多操作">···</summary>
+      <summary class="board-more__trigger" aria-label="更多操作" title="更多操作">${icon("more-horizontal", 20)}</summary>
       <div class="board-more__menu">
         <button class="btn btn-ghost btn-sm" type="button" data-action="open-job-followup" data-id="${id}">安排跟进</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="open-job-timeline" data-id="${id}">详情</button>
@@ -1817,7 +1821,7 @@ export function workbenchGuideHtml(job, hasDraft = false) {
           .map(
             (step, index) => `
           <span class="workbench-guide__step ${step.done ? "is-done" : ""} ${step.key === currentKey ? "is-current" : ""}" data-guide-step="${esc(step.key)}">${esc(step.label)}</span>
-          ${index < steps.length - 1 ? '<span class="workbench-guide__arrow" aria-hidden="true">→</span>' : ""}`,
+          ${index < steps.length - 1 ? icon("arrow-right", 16, "workbench-guide__arrow") : ""}`,
           )
           .join("")}
       </div>
@@ -1957,7 +1961,7 @@ export function matchBadgeInfo(session, job) {
 export function renderMatchBadge(session, job) {
   const { score, source } = matchBadgeInfo(session, job);
   if (score == null) return "";
-  return `<span class="match-badge ${matchTone(score)}" data-match-badge title="${esc(source)}"><svg class="match-badge__icon" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8 13 3.6v4.1c0 3.2-2.1 5.6-5 6.5-2.9-.9-5-3.3-5-6.5V3.6L8 1.8z"/><path d="m5.8 8 1.5 1.5 2.9-3"/></svg>匹配 ${Math.round(score)}</span>${source ? `<span class="small muted" data-match-source>${esc(source)}</span>` : ""}`;
+  return `<span class="match-badge ${matchTone(score)}" data-match-badge title="${esc(source)}">${icon("shield-check", 13, "match-badge__icon")}匹配 ${Math.round(score)}</span>${source ? `<span class="small muted" data-match-source>${esc(source)}</span>` : ""}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1975,7 +1979,7 @@ export function jobSourceUrl(job) {
 export function jobApplyLinkHtml(job) {
   const url = jobSourceUrl(job);
   if (url) {
-    return `<button type="button" class="btn btn-secondary btn-sm" data-action="open-source-url" data-url="${esc(url)}">去投递 ↗</button>`;
+    return `<button type="button" class="btn btn-secondary btn-sm" data-action="open-source-url" data-url="${esc(url)}">${icon("external-link", 16)} 去投递</button>`;
   }
   return `<button type="button" class="btn btn-ghost btn-sm" data-action="open-job-detail" data-id="${esc(job && job.job_id ? job.job_id : "")}">补链接</button>`;
 }
@@ -2247,7 +2251,7 @@ export function jobTimelineFormHtml(job, snapshots = []) {
         <div class="field wide"><label>JD 原文链接</label>
           <div class="row">
             <input type="url" name="source_url" value="${esc(jobSourceUrl(job))}" placeholder="https://...">
-            ${jobSourceUrl(job) ? `<button type="button" class="btn btn-secondary btn-sm" data-action="open-source-url" data-url="${esc(jobSourceUrl(job))}">去投递 ↗</button>` : ""}
+            ${jobSourceUrl(job) ? `<button type="button" class="btn btn-secondary btn-sm" data-action="open-source-url" data-url="${esc(jobSourceUrl(job))}">${icon("external-link", 16)} 去投递</button>` : ""}
           </div>
         </div>
         <div class="field"><label>状态</label><select name="status">${statusOptions}</select></div>

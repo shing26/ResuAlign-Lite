@@ -1,3 +1,5 @@
+import { icon } from "./icons.js";
+
 const STORAGE_KEY = "resualign_theme";
 
 function preferredTheme() {
@@ -24,6 +26,8 @@ export function applyTheme(theme) {
   toggle.setAttribute("aria-pressed", String(theme === "dark"));
   const label = toggle.querySelector("[data-theme-label]");
   if (label) label.textContent = theme === "dark" ? "深色" : "浅色";
+  const iconMount = toggle.querySelector("[data-theme-icon]");
+  if (iconMount) iconMount.innerHTML = icon(theme === "dark" ? "moon" : "sun", 16);
 }
 
 export function toggleTheme() {

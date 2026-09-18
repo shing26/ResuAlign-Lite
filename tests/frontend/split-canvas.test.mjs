@@ -221,7 +221,8 @@ test("diffCard renders actionable modify card with provenance", () => {
 test("diffCard renders the inline edit button on valid modify cards", () => {
   const html = diffCard(SAMPLE_DIFF, 0, "job-1");
   assert.match(html, /data-action="toggle-bullet-edit"/);
-  assert.match(html, /✏️ 编辑/);
+  assert.match(html, /data-icon="pencil"/);
+  assert.match(html, /编辑/);
 });
 
 test("diffCard omits the inline edit button on invalid-gate cards", () => {
@@ -275,7 +276,8 @@ test("diffCard offers per-item retry on invalid cards", () => {
   );
   assert.match(invalid, /diff-card--invalid/);
   assert.match(invalid, /data-action="polish-bullet"/);
-  assert.match(invalid, /↻ 重试此条/);
+  assert.match(invalid, /data-icon="rotate-ccw"/);
+  assert.match(invalid, /重试此条/);
   assert.doesNotMatch(invalid, /data-action="accept-bullet"/);
 
   assert.match(diffCard(SAMPLE_DIFF, 0, "job-1"), /AI 润色/);
@@ -640,7 +642,8 @@ test("boardCard shows 去投递 when source_url exists", () => {
     source_url: "https://example.com/jobs/1",
   });
   assert.match(html, /data-action="open-source-url"/);
-  assert.match(html, /去投递 ↗/);
+  assert.match(html, /data-icon="external-link"/);
+  assert.match(html, /去投递/);
 });
 
 test("boardCard shows 待分析 when no match score", () => {

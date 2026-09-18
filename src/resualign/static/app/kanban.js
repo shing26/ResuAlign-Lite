@@ -28,6 +28,7 @@ import {
   jobsEmptyGuideHtml,
   options,
 } from "./format.js";
+import { icon } from "./icons.js";
 
 let canvasRenderHooks = [];
 let draggingJobId = null;
@@ -132,7 +133,7 @@ export async function renderKanban(app) {
             <button type="button" class="btn btn-outline btn-sm" data-action="batch-align-pending" data-batch-align>批量对齐</button>
             <button type="button" class="btn btn-primary btn-sm" data-action="show-add-job">添加岗位</button>
             <details class="toolbar-more" data-jobs-data-menu>
-              <summary class="btn btn-secondary btn-sm toolbar-more__trigger">数据 ▾</summary>
+              <summary class="btn btn-secondary btn-sm toolbar-more__trigger">数据 ${icon("chevron-down", 16)}</summary>
               <div class="toolbar-more__menu">
                 <button type="button" class="btn btn-secondary btn-sm" data-action="show-import">批量导入</button>
                 <button type="button" class="btn btn-secondary btn-sm" data-action="export-jobs-csv">导出 CSV</button>

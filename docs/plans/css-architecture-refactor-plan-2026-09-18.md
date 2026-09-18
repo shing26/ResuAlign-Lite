@@ -1,6 +1,6 @@
 # ResuAlign 前端 CSS 架构重构 · 批次施工单
 
-**状态**: B0/B1/B2a/B2b/B2c/B2d/B2e/B3a/B3b/B4 已完成；B5–B7 按 ADR-0050 逐批推进
+**状态**: B0/B1/B2a/B2b/B2c/B2d/B2e/B3a/B3b/B4/B5 已完成；B6–B7 按 ADR-0050 逐批推进
 **日期**: 2026-09-18
 **依据**: ADR-0043（分层）/ ADR-0044（token）/ ADR-0045（图标）/
 ADR-0046（内联变量）/ ADR-0047（主题与主色）
@@ -439,3 +439,36 @@ B1a 旧值重放**之前**，并新增 `--shadow-ink` 基元；业务规则、�
   原生 `select` 展开态可捕获，浅色与深色 option 面板均正确；
 - 390px 触摸视口复验：三页 `select` 高度 44px、字号 16px、
   `scrollWidth === innerWidth`，无横向溢出。
+
+---
+
+## 19. B5 图标替换实作记录（2026-09-18）
+
+**范围**：按 ADR-0045 新增唯一图标工厂，清除真实 emoji / 功能符号，
+统一主题切换、关闭、编辑、更多菜单和下拉入口的图元来源；不引入 npm
+图标包、sprite、图标字体或外部请求。静态缓存版本 `v=44 → v=45`。
+
+**结果**：
+
+- 新增 `src/resualign/static/app/icons.js`：Lucide path 数据 + 内联 SVG
+  工厂，统一 `viewBox="0 0 24 24"`、`currentColor`、`stroke-width="1.75"`、
+  `aria-hidden` 与 `focusable="false"`；新增 `.ic--12/16/20/24` 尺寸，
+  保留冻结的 `.ic` / `.ic--sm`；
+- `format.js` 的 check / x / warning / provenance / match badge / progress
+  SVG 全部改由工厂输出；保留 `empty-state__illustration` 作为结构性插图例外；
+- `✏️` 编辑按钮（格式层与事件层两处）改为 `pencil` 图标；
+  `◐` 主题切换改为 `sun` / `moon` 动态图标；模态关闭 `✕` 与 toast 关闭
+  `×` 改为 `x` 图标；岗位卡 `···` 改为 `more-horizontal`；
+  导出 / 数据菜单 `▾` 改为 `chevron-down`；快速评估跳转与工作台引导箭头
+  改为 `chevron-right` / `arrow-right`；
+- 正文中的 `→`、`·`、`…`、`•` 按 ADR-0045 保留，不做全文件裸扫替换；
+- 新增 `tests/frontend/icons.test.mjs` 四条守卫：SVG 来源唯一、
+  功能 emoji/符号零命中、动作入口使用 Lucide、尺寸集合受限；
+- 前端全量：**513 passed / 0 failed**；
+- 后端全量：**997 passed / 7 skipped**；
+- 浏览器探针：dashboard/jobs/resumes/resume/workspace/settings/review
+  共 7 路由 × 明暗双主题，图标均非零尺寸、主题图标随主题切为
+  `sun` / `moon`、0 console error；
+- DOM 度量：8 路由 rail 224 / topbar 52 / 看板溢出 0；
+- 截图存 `.scratch/css-refactor-b5/`，图标探针原始报告存
+  `.scratch/b5-icon-report.json`。

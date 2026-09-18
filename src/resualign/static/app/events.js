@@ -27,6 +27,7 @@ import {
   renderBatchMatrixHtml,
 } from "./format.js";
 import { API_CACHE_TTL, apiCache } from "./cache-manager.js";
+import { icon } from "./icons.js";
 
 /* Pure formatting / vocabulary / status helpers now live in format.js.
  * They are re-exported here so every existing import path keeps working. */
@@ -174,7 +175,7 @@ export function toast(message, kind = "info") {
   const close = document.createElement("button");
   close.type = "button";
   close.setAttribute("aria-label", "关闭提示");
-  close.textContent = "×";
+  close.innerHTML = icon("x", 16);
   close.addEventListener("click", () => node.remove());
   node.append(text, close);
   region.append(node);
@@ -289,7 +290,7 @@ export function showModal(title, bodyHtml, options = {}) {
   backdrop.setAttribute("aria-modal", "true");
   backdrop.setAttribute("aria-label", title);
   const closeBtn = options.closeBtn
-    ? `<button type="button" class="modal-close" data-action="close-modal" aria-label="关闭">✕</button>`
+    ? `<button type="button" class="modal-close" data-action="close-modal" aria-label="关闭">${icon("x", 20)}</button>`
     : "";
   backdrop.innerHTML = `<div class="modal"><h3>${esc(title)}</h3>${closeBtn}${bodyHtml}</div>`;
   backdrop.addEventListener("click", (event) => {

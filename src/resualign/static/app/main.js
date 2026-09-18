@@ -106,6 +106,7 @@ import {
   simpleLlmSetupHtml,
   snapshotDrawerHtml,
 } from "./format.js";
+import { icon } from "./icons.js";
 import {
   buildAutomationRulePayload,
   buildCostGuardPayload,
@@ -2124,7 +2125,7 @@ const actions = {
       const savedHtml = card.dataset.originalProposedHtml || "";
       proposedNode.innerHTML = savedHtml;
       card.classList.remove("is-editing");
-      button.textContent = "✏️ 编辑";
+      button.innerHTML = `${icon("pencil", 16)} 编辑`;
       return;
     }
     /* 进入编辑：保存高亮 HTML，替换为可编辑 textarea（纯文本）。 */

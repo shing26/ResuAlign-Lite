@@ -8,6 +8,7 @@
 
 import { $, $$, api, esc, state, toast } from "./events.js";
 import { isJdUrl, previewFor, renderJobSuggestionsHtml } from "./format.js";
+import { icon } from "./icons.js";
 
 let jobsCache = null;
 
@@ -248,7 +249,7 @@ export async function runQuickEval() {
       if (preview) {
         preview.innerHTML =
           '<div class="form-error" role="alert">该 JD 已在岗位库中。</div>' +
-          '<a class="btn btn-outline btn-sm" href="#/workspace/' + encodeURIComponent(body.existing_job_id) + '" data-action="close-command-panel">查看该岗位 →</a>';
+          '<a class="btn btn-outline btn-sm" href="#/workspace/' + encodeURIComponent(body.existing_job_id) + '" data-action="close-command-panel">查看该岗位 ' + icon("chevron-right", 16) + '</a>';
       }
       return;
     }

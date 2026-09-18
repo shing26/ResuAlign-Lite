@@ -4749,6 +4749,9 @@ body {
 }
 
 .theme-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: var(--text-lg);
   line-height: 1;
 }
@@ -5552,7 +5555,7 @@ body.command-palette-open {
   line-height: 1.5;
 }
 
-/* 黄金核心 1：Bullet 原地编辑（✏️ 编辑 → textarea → 采纳读取编辑后文本） */
+/* 黄金核心 1：Bullet 原地编辑（编辑 → textarea → 采纳读取编辑后文本） */
 .diff-card.is-editing .diff-card__text {
   white-space: normal;
 }
@@ -10652,8 +10655,6 @@ details > summary::-webkit-details-marker,
   color: var(--ra-text-secondary);
   background: transparent;
   cursor: pointer;
-  font-weight: 700;
-  letter-spacing: 0.08em;
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
@@ -11974,6 +11975,26 @@ select,
 .ic--sm {
   width: 13px;
   height: 13px;
+}
+
+.ic--12 {
+  width: 12px;
+  height: 12px;
+}
+
+.ic--16 {
+  width: 16px;
+  height: 16px;
+}
+
+.ic--20 {
+  width: 20px;
+  height: 20px;
+}
+
+.ic--24 {
+  width: 24px;
+  height: 24px;
 }
 
 @keyframes ra-drawer-in {

@@ -90,15 +90,16 @@ test("UI templates no longer ship emoji glyphs (warning/check/cross)", () => {
     assert.doesNotMatch(src, /\u2713/, "no U+2713 check emoji");
     assert.doesNotMatch(src, /\u2717/, "no U+2717 cross emoji");
   }
-  assert.match(readApp("format.js"), /<svg[^>]*class="ic[^"]*"/, "linear SVG icons introduced");
+  assert.match(readApp("format.js"), /icon\("check", 13\)/, "format.js uses the shared icon factory");
+  assert.match(readApp("icons.js"), /<svg[^>]*class="\$\{classes\}"/, "linear SVG factory introduced");
 });
 
 /* ------------------------------------------------------------------ */
 /* 静态缓存版本                                                        */
 /* ------------------------------------------------------------------ */
 
-test("index.html bumps static cache version to v=44", () => {
+test("index.html bumps static cache version to v=45", () => {
   const html = readStatic("index.html");
-  assert.match(html, /\/static\/styles\.css\?v=44/);
-  assert.match(html, /\/static\/app\/main\.js\?v=44/);
+  assert.match(html, /\/static\/styles\.css\?v=45/);
+  assert.match(html, /\/static\/app\/main\.js\?v=45/);
 });
