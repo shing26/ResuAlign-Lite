@@ -88,7 +88,7 @@ test("styles.css styles the inline source editor", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* v2.1 对齐：240px 侧栏 + 64px 顶栏 + 岗位库单一 Top Bar + 简历默认详情 */
+/* v2.1 对齐：侧栏 + 顶栏 + 岗位库单一 Top Bar + 简历默认详情 */
 /* ------------------------------------------------------------------ */
 
 test("index.html: rail brand, jobs count badge and topbar title slots", () => {
@@ -113,15 +113,17 @@ test("index.html: rail brand, jobs count badge and topbar title slots", () => {
   assert.match(html, />系统设置</, "settings rail label");
 });
 
-test("styles.css: 240px rail + 64px topbar override layer", () => {
+test("styles.css: rail/topbar reference --rail-w / --topbar-h tokens (ADR-0048)", () => {
   const css = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src/resualign/static/styles.css"),
     "utf8",
   );
-  assert.match(css, /\.app-rail\s*\{[^}]*240px/, "240px rail column");
+  assert.match(css, /--rail-w:\s*224px/, "--rail-w token is 224px");
+  assert.match(css, /--topbar-h:\s*52px/, "--topbar-h token is 52px");
+  assert.match(css, /\.app-rail\.rail\s*\{[^}]*width:\s*var\(--rail-w\)/, "rail width references the token");
+  assert.match(css, /\.topbar\s*\{[^}]*height:\s*var\(--topbar-h\)/, "topbar height references the token");
   assert.match(css, /\.rail-brand\s*\{/, "rail brand styles");
   assert.match(css, /\.rail-count\s*\{/, "rail count badge styles");
-  assert.match(css, /\.topbar\s*\{[^}]*height:\s*64px/, "64px topbar");
   assert.match(css, /\.header-title\s*\{/, "topbar title styles");
   assert.match(css, /\.quick-jd-btn\s*\{/, "quick JD button styles");
   assert.match(css, /\.rail-icon\s*\{/, "rail emoji icon styles");

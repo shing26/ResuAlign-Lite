@@ -33,6 +33,10 @@
   --danger: #dc2626;          /* light attr 生效值；原 Phase20 :root 的 #b42318
                                  被 :root[data-theme="light"] 特异性压制，仅无属性状态可见 */
   --success: #16a34a;
+  /* ADR-0048（ADR-0042 决定 6e 逐项例外）：应用外壳尺度 canonical token。
+     B1 迁入 @layer tokens 时只需搬移本块，不必再追散落的魔法数字。 */
+  --rail-w: 224px;
+  --topbar-h: 52px;
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
@@ -3767,7 +3771,7 @@ select {
 /* T4 pipeline board */
 .pipeline-board {
   display: grid;
-  grid-template-columns: repeat(5, minmax(240px, 1fr));
+  grid-template-columns: repeat(5, minmax(220px, 1fr));
   gap: 12px;
   overflow-x: auto;
   padding-bottom: 8px;
@@ -6791,12 +6795,12 @@ select option {
 }
 
 /* ==========================================================================
-   ResuAlign v2.1 - 240px Apple sidebar + 64px topbar + jobs top bar
+   ResuAlign v2.1 - Apple sidebar + 52px topbar + jobs top bar
    (追加在 Apple Native override 层之后，保持桌面端与模板 1:1)
    ========================================================================== */
 
 .app-shell {
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
 }
 
 .app-rail {
@@ -6917,13 +6921,13 @@ select option {
   color: #fff;
 }
 
-/* 240px 侧栏有文字标签后，不再需要 hover 悬浮 tooltip。 */
+/* 侧栏有文字标签后，不再需要 hover 悬浮 tooltip。 */
 .tabs--rail button:hover::after,
 .tabs--rail button:hover::before {
   display: none;
 }
 
-/* 旧版 60px 图标栏的彩色指示点不再参与 240px 侧栏布局。 */
+/* 旧版 60px 图标栏的彩色指示点不再参与侧栏布局。 */
 .tabs--rail button::before {
   display: none;
 }
@@ -6954,8 +6958,8 @@ select option {
 
 .topbar {
   flex-wrap: nowrap;
-  height: 64px;
-  min-height: 64px;
+  height: var(--topbar-h);
+  min-height: var(--topbar-h);
   margin: 0 0 14px;
   padding: 0 18px;
   border: none;
@@ -7153,8 +7157,8 @@ select option {
   }
 }
 
-/* 移动端修正：追加层在 240px 侧栏规则之后，必须重新收起为顶部导航。
-   （覆盖较早的 @media(max-width:900px) 基础块与 240px 桌面规则） */
+/* 移动端修正：追加层在侧栏桌面规则之后，必须重新收起为顶部导航。
+   （覆盖较早的 @media(max-width:900px) 基础块与桌面侧栏规则） */
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: minmax(0, 1fr);
@@ -7291,8 +7295,8 @@ select option {
   position: relative;
   top: auto;
   height: 100vh;
-  width: 240px;
-  flex: 0 0 240px;
+  width: var(--rail-w);
+  flex: 0 0 var(--rail-w);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -7392,8 +7396,8 @@ select option {
 }
 
 .topbar {
-  height: 64px;
-  min-height: 64px;
+  height: var(--topbar-h);
+  min-height: var(--topbar-h);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -7433,7 +7437,7 @@ select option {
   overscroll-behavior: contain;
 }
 
-.w-60 { width: 240px; }
+.w-60 { width: var(--rail-w); }
 .h-16 { height: 64px; }
 .w-8 { width: 32px; }
 .h-8 { height: 32px; }
@@ -7959,8 +7963,8 @@ html {
 }
 
 .app-rail.rail {
-  flex: 0 0 240px;
-  width: 240px;
+  flex: 0 0 var(--rail-w);
+  width: var(--rail-w);
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -8100,8 +8104,8 @@ html {
 }
 
 .topbar {
-  height: 64px;
-  min-height: 64px;
+  height: var(--topbar-h);
+  min-height: var(--topbar-h);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -8919,7 +8923,9 @@ html {
 }
 
 .board-column {
-  flex: 0 0 320px;
+  /* ADR-0048: 5 列在可视宽内均分；允许收缩，第 5 列不再被裁。 */
+  flex: 1 1 200px;
+  max-width: 320px;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -11086,19 +11092,19 @@ del {
   text-decoration: line-through;
 }
 
-/* ---- 4. 侧栏（230px 白底）与顶栏 ----
+/* ---- 4. 侧栏（224px 白底）与顶栏 ----
    仅桌面：≤900px 时 .app-shell 是 flex-direction: column，这里的
-   `flex: 0 0 230px` 会作用在「高度」上，把侧栏撑成 230px 高的方块
+   `flex: 0 0 224px` 会作用在「高度」上，把侧栏撑成 224px 高的方块
    （实测 390×844 下吃掉 27% 屏高，其中 95px 是空白）。响应式规则见
    styles.css:2788 起的 @media (max-width: 900px)。 */
 @media (min-width: 901px) {
   .app-shell {
-    grid-template-columns: 230px minmax(0, 1fr);
+    grid-template-columns: var(--rail-w) minmax(0, 1fr);
   }
 
   .app-rail.rail {
-    flex: 0 0 230px;
-    width: 230px;
+    flex: 0 0 var(--rail-w);
+    width: var(--rail-w);
     padding: 16px 10px 14px;
   }
 }
