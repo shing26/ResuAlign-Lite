@@ -1,6 +1,6 @@
 # ResuAlign 前端 CSS 架构重构 · 批次施工单
 
-**状态**: B0/B1/B2a/B2b/B2c/B2d 已完成；B2e–B7 按 ADR-0050 逐批推进
+**状态**: B0/B1/B2a/B2b/B2c/B2d/B2e 已完成；B3–B7 按 ADR-0050 逐批推进
 **日期**: 2026-09-18
 **依据**: ADR-0043（分层）/ ADR-0044（token）/ ADR-0045（图标）/
 ADR-0046（内联变量）/ ADR-0047（主题与主色）
@@ -326,3 +326,29 @@ ADR-0044 决定 11 已批准引入，施工时须一并确定：
 - 8 路由 DOM 度量：rail 224 / topbar 52 / 看板溢出 0 / 0 console error；
 - 16 张明暗截图完成目视检查，卡片、面板、表格靠描边和底阶区分，
   下拉、模态、抽屉、Toast 仍保留脱离感。
+
+---
+
+## 15. B2e z-index 收敛实作记录（2026-09-18）
+
+**范围**：只替换 `@layer reset/base/components/patterns/utilities` 中
+的业务层 `z-index`，不改 token 数值、打印覆盖或 JS/HTML 契约。
+
+**结果**：
+
+- 业务层裸 `z-index: <number>` 归零，业务规则不得再引用兼容名
+  `var(--ra-z-*)`；
+- 收敛为 9 档 canonical token：
+  `--z-below/base/sticky/rail/dropdown/drawer/modal/popover/toast`；
+- 浮层语义按职责归位：Toast 与庆祝态 `toast`，模态遮罩与命令面板
+  `modal`，导航栏 `rail`，菜单与筛选浮层 `dropdown`，模态内浮层
+  `popover`，页内 sticky 区域 `sticky`，装饰底层 `below/base`；
+- `.batch-fab` 从旧值 `80` 归到 `--z-dropdown`（30），不再越级压过抽屉、
+  模态与 Toast；
+- 新增 `css-architecture.test.mjs` 守卫：九档 token 必须存在、业务层不得
+  写裸值或引用 legacy alias、关键组件必须使用正确语义 token；
+- 静态缓存版本 `v=41 → v=42`；
+- 前端全量 **502 passed / 0 failed**；
+- 后端全量 **997 passed / 7 skipped**；
+- 8 路由 DOM 度量：rail 224 / topbar 52 / 看板溢出 0 / 0 console error；
+- 16 张明暗截图完成目视检查，菜单、模态、抽屉、看板和移动底栏层级正常。

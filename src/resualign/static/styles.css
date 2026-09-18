@@ -2317,7 +2317,7 @@ table.data th {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  z-index: 50;
+  z-index: var(--z-toast);
   max-width: min(380px, calc(100vw - 32px));
 }
 
@@ -2357,7 +2357,7 @@ table.data th {
   display: grid;
   place-items: center;
   padding: var(--space-4);
-  z-index: 60;
+  z-index: var(--z-modal);
 }
 
 /* Scroll lock while a modal is open (#6): desktop scrolls inside #app,
@@ -2370,7 +2370,7 @@ body.modal-open #app-router-view {
 .offer-celebration {
   position: fixed;
   inset: 0;
-  z-index: 300;
+  z-index: var(--z-toast);
   pointer-events: none;
   overflow: hidden;
   display: flex;
@@ -2680,7 +2680,7 @@ h6 {
   left: calc(100% + 10px);
   top: 50%;
   transform: translateY(-50%);
-  z-index: 90;
+  z-index: var(--z-popover);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-lg);
   background: rgba(0, 0, 0, 0.82);
@@ -2702,7 +2702,7 @@ h6 {
   transform: translateY(-50%);
   border: 5px solid transparent;
   border-right-color: rgba(0, 0, 0, 0.82);
-  z-index: 90;
+  z-index: var(--z-popover);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease;
@@ -3648,7 +3648,7 @@ table.data th {
   .app-rail {
     position: sticky;
     top: 0;
-    z-index: 40;
+    z-index: var(--z-rail);
     height: auto;
     flex-direction: row;
     align-items: center;
@@ -4008,7 +4008,7 @@ select {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: -1;
+  z-index: var(--z-below);
   border-radius: var(--radius-sm);
   background: var(--primary);
   opacity: 0;
@@ -5051,7 +5051,7 @@ body.is-printing #print-root {
 .command-palette {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: var(--z-modal);
   display: grid;
   place-items: start center;
   padding: 14vh var(--space-4) var(--space-6);
@@ -6797,7 +6797,7 @@ body.resume-inline-editing .resume-sheet__doc {
 
 .version-timeline__dot {
   position: relative;
-  z-index: 1;
+  z-index: var(--z-base);
   flex: none;
   width: 12px;
   height: 12px;
@@ -7775,7 +7775,7 @@ select option {
   .app-rail {
     position: sticky;
     top: 0;
-    z-index: 40;
+    z-index: var(--z-rail);
     height: auto;
     width: 100%;
     min-width: 0;
@@ -9457,7 +9457,7 @@ html {
 
 .filter-pop {
   position: absolute;
-  z-index: 20;
+  z-index: var(--z-dropdown);
   top: 38px;
   left: 0;
   width: min(640px, calc(100vw - 48px));
@@ -10218,7 +10218,7 @@ button:active:not(:disabled),
 .command-palette.overlay {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: var(--z-modal);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -10307,7 +10307,7 @@ button:active:not(:disabled),
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -10724,7 +10724,7 @@ details > summary::-webkit-details-marker,
 .toolbar-more__menu,
 .board-more__menu {
   position: absolute;
-  z-index: 60;
+  z-index: var(--z-dropdown);
   top: calc(100% + 6px);
   right: 0;
   display: grid;
@@ -10798,7 +10798,7 @@ details > summary::-webkit-details-marker,
 
 .batch-fab {
   position: fixed;
-  z-index: 80;
+  z-index: var(--z-dropdown);
   bottom: 24px;
   left: 50%;
   display: flex;
@@ -12122,7 +12122,7 @@ select,
     overflow-x: auto;
     position: sticky;
     top: 0;
-    z-index: 5;
+    z-index: var(--z-sticky);
     gap: var(--space-1);
     padding: var(--space-2) var(--space-2);
     background: color-mix(in srgb, var(--ra-surface-2) 94%, transparent);
@@ -12467,7 +12467,7 @@ select,
     gap: var(--space-3);
     position: sticky;
     bottom: 0;
-    z-index: 30;
+    z-index: var(--z-sticky);
     padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
     background: color-mix(in srgb, var(--ra-surface-2, #1d2129) 92%, transparent);
     backdrop-filter: blur(12px);

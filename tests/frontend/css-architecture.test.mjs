@@ -290,3 +290,83 @@ test("shadow tokens publish four floating steps plus none", () => {
     assert.match(tokens, new RegExp(`--shadow-${name}\\s*:`));
   }
 });
+
+function declarationsFor(css, selector, property) {
+  const values = [];
+  for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = match[1]
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split(",")
+      .map((part) => part.replace(/\s+/g, " ").trim());
+    if (!selectors.includes(selector)) continue;
+
+    const declaration = match[2].match(
+      new RegExp(`${property}\\s*:\\s*([^;{}]+)\\s*;`),
+    );
+    if (declaration) values.push(declaration[1].replace(/\s+/g, " ").trim());
+  }
+  return values;
+}
+
+test("business rules keep z-index on the canonical nine-step scale", () => {
+  const businessCss = [
+    "reset",
+    "base",
+    "components",
+    "patterns",
+    "utilities",
+  ]
+    .map((layer) => extractLayerText(CSS, layer))
+    .join("\n");
+
+  const raw = businessCss.match(/z-index\s*:\s*-?\d+\s*;/g) || [];
+  assert.deepEqual(raw, []);
+  assert.doesNotMatch(businessCss, /var\(--ra-z-/);
+
+  const tokens = extractLayerText(CSS, "tokens");
+  for (const name of [
+    "below",
+    "base",
+    "sticky",
+    "rail",
+    "dropdown",
+    "drawer",
+    "modal",
+    "popover",
+    "toast",
+  ]) {
+    assert.match(tokens, new RegExp(`--z-${name}\\s*:`));
+  }
+});
+
+test("z-index tokens preserve layering semantics", () => {
+  const businessCss = [
+    "reset",
+    "base",
+    "components",
+    "patterns",
+    "utilities",
+  ]
+    .map((layer) => extractLayerText(CSS, layer))
+    .join("\n");
+
+  const expected = new Map([
+    [".toast-region", "--z-toast"],
+    [".modal-backdrop", "--z-modal"],
+    [".command-palette", "--z-modal"],
+    [".app-rail", "--z-rail"],
+    [".filter-pop", "--z-dropdown"],
+    [".export-dock__menu", "--z-dropdown"],
+    [".batch-fab", "--z-dropdown"],
+    [".tabs--rail button:hover::after", "--z-popover"],
+  ]);
+
+  for (const [selector, token] of expected) {
+    const values = declarationsFor(businessCss, selector, "z-index");
+    assert.ok(values.length > 0, `missing z-index for ${selector}`);
+    assert.ok(
+      values.every((value) => value === `var(${token})`),
+      `${selector} must use ${token}, got ${values.join(", ")}`,
+    );
+  }
+});
