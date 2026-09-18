@@ -416,11 +416,11 @@ test("cmpLineHtml emits addressable rows with 1-based visible numbers", () => {
 
 test("matchTone buckets scores at 80/60 boundaries", () => {
   assert.equal(matchTone(null), "");
-  assert.equal(matchTone(90), "match--high");
-  assert.equal(matchTone(80), "match--high");
-  assert.equal(matchTone(70), "match--mid");
-  assert.equal(matchTone(60), "match--mid");
-  assert.equal(matchTone(30), "match--low");
+  assert.equal(matchTone(90), "match-badge--high");
+  assert.equal(matchTone(80), "match-badge--high");
+  assert.equal(matchTone(70), "match-badge--mid");
+  assert.equal(matchTone(60), "match-badge--mid");
+  assert.equal(matchTone(30), "match-badge--low");
 });
 
 /* ------------------------------------------------------------------ */
@@ -567,7 +567,7 @@ test("renderMatchBadge renders score, source title and muted source label", () =
     { alignment: { eval_score: { jd_match_score: 82.4 } } },
     {},
   );
-  assert.match(html, /class="match-badge match--high" data-match-badge/);
+  assert.match(html, /class="match-badge match-badge--high" data-match-badge/);
   assert.match(html, /title="AI 对齐匹配分（LLM 评估）"/);
   assert.match(html, /match-badge__icon/);
   assert.match(html, />匹配 82</);

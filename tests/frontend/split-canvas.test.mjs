@@ -629,7 +629,7 @@ test("boardCard renders copilot card with drag handle and match badge", () => {
   assert.match(html, /data-action="open-optimizer"/);
   assert.match(html, /data-action="open-job-followup" data-id="j1"/);
   assert.match(html, /data-action="delete-job"/);
-  assert.match(html, /match--high/);
+  assert.match(html, /match-badge--high/);
   assert.match(html, />82<\/span>/);
   assert.match(html, /20-30K/);
 });
@@ -661,7 +661,7 @@ test("boardCard match badge title discloses the score source", () => {
     match_score: 80,
     match_score_detail: { total: 80 },
   });
-  assert.match(html, /class="match-badge match--high" data-match-total title="匹配度 · 规则匹配分（四维打分）">80<\/span>/);
+  assert.match(html, /class="match-badge match-badge--high" data-match-total title="匹配度 · 规则匹配分（四维打分）">80<\/span>/);
   assert.match(
     boardCard({ job_id: "j2", title: "T", status: "draft" }),
     /class="match-badge match-badge--empty" title="尚未分析">待分析<\/span>/,

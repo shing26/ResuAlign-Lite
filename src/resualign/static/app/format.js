@@ -458,9 +458,9 @@ export const STAGE_LABELS = {
 
 export function matchTone(score) {
   if (score == null) return "";
-  if (score >= 80) return "match--high";
-  if (score >= 60) return "match--mid";
-  return "match--low";
+  if (score >= 80) return "match-badge--high";
+  if (score >= 60) return "match-badge--mid";
+  return "match-badge--low";
 }
 
 export function alignProgressPercent(stage) {
