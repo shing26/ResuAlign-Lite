@@ -9,8 +9,11 @@ import time
 from typing import Any
 
 from .job_library import JOB_FUNCTIONS, JOB_STATUSES, SENIORITIES
+from .llm_providers import ALLOWED_PROVIDERS
 from .secret_box import decrypt_value, encrypt_value
 from .store_base import UserStoreError, _SqliteStore
+
+_LLM_PROVIDERS = ALLOWED_PROVIDERS
 
 _SETTINGS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS user_settings (
@@ -475,13 +478,9 @@ def _validate_settings(settings: dict[str, Any]) -> None:
     if eval_default is not None and not isinstance(eval_default, bool):
         raise UserStoreError("eval_default must be a boolean")
     provider = settings.get("llm_provider")
-    if provider is not None and provider not in (
-        "deepseek",
-        "openrouter",
-        "ollama",
-    ):
+    if provider is not None and provider not in _LLM_PROVIDERS:
         raise UserStoreError(
-            "llm_provider must be one of deepseek, openrouter, ollama"
+            f"llm_provider must be one of {', '.join(_LLM_PROVIDERS)}"
         )
     model = settings.get("llm_model")
     if model is not None and (not isinstance(model, str) or not model.strip()):
@@ -491,13 +490,9 @@ def _validate_settings(settings: dict[str, Any]) -> None:
 
     llm = settings.get("llm") or {}
     llm_provider = llm.get("provider")
-    if llm_provider is not None and llm_provider not in (
-        "deepseek",
-        "openrouter",
-        "ollama",
-    ):
+    if llm_provider is not None and llm_provider not in _LLM_PROVIDERS:
         raise UserStoreError(
-            "llm.provider must be one of deepseek, openrouter, ollama"
+            f"llm.provider must be one of {', '.join(_LLM_PROVIDERS)}"
         )
     llm_model = llm.get("model")
     if llm_model is not None and (

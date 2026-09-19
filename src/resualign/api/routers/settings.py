@@ -14,6 +14,7 @@ from ...config import (
 )
 from ...job_library import JOB_STATUSES
 from ...llm import _DEFAULT_PROVIDER_URLS
+from ...llm_providers import resolve_provider
 from ...role_router import usable_active_node
 from ...settings_store import default_settings
 from ..deps import get_current_user
@@ -421,8 +422,13 @@ def test_llm_connection(
     store > .env / env vars. Returns ``{ok, status, latency_ms, message}``
     with a readable failure reason (auth, model missing, timeout, network).
     """
+    provider = (
+        resolve_provider(req.provider, req.base_url)
+        if req.provider
+        else None
+    )
     config = api_module.build_config(
-        provider=req.provider,
+        provider=provider,
         api_key=req.api_key,
         model=req.model,
         base_url=req.base_url,

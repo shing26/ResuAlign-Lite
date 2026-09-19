@@ -19,6 +19,7 @@ import time
 import uuid
 from typing import Any
 
+from .llm_providers import ALLOWED_PROVIDERS
 from .observability import log_event
 from .secret_box import decrypt_value, encrypt_value
 from .store_base import UserStoreError, _SqliteStore
@@ -79,7 +80,7 @@ _EDITABLE_FIELDS = (
     "disable_thinking",
 )
 
-_ALLOWED_PROVIDERS = ("deepseek", "openrouter", "ollama")
+_ALLOWED_PROVIDERS = ALLOWED_PROVIDERS
 
 _LLM_ROLES = ("diagnose", "profiler", "gap_analyzer", "editor", "evaluator")
 _LLM_ROLE_ASSIGNMENTS_SCHEMA = """
@@ -686,7 +687,7 @@ class LLMNodeStore(_SqliteStore):
             raise UserStoreError("name must be a non-empty string")
         if provider not in _ALLOWED_PROVIDERS:
             raise UserStoreError(
-                "provider must be one of deepseek, openrouter, ollama"
+                "provider must be a supported OpenAI-compatible provider or custom"
             )
         if not str(model or "").strip():
             raise UserStoreError("model must be a non-empty string")

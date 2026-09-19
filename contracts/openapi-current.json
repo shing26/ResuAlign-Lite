@@ -2561,6 +2561,55 @@
         }
       }
     },
+    "/api/llm/models": {
+      "post": {
+        "summary": "List Llm Models",
+        "description": "Discover models from an OpenAI-compatible endpoint.\n\n``provider=auto`` is resolved from Base URL. A saved node's key is reused\nwhen the edit form leaves the password field blank.",
+        "operationId": "list_llm_models_api_llm_models_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMModelsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/llm/nodes/{node_id}": {
       "put": {
         "summary": "Update Llm Node",
@@ -4852,6 +4901,61 @@
         ],
         "title": "KanbanBulkStatusResultItem"
       },
+      "LLMModelsRequest": {
+        "properties": {
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          }
+        },
+        "type": "object",
+        "title": "LLMModelsRequest",
+        "description": "Credentials used to discover models before a node is saved."
+      },
       "LLMNodeCreateRequest": {
         "properties": {
           "name": {
@@ -4861,11 +4965,7 @@
           },
           "provider": {
             "type": "string",
-            "enum": [
-              "deepseek",
-              "openrouter",
-              "ollama"
-            ],
+            "maxLength": 32,
             "title": "Provider"
           },
           "base_url": {
@@ -4930,11 +5030,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "enum": [
-                  "deepseek",
-                  "openrouter",
-                  "ollama"
-                ]
+                "maxLength": 32
               },
               {
                 "type": "null"
@@ -5011,11 +5107,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "enum": [
-                  "deepseek",
-                  "openrouter",
-                  "ollama"
-                ]
+                "maxLength": 32
               },
               {
                 "type": "null"
@@ -5897,11 +5989,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "enum": [
-                  "deepseek",
-                  "openrouter",
-                  "ollama"
-                ]
+                "maxLength": 32
               },
               {
                 "type": "null"

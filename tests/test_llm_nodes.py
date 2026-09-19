@@ -209,14 +209,48 @@ def test_node_crud_roundtrip_and_api_key_masking():
     assert r.json() == []
 
 
-def test_create_node_rejects_unknown_provider():
+def test_create_node_maps_unknown_provider_to_custom():
+    """未知服务商降级为 custom，而不是被拒；Base URL 原样保留。"""
     headers = _auth_headers()
     r = client.post(
         "/api/llm/nodes",
-        json=_node_payload(provider="not-a-provider"),
+        json=_node_payload(
+            provider="not-a-provider",
+            base_url="https://my.gateway.example/v1",
+        ),
         headers=headers,
     )
-    assert r.status_code == 422
+    assert r.status_code == 201
+    body = r.json()
+    assert body["provider"] == "custom"
+    assert body["base_url"] == "https://my.gateway.example/v1"
+
+
+def test_create_node_detects_provider_from_base_url():
+    """provider=auto 时由 Base URL 识别服务商。"""
+    headers = _auth_headers()
+    r = client.post(
+        "/api/llm/nodes",
+        json=_node_payload(
+            provider="auto",
+            base_url="https://integrate.api.nvidia.com/v1",
+        ),
+        headers=headers,
+    )
+    assert r.status_code == 201
+    assert r.json()["provider"] == "nvidia"
+
+
+def test_create_node_fills_default_base_url_for_known_provider():
+    """未填 Base URL 时，已知服务商落默认地址。"""
+    headers = _auth_headers()
+    r = client.post(
+        "/api/llm/nodes",
+        json=_node_payload(provider="groq", base_url=None),
+        headers=headers,
+    )
+    assert r.status_code == 201
+    assert r.json()["base_url"] == "https://api.groq.com/openai/v1"
 
 
 def test_update_node_can_switch_active_via_is_active_field():
@@ -629,6 +663,101 @@ def test_test_all_probes_every_node_and_persists():
     # 全部落库
     listed = client.get("/api/llm/nodes", headers=headers).json()
     assert all(n["last_test_status"] == "ok" for n in listed)
+
+
+# ---------------------------------------------------------------------------
+# /api/llm/models：Base URL 自动识别服务商 + 拉取模型列表（网络 mocked）
+# ---------------------------------------------------------------------------
+
+
+def _ok_get(payload):
+    mock = patch("httpx.get")
+    handle = mock.start()
+    handle.return_value.raise_for_status.return_value = None
+    handle.return_value.json.return_value = payload
+    return mock, handle
+
+
+def test_llm_models_lists_openai_compatible_models():
+    headers = _auth_headers()
+    mock, handle = _ok_get(
+        {"data": [{"id": "openai/gpt-4o-mini"}, {"id": "meta/llama-3.1-8b"}]}
+    )
+    try:
+        r = client.post(
+            "/api/llm/models",
+            json={
+                "provider": "auto",
+                "base_url": "https://integrate.api.nvidia.com/v1",
+                "api_key": fake_api_key("models"),
+            },
+            headers=headers,
+        )
+    finally:
+        mock.stop()
+    assert r.status_code == 200
+    body = r.json()
+    assert body["provider"] == "nvidia"
+    assert body["models"] == ["meta/llama-3.1-8b", "openai/gpt-4o-mini"]
+    assert handle.call_args.args[0] == "https://integrate.api.nvidia.com/v1/models"
+    assert (
+        handle.call_args.kwargs["headers"]["Authorization"]
+        == "Bearer " + fake_api_key("models")
+    )
+
+
+def test_llm_models_uses_ollama_tags_without_auth():
+    headers = _auth_headers()
+    mock, handle = _ok_get({"models": [{"name": "qwen2.5:7b"}]})
+    try:
+        r = client.post(
+            "/api/llm/models",
+            json={"provider": "ollama", "base_url": "http://localhost:11434/v1"},
+            headers=headers,
+        )
+    finally:
+        mock.stop()
+    assert r.status_code == 200
+    assert r.json()["models"] == ["qwen2.5:7b"]
+    assert handle.call_args.args[0] == "http://localhost:11434/api/tags"
+    assert "Authorization" not in (handle.call_args.kwargs.get("headers") or {})
+
+
+def test_llm_models_reuses_saved_node_key():
+    headers = _auth_headers()
+    node = client.post(
+        "/api/llm/nodes",
+        json=_node_payload(
+            api_key=fake_api_key("saved"),
+            base_url="https://api.deepseek.com",
+        ),
+        headers=headers,
+    ).json()
+    mock, handle = _ok_get({"data": [{"id": "deepseek-chat"}]})
+    try:
+        r = client.post(
+            "/api/llm/models",
+            json={"node_id": node["node_id"], "api_key": None, "base_url": None},
+            headers=headers,
+        )
+    finally:
+        mock.stop()
+    assert r.status_code == 200
+    assert r.json()["provider"] == "deepseek"
+    assert (
+        handle.call_args.kwargs["headers"]["Authorization"]
+        == "Bearer " + fake_api_key("saved")
+    )
+
+
+def test_llm_models_requires_key_for_remote_provider():
+    headers = _auth_headers()
+    r = client.post(
+        "/api/llm/models",
+        json={"provider": "deepseek", "base_url": "https://api.deepseek.com"},
+        headers=headers,
+    )
+    assert r.status_code == 422
 
 
 # ---------------------------------------------------------------------------

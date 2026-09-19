@@ -12,14 +12,24 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 
 import resualign.api as api_module
 
 from ...config import EnvSettings
+from ...llm_providers import (
+    default_base_url,
+    normalize_base_url,
+    resolve_provider,
+)
 from ..deps import get_current_user
-from ..schemas import LLMNodeCreateRequest, LLMNodeUpdateRequest
-from .settings import mask_api_key, probe_llm_connection
+from ..schemas import (
+    LLMModelsRequest,
+    LLMNodeCreateRequest,
+    LLMNodeUpdateRequest,
+)
+from .settings import _http_error_detail, mask_api_key, probe_llm_connection
 
 router = APIRouter()
 
@@ -63,10 +73,11 @@ def _seed_default_node(tenant_id: str) -> None:
     if store.count_nodes(tenant_id) > 0:
         return
     env = EnvSettings()
-    provider = (env.llm_provider or "deepseek").strip().lower()
-    api_key = getattr(env, f"{provider}_api_key", "") or ""
-    model = getattr(env, f"{provider}_model", "") or ""
-    base_url = getattr(env, f"{provider}_base_url", "") or ""
+    raw_provider = (env.llm_provider or "deepseek").strip().lower()
+    api_key = getattr(env, f"{raw_provider}_api_key", "") or ""
+    model = getattr(env, f"{raw_provider}_model", "") or ""
+    base_url = getattr(env, f"{raw_provider}_base_url", "") or ""
+    provider = resolve_provider(raw_provider, base_url)
     if provider != "ollama" and not api_key:
         return
     if not model:
@@ -78,7 +89,7 @@ def _seed_default_node(tenant_id: str) -> None:
         tenant_id,
         name=".env 默认",
         provider=provider,
-        base_url=base_url or None,
+        base_url=normalize_base_url(base_url) or default_base_url(provider) or None,
         api_key=api_key or None,
         model=model,
         is_active=True,
@@ -97,17 +108,119 @@ def list_llm_nodes(user: dict[str, Any] = Depends(get_current_user)):
     return [_public_node(node) for node in _nodes_store().list_nodes(tenant_id)]
 
 
+def _extract_model_ids(payload: Any) -> list[str]:
+    rows: list[Any] = []
+    if isinstance(payload, dict):
+        if isinstance(payload.get("data"), list):
+            rows = payload["data"]
+        elif isinstance(payload.get("models"), list):
+            rows = payload["models"]
+    elif isinstance(payload, list):
+        rows = payload
+    seen: set[str] = set()
+    models: list[str] = []
+    for row in rows:
+        if isinstance(row, dict):
+            value = row.get("id") or row.get("name") or row.get("model")
+        else:
+            value = row
+        model_id = str(value or "").strip()
+        key = model_id.lower()
+        if not model_id or key in seen:
+            continue
+        seen.add(key)
+        models.append(model_id)
+    return sorted(models, key=str.lower)
+
+
+@router.post("/api/llm/models")
+def list_llm_models(
+    req: LLMModelsRequest,
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Discover models from an OpenAI-compatible endpoint.
+
+    ``provider=auto`` is resolved from Base URL. A saved node's key is reused
+    when the edit form leaves the password field blank.
+    """
+    node = (
+        _get_node_or_404(user["user_id"], req.node_id)
+        if req.node_id
+        else {}
+    )
+    base_url = normalize_base_url(req.base_url or node.get("base_url"))
+    provider = resolve_provider(
+        req.provider or node.get("provider"),
+        base_url,
+    )
+    base_url = base_url or default_base_url(provider)
+    api_key = str(req.api_key or node.get("api_key") or "").strip()
+    if not base_url:
+        raise HTTPException(
+            status_code=422,
+            detail="请填写 Base URL，或选择带默认地址的服务商",
+        )
+    if not api_key and provider != "ollama":
+        raise HTTPException(status_code=422, detail="请填写 API Key")
+
+    root = base_url.rstrip("/")
+    if provider == "ollama":
+        root = root[:-3] if root.endswith("/v1") else root
+        url = f"{root}/api/tags"
+    else:
+        url = f"{root}/models"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        response = httpx.get(
+            url,
+            headers=headers,
+            timeout=_NODE_TEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status == 401:
+            detail = "认证失败：API Key 无效或已过期"
+        elif status == 403:
+            detail = "权限不足：该 Key 无权读取模型列表"
+        elif status == 404:
+            detail = "模型列表端点不存在：请检查 Base URL"
+        else:
+            detail = (
+                f"服务返回错误（HTTP {status}）："
+                f"{_http_error_detail(exc)}"
+            )
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"连接失败：{exc}",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="模型列表响应不是有效 JSON",
+        ) from exc
+    models = _extract_model_ids(payload)
+    if not models:
+        raise HTTPException(status_code=502, detail="服务未返回可用模型")
+    return {"provider": provider, "models": models}
+
+
 @router.post("/api/llm/nodes", status_code=201)
 def create_llm_node(
     req: LLMNodeCreateRequest, user: dict[str, Any] = Depends(get_current_user)
 ):
     """Register a new LLM node. The first node becomes the active one."""
+    provider = resolve_provider(req.provider, req.base_url)
+    base_url = normalize_base_url(req.base_url) or default_base_url(provider) or None
     try:
         node = _nodes_store().create_node(
             user["user_id"],
             name=req.name,
-            provider=req.provider,
-            base_url=req.base_url,
+            provider=provider,
+            base_url=base_url,
             api_key=req.api_key,
             model=req.model,
             disable_thinking=req.disable_thinking,
@@ -124,9 +237,27 @@ def update_llm_node(
     user: dict[str, Any] = Depends(get_current_user),
 ):
     """Partially update a node; any editable field may be changed."""
+    updates = req.model_dump(exclude_unset=True)
+    if "provider" in updates or "base_url" in updates:
+        current = _get_node_or_404(user["user_id"], node_id)
+        base_source = (
+            updates.get("base_url")
+            if "base_url" in updates
+            else current.get("base_url")
+        )
+        provider = resolve_provider(
+            updates.get("provider", current.get("provider")),
+            base_source,
+        )
+        updates["provider"] = provider
+        updates["base_url"] = (
+            normalize_base_url(base_source)
+            or default_base_url(provider)
+            or None
+        )
     try:
         node = _nodes_store().update_node(
-            user["user_id"], node_id, req.model_dump(exclude_unset=True)
+            user["user_id"], node_id, updates
         )
     except api_module.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

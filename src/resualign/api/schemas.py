@@ -123,7 +123,7 @@ class LLMSettingsUpdate(BaseModel):
     Omitted keys keep their stored value; explicit ``null`` clears a field.
     """
 
-    provider: Literal["deepseek", "openrouter", "ollama"] | None = None
+    provider: str | None = Field(default=None, max_length=32)
     model: str | None = Field(default=None, max_length=_TITLE_MAX)
     api_key: str | None = Field(default=None, max_length=_LLM_KEY_MAX)
     base_url: str | None = Field(default=None, max_length=_URL_MAX)
@@ -153,10 +153,19 @@ class SettingsTestConnectionRequest(BaseModel):
     mirroring the real pipeline resolution order.
     """
 
-    provider: Literal["deepseek", "openrouter", "ollama"] | None = None
+    provider: str | None = Field(default=None, max_length=32)
     model: str | None = Field(default=None, max_length=_TITLE_MAX)
     api_key: str | None = Field(default=None, max_length=_LLM_KEY_MAX)
     base_url: str | None = Field(default=None, max_length=_URL_MAX)
+
+
+class LLMModelsRequest(BaseModel):
+    """Credentials used to discover models before a node is saved."""
+
+    node_id: str | None = Field(default=None, max_length=_TITLE_MAX)
+    provider: str | None = Field(default=None, max_length=32)
+    base_url: str | None = Field(default=None, max_length=_URL_MAX)
+    api_key: str | None = Field(default=None, max_length=_LLM_KEY_MAX)
 
 
 class LLMNodeCreateRequest(BaseModel):
@@ -167,7 +176,7 @@ class LLMNodeCreateRequest(BaseModel):
     """
 
     name: str = Field(max_length=_TITLE_MAX)
-    provider: Literal["deepseek", "openrouter", "ollama"]
+    provider: str = Field(max_length=32)
     base_url: str | None = Field(default=None, max_length=_URL_MAX)
     api_key: str | None = Field(default=None, max_length=_LLM_KEY_MAX)
     model: str = Field(max_length=_TITLE_MAX)
@@ -184,7 +193,7 @@ class LLMNodeUpdateRequest(BaseModel):
     """
 
     name: str | None = Field(default=None, max_length=_TITLE_MAX)
-    provider: Literal["deepseek", "openrouter", "ollama"] | None = None
+    provider: str | None = Field(default=None, max_length=32)
     base_url: str | None = Field(default=None, max_length=_URL_MAX)
     api_key: str | None = Field(default=None, max_length=_LLM_KEY_MAX)
     model: str | None = Field(default=None, max_length=_TITLE_MAX)

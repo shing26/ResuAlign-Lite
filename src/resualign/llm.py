@@ -9,6 +9,7 @@ from typing import Any, Callable, ClassVar, Optional, Type
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from .llm_providers import PROVIDER_DEFAULT_URLS
 from .observability import CallStats, log_event
 
 STRUCTURED_MAX_EXTRA_RETRIES = 2
@@ -997,11 +998,9 @@ DIAG_PROMPT = """PROMPT_VERSION: diagnose/v3
 # - 缓存影响：版本常量随文本变更 bump，缓存键自动失效（cache.py 以 prompt_version 为键）；
 #   若只改文本不 bump，新旧提示词结果互串缓存（B3 类事故）。
 DIAG_PROMPT_VERSION = "v3"
-_DEFAULT_PROVIDER_URLS: dict[str, str] = {
-    "deepseek": "https://api.deepseek.com",
-    "openrouter": "https://openrouter.ai/api/v1",
-    "ollama": "http://localhost:11434/v1",
-}
+# Kept as a private alias for existing imports while provider metadata lives
+# in one place.
+_DEFAULT_PROVIDER_URLS = PROVIDER_DEFAULT_URLS
 def _structured_or_json(
     client: LLMClient,
     system: str,
