@@ -174,6 +174,16 @@ function setActiveTab() {
   });
 }
 
+function mountShellIcons() {
+  const brandIcon = $("[data-brand-icon]");
+  if (brandIcon) {
+    brandIcon.innerHTML = icon(brandIcon.dataset.brandIcon || "crosshair", 16);
+  }
+  $$("[data-nav-icon]").forEach((mount) => {
+    mount.innerHTML = icon(mount.dataset.navIcon, 20);
+  });
+}
+
 function refreshHeaderMeta() {
   const route = (state.route && state.route.name) || "dashboard";
   const [title, subtitle] = PAGE_META[route] || PAGE_META.dashboard;
@@ -223,6 +233,13 @@ async function handleRoute(app) {
         ["updated_at_desc", "match_score_desc", "match_score_asc"].includes(sort)
       ) {
         state.filters.sort = sort;
+      }
+      const status = params.get("status");
+      if (
+        status &&
+        ["draft", "applied", "interview", "offer", "withdrawn"].includes(status)
+      ) {
+        state.filters.status = status;
       }
       await renderKanban(app);
       break;
@@ -681,23 +698,7 @@ async function renderSettingsView(app) {
           </div>
           <div data-automation-rules-panel>${ruleListHtml(state.automationRules)}</div>
         </aside>
-      </div>
-      <form class="panel vocab-panel" data-form="settings-vocabulary">
-        <div class="panel-head">
-          <div>
-            <h2>词表</h2>
-            <p>岗位职能 / 职级 / 状态选项</p>
-          </div>
-          <button class="btn btn-secondary btn-sm" type="submit">保存词表</button>
-        </div>
-        <div class="panel-body">
-          <div class="vocab-grid">
-            <label><span>岗位职能</span><textarea name="job_functions" rows="6">${esc(vocabulary.job_functions.join("\n"))}</textarea></label>
-            <label><span>职级</span><textarea name="seniorities" rows="4">${esc(vocabulary.seniorities.join("\n"))}</textarea></label>
-            <label><span>状态</span><textarea name="statuses" rows="5">${esc(vocabulary.statuses.join("\n"))}</textarea></label>
-          </div>
-        </div>
-      </form>`;
+      </div>`;
   app.innerHTML = `
     <div class="view view-scroll settings-view">
       <div class="settings-head">
@@ -1739,6 +1740,76 @@ const actions = {
   /* Sprint 5 T2: LLM 节点管理（新增 / 编辑 / 测试 / 激活 / 删除）。 */
   "llm-node-add": () => {
     showModal("新增 LLM 节点", llmNodeFormHtml(null));
+  },
+  /* Base URL 自动识别服务商 + 拉取模型列表（POST /api/llm/models）。
+   * 编辑态可复用后端已存 Key；Ollama 本地服务无需 Key。 */
+  "llm-fetch-models": async (button) => {
+    const form = button.closest("form");
+    if (!form) return;
+    const data = Object.fromEntries(new FormData(form).entries());
+    const nodeId = String(data.node_id || "").trim();
+    const providerSelect = form.querySelector('select[name="node_provider"]');
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = "获取中...";
+    try {
+      const body = await api("/api/llm/models", {
+        method: "POST",
+        body: JSON.stringify({
+          node_id: nodeId || null,
+          provider: String(data.node_provider || "").trim() || null,
+          base_url: String(data.node_base_url || "").trim() || null,
+          api_key: String(data.node_api_key || "").trim() || null,
+        }),
+      });
+      const models = Array.isArray(body.models) ? body.models : [];
+      const list = form.querySelector("[data-llm-model-list]");
+      if (list) {
+        list.innerHTML = models
+          .map((model) => `<option value="${esc(model)}"></option>`)
+          .join("");
+      }
+      const input = form.querySelector("[data-llm-model-input]");
+      const picked = String((input && input.value) || "").trim();
+      if (input && !picked && models.length) {
+        input.value = models[0];
+      }
+      /* 原生 datalist 只在「聚焦 + 输入过滤」时才可见，按钮点完看不到
+       * 结果等于没用；这里同时渲染一份可点的模型清单，点一下即回填。 */
+      const picker = form.querySelector("[data-llm-model-picker]");
+      if (picker) {
+        const active = String((input && input.value) || "").trim();
+        picker.hidden = models.length === 0;
+        picker.innerHTML = models
+          .map(
+            (model) =>
+              `<button type="button" class="llm-model-chip${model === active ? " is-active" : ""}" data-action="llm-pick-model" data-model="${esc(model)}" title="${esc(model)}">${esc(model)}</button>`,
+          )
+          .join("");
+      }
+      if (providerSelect && body.provider) {
+        providerSelect.value = body.provider;
+      }
+      toast(
+        models.length ? `已获取 ${models.length} 个模型` : "服务未返回模型",
+        models.length ? "success" : "error",
+      );
+    } catch (error) {
+      toast(error.message || "获取模型失败", "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  },
+  /* 点击「获取模型」列出的模型 → 回填模型名输入框并标记选中项。 */
+  "llm-pick-model": (button) => {
+    const form = button.closest("form");
+    if (!form) return;
+    const input = form.querySelector("[data-llm-model-input]");
+    if (input) input.value = button.dataset.model || "";
+    form.querySelectorAll(".llm-model-chip").forEach((chip) => {
+      chip.classList.toggle("is-active", chip === button);
+    });
   },
   /* 新手体验：设置页简单/专家模式切换（无节点时强制简单，见 renderSettingsView）。 */
   "settings-mode-simple": () => {
@@ -3316,21 +3387,6 @@ async function handleForm(formName, data, form) {
       render();
       break;
     }
-    case "settings-vocabulary": {
-      const vocabulary = {
-        job_functions: (data.job_functions || "").split("\n").map((item) => item.trim()).filter(Boolean),
-        seniorities: (data.seniorities || "").split("\n").map((item) => item.trim()).filter(Boolean),
-        statuses: (data.statuses || "").split("\n").map((item) => item.trim()).filter(Boolean),
-      };
-      await api("/api/settings", {
-        method: "PUT",
-        body: JSON.stringify({ classification_vocabulary: vocabulary }),
-      });
-      state.vocabulary = normalizeVocabulary(vocabulary);
-      toast("分类词表已保存", "success");
-      render();
-      break;
-    }
     /* Sprint 5: 对齐评估默认开关（全局 eval_default，与 LLM 节点解耦）。 */
     case "settings-eval-default": {
       await api("/api/settings", {
@@ -3610,6 +3666,7 @@ setCanvasRenderHook(async (app) => {
 
 async function boot() {
   initTheme();
+  mountShellIcons();
   initializeCommandPanel();
   $$(".tabs button").forEach((button) => {
     button.addEventListener("click", () => navigate(button.dataset.route));

@@ -143,6 +143,24 @@ test("skillGapHtml renders an empty state for no gaps", () => {
   assert.match(body.querySelector("[data-skill-gaps]").textContent, /暂无技能缺口数据/);
 });
 
+test("skillGapHtml table variant mirrors the dashboard reference without fake coverage", () => {
+  const body = bodyFrom(
+    skillGapHtml(gaps, undefined, { variant: "table" }),
+  );
+  const rows = [...body.querySelectorAll("[data-skill-gaps] .skill-gap-table__row")];
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].querySelector(".meter__fill").style.width, "100%");
+  assert.equal(rows[2].querySelector(".meter__fill").style.width, "20%");
+  assert.match(rows[0].textContent, /K8s/);
+  assert.match(rows[0].textContent, /5/);
+  assert.match(body.querySelector("thead").textContent, /需求强度/);
+  assert.doesNotMatch(body.querySelector("thead").textContent, /覆盖率|我方证据/);
+  assert.equal(
+    rows[0].querySelector("[data-action='goto-skill']").getAttribute("data-skill"),
+    "K8s",
+  );
+});
+
 test("skillGapHtml escapes skill names", () => {
   const body = bodyFrom(skillGapHtml([{ skill: "<img src=x onerror=1>", count: 2 }]));
   assert.equal(body.querySelector("img"), null);

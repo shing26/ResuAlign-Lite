@@ -5,45 +5,63 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ResuAlign - Career Studio</title>
   <link rel="icon" href="data:,">
-    <link rel="stylesheet" href="/static/styles.css?v=48">
+    <link rel="stylesheet" href="/static/styles.css?v=53">
 </head>
 <body class="app-body app-shell bg-appbg text-white/90 h-screen flex overflow-hidden select-none text-[13px]">
   <aside class="app-rail rail" aria-label="主导航栏">
     <div class="rail-brand">
-      <div class="rail-mark brand-mark" aria-hidden="true">RA</div>
+      <span class="rail-mark brand-mark" data-brand-icon="crosshair" aria-hidden="true"></span>
       <div class="rail-brand__text">
         <h1 class="brand-name">ResuAlign</h1>
         <span class="rail-brand__tagline brand-tag">Career Studio v3</span>
       </div>
     </div>
     <nav class="tabs tabs--rail nav" id="app-nav" aria-label="主导航">
-      <button type="button" class="nav-btn" data-route="dashboard" data-tab="dashboard" aria-selected="false" title="驾驶舱" aria-label="驾驶舱">
+      <button type="button" class="nav-btn" data-route="dashboard" data-tab="dashboard" aria-selected="true" title="驾驶舱" aria-label="驾驶舱">
+        <span class="rail-icon" data-nav-icon="gauge" aria-hidden="true"></span>
         <span class="nav-index" aria-hidden="true">01</span>
         <span class="rail-label">驾驶舱</span>
       </button>
       <button type="button" class="nav-btn" data-route="review" data-tab="review" aria-selected="false" title="投递复盘" aria-label="投递复盘">
+        <span class="rail-icon" data-nav-icon="clipboard-list" aria-hidden="true"></span>
         <span class="nav-index" aria-hidden="true">02</span>
-        <span class="rail-label">复盘</span>
+        <span class="rail-label">投递复盘</span>
       </button>
       <button type="button" class="nav-btn" data-route="workspace" data-tab="workspace" aria-selected="false" title="对齐工作台" aria-label="对齐工作台">
+        <span class="rail-icon" data-nav-icon="columns" aria-hidden="true"></span>
         <span class="nav-index" aria-hidden="true">03</span>
         <span class="rail-label">工作台</span>
       </button>
       <button type="button" class="nav-btn" data-route="jobs" data-tab="jobs" aria-selected="false" title="岗位库" aria-label="岗位库">
+        <span class="rail-icon" data-nav-icon="briefcase" aria-hidden="true"></span>
         <span class="nav-index" aria-hidden="true">04</span>
         <span class="rail-label">岗位库</span>
         <span class="rail-count" data-jobs-rail-count hidden></span>
       </button>
-      <button type="button" class="nav-btn" data-route="resume" data-tab="resume" aria-selected="true" title="简历中心" aria-label="简历中心">
+      <button type="button" class="nav-btn" data-route="resume" data-tab="resume" aria-selected="false" title="简历中心" aria-label="简历中心">
+        <span class="rail-icon" data-nav-icon="file-text" aria-hidden="true"></span>
         <span class="nav-index" aria-hidden="true">05</span>
         <span class="rail-label">简历中心</span>
       </button>
       <button type="button" class="nav-btn" data-route="settings" data-tab="settings" aria-selected="false" title="系统设置" aria-label="系统设置">
+        <span class="rail-icon" data-nav-icon="settings" aria-hidden="true"></span>
         <span class="nav-index" aria-hidden="true">06</span>
         <span class="rail-label">系统设置</span>
       </button>
     </nav>
     <div class="rail-foot" data-rail-foot>
+      <div class="rail-funnel" data-rail-funnel hidden>
+        <a class="count-pair" href="#/jobs?status=applied" aria-label="查看已投递的岗位">
+          <span class="dot metric-dot metric-dot--applied" aria-hidden="true"></span>
+          <span>已投递</span>
+          <span class="count-pair__value" data-rail-funnel-applied>0</span>
+        </a>
+        <a class="count-pair" href="#/jobs?status=interview" aria-label="查看面试中的岗位">
+          <span class="dot metric-dot metric-dot--interview" aria-hidden="true"></span>
+          <span>面试中</span>
+          <span class="count-pair__value" data-rail-funnel-interview>0</span>
+        </a>
+      </div>
       <div class="rail-quota" data-rail-quota hidden>
         <div class="rail-quota__head">
           <span class="rail-quota__label">今日云端额度</span>
@@ -119,6 +137,6 @@
       </form>
     </div>
   </div>
-  <script type="module" src="/static/app/main.js?v=48"></script>
+  <script type="module" src="/static/app/main.js?v=53"></script>
 </body>
 </html>

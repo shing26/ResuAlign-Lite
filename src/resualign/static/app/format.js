@@ -843,7 +843,6 @@ export function alignmentControls(session, resumes, jobId) {
       <div class="align-form__row">
         <button class="btn btn-primary" type="submit" data-align-run ${running ? "disabled" : ""}>${running ? "对齐运行中..." : failed ? "重新运行对齐" : "一键生成对齐简历"}</button>
         <button class="btn btn-outline btn-sm" type="button" data-action="cancel-align-job" ${running ? "" : "hidden"}>${alignment.status === "queued" ? "取消任务" : "停止等待"}</button>
-        <button class="btn btn-ghost btn-sm" type="button" data-action="apply-accepted-bullets" data-id="${esc(jobId)}" style="white-space:nowrap" ${!alignment.draft ? "disabled" : ""}>应用已采纳 ${ICON_CHECK}</button>
         <span class="small muted" data-align-status>${alignment.status === "succeeded" ? "已生成对齐版本" : alignment.status === "failed" ? `任务失败：${esc(alignment.error || "请重试")}` : alignment.status === "running" || alignment.status === "queued" ? "正在生成..." : ""}</span>
       </div>
       <label class="eval-option">
@@ -927,6 +926,42 @@ function matchDimensionHtml(detail) {
   }).join("");
 }
 
+function jdTechStackHtml(job) {
+  const profile =
+    job && job.jd_profile && typeof job.jd_profile === "object"
+      ? job.jd_profile
+      : {};
+  const sources = [
+    profile.must_have_skills,
+    profile.hard_skills,
+    profile.nice_to_have_skills,
+    job && job.tech_tags,
+  ];
+  const seen = new Set();
+  const keywords = [];
+  for (const source of sources) {
+    if (!Array.isArray(source)) continue;
+    for (const raw of source) {
+      const value = String(raw || "").trim();
+      const key = value.toLocaleLowerCase();
+      if (!value || seen.has(key)) continue;
+      seen.add(key);
+      keywords.push(value);
+    }
+  }
+  if (!keywords.length) return "";
+  const visible = keywords.slice(0, 4);
+  const remaining = keywords.length - visible.length;
+  return `
+    <div class="board-card__stack" data-jd-tech-stack>
+      <span class="board-card__reveal-label">岗位 JD 技术栈</span>
+      <div class="chips" title="${esc(keywords.join("、"))}">
+        ${visible.map((keyword) => `<span class="tag">${esc(keyword)}</span>`).join("")}
+        ${remaining > 0 ? `<span class="tag">+${remaining}</span>` : ""}
+      </div>
+    </div>`;
+}
+
 /** Alignment badge (ticket #111 / ADR-0041 决定 5).
  *
  *  A `succeeded` badge no longer implies "已对齐". Three shapes:
@@ -975,7 +1010,10 @@ function boardMatchBlock(job) {
   if (!hasDetail && match == null && !reason && !stale) return "";
   const parts = [];
   if (hasDetail) {
-    parts.push(`<div class="board-match__dims">${matchDimensionHtml(detail)}</div>`);
+    parts.push(
+      '<span class="board-card__reveal-label">匹配分 · 规则四维</span>',
+      `<div class="board-match__dims">${matchDimensionHtml(detail)}</div>`,
+    );
   } else if (match != null) {
     parts.push('<div class="board-match__legacy" data-match-legacy>旧版匹配分</div>');
   }
@@ -1010,26 +1048,29 @@ export function boardCard(job, statuses = null) {
         ${boardMoreMenu(job)}
       </div>
       <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
-      ${boardMatchBlock(job)}
-      <div class="board-card__tags">
-        <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
-        <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
-        ${jobCompletenessBadge(job)}
-        ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
-        ${alignmentBadgeHtml(job)}
-      </div>
-      <div class="board-card__timeline">
-        ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}
-        ${applicationResultBadge(job)}
-        ${deadlineBadge(job)}
-        ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
-        ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
-      </div>
-      ${jobSourceUrl(job) ? `<div class="board-card__links">${jobApplyLinkHtml(job)}</div>` : ""}
-      <div class="row" style="margin-top:8px">
-        <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
-        ${boardAlignButton(job)}
-        <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-optimizer" data-id="${job.job_id}">工作台</button>
+      <div class="board-card__reveal">
+        ${jdTechStackHtml(job)}
+        ${boardMatchBlock(job)}
+        <div class="board-card__tags">
+          <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
+          <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
+          ${jobCompletenessBadge(job)}
+          ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
+          ${alignmentBadgeHtml(job)}
+        </div>
+        <div class="board-card__timeline">
+          ${job.final_draft_version ? `<span class="badge badge-green">已定稿 v${job.final_draft_version}</span>` : ""}
+          ${applicationResultBadge(job)}
+          ${deadlineBadge(job)}
+          ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
+          ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
+        </div>
+        ${jobSourceUrl(job) ? `<div class="board-card__links">${jobApplyLinkHtml(job)}</div>` : ""}
+        <div class="row board-card__actions">
+          <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
+          ${boardAlignButton(job)}
+          <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-optimizer" data-id="${job.job_id}">工作台</button>
+        </div>
       </div>
     </article>`;
 }
@@ -2588,7 +2629,7 @@ const GAP_TONE_HINTS = {
  * 梯度（cool=info / warm=warning / hot=danger，全部走现有语义 token）。
  * 每条渲染为 data-action="goto-skill" + data-skill 的可点击按钮；
  * onSkillGapUrl(skill) 若提供则额外写入 data-skill-url 兜底深链。 */
-export function skillGapHtml(gaps, onSkillGapUrl) {
+export function skillGapHtml(gaps, onSkillGapUrl, options = {}) {
   const list = Array.isArray(gaps)
     ? gaps.filter((gap) => gap && String(gap.skill || "").trim())
     : [];
@@ -2596,6 +2637,50 @@ export function skillGapHtml(gaps, onSkillGapUrl) {
     return `<div class="muted small" data-skill-gaps>暂无技能缺口数据</div>`;
   }
   const max = Math.max(...list.map((gap) => Number(gap.count) || 0));
+  if (options && options.variant === "table") {
+    const rows = list
+      .map((gap) => {
+        const skill = String(gap.skill);
+        const count = Math.max(0, Number(gap.count) || 0);
+        const ratio = max > 0 ? count / max : 0;
+        const strength = count === 0 ? "empty" : ratio >= 0.85 ? "ord-5" : ratio >= 0.65 ? "ord-4" : ratio >= 0.4 ? "ord-3" : ratio >= 0.2 ? "ord-2" : "ord-1";
+        const width = max > 0 ? Math.max(2, Math.round(ratio * 100)) : 0;
+        const hint = esc(GAP_TONE_HINTS[ratio >= 0.66 ? "hot" : ratio >= 0.33 ? "warm" : "cool"] || GAP_TONE_HINTS.cool);
+        const url =
+          typeof onSkillGapUrl === "function" ? onSkillGapUrl(skill) : "";
+        const urlAttr = url ? ` data-skill-url="${esc(url)}"` : "";
+        return `
+          <tr class="skill-gap-table__row">
+            <td class="cell-strong">${esc(skill)}</td>
+            <td class="is-num">${esc(count)}</td>
+            <td>
+              <span class="meter-cell ${strength}">
+                <span class="meter meter--sm" aria-hidden="true"><span class="meter__fill" style="width:${width}%"></span></span>
+              </span>
+            </td>
+            <td class="is-num">
+              <button type="button" class="icon-btn" data-action="goto-skill" data-skill="${esc(skill)}"${urlAttr} title="${hint}" aria-label="查看要求 ${esc(skill)} 的岗位">
+                ${icon("chevron-right", 16)}
+              </button>
+            </td>
+          </tr>`;
+      })
+      .join("");
+    return `<div class="skill-gap-table" data-skill-gaps>
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">技能</th>
+            <th scope="col" class="is-num">需求岗位</th>
+            <th scope="col">需求强度</th>
+            <th scope="col" aria-label="操作"></th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="skill-gap-table__hint" data-gap-hint>点击任意技能可跳到要求它的岗位工作台；怎么补：优先改写与该技能相关的已有经历，确实没有依据的经历不要硬凑。</div>
+    </div>`;
+  }
   const rows = list
     .map((gap) => {
       const skill = String(gap.skill);
@@ -3140,12 +3225,44 @@ export function collectAcceptedOptimizeItems(modules, accepted) {
  * Guardrails：后端 Read Timeout 40s + 并发额度 1（只读展示）。
  */
 
-export const LLM_NODE_PROVIDERS = ["deepseek", "openrouter", "ollama"];
+export const LLM_NODE_PROVIDERS = [
+  "auto",
+  "openai",
+  "deepseek",
+  "openrouter",
+  "ollama",
+  "nvidia",
+  "siliconflow",
+  "moonshot",
+  "zhipu",
+  "dashscope",
+  "volcengine",
+  "groq",
+  "mistral",
+  "together",
+  "fireworks",
+  "xai",
+  "custom",
+];
 
 export const LLM_NODE_PROVIDER_LABELS = {
+  auto: "自动识别",
+  openai: "OpenAI",
   deepseek: "DeepSeek",
   openrouter: "OpenRouter",
   ollama: "Ollama",
+  nvidia: "NVIDIA NIM",
+  siliconflow: "硅基流动",
+  moonshot: "Moonshot",
+  zhipu: "智谱 AI",
+  dashscope: "阿里云百炼",
+  volcengine: "火山方舟",
+  groq: "Groq",
+  mistral: "Mistral",
+  together: "Together AI",
+  fireworks: "Fireworks AI",
+  xai: "xAI",
+  custom: "OpenAI 兼容接口",
 };
 
 export const AUTOMATION_RULE_TYPE_LABELS = {
@@ -3354,11 +3471,12 @@ export function llmNodeFormHtml(node) {
   const n = node && typeof node === "object" ? node : {};
   const nodeId = String(n.node_id || "");
   const name = String(n.name || "");
-  const provider = String(n.provider || "deepseek");
+  const provider = String(n.provider || "auto");
   const model = String(n.model || "");
   const baseUrl = String(n.base_url || "");
   const hasKey = Boolean(n.api_key);
   const disableThinking = Boolean(n.disable_thinking);
+  const modelListId = `llm-model-options-${nodeId || "new"}`;
   const providerOptions = LLM_NODE_PROVIDERS.map(
     (value) =>
       `<option value="${esc(value)}" ${provider === value ? "selected" : ""}>${esc(LLM_NODE_PROVIDER_LABELS[value] || value)}</option>`,
@@ -3371,9 +3489,15 @@ export function llmNodeFormHtml(node) {
         <div class="field"><label>服务商</label>
           <select name="node_provider">${providerOptions}</select></div>
         <div class="field"><label>模型名称</label>
-          <input type="text" name="node_model" required value="${esc(model)}" placeholder="例如 deepseek-chat"></div>
-        <div class="field"><label>Base URL（可选）</label>
-          <input type="text" name="node_base_url" value="${esc(baseUrl)}" placeholder="留空使用服务商默认地址"></div>
+          <div class="llm-model-field">
+            <input type="text" name="node_model" required value="${esc(model)}" placeholder="点击「获取模型」选择" list="${modelListId}" data-llm-model-input>
+            <button class="btn btn-outline btn-sm" type="button" data-action="llm-fetch-models">获取模型</button>
+          </div>
+          <datalist id="${modelListId}" data-llm-model-list></datalist>
+          <div class="llm-model-picker" data-llm-model-picker hidden></div></div>
+        <div class="field"><label>Base URL</label>
+          <input type="text" name="node_base_url" value="${esc(baseUrl)}" placeholder="例如 https://integrate.api.nvidia.com/v1；已知服务商可留空">
+          <span class="small muted">点击「获取模型」会根据 Base URL 自动识别服务商。</span></div>
         <div class="field wide"><label>API Key${nodeId ? "（编辑留空保持不变）" : ""}</label>
           <input type="password" name="node_api_key" autocomplete="new-password" value="" placeholder="${hasKey ? "已保存，留空保持不变" : "输入 API Key（Ollama 可留空）"}">
           ${hasKey ? `<div class="small muted">已保存 Key：${esc(maskApiKey(n.api_key))}</div>` : ""}</div>
@@ -3409,7 +3533,8 @@ export function settingsModeSwitchHtml(mode) {
 export function simpleLlmSetupHtml(node, lastTest) {
   const n = node && typeof node === "object" ? node : {};
   const isEdit = Boolean(n.node_id);
-  const provider = String(n.provider || "deepseek");
+  const provider = String(n.provider || "auto");
+  const modelListId = `llm-model-options-simple-${isEdit ? n.node_id : "new"}`;
   const providerOptions = LLM_NODE_PROVIDERS.map(
     (value) =>
       `<option value="${esc(value)}" ${provider === value ? "selected" : ""}>${esc(LLM_NODE_PROVIDER_LABELS[value] || value)}</option>`,
@@ -3434,11 +3559,17 @@ export function simpleLlmSetupHtml(node, lastTest) {
             <div class="field"><label>AI 服务商</label>
               <select name="node_provider">${providerOptions}</select></div>
             <div class="field"><label>模型名称</label>
-              <input type="text" name="node_model" required value="${esc(String(n.model || ""))}" placeholder="例如 deepseek-chat"></div>
+              <div class="llm-model-field">
+                <input type="text" name="node_model" required value="${esc(String(n.model || ""))}" placeholder="点击「获取模型」选择" list="${modelListId}" data-llm-model-input>
+                <button class="btn btn-outline btn-sm" type="button" data-action="llm-fetch-models">获取模型</button>
+              </div>
+              <datalist id="${modelListId}" data-llm-model-list></datalist>
+              <div class="llm-model-picker" data-llm-model-picker hidden></div></div>
             <div class="field wide"><label>API Key</label>
               <input type="password" name="node_api_key" autocomplete="new-password" value="" placeholder="${hasKey ? "已保存，留空保持不变" : "输入 API Key（Ollama 本地模型可留空）"}"></div>
-            <div class="field wide"><label>Base URL（可选，Ollama 本地用户需要）</label>
-              <input type="text" name="node_base_url" value="${esc(String(n.base_url || ""))}" placeholder="留空使用服务商默认地址，例如 http://localhost:11434"></div>
+            <div class="field wide"><label>Base URL</label>
+              <input type="text" name="node_base_url" value="${esc(String(n.base_url || ""))}" placeholder="例如 https://integrate.api.nvidia.com/v1 或 http://localhost:11434">
+              <span class="small muted">点击「获取模型」会根据 Base URL 自动识别服务商。</span></div>
           </div>
           <div class="row simple-llm-form__actions">
             <button class="btn btn-primary" type="submit">${isEdit ? "保存并启用" : "启用 AI 助手"}</button>

@@ -141,28 +141,31 @@ async function renderResumeDetailView(app, resumeId) {
         <div data-diagnosis-result hidden></div>
         <div class="form-error" data-diagnosis-error hidden></div>
       </section>
-      <section class="panel optimize-panel" data-optimize-panel>
-        <div class="optimize-panel__head optimize-panel__row">
-          <div class="optimize-panel__copy">
+      <details class="panel optimize-panel" data-optimize-panel>
+        <summary class="optimize-panel__head optimize-panel__row">
+          <span class="optimize-panel__copy">
             <span class="optimize-panel__label">AI 优化（模块化润色项目经历）</span>
             <span class="small muted" data-optimize-meta>尚未运行</span>
+          </span>
+          <span class="optimize-panel__disclosure" aria-hidden="true"></span>
+        </summary>
+        <div class="optimize-panel__body">
+          <div class="optimize-panel__jd">
+            <textarea class="optimize-jd-input" data-optimize-jd rows="2" placeholder="可选：粘贴目标 JD，模块润色时会自然融入 JD 关键词与业务场景"></textarea>
           </div>
           <div class="optimize-panel__actions">
-            <button class="btn btn-primary btn-sm" data-action="optimize-resume" data-id="${resume.resume_id}">运行 AI 优化</button>
+            <button class="btn btn-primary btn-sm" type="button" data-action="optimize-resume" data-id="${resume.resume_id}">运行 AI 优化</button>
             <button class="btn btn-ghost btn-sm" type="button" data-action="cancel-optimize" hidden>取消任务</button>
           </div>
+          <div class="progress-wrap" data-optimize-progress hidden>
+            <div class="progress-track"><div class="progress-fill" data-optimize-fill style="width:5%"></div></div>
+            <span class="small" data-optimize-stage>排队中</span>
+            <span class="small muted" data-optimize-elapsed>0s</span>
+          </div>
+          <div data-optimize-result hidden></div>
+          <div class="form-error" data-optimize-error hidden></div>
         </div>
-        <div class="optimize-panel__jd">
-          <textarea class="optimize-jd-input" data-optimize-jd rows="2" placeholder="可选：粘贴目标 JD，模块润色时会自然融入 JD 关键词与业务场景"></textarea>
-        </div>
-        <div class="progress-wrap" data-optimize-progress hidden>
-          <div class="progress-track"><div class="progress-fill" data-optimize-fill style="width:5%"></div></div>
-          <span class="small" data-optimize-stage>排队中</span>
-          <span class="small muted" data-optimize-elapsed>0s</span>
-        </div>
-        <div data-optimize-result hidden></div>
-        <div class="form-error" data-optimize-error hidden></div>
-      </section>
+      </details>
       <div class="resume-archive-grid resume-grid">
         <section class="panel resume-sheet" data-resume-sheet>
           <div class="resume-sheet-head">

@@ -182,6 +182,18 @@ test("deep link #/jobs?sort=match_score_asc restores the sort", async () => {
   );
 });
 
+test("deep link #/jobs?status=applied restores the status filter", async () => {
+  window.location.hash = "#/jobs?status=applied";
+  window.dispatchEvent(new window.Event("hashchange"));
+  await waitFor(
+    () =>
+      state.filters.status === "applied" &&
+      calls.jobs.some((url) => url.includes("status=applied")),
+    "status filter request",
+  );
+  assert.equal(state.filters.status, "applied");
+});
+
 test("sort change requests match_score_desc and keeps the board route", async () => {
   const select = document.querySelector("[data-job-sort]");
   select.value = "match_score_desc";

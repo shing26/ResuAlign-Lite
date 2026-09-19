@@ -170,7 +170,15 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
     granularity: $("[data-form='split-align'] [name='granularity']")?.value,
     focus: $("[data-form='split-align'] [name='prompt_focus']")?.value,
   };
+  /* 「定稿预览」与 Live Sheet 都跟随**当前工作草稿**（逐条采纳会即时
+   * 累积到 state.wbWorkingDraft），而不是只读对齐产出的一次性 draft，
+   * 否则采纳后预览看着像摆设。jobId 不匹配时回落到已保存的定稿。 */
   const liveSheetDraft =
+    (state.wbWorkingDraft &&
+    state.wbWorkingDraft.jobId === jobId &&
+    state.wbWorkingDraft.draft
+      ? state.wbWorkingDraft.draft
+      : null) ||
     (state.wbFinalDraft && state.wbFinalDraft.draft) ||
     (session && session.alignment && session.alignment.draft) ||
     null;
@@ -225,8 +233,10 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
     job.final_draft ||
       (session && session.alignment && session.alignment.draft),
   );
+  /* 默认落在「对照编辑」：定稿预览是核验态，不该默认占掉主区，
+   * 更不能把用户挡在逐条采纳的操作面之外。 */
   if (state.wbViewMode !== "a4" && state.wbViewMode !== "diff") {
-    state.wbViewMode = hasGuideDraft ? "a4" : "diff";
+    state.wbViewMode = "diff";
   }
   const viewMode = state.wbViewMode === "a4" ? "a4" : "diff";
   const dutyText = String(
@@ -275,13 +285,14 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <div class="wb-main-head">
             <div>
               <h2>简历精修</h2>
-              <p>${viewMode === "a4" ? "以 A4 纸预览定稿，建议集中在右侧处理" : "逐条采纳 AI 精修建议，每条建议都可追溯来源"}</p>
+              <p>${viewMode === "a4" ? "定稿预览：当前工作草稿的 A4 呈现，采纳一条就刷新一次" : "逐条采纳 AI 精修建议，每条建议都可追溯来源"}</p>
             </div>
             <div class="toolbar-group">
               <div class="wb-view-toggle" role="group" aria-label="工作台显示模式">
                 <button type="button" class="wb-view-toggle__btn ${viewMode === "diff" ? "active" : ""}" data-action="set-wb-view-mode" data-wb-view-mode="diff" aria-pressed="${viewMode === "diff"}">对照编辑</button>
-                <button type="button" class="wb-view-toggle__btn ${viewMode === "a4" ? "active" : ""}" data-action="set-wb-view-mode" data-wb-view-mode="a4" aria-pressed="${viewMode === "a4"}">A4 预览</button>
+                <button type="button" class="wb-view-toggle__btn ${viewMode === "a4" ? "active" : ""}" data-action="set-wb-view-mode" data-wb-view-mode="a4" aria-pressed="${viewMode === "a4"}">定稿预览</button>
               </div>
+              ${acceptedCount ? `<button class="btn btn-primary btn-sm" type="button" data-action="apply-accepted-bullets" data-id="${esc(jobId)}">应用已采纳（${acceptedCount}）</button>` : ""}
               ${exportDock(jobId, job)}
               ${viewMode === "diff" && alignment.diffs && alignment.diffs.length ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-live-compare">对比视图</button>` : ""}
             </div>

@@ -64,6 +64,53 @@ test("boardCard renders four match dimensions with labels and values", () => {
   assert.equal(dims[3].textContent.includes("经验"), true);
 });
 
+test("boardCard keeps secondary details in the hover reveal layer", () => {
+  const body = bodyFrom(boardCard(DETAIL_JOB));
+  const reveal = body.querySelector(".board-card__reveal");
+  assert.ok(reveal, "card renders a reveal layer");
+  assert.ok(reveal.querySelector("[data-match-block]"));
+  assert.ok(reveal.querySelector(".board-card__tags"));
+  assert.ok(reveal.querySelector(".board-card__timeline"));
+  assert.ok(reveal.querySelector("[data-board-status]"));
+  assert.match(
+    [...reveal.querySelectorAll(".board-card__reveal-label")]
+      .map((node) => node.textContent)
+      .join(" "),
+    /匹配分 · 规则四维/,
+  );
+  assert.equal(body.querySelector(".board-card > [data-match-block]"), null);
+
+  const styles = readFileSync(
+    join(appDir, "..", "styles.css"),
+    "utf8",
+  );
+  assert.match(
+    styles,
+    /\.board-card:hover \.board-card__reveal,[\s\S]*display:\s*flex/,
+  );
+  assert.match(styles, /@media \(hover: none\)[\s\S]*\.board-card__reveal/);
+});
+
+test("boardCard renders JD tech-stack keywords from the persisted profile", () => {
+  const body = bodyFrom(
+    boardCard({
+      ...DETAIL_JOB,
+      jd_profile: {
+        must_have_skills: ["Python", "FastAPI"],
+        nice_to_have_skills: ["Docker"],
+      },
+      tech_tags: ["Python", "PostgreSQL", "Redis"],
+    }),
+  );
+  const stack = body.querySelector("[data-jd-tech-stack]");
+  assert.ok(stack, "JD tech stack block renders");
+  assert.match(stack.textContent, /岗位 JD 技术栈/);
+  assert.deepEqual(
+    [...stack.querySelectorAll(".tag")].map((node) => node.textContent),
+    ["Python", "FastAPI", "Docker", "PostgreSQL", "+1"],
+  );
+});
+
 test("match dimensions below 50 are flagged as weak (短板高亮)", () => {
   const body = bodyFrom(
     boardCard({

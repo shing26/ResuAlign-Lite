@@ -762,6 +762,9 @@ export function renderOptimizeIdle() {
 export function renderOptimizeProgress(snapshot) {
   const panel = $("[data-optimize-panel]");
   if (!panel) return;
+  /* 面板默认折叠（不占版面）；一旦有进行中的任务就自动展开，免得用户
+   * 看不到进度。 */
+  if (panel.open !== undefined) panel.open = true;
   const progress = $("[data-optimize-progress]", panel);
   if (progress) progress.hidden = false;
   const result = $("[data-optimize-result]", panel);
@@ -806,6 +809,7 @@ export function renderOptimizeProgress(snapshot) {
 export function renderOptimizeResult(snapshot) {
   const panel = $("[data-optimize-panel]");
   if (!panel) return;
+  if (panel.open !== undefined) panel.open = true;
   const result = snapshot.result || {};
   const overview = result.overview || {};
   const modules = Array.isArray(result.modules) ? result.modules : [];
@@ -844,6 +848,7 @@ export function renderOptimizeResult(snapshot) {
 export function renderOptimizeError(snapshot) {
   const panel = $("[data-optimize-panel]");
   if (!panel) return;
+  if (panel.open !== undefined) panel.open = true;
   const meta = $("[data-optimize-meta]", panel);
   if (meta) {
     meta.textContent =

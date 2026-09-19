@@ -163,17 +163,26 @@ test("workbench export dock enables final actions and shows final badge", async 
     document.querySelectorAll("[data-export-dock] button[disabled]").length,
     0,
   );
-  /* B2 双模式：有定稿时默认进入 A4 预览，源稿面板隐藏（由 A4 纸呈现）；
-   * 切到「对照编辑」后原面板显示导出/记录投递等操作。 */
+  /* 默认落在「对照编辑」：源稿面板可见（A4 定稿预览不再是默认落点）；
+   * 切到「定稿预览」后由 A4 纸呈现，源稿面板隐藏。 */
   const initialPanel = document.querySelector("[data-final-draft-panel]");
-  assert.ok(initialPanel && initialPanel.hidden, "a4 preview hides the source draft panel");
+  assert.ok(initialPanel && !initialPanel.hidden, "diff mode shows the source draft panel");
+  document.querySelector('[data-wb-view-mode="a4"]').click();
+  await waitFor(
+    () => {
+      const p = document.querySelector("[data-final-draft-panel]");
+      return p && p.hidden;
+    },
+    "a4 mode hides the source draft panel",
+  );
+  assert.ok(document.querySelector("[data-a4-wrap]"), "a4 mode renders the paper preview");
   document.querySelector('[data-wb-view-mode="diff"]').click();
   await waitFor(
     () => {
       const p = document.querySelector("[data-final-draft-panel]");
       return p && !p.hidden;
     },
-    "final draft panel shown after switching to diff mode",
+    "final draft panel shown after switching back to diff mode",
   );
   const panel = document.querySelector("[data-final-draft-panel]");
   assert.ok(panel && !panel.hidden);

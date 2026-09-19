@@ -165,6 +165,34 @@ const NODE = {
   is_active: true,
 };
 
+/* Base URL 自动识别：服务商下拉的完整清单（顺序即下拉渲染顺序）。 */
+const EXPECTED_PROVIDERS = [
+  "auto",
+  "openai",
+  "deepseek",
+  "openrouter",
+  "ollama",
+  "nvidia",
+  "siliconflow",
+  "moonshot",
+  "zhipu",
+  "dashscope",
+  "volcengine",
+  "groq",
+  "mistral",
+  "together",
+  "fireworks",
+  "xai",
+  "custom",
+];
+
+/* happy-dom 不解析 <option selected> 的默认选中项，纯 HTML 构建器只对
+ * 正确的 option 打上 selected 属性——直接断言该属性更贴近真实契约。 */
+function selectedProvider(form) {
+  const option = form.querySelector('select[name="node_provider"] option[selected]');
+  return option ? option.value : null;
+}
+
 test("llmNodeCardHtml renders active badge, masked key and test button", () => {
   const body = bodyFrom(llmNodeCardHtml(NODE, null));
   const card = body.querySelector("[data-llm-node-card]");
@@ -310,7 +338,7 @@ test("llmNodeFormHtml renders an empty create form", () => {
   assert.equal(form.querySelector('input[name="node_name"]').value, "");
   assert.deepEqual(
     [...form.querySelectorAll('select[name="node_provider"] option')].map((o) => o.value),
-    ["deepseek", "openrouter", "ollama"],
+    EXPECTED_PROVIDERS,
   );
   assert.equal(form.querySelector('input[name="node_model"]').value, "");
   assert.equal(form.querySelector('input[name="node_base_url"]').value, "");
@@ -323,7 +351,7 @@ test("llmNodeFormHtml prefills an edit form and keeps the API key blank", () => 
   const form = body.querySelector("[data-form='llm-node-form']");
   assert.equal(form.querySelector('input[name="node_id"]').value, "n1");
   assert.equal(form.querySelector('input[name="node_name"]').value, "主 DeepSeek 节点");
-  assert.equal(form.querySelector('select[name="node_provider"]').value, "deepseek");
+  assert.equal(selectedProvider(form), "deepseek");
   assert.equal(form.querySelector('input[name="node_model"]').value, "deepseek-chat");
   assert.equal(form.querySelector('input[name="node_base_url"]').value, "https://api.deepseek.com/v1");
   assert.equal(form.querySelector('input[name="node_api_key"]').value, "", "edit keeps key blank");
@@ -571,7 +599,7 @@ test("simpleLlmSetupHtml renders a create form without test button", () => {
   assert.equal(form.querySelector('input[name="node_name"]').value, "我的 AI 助手");
   assert.deepEqual(
     [...form.querySelectorAll('select[name="node_provider"] option')].map((o) => o.value),
-    ["deepseek", "openrouter", "ollama"],
+    EXPECTED_PROVIDERS,
   );
   assert.equal(form.querySelector('button[type="submit"]').textContent, "启用 AI 助手");
   assert.equal(body.querySelector('[data-action="llm-node-test"]'), null, "no node yet, no test button");
@@ -587,7 +615,7 @@ test("simpleLlmSetupHtml prefills the edit form and keeps key blank", () => {
   assert.equal(form.querySelector('input[name="node_id"]').value, "n1");
   assert.equal(form.querySelector('input[name="node_name"]').value, "主 DeepSeek 节点");
   assert.equal(form.querySelector('input[name="node_disable_thinking"]').value, "on", "disable_thinking is carried through");
-  assert.equal(form.querySelector('select[name="node_provider"]').value, "deepseek");
+  assert.equal(selectedProvider(form), "deepseek");
   assert.equal(form.querySelector('input[name="node_model"]').value, "deepseek-chat");
   assert.equal(form.querySelector('input[name="node_api_key"]').value, "", "edit keeps key blank");
   assert.match(form.querySelector('input[name="node_api_key"]').getAttribute("placeholder"), /已保存，留空保持不变/);
@@ -625,4 +653,52 @@ test("main.js wires the simple/expert mode switch and simple form submission", (
   assert.match(mainJs, /"resualign\.settingsMode"/);
   /* 简单模式表单提交走节点 CRUD 复用路径 */
   assert.match(mainJs, /case "simple-llm-form":/);
+});
+
+/* ------------------------------------------------------------------ */
+/* Base URL 自动识别：模型输入 + 「获取模型」按钮                        */
+/* ------------------------------------------------------------------ */
+
+test("llmNodeFormHtml exposes the fetch-models button and picker", () => {
+  const body = bodyFrom(llmNodeFormHtml(null));
+  const form = body.querySelector("[data-form='llm-node-form']");
+  const button = form.querySelector('[data-action="llm-fetch-models"]');
+  assert.ok(button, "expert node form wires the fetch-models button");
+  assert.equal(button.getAttribute("type"), "button", "must not submit the form");
+  const input = form.querySelector("input[name='node_model']");
+  const listId = input.getAttribute("list");
+  assert.ok(listId, "model input points at a datalist");
+  const datalist = form.querySelector(`datalist#${listId}[data-llm-model-list]`);
+  assert.ok(datalist, "matching datalist is present for the model input");
+  assert.equal(input.dataset.llmModelInput, "", "model input carries the fetch hook");
+  const picker = form.querySelector("[data-llm-model-picker]");
+  assert.ok(picker, "a visible model picker is rendered next to the datalist");
+  assert.ok(picker.hidden, "the picker stays hidden until models are fetched");
+});
+
+test("simpleLlmSetupHtml exposes the fetch-models button and picker", () => {
+  const body = bodyFrom(simpleLlmSetupHtml(null, null));
+  const form = body.querySelector("[data-form='simple-llm-form']");
+  assert.ok(form.querySelector('[data-action="llm-fetch-models"]'));
+  const input = form.querySelector("input[name='node_model']");
+  const listId = input.getAttribute("list");
+  assert.ok(form.querySelector(`datalist#${listId}[data-llm-model-list]`));
+  assert.ok(form.querySelector("[data-llm-model-picker]"));
+});
+
+test("main.js wires the llm-fetch-models action to POST /api/llm/models", () => {
+  const mainJs = readFileSync(join(HERE, "../../src/resualign/static/app/main.js"), "utf8");
+  assert.match(mainJs, /"llm-fetch-models": async \(button\)/);
+  assert.match(mainJs, /api\("\/api\/llm\/models", \{/);
+  /* 403/网络错误走 toast，不静默失败 */
+  assert.match(mainJs, /获取模型失败/);
+  /* 拉回结果必须渲染成可点清单，而不是只塞进原生 datalist（点了没反应） */
+  assert.match(mainJs, /\[data-llm-model-picker\]/);
+  assert.match(mainJs, /data-action="llm-pick-model"/);
+  assert.match(mainJs, /"llm-pick-model": \(button\)/);
+  assert.match(
+    mainJs,
+    /input\.value = button\.dataset\.model/,
+    "picking a model writes it back into the model input",
+  );
 });

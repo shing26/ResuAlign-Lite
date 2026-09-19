@@ -319,13 +319,15 @@ test("#83: UX 摩擦清理——toast 去重 / 上传提示 / 需求最多样本
   // toast 同文案短窗口去重
   const eventsSrc = read("events.js");
   assert.match(eventsSrc, /last\.dataset\.text === message/);
-  // 「应用已采纳」按钮不折行
+  // 「应用已采纳」升级为主区 CTA（不再挤在右侧调优表单里）
   const fmtSrc = read("format.js");
   assert.ok(
     !fmtSrc.includes("应用已${ICON_CHECK} 采纳"),
     "旧的应用按钮文案应已替换",
   );
-  assert.match(fmtSrc, /应用已采纳 \$\{ICON_CHECK\}/);
+  const canvasSrc = read("split-canvas.js");
+  assert.match(canvasSrc, /data-action="apply-accepted-bullets"/);
+  assert.match(canvasSrc, /应用已采纳（\$\{acceptedCount\}）/);
   // 上传格式提示外显 + 上传回填弹窗标题与动作一致
   const resumeSrc = read("resume-center.js");
   assert.match(resumeSrc, /支持 PDF \/ DOCX \/ TXT/);
@@ -338,4 +340,43 @@ test("#83: UX 摩擦清理——toast 去重 / 上传提示 / 需求最多样本
   // 差距项附行动指引
   assert.match(fmtSrc, /data-gap-hint/);
   assert.match(fmtSrc, /确实没有依据的经历不要硬凑/);
+});
+
+/* ---------- 产品摩擦：定稿预览 / AI 优化 / 词表 ---------- */
+
+test("工作台默认落在「对照编辑」，「应用已采纳」提升到主区工具条", () => {
+  const canvasSrc = read("split-canvas.js");
+  /* 默认视图不再按“有无定稿”跳到 A4；A4 是核验态，需显式切换 */
+  assert.match(canvasSrc, /state\.wbViewMode = "diff";/);
+  assert.doesNotMatch(canvasSrc, /hasGuideDraft \? "a4" : "diff"/);
+  /* 采纳后主区工具条直接给出「应用已采纳（N）」，不再是右侧表单里的埋点 */
+  assert.match(
+    canvasSrc,
+    /acceptedCount \? `<button class="btn btn-primary btn-sm" type="button" data-action="apply-accepted-bullets"/,
+  );
+  assert.match(canvasSrc, /应用已采纳（\$\{acceptedCount\}）/);
+  /* 定稿预览读当前工作草稿，逐条采纳会即时反映 */
+  assert.match(
+    canvasSrc,
+    /state\.wbWorkingDraft\.jobId === jobId[\s\S]{0,120}?state\.wbWorkingDraft\.draft/,
+  );
+});
+
+test("简历中心「AI 优化」是默认折叠的按需展开面板", () => {
+  const resumeSrc = read("resume-center.js");
+  assert.match(
+    resumeSrc,
+    /<details class="panel optimize-panel" data-optimize-panel>/,
+    "optimize panel must be a collapsible disclosure",
+  );
+  /* 进行中/有结果时自动展开，保证进度与结果不会被折叠藏住 */
+  const eventsSrc = read("events.js");
+  assert.match(eventsSrc, /if \(panel\.open !== undefined\) panel\.open = true;/);
+});
+
+test("设置页不再渲染「词表」编辑面板（避免编辑后被静默改回）", () => {
+  const mainSrc = read("main.js");
+  assert.doesNotMatch(mainSrc, /data-form="settings-vocabulary"/);
+  assert.doesNotMatch(mainSrc, /vocab-panel/);
+  assert.doesNotMatch(mainSrc, /case "settings-vocabulary"/);
 });
