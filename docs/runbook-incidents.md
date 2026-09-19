@@ -13,6 +13,7 @@ Ticket #13 的运维手册。覆盖：日志设施说明、四类常见故障的
 | 格式 | 控制台与文件均为 `时间 级别 模块 JSON事件行`（`log_event` 产出单行 JSON） |
 | 采样 | `http.request` 默认 1%（`RESUALIGN_LOG_SAMPLE_RATE`，0=不记，1=全记）；`http.slow`（>3s）始终记录 |
 | 脱敏 | 所有 handler 挂 `RedactingFilter`：`sk-...` 密钥 token → `sk-***`，`error` 字段超 500 字符截断 |
+| LLM 原始报文归档 | 默认关闭；设 `RESUALIGN_LLM_TRACE=1` 后每次 LLM 调用追加一行到 `<RESUALIGN_LOG_DIR>/llm-traces.jsonl`（同样 10 MB × 5）。写盘前显式过 `redact_fields`；内容含 `request` / `response` 全文，超时/连不上等无响应场景 `response` 为 `null`（请求体仍保留） |
 | Docker | `compose.yaml` 的 `logging` 段：json-file driver，`max-size: 10m`、`max-file: "5"`（容器日志 10MB×5） |
 | 配置时机 | `resualign.api` 导入时 `dictConfig` 一次（幂等），**不在** lifespan 里配置 |
 
@@ -63,6 +64,10 @@ Get-Content .env | Select-String -Pattern 'API_KEY|BASE_URL|MODEL'
 curl.exe -s -o NUL -w "%{http_code}" -X POST https://api.deepseek.com/chat/completions `
   -H "Authorization: Bearer $env:DEEPSEEK_API_KEY" -H "Content-Type: application/json" `
   -d '{\"model\":\"deepseek-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'
+
+# 5) 复盘"当时到底发了什么"：先设 RESUALIGN_LLM_TRACE=1 重启，再复现一次，
+#    然后读原始报文（正文含简历/JD 原文，按敏感数据管理，用完即关）
+Get-Content data\logs\llm-traces.jsonl -Tail 5
 ```
 
 ### 恢复

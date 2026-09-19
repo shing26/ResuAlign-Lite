@@ -29,8 +29,10 @@ Status: 现在批**已施工并验证**；挂起批为决策完备施工单，�
 - 每条记录显式 `redact_fields`（`sk-*` 掩码、超长 `error` 截断），字段
   含 `ts` / stage / provider / model / status / mode / attempts /
   duration_ms / request / response。
-- 注入点：`OpenAIClient._post_json`（非流式唯一出口，含 deadline 分支）；
-  流式在 `_stream_deltas` 记录请求体、在 `stream_chat_json` 记录**累积输出**
+- 注入点：`OpenAIClient._post_json`（非流式唯一出口，含 deadline 分支）。
+  **请求体在 POST 之前捕获**：超时、墙钟 deadline、连不上这类「没有响应」的
+  失败同样留下「我们发了什么」，此时 `response` 为 `null`；流式在
+  `_stream_deltas` 记录请求体、在 `stream_chat_json` 记录**累积输出**
   （失败时的部分输出同样保留为证据）。
 - 写失败只 warning，不影响调用。
 - 测试：`tests/test_llm_trace.py`（7 条：默认关、全量落盘、脱敏、
