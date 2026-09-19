@@ -19,6 +19,7 @@ import time
 import uuid
 from typing import Any
 
+from .contracts.errors import LlmFailureCode
 from .llm_providers import ALLOWED_PROVIDERS
 from .observability import log_event
 from .secret_box import decrypt_value, encrypt_value
@@ -156,7 +157,14 @@ class LLMNodeStore(_SqliteStore):
     # rate_limit (429) is transient; parse/schema/empty are model-output
     # quality issues, not node availability — none of them count.
     BREAKER_COUNTED_CODES = frozenset(
-        {"timeout", "http", "auth", "quota", "other"}
+        code.value
+        for code in (
+            LlmFailureCode.TIMEOUT,
+            LlmFailureCode.HTTP,
+            LlmFailureCode.AUTH,
+            LlmFailureCode.QUOTA,
+            LlmFailureCode.OTHER,
+        )
     )
     # probe_llm_connection statuses that count (deterministic failure,
     # aligned with the Phase A1 pre-flight classification); http_429 and

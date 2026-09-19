@@ -9,6 +9,8 @@ from typing import Any, Callable, ClassVar, Optional, Type
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from .archive.llm_trace import record_llm_trace, trace_enabled
+from .contracts.errors import KNOWN_LLM_FAILURE_CODES, LlmFailureCode
 from .llm_providers import PROVIDER_DEFAULT_URLS
 from .observability import CallStats, log_event
 
@@ -37,11 +39,17 @@ def _observe_llm_call(
     status: str,
     mode: Optional[str] = None,
     usage: Optional[dict] = None,
+    trace_request: Any = None,
+    trace_response: Any = None,
 ) -> None:
     """Record one LLM call in memory and emit a structured ``llm.call`` event.
 
     ``usage`` carries the provider's real token counts when available
     (P2 #78) so cost accounting can replace the fixed 2000/1000 estimate.
+
+    ``trace_request`` / ``trace_response`` are the raw exchange bodies. They
+    stay ``None`` unless ``RESUALIGN_LLM_TRACE`` is on, which is what keeps
+    the archive layer free of I/O and allocation on the default path.
     """
     _LLM_CALL_STATS.record(duration_ms, status)
     if _DAILY_USAGE_RECORDER is not None:
@@ -67,6 +75,20 @@ def _observe_llm_call(
         duration_ms=duration_ms,
         extra=extra,
     )
+    if trace_request is not None or trace_response is not None:
+        record_llm_trace(
+            {
+                "stage": stage,
+                "provider": provider,
+                "model": model,
+                "status": status,
+                "mode": mode,
+                "attempts": attempts,
+                "duration_ms": round(duration_ms, 1),
+                "request": trace_request,
+                "response": trace_response,
+            }
+        )
 def _strip_json_wrapping(text: str) -> str:
     """Strip BOM, markdown code fences, and surrounding whitespace."""
     text = (text or "").strip()
@@ -208,17 +230,10 @@ def _schema_feedback_prompt(user: str, exc: BaseException) -> str:
 # R4 P0-1（03-AIE §②/§③-P0-1）：结构化失败分类。LLMResponseError 携带
 # 稳定 code 枚举，_job_failure_detail 按 code 分支，杜绝 message substring 漂移
 # 导致的误归因（166.2s 现场失败文案曾落入「检查 API Key 与网络」else 分支）。
-_KNOWN_CODES = {
-    "timeout",
-    "empty",
-    "parse",
-    "schema",
-    "quota",
-    "rate_limit",
-    "auth",
-    "http",
-    "other",
-}
+# 码表本身搬到 ``contracts/errors.py``（加固计划 2026-09-19）：它同时被
+# engine（降级判据）、api.services.jobs（用户文案）和 llm_nodes（熔断计数）
+# 读取，散落的字面量一旦拼错会静默落进 ``other``。
+_KNOWN_CODES = KNOWN_LLM_FAILURE_CODES
 
 
 class LLMResponseError(Exception):
@@ -228,9 +243,14 @@ class LLMResponseError(Exception):
     surface user-facing copy branch on it instead of parsing the message text.
     """
 
-    def __init__(self, message: str, code: str = "other"):
+    def __init__(
+        self, message: str, code: str | LlmFailureCode = LlmFailureCode.OTHER
+    ):
         super().__init__(message)
-        self.code = code if code in _KNOWN_CODES else "other"
+        # Normalise to a bare ``str`` so callers keep comparing against plain
+        # strings (and JSON payloads stay unchanged) after the enum landed.
+        value = code.value if isinstance(code, LlmFailureCode) else str(code)
+        self.code = value if value in _KNOWN_CODES else LlmFailureCode.OTHER.value
 
 
 class StreamConnectionError(Exception):
@@ -244,7 +264,7 @@ def _raise_network_timeout(kind: str, attempt: int, exc: BaseException) -> None:
     raise LLMResponseError(
         f"{kind} call failed after {attempt + 1} attempt(s) "
         f"(network timeout): {exc}",
-        code="timeout",
+        code=LlmFailureCode.TIMEOUT,
     ) from exc
 
 
@@ -255,12 +275,12 @@ def _http_error_code(exc: BaseException) -> str:
     """
     status = getattr(getattr(exc, "response", None), "status_code", None)
     if status == 402:
-        return "quota"
+        return LlmFailureCode.QUOTA.value
     if status in (401, 403):
-        return "auth"
+        return LlmFailureCode.AUTH.value
     if status == 429 or "rate limit" in str(exc).lower():
-        return "rate_limit"
-    return "http"
+        return LlmFailureCode.RATE_LIMIT.value
+    return LlmFailureCode.HTTP.value
 
 
 class _WallClockDeadlineExceeded(httpx.ReadTimeout):
@@ -310,7 +330,7 @@ class LLMClient(ABC):
         raise LLMResponseError(
             "Structured response failed schema validation after "
             f"{self.max_retries + 1} attempts: {last_error}",
-            code="schema",
+            code=LlmFailureCode.SCHEMA,
         )
 class OpenAIClient(LLMClient):
     """Concrete LLM client compatible with OpenAI / DeepSeek / Ollama APIs."""
@@ -399,6 +419,32 @@ class OpenAIClient(LLMClient):
             ),
             headers={"Content-Type": "application/json"},
         )
+        # Archive layer (2026-09-19). Both stay None unless tracing is on, so
+        # the default path is byte-identical to the pre-hardening behaviour.
+        self._trace_request_body: dict | None = None
+        self._trace_response_text: str | None = None
+    def _post_json(
+        self, url: str, headers: dict, payload: dict
+    ) -> httpx.Response:
+        """Single POST choke point for the archive layer.
+
+        Every non-streaming call funnels through here so the raw request body
+        and response text are captured in exactly one place. Capture is a
+        no-op when ``RESUALIGN_LLM_TRACE`` is off.
+        """
+        if self._deadline_s is not None:
+            response = self._post_with_deadline(
+                url, headers, payload, self._deadline_s
+            )
+        else:
+            response = self._client.post(url, headers=headers, json=payload)
+        if trace_enabled():
+            self._trace_request_body = payload
+            try:
+                self._trace_response_text = response.text
+            except Exception:  # noqa: BLE001 - tracing must never break a call
+                self._trace_response_text = None
+        return response
     def _post_with_deadline(
         self, url: str, headers: dict, json_body: dict, deadline_s: float
     ) -> httpx.Response:
@@ -463,17 +509,10 @@ class OpenAIClient(LLMClient):
         last_usage: dict = {}
         try:
             def _post(payload: dict) -> httpx.Response:
-                if self._deadline_s is not None:
-                    return self._post_with_deadline(
-                        f"{self.base_url.rstrip('/')}/chat/completions",
-                        headers,
-                        payload,
-                        self._deadline_s,
-                    )
-                return self._client.post(
+                return self._post_json(
                     f"{self.base_url.rstrip('/')}/chat/completions",
-                    headers=headers,
-                    json=payload,
+                    headers,
+                    payload,
                 )
 
             for attempt in range(self.max_retries + 1):
@@ -494,7 +533,8 @@ class OpenAIClient(LLMClient):
                     if start < 0:
                         if attempt == self.max_retries:
                             raise LLMResponseError(
-                                "No JSON object found in response", code="empty"
+                                "No JSON object found in response",
+                                code=LlmFailureCode.EMPTY,
                             )
                         if (
                             finish_reason == "length"
@@ -517,7 +557,7 @@ class OpenAIClient(LLMClient):
                             raise LLMResponseError(
                                 "LLM call failed to parse JSON response "
                                 f"after {self.max_retries + 1} attempts",
-                                code="parse",
+                                code=LlmFailureCode.PARSE,
                             ) from None
                         if (
                             finish_reason == "length"
@@ -558,6 +598,8 @@ class OpenAIClient(LLMClient):
                 attempts=attempts,
                 status=status,
                 usage=last_usage,
+                trace_request=self._trace_request_body,
+                trace_response=self._trace_response_text,
             )
 
     def stream_chat_json(
@@ -578,17 +620,17 @@ class OpenAIClient(LLMClient):
         """
         _t0 = time.monotonic()
         status = "failed"
+        collected: list[str] = []
         try:
-            deltas = list(
-                self._stream_deltas(
-                    system,
-                    user,
-                    model=model,
-                    idle_timeout=idle_timeout,
-                    max_tokens=max_tokens,
-                )
-            )
-            result = _parse_json_object("".join(deltas))
+            for delta in self._stream_deltas(
+                system,
+                user,
+                model=model,
+                idle_timeout=idle_timeout,
+                max_tokens=max_tokens,
+            ):
+                collected.append(delta)
+            result = _parse_json_object("".join(collected))
             status = "ok"
             return result
         except StreamConnectionError:
@@ -601,6 +643,10 @@ class OpenAIClient(LLMClient):
                 f"Stream transport failure: {exc.__class__.__name__}: {exc}"
             ) from exc
         finally:
+            if trace_enabled():
+                # Partial output is still evidence: keep whatever the model
+                # managed to emit before a stall or a parse failure.
+                self._trace_response_text = "".join(collected) or None
             _observe_llm_call(
                 stage="stream_chat_json",
                 provider=self.provider,
@@ -608,6 +654,8 @@ class OpenAIClient(LLMClient):
                 duration_ms=(time.monotonic() - _t0) * 1000,
                 attempts=1,
                 status=status,
+                trace_request=self._trace_request_body,
+                trace_response=self._trace_response_text,
             )
 
     def _stream_deltas(
@@ -640,6 +688,8 @@ class OpenAIClient(LLMClient):
             "stream": True,
             **self._provider_extras(),
         }
+        if trace_enabled():
+            self._trace_request_body = body
         timeout = httpx.Timeout(
             idle_timeout,
             connect=idle_timeout,
@@ -744,17 +794,10 @@ class OpenAIClient(LLMClient):
         last_usage: dict = {}
         try:
             def _post() -> httpx.Response:
-                if self._deadline_s is not None:
-                    return self._post_with_deadline(
-                        f"{self.base_url.rstrip('/')}/chat/completions",
-                        headers,
-                        body,
-                        self._deadline_s,
-                    )
-                return self._client.post(
+                return self._post_json(
                     f"{self.base_url.rstrip('/')}/chat/completions",
-                    headers=headers,
-                    json=body,
+                    headers,
+                    body,
                 )
 
             for attempt in range(self.max_retries + 1):
@@ -845,6 +888,8 @@ class OpenAIClient(LLMClient):
                 status=status,
                 mode="json_schema",
                 usage=last_usage,
+                trace_request=self._trace_request_body,
+                trace_response=self._trace_response_text,
             )
     def _chat_structured_json_mode(
         self,
@@ -875,17 +920,10 @@ class OpenAIClient(LLMClient):
         last_usage: dict = {}
         try:
             def _post(payload: dict) -> httpx.Response:
-                if self._deadline_s is not None:
-                    return self._post_with_deadline(
-                        f"{self.base_url.rstrip('/')}/chat/completions",
-                        headers,
-                        payload,
-                        self._deadline_s,
-                    )
-                return self._client.post(
+                return self._post_json(
                     f"{self.base_url.rstrip('/')}/chat/completions",
-                    headers=headers,
-                    json=payload,
+                    headers,
+                    payload,
                 )
 
             for attempt in range(self.max_retries + 1):
@@ -913,7 +951,7 @@ class OpenAIClient(LLMClient):
                         raise LLMResponseError(
                             "Structured response was empty after "
                             f"{self.max_retries + 1} attempts",
-                            code="empty",
+                            code=LlmFailureCode.EMPTY,
                         )
                     result = schema_model.model_validate(
                         _parse_json_object(content)
@@ -926,7 +964,7 @@ class OpenAIClient(LLMClient):
                         raise LLMResponseError(
                             "Structured response failed schema validation after "
                             f"{self.max_retries + 1} attempts: {last_error}",
-                            code="schema",
+                            code=LlmFailureCode.SCHEMA,
                         ) from exc
                     # One corrective retry (Bug-01): feed validation
                     # errors back so the model can repair the structure.
@@ -940,7 +978,7 @@ class OpenAIClient(LLMClient):
                         raise LLMResponseError(
                             "Structured response failed schema validation after "
                             f"{self.max_retries + 1} attempts: {last_error}",
-                            code=getattr(exc, "code", "parse"),
+                            code=getattr(exc, "code", LlmFailureCode.PARSE.value),
                         ) from exc
                     time.sleep(1)
                 except httpx.TransportError as exc:
@@ -972,6 +1010,8 @@ class OpenAIClient(LLMClient):
                 status=status,
                 mode="json_object",
                 usage=last_usage,
+                trace_request=self._trace_request_body,
+                trace_response=self._trace_response_text,
             )
 DIAG_PROMPT = """PROMPT_VERSION: diagnose/v3
 

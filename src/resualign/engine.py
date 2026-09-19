@@ -6,6 +6,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
+from .contracts.errors import LlmFailureCode
 from .evaluator import evaluate
 from .extractor import extract_structured
 from .gap_analyzer import analyze_gaps
@@ -34,7 +35,25 @@ TAILOR_MAX_RETRIES = 1
 # schema/parse/empty 先例并纳入 timeout——慢模型的等待成本已经付过，
 # 再吃一个 failed 只会逼用户手动重跑整条管线）。quota/auth/rate_limit
 # 等账户类失败仍冒泡：那种情况下后续岗位同样会失败，静默降级会掩盖问题。
-_DEGRADED_EDITOR_CODES = frozenset({"schema", "parse", "empty", "timeout"})
+_DEGRADED_EDITOR_CODES = frozenset(
+    code.value
+    for code in (
+        LlmFailureCode.SCHEMA,
+        LlmFailureCode.PARSE,
+        LlmFailureCode.EMPTY,
+        LlmFailureCode.TIMEOUT,
+    )
+)
+
+# Gap 分析降级集：结构/解析类失败产出空报告继续跑；账户类失败仍冒泡。
+_GAP_DEGRADED_CODES = frozenset(
+    code.value
+    for code in (
+        LlmFailureCode.SCHEMA,
+        LlmFailureCode.PARSE,
+        LlmFailureCode.EMPTY,
+    )
+)
 
 # Defensive cap on resume input so an exceptionally long resume cannot
 # blow out prompt size and slow the LLM calls. Typical resumes (2-3k
@@ -417,7 +436,7 @@ def run(
                     )
                     report.gap_report = gap_result
                 except LLMResponseError as exc:
-                    if getattr(exc, "code", "") in ("schema", "parse", "empty"):
+                    if getattr(exc, "code", "") in _GAP_DEGRADED_CODES:
                         logger.warning(
                             "gap degraded, continuing with empty report: %s", exc
                         )
@@ -435,7 +454,7 @@ def run(
                         tenant=tenant,
                     )
                 except LLMResponseError as exc:
-                    if getattr(exc, "code", "") in ("schema", "parse", "empty"):
+                    if getattr(exc, "code", "") in _GAP_DEGRADED_CODES:
                         logger.warning(
                             "gap degraded, continuing with empty report: %s", exc
                         )

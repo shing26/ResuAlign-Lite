@@ -13,6 +13,7 @@ from typing import Any
 import resualign.api as api_module
 
 from ...alignment_lifecycle import transition_alignment
+from ...contracts.errors import LlmFailureCode
 from ...job_library import _normalize_source_url, _text_dedupe_key
 from ...llm_usage import reset_llm_tenant, set_llm_tenant
 from ...observability import new_request_id, reset_request_id, set_request_id
@@ -326,15 +327,15 @@ def _job_failure_detail(
     if isinstance(exc, api_module.LLMResponseError):
         # R4 P0-1（03-AIE §③）：结构化 code 优先分支，杜绝 message substring 漂移
         # 误归因；code == "other"（旧调用方/测试构造的无 code 异常）回退文本分类。
-        code = getattr(exc, "code", "other")
-        if code != "other":
-            if code == "rate_limit":
+        code = getattr(exc, "code", LlmFailureCode.OTHER.value)
+        if code != LlmFailureCode.OTHER:
+            if code == LlmFailureCode.RATE_LIMIT:
                 reason = "模型服务繁忙（限流），请稍后重试"
-            elif code == "quota":
+            elif code == LlmFailureCode.QUOTA:
                 reason = "模型账户欠费或余额不足，请充值后重试（可先在设置页更换节点）"
-            elif code == "auth":
+            elif code == LlmFailureCode.AUTH:
                 reason = "API Key 无效或权限不足，请检查模型设置"
-            elif code == "timeout":
+            elif code == LlmFailureCode.TIMEOUT:
                 if elapsed_secs is not None:
                     reason = (
                         "模型响应超时（本次耗时 "
@@ -342,9 +343,9 @@ def _job_failure_detail(
                     )
                 else:
                     reason = "模型响应超时，可尝试更换更快的模型或稍后重试"
-            elif code == "empty":
+            elif code == LlmFailureCode.EMPTY:
                 reason = "模型返回为空，请重试"
-            elif code in ("parse", "schema"):
+            elif code in (LlmFailureCode.PARSE, LlmFailureCode.SCHEMA):
                 reason = "模型返回内容格式异常，请重试或更换模型"
             else:
                 reason = "模型服务暂时不可用，请稍后重试"
