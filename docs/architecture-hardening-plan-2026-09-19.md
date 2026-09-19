@@ -17,6 +17,21 @@ Status: 现在批**已施工并验证**；挂起批为决策完备施工单，�
 - **第一步门禁**：先提交推送 → CI 三阶段绿 → 才开工。已满足
   （`e5f2641` 三阶段全绿后开工）。
 
+**R1–R7 与共性四项的归属（防漏项对照）**
+
+| 项 | 归属 | 状态 |
+| --- | --- | --- |
+| R1 / R2 组合根双向绑定 | 挂起批 §3.1 | 施工单就绪 |
+| R3 两个 god method | 挂起批 §3.2 | 施工单就绪 |
+| R4 错误码文本回退 | 契约层（现在批 §2.3）+ 残余 挂起批 §3.6 | 码表已收口，文本回退待删 |
+| R5 配置 clamp 而非 fail | 挂起批 §3.4 | 施工单就绪 |
+| R6 调用图工具未接 CI | 现在批 §2.2 | **已落地** |
+| R7 领域目录平铺 | 挂起批 §3.3 | 施工单就绪 |
+| 共性 1 契约层 | 现在批 §2.3 | **已落地**（LLM 码；HTTP 码按裁定不动） |
+| 共性 2 配置 fail-fast | 挂起批 §3.4 | 施工单就绪 |
+| 共性 3 原始报文归档 | 现在批 §2.1 | **已落地** |
+| 共性 4 扩展点注册表 | 挂起批 §3.5 | 施工单就绪（首步定位清单） |
+
 ## 二、现在批（已落地）
 
 ### 2.1 归档层（原始 LLM 报文）
@@ -145,8 +160,13 @@ Status: 现在批**已施工并验证**；挂起批为决策完备施工单，�
 
 ### 3.4 配置 fail-fast（跨项目共性 2）
 
-- 位置：`src/resualign/config.py:88-91`、`src/resualign/observability.py:186-191`
-  （非法值当前被 clamp）。
+- 位置（实测坐标）：
+  - `src/resualign/api/state.py:66-77` `_clamp_worker_concurrency` —— 非法值
+    静默夹到 1..4，`RESUALIGN_WORKER_CONCURRENCY=0/-1/99` 都不报错；
+    `config.py:89-91` 只是那句「故意用 str，交给 resolver clamp」的注释。
+  - `src/resualign/observability.py:186-191` `log_sample_rate` —— 非法值回落
+    默认 1% 并夹到 [0, 1]。
+  - 施工时用 `git grep -n "clamp\|max(.*min(" src/resualign/` 复核是否还有第三处。
 - 手段：clamp → `raise ValueError`，错误信息必须含**环境变量名与合法区间**。
 - 验收：每个受管变量一条测试，断言非法值启动失败且报错含变量名。
 - 回滚粒度：一个变量一个 commit。
@@ -157,6 +177,30 @@ Status: 现在批**已施工并验证**；挂起批为决策完备施工单，�
   用一次定位扫描确认**（施工首步产出清单，再决定表结构）。
 - 手段：散落常量 → 单表注册；漏注册即报错（不是静默回落）。
 - 验收：新增一种版式只需改注册表一处，diff < 20 行。
+
+### 3.6 R4 残余 —— 删除 message 子串回退
+
+- 现状（实测 `api/services/jobs.py:352-395`）：结构化 code 分支已经就位，
+  但 `code == "other"` 时仍回退到子串嗅探，共 5 组 21 个片段 ——
+  `"429"`/`"rate limit"`；`"401"`/`"403"`/`"unauthorized"`/`"authentication"`/
+  `"invalid api key"`/`"api key"`；`"timeout"`/`"timed out"`/`"time-out"`；
+  `"empty response"`/`"empty content"`/`"returned empty"`/`"was empty"`/
+  `"empty after"`；`"expecting value"`/`"no json object found"`/
+  `"not a json object"`/`"invalid json"`/`"schema validation"`/
+  `"failed validation"`。
+- 手段：先确认没有生产路径会产出无 code 的异常
+  （`git grep -n "LLMResponseError(" src/` 逐个核对是否带 `code=`），
+  然后把整段子串分支降级为单一兜底文案「模型服务暂时不可用，请稍后重试」。
+- 验收：
+  - `git grep -n "invalid api key\|unauthorized" src/resualign/api/services/jobs.py`
+    为空（嗅探分支消失）。
+  - 构造「无 code 的旧式异常」，断言落到兜底文案，**不会**被误判成
+    「检查 API Key」—— 这正是 R4 当初要消灭的误归因。
+  - `tests/test_r4_aie_guardrails.py`、`tests/test_llm_timeout.py`、
+    `tests/test_alignment_persistence.py` 全绿。
+- 排序：排在 §3.1（R1/R2）**之后** —— 同一个 `jobs.py` 会被 R1 大改，
+  先删回退只会制造冲突。
+- 回滚粒度：一个 commit。
 
 ## 四、触发与门禁
 
