@@ -17,6 +17,7 @@
 | `ticket-9-observability.md` | 被 `src/resualign/api/routers/ops.py` 注释引用 |
 | `prd-commercialization-20260905.md` | 商业化 PRD（2026-09-14 主叙事已拍板） |
 | `probe-window-plan-2026-09-16.md` | 探针窗执行计划（活文档；判据截止后归档到 `plans/`） |
+| `architecture-hardening-plan-2026-09-19.md` | 架构加固计划（活文档；现在批已完成，挂起批等探针时钟出结论后评审） |
 | `probe-112-outreach-2026-09-15.md`、`probe-112-dogfood-2026-09-15.md`、`probe-112-send-checklist-2026-09-16.md` | ADR-0042 探针在途（时钟起点登记在此），**未收口前不许移动** |
 | `foundation-110-attribution-2026-09-15.md`、`market-research-competitors-2026-09-15.md`、`llm-provider-stability-analysis.md`、`tickets-2.0.md` | 被 ADR-0032/0040/0041/0019 正文按路径引用；ADR 只增不改，故**原位冻结**，整理时不要"顺手"搬走 |
 
