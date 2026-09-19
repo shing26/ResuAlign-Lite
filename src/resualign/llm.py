@@ -431,15 +431,22 @@ class OpenAIClient(LLMClient):
         Every non-streaming call funnels through here so the raw request body
         and response text are captured in exactly one place. Capture is a
         no-op when ``RESUALIGN_LLM_TRACE`` is off.
+
+        The request is captured *before* the POST: a wall-clock deadline or a
+        transport failure is exactly the dispute worth replaying, and on that
+        path no response ever arrives to trigger a later capture.
         """
+        tracing = trace_enabled()
+        if tracing:
+            self._trace_request_body = payload
+            self._trace_response_text = None
         if self._deadline_s is not None:
             response = self._post_with_deadline(
                 url, headers, payload, self._deadline_s
             )
         else:
             response = self._client.post(url, headers=headers, json=payload)
-        if trace_enabled():
-            self._trace_request_body = payload
+        if tracing:
             try:
                 self._trace_response_text = response.text
             except Exception:  # noqa: BLE001 - tracing must never break a call

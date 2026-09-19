@@ -11,11 +11,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 
 from resualign.archive import llm_trace
 from resualign.archive.llm_trace import record_llm_trace, trace_enabled
-from resualign.llm import OpenAIClient, _observe_llm_call
+from resualign.llm import LLMResponseError, OpenAIClient, _observe_llm_call
 from resualign.models import ResuAlignConfig
 
 from .conftest import fake_api_key
@@ -186,3 +187,32 @@ def test_chat_json_skips_trace_when_disabled(trace_dir, monkeypatch, httpx_mock)
     assert _read_traces(trace_dir) == []
     assert client._trace_request_body is None
     assert client._trace_response_text is None
+
+
+def test_trace_keeps_request_when_transport_fails(
+    trace_dir, monkeypatch, httpx_mock
+):
+    """A timeout is exactly the dispute worth replaying.
+
+    No response ever arrives on this path, so the request must be captured
+    *before* the POST — otherwise the archive records nothing for the very
+    failures operators ask about.
+    """
+    monkeypatch.setenv(llm_trace.TRACE_ENV, "1")
+    httpx_mock.add_exception(httpx.ConnectTimeout("connect timeout"))
+    client = OpenAIClient(
+        ResuAlignConfig(api_key=fake_api_key("trace"), model="m1")
+    )
+    client.max_retries = 0
+
+    with pytest.raises(LLMResponseError) as excinfo:
+        client.chat_json("system prompt", "user jd text")
+    assert excinfo.value.code == "timeout"
+
+    rows = _read_traces(trace_dir)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["status"] == "failed"
+    assert row["request"]["messages"][0]["content"] == "system prompt"
+    assert row["request"]["messages"][1]["content"] == "user jd text"
+    assert row["response"] is None
