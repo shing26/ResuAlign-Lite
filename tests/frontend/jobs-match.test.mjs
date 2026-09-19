@@ -64,14 +64,13 @@ test("boardCard renders four match dimensions with labels and values", () => {
   assert.equal(dims[3].textContent.includes("经验"), true);
 });
 
-test("boardCard keeps secondary details in the hover reveal layer", () => {
+test("boardCard keeps analysis details in hover reveal and action controls always visible", () => {
   const body = bodyFrom(boardCard(DETAIL_JOB));
   const reveal = body.querySelector(".board-card__reveal");
   assert.ok(reveal, "card renders a reveal layer");
   assert.ok(reveal.querySelector("[data-match-block]"));
   assert.ok(reveal.querySelector(".board-card__tags"));
   assert.ok(reveal.querySelector(".board-card__timeline"));
-  assert.ok(reveal.querySelector("[data-board-status]"));
   assert.match(
     [...reveal.querySelectorAll(".board-card__reveal-label")]
       .map((node) => node.textContent)
@@ -79,6 +78,14 @@ test("boardCard keeps secondary details in the hover reveal layer", () => {
     /匹配分 · 规则四维/,
   );
   assert.equal(body.querySelector(".board-card > [data-match-block]"), null);
+
+  /* 操作面常驻：状态流转 / 对齐入口不能藏进 hover 折叠 —— Playwright
+   * 与触屏都不会触发 :hover，藏起来等于用户和 E2E 都够不到。 */
+  const actions = body.querySelector(".board-card > .board-card__actions");
+  assert.ok(actions, "actions row is a direct child of the card");
+  assert.ok(actions.querySelector("[data-board-status]"));
+  assert.ok(actions.querySelector('[data-action="align-job"]'));
+  assert.equal(reveal.querySelector("[data-board-status]"), null);
 
   const styles = readFileSync(
     join(appDir, "..", "styles.css"),
@@ -89,6 +96,37 @@ test("boardCard keeps secondary details in the hover reveal layer", () => {
     /\.board-card:hover \.board-card__reveal,[\s\S]*display:\s*flex/,
   );
   assert.match(styles, /@media \(hover: none\)[\s\S]*\.board-card__reveal/);
+});
+
+test("classification-pending action stays outside the hover reveal layer", () => {
+  const body = bodyFrom(
+    boardCard({ ...DETAIL_JOB, classification_pending: true }),
+  );
+  const reveal = body.querySelector(".board-card__reveal");
+  const pending = body.querySelector(".badge-pending");
+  assert.ok(pending, "pending badge renders");
+  assert.equal(
+    reveal.contains(pending),
+    false,
+    "pending action must not be hidden behind hover",
+  );
+  assert.ok(
+    body.querySelector(".board-card > .board-card__actions .badge-pending"),
+  );
+});
+
+test("go-to-apply link stays outside the hover reveal layer", () => {
+  const body = bodyFrom(
+    boardCard({ ...DETAIL_JOB, source_url: "https://example.com/jobs/1" }),
+  );
+  const reveal = body.querySelector(".board-card__reveal");
+  const link = body.querySelector('[data-action="open-source-url"]');
+  assert.ok(link, "apply link renders");
+  assert.equal(
+    reveal.contains(link),
+    false,
+    "apply action must not be hidden behind hover",
+  );
 });
 
 test("boardCard renders JD tech-stack keywords from the persisted profile", () => {

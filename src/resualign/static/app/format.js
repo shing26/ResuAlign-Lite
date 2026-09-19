@@ -1055,7 +1055,6 @@ export function boardCard(job, statuses = null) {
           <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
           <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
           ${jobCompletenessBadge(job)}
-          ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
           ${alignmentBadgeHtml(job)}
         </div>
         <div class="board-card__timeline">
@@ -1065,12 +1064,13 @@ export function boardCard(job, statuses = null) {
           ${job.applied_at ? `<span class="small muted">投递 ${esc(job.applied_at)}</span>` : ""}
           ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
         </div>
-        ${jobSourceUrl(job) ? `<div class="board-card__links">${jobApplyLinkHtml(job)}</div>` : ""}
-        <div class="row board-card__actions">
-          <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
-          ${boardAlignButton(job)}
-          <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-optimizer" data-id="${job.job_id}">工作台</button>
-        </div>
+      </div>
+      ${jobSourceUrl(job) ? `<div class="board-card__links">${jobApplyLinkHtml(job)}</div>` : ""}
+      <div class="row board-card__actions">
+        ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
+        <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
+        ${boardAlignButton(job)}
+        <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-optimizer" data-id="${job.job_id}">工作台</button>
       </div>
     </article>`;
 }
