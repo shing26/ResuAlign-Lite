@@ -86,8 +86,9 @@ class EnvSettings(BaseSettings):
     resualign_job_db: str = ""
     resualign_data_dir: str = ""
     resualign_upload_dir: str = ""
-    # String type on purpose: invalid values are clamped by the worker
-    # concurrency resolver instead of failing EnvSettings validation.
+    # String type on purpose: the worker concurrency resolver validates the
+    # range and fails fast with the variable name instead of EnvSettings
+    # rejecting the raw value before the message is actionable.
     resualign_worker_concurrency: str = "1"
 
     # Reminder delivery (non-secret fields may be mirrored in settings store;

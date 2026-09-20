@@ -18,6 +18,7 @@ from ..config import EnvSettings
 from ..jobs import JobRegistry, resolve_data_dir
 from ..llm_nodes import LLMNodeStore
 from ..llm_usage import LLMUsageStore
+from ..observability import log_sample_rate
 from ..settings_store import SettingsStore
 from ..workspace import (
     ApplicationStore,
@@ -28,13 +29,27 @@ from ..workspace import (
 from .rate_limit import _RateLimiter
 
 
-def _clamp_worker_concurrency(value: int) -> int:
-    """Clamp worker concurrency to the safe 1..4 range."""
+def _clamp_worker_concurrency(value: object) -> int:
+    """Validate worker concurrency, failing fast outside the 1..4 range.
+
+    A silently clamped value hides a misconfiguration: an operator who sets
+    ``RESUALIGN_WORKER_CONCURRENCY=99`` would otherwise believe 99 workers
+    are running while the app quietly uses 4. The error names the variable
+    and its legal range so startup logs point straight at the fix.
+    """
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
-        return 1
-    return max(1, min(parsed, 4))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "RESUALIGN_WORKER_CONCURRENCY must be an integer in the range "
+            f"1..4; got {value!r}"
+        ) from exc
+    if not 1 <= parsed <= 4:
+        raise ValueError(
+            "RESUALIGN_WORKER_CONCURRENCY must be in the range 1..4; "
+            f"got {parsed}"
+        )
+    return parsed
 
 
 class AppContext:
@@ -42,6 +57,10 @@ class AppContext:
 
     def __init__(self) -> None:
         self._env_settings = EnvSettings()
+        # Fail fast on a malformed sampling rate: the request middleware
+        # reads it on every call, so a bad env var must surface at startup
+        # rather than on the first request.
+        log_sample_rate()
 
         self._auth_rate_limiter = _RateLimiter(
             max_requests=20, window_seconds=60

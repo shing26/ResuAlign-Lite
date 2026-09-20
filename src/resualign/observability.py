@@ -177,18 +177,26 @@ def should_sample(rate: float) -> bool:
 
 
 def log_sample_rate() -> float:
-    """Return the configured http.request sampling rate, clamped to [0, 1].
+    """Return the configured http.request sampling rate, failing fast.
 
-    Reads ``RESUALIGN_LOG_SAMPLE_RATE`` (default 0.01, i.e. 1%). Invalid
-    values fall back to the default so a bad env var can never disable or
-    flood request logging.
+    Reads ``RESUALIGN_LOG_SAMPLE_RATE`` (default 0.01, i.e. 1%). Out-of-range
+    or non-numeric values raise ``ValueError`` naming the variable and the
+    legal range instead of silently clamping or falling back.
     """
     raw = os.environ.get("RESUALIGN_LOG_SAMPLE_RATE", str(_DEFAULT_SAMPLE_RATE))
     try:
         rate = float(raw)
-    except (TypeError, ValueError):
-        rate = _DEFAULT_SAMPLE_RATE
-    return max(0.0, min(1.0, rate))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "RESUALIGN_LOG_SAMPLE_RATE must be a number in the range 0..1; "
+            f"got {raw!r}"
+        ) from exc
+    if not 0.0 <= rate <= 1.0:
+        raise ValueError(
+            "RESUALIGN_LOG_SAMPLE_RATE must be in the range 0..1; "
+            f"got {raw!r}"
+        )
+    return rate
 
 
 class CacheHitCounter:

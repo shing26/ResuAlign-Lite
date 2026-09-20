@@ -110,7 +110,7 @@ def test_should_sample_boundaries():
     assert seen_true and seen_false
 
 
-def test_log_sample_rate_reads_env_and_clamps(monkeypatch):
+def test_log_sample_rate_reads_env(monkeypatch):
     monkeypatch.delenv("RESUALIGN_LOG_SAMPLE_RATE", raising=False)
     assert log_sample_rate() == 0.01  # default
 
@@ -120,13 +120,33 @@ def test_log_sample_rate_reads_env_and_clamps(monkeypatch):
     assert log_sample_rate() == 0.0
     monkeypatch.setenv("RESUALIGN_LOG_SAMPLE_RATE", "0.25")
     assert log_sample_rate() == 0.25
-    # Out-of-range and garbage values are clamped / fall back.
-    monkeypatch.setenv("RESUALIGN_LOG_SAMPLE_RATE", "7")
-    assert log_sample_rate() == 1.0
-    monkeypatch.setenv("RESUALIGN_LOG_SAMPLE_RATE", "-2")
-    assert log_sample_rate() == 0.0
-    monkeypatch.setenv("RESUALIGN_LOG_SAMPLE_RATE", "not-a-number")
-    assert log_sample_rate() == 0.01
+
+
+@pytest.mark.parametrize("bad", ["7", "-2", "not-a-number"])
+def test_log_sample_rate_rejects_invalid_values(monkeypatch, bad):
+    monkeypatch.setenv("RESUALIGN_LOG_SAMPLE_RATE", bad)
+    with pytest.raises(ValueError, match="RESUALIGN_LOG_SAMPLE_RATE"):
+        log_sample_rate()
+
+
+@pytest.mark.parametrize("bad", ["7", "not-a-number"])
+def test_app_startup_rejects_invalid_sample_rate(bad):
+    env = os.environ.copy()
+    env["RESUALIGN_LOG_SAMPLE_RATE"] = bad
+    code = (
+        "import sys; sys.path.insert(0, 'src'); "
+        "import resualign.api as api_module"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        timeout=60,
+    )
+    assert proc.returncode != 0
+    assert "RESUALIGN_LOG_SAMPLE_RATE" in proc.stderr
 
 
 # ---------------------------------------------------------------------------
