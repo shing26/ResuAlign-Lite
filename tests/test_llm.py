@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from resualign.llm import LLMResponseError, OpenAIClient
+from resualign.engine.llm import LLMResponseError, OpenAIClient
 from resualign.models import ResuAlignConfig
 
 from .conftest import fake_api_key

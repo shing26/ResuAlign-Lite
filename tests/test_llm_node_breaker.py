@@ -20,9 +20,9 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
-from resualign.llm import LLMResponseError, StreamConnectionError
-from resualign.llm_nodes import LLMNodeStore
-from resualign.role_router import call_with_role, call_with_role_streaming
+from resualign.engine.llm import LLMResponseError, StreamConnectionError
+from resualign.engine.llm_nodes import LLMNodeStore
+from resualign.engine.role_router import call_with_role, call_with_role_streaming
 from resualign.workspace import UserStore
 
 from .conftest import fake_api_key, fake_password
@@ -154,7 +154,7 @@ class TestTripFilterAndRecovery:
     def test_transitions_logged_once(self, tmp_path, caplog):
         store = _store(tmp_path)
         n = _node(store)
-        with caplog.at_level(logging.INFO, logger="resualign.llm_nodes"):
+        with caplog.at_level(logging.INFO, logger="resualign.engine.llm_nodes"):
             _trip(store, "t", n["node_id"])
             _trip(store, "t", n["node_id"], times=2)  # already disabled
             store.record_call_success("t", n["node_id"])

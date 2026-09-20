@@ -32,11 +32,12 @@ from ..cache import ContentCache
 from ..classifier import classify_job
 from ..config import EnvSettings, build_config
 from ..engine import run
+from ..engine.llm import LLMResponseError, OpenAIClient, register_daily_usage_recorder
+from ..engine.tailor import rewrite_bullet
 from ..gap_analyzer import analyze_gaps
 from ..jd_analysis import jd_profile_to_dict, proactive_jd_profile
 from ..jd_profiler import profile_jd
 from ..jobs import JobRegistry, resolve_data_dir
-from ..llm import LLMResponseError, OpenAIClient, register_daily_usage_recorder
 from ..match_scorer import compute_match_score, fallback_match_reason, snapshot_matches
 from ..models import Report
 from ..observability import (
@@ -56,7 +57,6 @@ from ..parser import (
     structured_resume_sections,
 )
 from ..settings_store import SettingsStore
-from ..tailor import rewrite_bullet
 from ..workspace import (
     ApplicationStore,
     JobLibraryStore,

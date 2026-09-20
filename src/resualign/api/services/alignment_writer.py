@@ -15,11 +15,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from ...app.context import context
+from ...engine.llm import DIAG_PROMPT_VERSION
+from ...engine.tailor import TAILOR_PROMPT_VERSION
 from ...evaluator import EVALUATOR_PROMPT_VERSION
 from ...gap_analyzer import GAP_ANALYZER_PROMPT_VERSION
 from ...jd_profiler import JD_PROFILER_PROMPT_VERSION
-from ...llm import DIAG_PROMPT_VERSION
-from ...tailor import TAILOR_PROMPT_VERSION
 from .alignment_rules import resolve_alignment_outcome, split_verified_diffs
 
 logger = logging.getLogger(__name__)

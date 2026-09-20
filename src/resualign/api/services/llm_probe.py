@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from ...llm import _DEFAULT_PROVIDER_URLS
+from ...engine.llm import _DEFAULT_PROVIDER_URLS
 
 _TEST_CONNECT_TIMEOUT = 10.0
 

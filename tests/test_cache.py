@@ -2,8 +2,8 @@ import time
 
 from resualign.cache import ContentCache, content_sha256
 from resualign.classifier import classify_job
+from resualign.engine.llm import diagnose_resume
 from resualign.jd_profiler import profile_jd
-from resualign.llm import diagnose_resume
 
 
 class _CountingClient:

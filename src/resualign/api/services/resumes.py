@@ -141,7 +141,7 @@ def extract_resume_profile(user: dict[str, Any], resume_id: str) -> dict[str, An
             detail="LLM 未配置。结构化抽取需要模型，请先在设置页配置节点。",
         )
 
-    from ...llm import OpenAIClient
+    from ...engine.llm import OpenAIClient
 
     client = OpenAIClient(config, timeout=45.0, max_tokens=2048)
     try:

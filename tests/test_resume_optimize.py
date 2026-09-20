@@ -18,8 +18,8 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
+from resualign.engine.llm import LLMResponseError
 from resualign.jobs import JobRegistry
-from resualign.llm import LLMResponseError
 from resualign.resume_optimize import (
     build_overview,
     extract_project_modules,

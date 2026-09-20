@@ -20,7 +20,7 @@ import logging
 import os
 from typing import Any
 
-from .contracts.errors import LlmFailureCode
+from ..contracts.errors import LlmFailureCode
 from .llm import LLMResponseError, OpenAIClient, StreamConnectionError
 from .llm_nodes import LLMNodeStore
 
@@ -179,7 +179,7 @@ def create_client_for_role(
     resolved = resolve_config_for_role(node_store, tenant_id, role)
     if resolved is None:
         return None
-    from .models import ResuAlignConfig
+    from ..models import ResuAlignConfig
 
     config = ResuAlignConfig(**resolved)
     return OpenAIClient(
@@ -229,7 +229,7 @@ def call_with_role(
     primary_node = node_store.resolve_node_for_role(tenant_id, role)
     resolved = _config_from_node(primary_node)
     if resolved is not None:
-        from .models import ResuAlignConfig
+        from ..models import ResuAlignConfig
         primary_config = ResuAlignConfig(**resolved)
         meta["node_name"] = resolved.get("model", "")
         meta["model"] = resolved.get("model", "")
@@ -282,7 +282,7 @@ def call_with_role(
             raise LLMResponseError(
                 meta["error"], code=LlmFailureCode.HTTP
             )
-        from .models import ResuAlignConfig
+        from ..models import ResuAlignConfig
         fallback_config = ResuAlignConfig(
             provider=fallback_node.get("provider", ""),
             model=fallback_node.get("model", ""),
@@ -350,7 +350,7 @@ def call_with_role_streaming(
     primary_node = node_store.resolve_node_for_role(tenant_id, role)
     resolved = _config_from_node(primary_node)
     if resolved is not None:
-        from .models import ResuAlignConfig
+        from ..models import ResuAlignConfig
         primary_config = ResuAlignConfig(**resolved)
         meta["node_name"] = resolved.get("model", "")
         meta["model"] = resolved.get("model", "")
@@ -383,7 +383,7 @@ def call_with_role_streaming(
         raise LLMResponseError(
             meta["error"], code=LlmFailureCode.HTTP
         )
-    from .models import ResuAlignConfig
+    from ..models import ResuAlignConfig
     fallback_config = ResuAlignConfig(
         provider=fallback_node.get("provider", ""),
         model=fallback_node.get("model", ""),

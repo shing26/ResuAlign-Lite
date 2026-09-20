@@ -13,10 +13,10 @@ from typing import Any
 from ...alignment_lifecycle import transition_alignment
 from ...app.context import context
 from ...contracts.errors import LlmFailureCode
+from ...engine.role_router import usable_active_node
 from ...job_library import _normalize_source_url, _text_dedupe_key
 from ...llm_usage import reset_llm_tenant, set_llm_tenant
 from ...observability import new_request_id, reset_request_id, set_request_id
-from ...role_router import usable_active_node
 from . import llm_probe
 from .alignment_rules import is_noop_diff as _is_noop_diff  # noqa: F401
 from .alignment_writer import AlignmentOutcome, persist_alignment
@@ -844,7 +844,7 @@ def _execute_claimed_job(
         )
         # R4 §3.6：诊断快照内嵌提示词版本（P3，04b-PE 建议），随快照整包
         # JSON 序列化持久化，便于追溯快照对应的提示词文本。
-        from resualign.llm import DIAG_PROMPT_VERSION
+        from resualign.engine.llm import DIAG_PROMPT_VERSION
 
         result['diagnosis']['prompt_version'] = DIAG_PROMPT_VERSION
         _persist_diagnosis_snapshot(tenant_id, payload, result)

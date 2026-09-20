@@ -4,10 +4,10 @@ import re
 
 import pytest
 
-from resualign.llm import LLMResponseError
+from resualign.engine.llm import LLMResponseError
+from resualign.engine.tailor import METRIC_PLACEHOLDER, tailor_resume_map_reduce
 from resualign.models import TailoredResume
 from resualign.schema_registry import TailoredResumeSchema
-from resualign.tailor import METRIC_PLACEHOLDER, tailor_resume_map_reduce
 
 
 class MockBulletLLM:

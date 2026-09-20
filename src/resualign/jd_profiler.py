@@ -1,4 +1,4 @@
-from .llm import LLMClient, _structured_or_json
+from .engine.llm import LLMClient, _structured_or_json
 from .models import JDProfile
 from .prompt_versions import JD_PROFILER as _JD_PROFILER_STAGE
 from .prompt_versions import get_prompt_version

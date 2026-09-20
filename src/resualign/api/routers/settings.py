@@ -9,9 +9,9 @@ from ...config import (
     register_stored_llm_provider,
     set_runtime_llm,
 )
+from ...engine.llm_providers import resolve_provider
+from ...engine.role_router import usable_active_node
 from ...job_library import JOB_STATUSES
-from ...llm_providers import resolve_provider
-from ...role_router import usable_active_node
 from ...settings_store import default_settings
 from ..deps import get_current_user
 from ..schemas import SettingsTestConnectionRequest, SettingsUpdateRequest

@@ -11,8 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ...alignment_lifecycle import transition_alignment
 from ...app.context import context
+from ...engine.role_router import call_with_role
 from ...llm_usage import llm_tenant_context
-from ...role_router import call_with_role
 from ..deps import get_current_user, get_local_ingest_user
 from ..schemas import (
     FinalDraftRequest,

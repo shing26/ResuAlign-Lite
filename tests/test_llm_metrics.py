@@ -6,8 +6,8 @@ import logging
 import pytest
 from pydantic import BaseModel
 
-import resualign.llm as llm_module
-from resualign.llm import LLMResponseError, OpenAIClient
+import resualign.engine.llm as llm_module
+from resualign.engine.llm import LLMResponseError, OpenAIClient
 from resualign.models import ResuAlignConfig
 
 from .conftest import fake_api_key
@@ -28,7 +28,7 @@ class _CaptureHandler(logging.Handler):
 
 @pytest.fixture
 def captured():
-    logger = logging.getLogger("resualign.llm")
+    logger = logging.getLogger("resualign.engine.llm")
     saved_handlers = list(logger.handlers)
     saved_propagate = logger.propagate
     saved_level = logger.level

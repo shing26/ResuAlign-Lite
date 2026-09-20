@@ -9,11 +9,11 @@ from typing import Any, Callable, ClassVar, Optional, Type
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from .archive.llm_trace import record_llm_trace, trace_enabled
-from .contracts.errors import KNOWN_LLM_FAILURE_CODES, LlmFailureCode
+from ..archive.llm_trace import record_llm_trace, trace_enabled
+from ..contracts.errors import KNOWN_LLM_FAILURE_CODES, LlmFailureCode
+from ..observability import CallStats, log_event
+from ..prompt_versions import DIAGNOSE, get_prompt_version
 from .llm_providers import PROVIDER_DEFAULT_URLS
-from .observability import CallStats, log_event
-from .prompt_versions import DIAGNOSE, get_prompt_version
 
 STRUCTURED_MAX_EXTRA_RETRIES = 2
 _logger = logging.getLogger(__name__)
@@ -1075,7 +1075,7 @@ def diagnose_resume(
     model: Optional[str] = None,
 ) -> dict:
     """Run diagnosis through an optional content-hash cache."""
-    from .schema_registry import AnalysisSchema
+    from ..schema_registry import AnalysisSchema
     resolved_model = model or getattr(client, "model", "default")
     if cache is not None:
         cached = cache.get(

@@ -8,12 +8,11 @@ from resualign import (
     gap_analyzer,
     jd_analysis,
     jd_profiler,
-    llm,
     prompt_versions,
     resume_optimize,
-    tailor,
 )
 from resualign.api.services import resumes
+from resualign.engine import llm, tailor
 
 
 def test_registry_covers_every_stage():

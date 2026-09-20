@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 import resualign.api as api_module
 import resualign.config as config_module
 from resualign.api import app
+from resualign.engine.llm import OpenAIClient
+from resualign.engine.llm_nodes import LLMNodeStore
 from resualign.jobs import JobRegistry
-from resualign.llm import OpenAIClient
-from resualign.llm_nodes import LLMNodeStore
 from resualign.models import ResuAlignConfig
 from resualign.settings_store import SettingsStore
 from resualign.workspace import (
@@ -789,7 +789,7 @@ def test_node_disable_thinking_roundtrip():
 
 def test_role_router_propagates_disable_thinking():
     """角色路由：resolve_config_for_role 与 fallback 构造都透传该字段。"""
-    from resualign.role_router import resolve_config_for_role
+    from resualign.engine.role_router import resolve_config_for_role
 
     class _Node:
         def resolve_node_for_role(self, tenant_id, role):

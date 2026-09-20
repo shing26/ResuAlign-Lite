@@ -1,7 +1,6 @@
 import pytest
 
-from resualign.models import TailoredResume
-from resualign.tailor import (
+from resualign.engine.tailor import (
     METRIC_PLACEHOLDER,
     _ensure_metric_placeholder,
     _has_quantified_metric,
@@ -9,6 +8,7 @@ from resualign.tailor import (
     rewrite_bullet,
     tailor_resume,
 )
+from resualign.models import TailoredResume
 
 
 class MockLLM:
@@ -485,7 +485,7 @@ def test_parse_diff_original_fallback_still_rejects_invented():
 
 def test_derive_section_diffs_from_sections_when_diffs_empty():
     """Phase 3: 模型只回 sections 不回 diffs 时，推导章节级 diff（verified）。"""
-    from resualign.tailor import _locate_section_span, derive_section_diffs
+    from resualign.engine.tailor import _locate_section_span, derive_section_diffs
 
     resume = (
         "# 项目经历\n1. ResuAlign-Lite 智能简历对齐与求职工作台\n"
@@ -513,7 +513,7 @@ def test_derive_section_diffs_from_sections_when_diffs_empty():
 
 def test_derive_section_diffs_noop_when_sections_match():
     """Phase 3: 章节与原文一致时不应产出假 diff。"""
-    from resualign.tailor import derive_section_diffs
+    from resualign.engine.tailor import derive_section_diffs
 
     resume = "# 项目经历\n1. 现有项目描述\n"
     tailored = TailoredResume(
@@ -526,7 +526,7 @@ def test_derive_section_diffs_noop_when_sections_match():
 
 def test_derive_section_diffs_keeps_existing_bullet_diffs():
     """Phase 3: 已有 bullet diffs 时不覆盖。"""
-    from resualign.tailor import derive_section_diffs
+    from resualign.engine.tailor import derive_section_diffs
 
     resume = "# 项目经历\n1. 现有项目描述\n"
     tailored = TailoredResume(

@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Sequence
 
+from .engine.llm import _structured_or_json
 from .job_library import JOB_FUNCTIONS, SENIORITIES
-from .llm import _structured_or_json
 from .prompt_versions import CLASSIFIER as _CLASSIFIER_STAGE
 from .prompt_versions import get_prompt_version
 from .schema_registry import ClassifierResultSchema

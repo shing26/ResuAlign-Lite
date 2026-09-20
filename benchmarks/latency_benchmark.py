@@ -25,15 +25,15 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from resualign.engine import run
-from resualign.gap_analyzer import analyze_gaps
-from resualign.jd_profiler import profile_jd
-from resualign.llm import (
+from resualign.engine.llm import (
     DIAG_PROMPT,
     STRUCTURED_MAX_EXTRA_RETRIES,
     LLMResponseError,
 )
+from resualign.engine.tailor import tailor_resume
+from resualign.gap_analyzer import analyze_gaps
+from resualign.jd_profiler import profile_jd
 from resualign.models import ResuAlignConfig
-from resualign.tailor import tailor_resume
 
 RESUME = (
     "# Python Backend Engineer\n"

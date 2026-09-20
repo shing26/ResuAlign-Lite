@@ -74,7 +74,7 @@ def _app_flow_verdict(item: dict, resume_text: str, jd_support: str):
     A2 noop filter exactly as the job layer applies it — the parity lock now
     runs against live app code, not a duplicated flow (#119 review followup)."""
     from resualign.api.services.jobs import _is_noop_diff
-    from resualign.tailor import gate_diff_items
+    from resualign.engine.tailor import gate_diff_items
 
     diffs, invalid = gate_diff_items([item], resume_text, jd_support)
     if invalid:

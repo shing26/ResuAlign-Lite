@@ -1,9 +1,9 @@
-from .llm import _structured_or_json
+from .engine.llm import _structured_or_json
+from .engine.tailor import parse_diff_with_provenance
 from .models import EvalScore
 from .prompt_versions import EVALUATOR as _EVALUATOR_STAGE
 from .prompt_versions import get_prompt_version
 from .schema_registry import EvalScoreSchema
-from .tailor import parse_diff_with_provenance
 
 # PROMPT_VERSION bump: evaluator/v1 -> v2（2026-08-25，对照 04b-PE §2.6）
 # 本次升级说明：

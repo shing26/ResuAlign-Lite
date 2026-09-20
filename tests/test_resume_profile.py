@@ -130,7 +130,7 @@ def test_profile_extract_persists_and_marks_fresh(monkeypatch):
         def close(self):
             pass
 
-    import resualign.llm as _llm
+    import resualign.engine.llm as _llm
 
     monkeypatch.setattr(_llm, "OpenAIClient", lambda *a, **kw: fake)
     monkeypatch.setattr(
@@ -299,7 +299,7 @@ def test_extract_enriches_basic_from_text_when_llm_misses(monkeypatch):
         def close(self):
             pass
 
-    import resualign.llm as _llm
+    import resualign.engine.llm as _llm
     monkeypatch.setattr(_llm, "OpenAIClient", lambda *a, **kw: _SparseClient())
     monkeypatch.setattr(
         "resualign.api.build_config",

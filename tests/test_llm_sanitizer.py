@@ -2,7 +2,7 @@
 
 import pytest
 
-from resualign.llm import LLMResponseError, _parse_json_object
+from resualign.engine.llm import LLMResponseError, _parse_json_object
 
 
 def test_plain_json_object():

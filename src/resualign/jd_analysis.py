@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
+from .engine.llm import LLMClient
 from .jd_profiler import profile_jd
-from .llm import LLMClient
 from .models import GapReport, JDProfile
 from .prompt_versions import JD_ANALYSIS as _JD_ANALYSIS_STAGE
 from .prompt_versions import get_prompt_version
@@ -131,7 +131,7 @@ def profile_and_gaps(
                 return profile, gap
 
     user = f"Resume:\n{resume_text}\n\nJob Description:\n{jd_text}"
-    from .llm import _structured_or_json
+    from .engine.llm import _structured_or_json
     from .schema_registry import JDAnalysisSchema
 
     result = _structured_or_json(

@@ -24,10 +24,10 @@ import re
 
 from .contracts.errors import LlmFailureCode
 from .engine import MAX_RESUME_INPUT_CHARS, truncate_text
-from .llm import LLMClient, LLMResponseError
+from .engine.llm import LLMClient, LLMResponseError
+from .engine.role_router import _role_timeout
 from .prompt_versions import RESUME_POLISH as _RESUME_POLISH_STAGE
 from .prompt_versions import get_prompt_version
-from .role_router import _role_timeout
 from .rule_diagnose import _SKILL_KEYWORDS, diagnose_resume_local
 
 # ---------------------------------------------------------------------------

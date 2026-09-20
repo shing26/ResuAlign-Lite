@@ -21,8 +21,8 @@ from fastapi import HTTPException
 
 import resualign.api as api_module
 from resualign.api.services.jobs import _job_failure_detail
+from resualign.engine.llm import LLMResponseError, OpenAIClient
 from resualign.jobs import JobRegistry
-from resualign.llm import LLMResponseError, OpenAIClient
 from resualign.models import JDProfile, ResuAlignConfig
 
 from .conftest import MockLLMClient, _diag, _jd_profile_only, _tailor, fake_api_key
@@ -137,7 +137,7 @@ def test_job_failure_detail_branches_by_code():
 
 
 def test_role_router_clamps_max_tokens_and_deadline():
-    from resualign import role_router
+    from resualign.engine import role_router
 
     recorded: list[dict] = []
 
@@ -233,7 +233,7 @@ def test_chat_json_length_doubling_respects_token_cap(httpx_mock):
 
 
 def _freeze_sleep():
-    return patch("resualign.llm.time.sleep")
+    return patch("resualign.engine.llm.time.sleep")
 
 
 def test_wall_clock_deadline_interrupts_slow_post():

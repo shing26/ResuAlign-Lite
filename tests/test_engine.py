@@ -507,7 +507,7 @@ def test_direct_path_local_editor_skips_whole_doc_fallback(monkeypatch):
     """P1（2026-09-07 双轴审查补）：engine.run 直连分支（CLI/.env 场景）对
     本地节点同样必须传 whole_doc_fallback=False——审查发现该分支漏传，
     全败时仍会走整文档 fallback 在 90s deadline 上必然超时。"""
-    from resualign.llm import LLMResponseError
+    from resualign.engine.llm import LLMResponseError
     from resualign.schema_registry import (
         Analysis,
         DiffItem,
@@ -571,7 +571,7 @@ def test_direct_path_local_editor_skips_whole_doc_fallback(monkeypatch):
 def test_engine_tailor_degrades_on_editor_failure(monkeypatch):
     """editor 阶段结构/超时类失败 → 空改写 + tailor_degraded，任务继续而非
     整体 failed（诊断/画像/缺口照常保存）。"""
-    from resualign.llm import LLMResponseError
+    from resualign.engine.llm import LLMResponseError
 
     def boom(*args, **kwargs):
         raise LLMResponseError("模型响应超时", code="timeout")
@@ -594,7 +594,7 @@ def test_engine_tailor_degrades_on_editor_failure(monkeypatch):
 
 def test_engine_tailor_reraises_account_failures(monkeypatch):
     """quota/auth 等账户类失败不降级：静默空结果会掩盖后续岗位同样失败。"""
-    from resualign.llm import LLMResponseError
+    from resualign.engine.llm import LLMResponseError
 
     def boom(*args, **kwargs):
         raise LLMResponseError("Insufficient Balance", code="quota")

@@ -8,10 +8,10 @@ import time
 import httpx
 import pytest
 
-from resualign.llm import OpenAIClient, StreamConnectionError
-from resualign.llm_nodes import LLMNodeStore
+from resualign.engine.llm import OpenAIClient, StreamConnectionError
+from resualign.engine.llm_nodes import LLMNodeStore
+from resualign.engine.role_router import call_with_role_streaming
 from resualign.models import ResuAlignConfig
-from resualign.role_router import call_with_role_streaming
 
 from .conftest import fake_api_key
 

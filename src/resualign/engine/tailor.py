@@ -5,12 +5,12 @@ import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+from ..models import DiffItem, TailoredResume
+from ..prompt_versions import BULLET_REWRITE as _BULLET_REWRITE_STAGE
+from ..prompt_versions import TAILOR as _TAILOR_STAGE
+from ..prompt_versions import get_prompt_version
+from ..schema_registry import DiffItemSchema, TailoredResumeSchema
 from .llm import LLMClient, _structured_or_json
-from .models import DiffItem, TailoredResume
-from .prompt_versions import BULLET_REWRITE as _BULLET_REWRITE_STAGE
-from .prompt_versions import TAILOR as _TAILOR_STAGE
-from .prompt_versions import get_prompt_version
-from .schema_registry import DiffItemSchema, TailoredResumeSchema
 
 # PROMPT_VERSION bump: bullet_rewrite/v2 -> v3（2026-08-27，黄金核心 1：Few-Shot 强动词库）
 # 本次升级说明：

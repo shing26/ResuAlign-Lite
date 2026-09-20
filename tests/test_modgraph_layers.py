@@ -21,7 +21,9 @@ def test_layer_of_prefers_the_longest_prefix():
 
 
 def test_layer_of_does_not_match_longer_siblings():
-    assert modgraph.layer_of("engine.py") == "引擎"
+    # R7 把 engine 从模块改成包；层匹配走目录前缀，包内文件归引擎层。
+    assert modgraph.layer_of("engine/__init__.py") == "引擎"
+    assert modgraph.layer_of("engine/llm.py") == "引擎"
     assert modgraph.layer_of("engine_utils.py") == "其他"
     assert modgraph.layer_of("jobs.py") == "存储"
     assert modgraph.layer_of("jobs_extra.py") == "其他"
@@ -54,7 +56,7 @@ def test_service_to_service_stays_allowed():
 
 def test_inner_layer_reaching_service_is_a_violation():
     all_mods = {
-        "resualign.engine": modgraph.PKG / "engine.py",
+        "resualign.engine": modgraph.PKG / "engine/__init__.py",
         "resualign.api.services.thing": modgraph.PKG / "api/services/thing.py",
     }
     edges = {"resualign.engine": {"resualign.api.services.thing"}}

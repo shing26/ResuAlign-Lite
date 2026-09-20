@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from resualign.llm import LLMClient, LLMResponseError, OpenAIClient
+from resualign.engine.llm import LLMClient, LLMResponseError, OpenAIClient
 from resualign.models import ResuAlignConfig
 from resualign.schema_registry import (
     Analysis,
@@ -53,7 +53,7 @@ def test_chat_structured_uses_json_schema_for_openai(httpx_mock):
 def test_chat_structured_json_mode_retries_schema_validation(
     httpx_mock, monkeypatch
 ):
-    monkeypatch.setattr("resualign.llm.time.sleep", lambda _: None)
+    monkeypatch.setattr("resualign.engine.llm.time.sleep", lambda _: None)
     config = ResuAlignConfig(api_key=fake_api_key("test"), model="m1")
     client = OpenAIClient(config)
     httpx_mock.add_response(
@@ -101,7 +101,7 @@ class _RetryFallbackClient(LLMClient):
 
 
 def test_chat_structured_base_client_retries_then_fails(monkeypatch):
-    monkeypatch.setattr("resualign.llm.time.sleep", lambda _: None)
+    monkeypatch.setattr("resualign.engine.llm.time.sleep", lambda _: None)
     client = _RetryFallbackClient(
         [
             {"score": "bad", "issues": [], "skills": []},

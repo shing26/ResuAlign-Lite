@@ -16,7 +16,7 @@ import pytest
 
 from resualign.archive import llm_trace
 from resualign.archive.llm_trace import record_llm_trace, trace_enabled
-from resualign.llm import LLMResponseError, OpenAIClient, _observe_llm_call
+from resualign.engine.llm import LLMResponseError, OpenAIClient, _observe_llm_call
 from resualign.models import ResuAlignConfig
 
 from .conftest import fake_api_key

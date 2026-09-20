@@ -25,11 +25,11 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
-from resualign.jobs import JobRegistry
-from resualign.llm import (
+from resualign.engine.llm import (
     LLMResponseError,
     OpenAIClient,
 )
+from resualign.jobs import JobRegistry
 from resualign.models import ResuAlignConfig
 from resualign.schema_registry import (
     AnalysisSchema,
@@ -58,7 +58,7 @@ def _config(api_key: str = fake_api_key("test")) -> ResuAlignConfig:
 
 def _freeze_sleep():
     """Retry backoff is 1s per attempt; freeze it so tests stay fast."""
-    return patch("resualign.llm.time.sleep")
+    return patch("resualign.engine.llm.time.sleep")
 
 
 @pytest.fixture
@@ -257,7 +257,7 @@ def test_analyze_job_fails_with_readable_error_when_llm_times_out():
         })
 
     with patch(
-        "resualign.llm.OpenAIClient.chat_structured",
+        "resualign.engine.llm.OpenAIClient.chat_structured",
         side_effect=httpx.ReadTimeout("read timed out"),
     ):
         api_module._run_job(job_id)
@@ -330,8 +330,8 @@ def test_analyze_job_timeout_failure_is_retryable():
         second = _submit_analyze(payload)
 
     with patch(
-        "resualign.llm.OpenAIClient.chat_structured", flaky_structured
-    ), patch("resualign.llm.OpenAIClient.chat_json", flaky_json):
+        "resualign.engine.llm.OpenAIClient.chat_structured", flaky_structured
+    ), patch("resualign.engine.llm.OpenAIClient.chat_json", flaky_json):
         api_module._run_job(first)
         api_module._run_job(second)
 
@@ -376,10 +376,10 @@ def test_diagnosis_job_succeeds_with_local_rules_when_llm_is_down():
         job_id = r.json()["job_id"]
 
     with patch(
-        "resualign.llm.OpenAIClient.chat_structured",
+        "resualign.engine.llm.OpenAIClient.chat_structured",
         side_effect=httpx.ReadTimeout("read timed out"),
     ), patch(
-        "resualign.llm.OpenAIClient.chat_json",
+        "resualign.engine.llm.OpenAIClient.chat_json",
         side_effect=httpx.ReadTimeout("read timed out"),
     ):
         api_module._run_job(job_id)

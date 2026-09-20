@@ -6,22 +6,22 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
-from .contracts.errors import LlmFailureCode
-from .evaluator import evaluate
-from .extractor import extract_structured
-from .gap_analyzer import analyze_gaps
-from .jd_analysis import jd_profile_to_dict
-from .jd_profiler import profile_jd
+from ..contracts.errors import LlmFailureCode
+from ..evaluator import evaluate
+from ..extractor import extract_structured
+from ..gap_analyzer import analyze_gaps
+from ..jd_analysis import jd_profile_to_dict
+from ..jd_profiler import profile_jd
+from ..models import GapReport, Report, ResuAlignConfig, TailoredResume
+from ..rule_diagnose import diagnose_resume_local
 from .llm import LLMClient, LLMResponseError, OpenAIClient, diagnose_resume
 from .llm_nodes import LLMNodeStore
-from .models import GapReport, Report, ResuAlignConfig, TailoredResume
 from .role_router import (
     _role_timeout,
     call_with_role,
     is_parallel_safe,
     usable_active_node,
 )
-from .rule_diagnose import diagnose_resume_local
 from .tailor import tailor_resume, tailor_resume_map_reduce
 
 logger = logging.getLogger(__name__)

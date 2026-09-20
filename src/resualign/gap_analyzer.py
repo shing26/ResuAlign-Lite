@@ -1,4 +1,4 @@
-from .llm import LLMClient, _structured_or_json
+from .engine.llm import LLMClient, _structured_or_json
 from .models import GapReport
 from .prompt_versions import GAP_ANALYZER as _GAP_ANALYZER_STAGE
 from .prompt_versions import get_prompt_version

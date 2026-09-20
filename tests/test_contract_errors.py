@@ -10,7 +10,7 @@ consumer sets that must hold plain values (an Enum mixin overrides
 from __future__ import annotations
 
 from resualign.contracts.errors import KNOWN_LLM_FAILURE_CODES, LlmFailureCode
-from resualign.llm import LLMResponseError
+from resualign.engine.llm import LLMResponseError
 
 EXPECTED = {
     "timeout": LlmFailureCode.TIMEOUT,
@@ -56,7 +56,7 @@ def test_error_falls_back_to_other_for_unknown_codes():
 
 def test_consumer_sets_hold_plain_string_values():
     from resualign.engine import _DEGRADED_EDITOR_CODES, _GAP_DEGRADED_CODES
-    from resualign.llm_nodes import LLMNodeStore
+    from resualign.engine.llm_nodes import LLMNodeStore
 
     assert "schema" in _DEGRADED_EDITOR_CODES
     assert "timeout" in _DEGRADED_EDITOR_CODES
@@ -72,7 +72,7 @@ def test_consumer_sets_hold_plain_string_values():
 
 def test_breaker_does_not_count_output_quality_codes():
     """parse/schema/empty/rate_limit are not node-availability failures."""
-    from resualign.llm_nodes import LLMNodeStore
+    from resualign.engine.llm_nodes import LLMNodeStore
 
     for code in (
         LlmFailureCode.PARSE,

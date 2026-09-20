@@ -1,15 +1,15 @@
 import json
 
-from resualign.evaluator import evaluate
-from resualign.llm import OpenAIClient
-from resualign.models import DiffItem, ResuAlignConfig, TailoredResume
-from resualign.tailor import (
+from resualign.engine.llm import OpenAIClient
+from resualign.engine.tailor import (
     METRIC_PLACEHOLDER,
     _unsupported_content,
     derive_section_diffs,
     rewrite_bullet,
     tailor_resume,
 )
+from resualign.evaluator import evaluate
+from resualign.models import DiffItem, ResuAlignConfig, TailoredResume
 
 from .conftest import SchemaAwareLLMClient, fake_api_key
 

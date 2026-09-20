@@ -25,7 +25,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from resualign.engine import run
-from resualign.llm import (
+from resualign.engine.llm import (
     STRUCTURED_MAX_EXTRA_RETRIES,
     LLMResponseError,
     OpenAIClient,

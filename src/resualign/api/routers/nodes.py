@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ...app.context import context
 from ...config import EnvSettings
-from ...llm_providers import (
+from ...engine.llm_providers import (
     default_base_url,
     normalize_base_url,
     resolve_provider,

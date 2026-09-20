@@ -8,8 +8,8 @@ import secrets
 import time
 from typing import Any
 
+from .engine.llm_providers import ALLOWED_PROVIDERS
 from .job_library import JOB_FUNCTIONS, JOB_STATUSES, SENIORITIES
-from .llm_providers import ALLOWED_PROVIDERS
 from .secret_box import decrypt_value, encrypt_value
 from .store_base import UserStoreError, _SqliteStore
 

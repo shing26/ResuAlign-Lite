@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
+from resualign.engine.llm import OpenAIClient, register_daily_usage_recorder
 from resualign.jobs import JobRegistry
-from resualign.llm import OpenAIClient, register_daily_usage_recorder
 from resualign.llm_usage import (
     LLMUsageStore,
     estimate_call_cost,

@@ -1,5 +1,6 @@
 from .config import EnvSettings, build_config
 from .engine import run
+from .engine.tailor import tailor_resume
 from .evaluator import evaluate
 from .gap_analyzer import analyze_gaps
 from .jd_profiler import profile_jd
@@ -14,7 +15,6 @@ from .models import (
     TailoredResume,
 )
 from .parser import FileParseError, extract_text
-from .tailor import tailor_resume
 
 __all__ = [
     "DiffItem", "Analysis", "Report", "ResuAlignConfig", "JDProfile", "GapReport", "TailoredResume", "EvalScore",

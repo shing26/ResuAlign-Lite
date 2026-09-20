@@ -91,7 +91,7 @@ def test_metrics_job_failure_rate():
 
 def test_metrics_llm_aggregates_current_snapshot():
     """The endpoint surfaces whatever the in-process LLM stats hold."""
-    from resualign.llm import llm_metrics_snapshot
+    from resualign.engine.llm import llm_metrics_snapshot
 
     body = client.get("/api/ops/metrics").json()
     snapshot = llm_metrics_snapshot()

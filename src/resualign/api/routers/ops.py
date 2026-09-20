@@ -11,7 +11,7 @@ import time
 from fastapi import APIRouter
 
 from ...app.context import context
-from ...llm import llm_metrics_snapshot
+from ...engine.llm import llm_metrics_snapshot
 
 router = APIRouter(tags=["ops"])
 

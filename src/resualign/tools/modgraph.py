@@ -36,7 +36,7 @@ LAYERS = [
     ("接入/入口", ("cli", "__main__")),
     ("API", ("api/",)),
     ("服务", ("api/services/",)),
-    ("引擎", ("engine", "llm", "llm_nodes", "role_router", "tailor")),
+    ("引擎", ("engine/",)),
     (
         "领域",
         (

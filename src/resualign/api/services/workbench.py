@@ -13,9 +13,9 @@ from typing import Any, Optional
 
 from fastapi import Request
 
+from resualign.engine.role_router import call_with_role
 from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
 from resualign.llm_usage import reset_llm_tenant, set_llm_tenant
-from resualign.role_router import call_with_role
 
 from ...app.context import context
 
