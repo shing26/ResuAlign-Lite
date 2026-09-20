@@ -6,8 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-import resualign.api as api_module
-
+from ...app.context import context
 from ..deps import get_current_user
 from ..schemas import (
     KanbanBulkStatusRequest,
@@ -43,20 +42,20 @@ def bulk_update_kanban_status(
             detail=f"Bulk update exceeds maximum of {_MAX_BULK_ROWS} rows",
         )
     try:
-        api_module._jobs.validate_status(req.status)
+        context._jobs.validate_status(req.status)
         if req.expected_status is not None:
-            api_module._jobs.validate_status(req.expected_status)
-    except api_module.UserStoreError as exc:
+            context._jobs.validate_status(req.expected_status)
+    except context.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if req.idempotency_key:
-        cached = api_module._jobs.get_bulk_status_op(
+        cached = context._jobs.get_bulk_status_op(
             user["user_id"], req.idempotency_key
         )
         if cached is not None:
             return KanbanBulkStatusResponse(**cached["result"])
 
-    results = api_module._jobs.bulk_update_status(
+    results = context._jobs.bulk_update_status(
         user["user_id"],
         job_ids,
         req.status,
@@ -69,7 +68,7 @@ def bulk_update_kanban_status(
         results=results,
     )
     if req.idempotency_key:
-        api_module._jobs.save_bulk_status_op(
+        context._jobs.save_bulk_status_op(
             user["user_id"],
             req.idempotency_key,
             {"job_ids": job_ids, "status": req.status, "expected_status": req.expected_status},

@@ -6,8 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-import resualign.api as api_module
-
+from ...app.context import context
 from ..deps import get_current_user
 from ..schemas import AutomationRuleCreateRequest, AutomationRuleUpdateRequest
 
@@ -19,7 +18,7 @@ def list_automation_rules(
     user: dict[str, Any] = Depends(get_current_user),
 ):
     """Return the tenant's automation rules in creation order."""
-    return api_module._jobs.list_rules(user["user_id"])
+    return context._jobs.list_rules(user["user_id"])
 
 
 @router.post("/api/automation/rules", status_code=201)
@@ -29,14 +28,14 @@ def create_automation_rule(
 ):
     """Create one automation rule."""
     try:
-        return api_module._jobs.create_rule(
+        return context._jobs.create_rule(
             user["user_id"],
             req.rule_type,
             req.value,
             label=req.label,
             enabled=req.enabled,
         )
-    except api_module.UserStoreError as exc:
+    except context.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
@@ -48,14 +47,14 @@ def update_automation_rule(
 ):
     """Partially update one automation rule."""
     try:
-        rule = api_module._jobs.update_rule(
+        rule = context._jobs.update_rule(
             user["user_id"],
             rule_id,
             value=req.value,
             label=req.label,
             enabled=req.enabled,
         )
-    except api_module.UserStoreError as exc:
+    except context.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if rule is None:
         raise HTTPException(status_code=404, detail="Rule not found")
@@ -68,6 +67,6 @@ def delete_automation_rule(
     user: dict[str, Any] = Depends(get_current_user),
 ):
     """Delete one automation rule."""
-    if not api_module._jobs.delete_rule(user["user_id"], rule_id):
+    if not context._jobs.delete_rule(user["user_id"], rule_id):
         raise HTTPException(status_code=404, detail="Rule not found")
     return None

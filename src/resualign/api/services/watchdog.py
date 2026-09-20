@@ -25,8 +25,7 @@ import threading
 import time
 from typing import Any
 
-import resualign.api as api_module
-
+from ...app.context import context
 from ...observability import log_event
 
 logger = logging.getLogger("resualign.api.watchdog")
@@ -69,13 +68,13 @@ def scan_once(now: float | None = None) -> list[str]:
         return []
     now = time.time() if now is None else now
     forced: list[str] = []
-    for row in api_module._registry.stale_running_jobs(now - cap):
+    for row in context._registry.stale_running_jobs(now - cap):
         job_id = row["job_id"]
         tenant_id = row["tenant_id"]
         error = _timeout_error(cap)
         # Conditional UPDATE inside fail() decides the race against a
         # possibly-alive worker: whoever writes the terminal state first wins.
-        if not api_module._registry.fail(job_id, error):
+        if not context._registry.fail(job_id, error):
             continue
         forced.append(job_id)
         log_event(
@@ -92,12 +91,12 @@ def scan_once(now: float | None = None) -> list[str]:
         # Mirror the worker's failed-terminal linkage (services/jobs.py
         # except branch): board badge + last_alignment_error so the failure
         # stays diagnosable, and the application pointer if one exists.
-        stored = api_module._registry.get_payload(job_id)
+        stored = context._registry.get_payload(job_id)
         payload: dict[str, Any] = stored[0] if stored else {}
         library_job_id = payload.get("library_job_id")
         if library_job_id:
             try:
-                api_module._jobs.update_job(
+                context._jobs.update_job(
                     tenant_id,
                     library_job_id,
                     alignment_status="failed",
@@ -113,7 +112,7 @@ def scan_once(now: float | None = None) -> list[str]:
         )
         if application_id:
             try:
-                api_module._applications.set_application_job(
+                context._applications.set_application_job(
                     tenant_id, application_id, job_id, "failed"
                 )
             except Exception:

@@ -14,8 +14,7 @@ from typing import Any, Callable
 
 from fastapi import HTTPException
 
-import resualign.api as api_module
-
+from ...app.context import context
 from ...engine import MAX_RESUME_INPUT_CHARS, truncate_text
 from ...resume_optimize import (
     build_overview,
@@ -54,11 +53,11 @@ def run_resume_optimize(
     llm_used = False
     total = len(modules)
     if total:
-        config = api_module.build_config()
+        config = context.build_config()
         client = None
         build_error = None
         try:
-            client = api_module.OpenAIClient(
+            client = context.OpenAIClient(
                 config,
                 timeout=polish_timeout(),
                 # R4 P0-2：polish 非 role 直连调用，输出钳制 1024（03-AIE §③）。
@@ -117,7 +116,7 @@ def run_resume_optimize(
         "overview": overview,
         "modules": items,
         "llm_used": llm_used,
-        "model": api_module.build_config().model if llm_used else None,
+        "model": context.build_config().model if llm_used else None,
         "elapsed_seconds": round(time.monotonic() - t0, 1),
         "note": (
             "未识别到项目经历/工作经历模块，跳过逐项润色" if not total else None
@@ -145,7 +144,7 @@ def apply_resume_optimize_items(
     """
     if not items:
         raise HTTPException(status_code=422, detail="没有要采纳的优化项")
-    resume = api_module._resumes.get_master_resume(tenant_id, resume_id)
+    resume = context._resumes.get_master_resume(tenant_id, resume_id)
     if resume is None:
         raise HTTPException(status_code=404, detail="Master resume not found")
     content = resume.get("content") or ""
@@ -192,7 +191,7 @@ def apply_resume_optimize_items(
         )
     if not applied:
         raise HTTPException(status_code=422, detail="没有可应用的优化项")
-    updated = api_module._resumes.update_master_resume(tenant_id, resume_id, new_content)
+    updated = context._resumes.update_master_resume(tenant_id, resume_id, new_content)
     return {
         "resume": updated,
         "applied": applied,

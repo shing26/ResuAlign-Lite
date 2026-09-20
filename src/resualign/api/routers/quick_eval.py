@@ -13,8 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-import resualign.api as api_module
-
+from ...app.context import context
 from ...local_fallback import _extract_skills, local_gap_report
 from ...match_scorer import (
     compute_match_score,
@@ -76,14 +75,14 @@ def quick_eval(req: QuickEvalRequest, user: dict[str, Any] = Depends(get_current
     resume_text = ""
     master_resume_id = req.master_resume_id or None
     if master_resume_id:
-        resume = api_module._resumes.get_master_resume(user["user_id"], master_resume_id)
+        resume = context._resumes.get_master_resume(user["user_id"], master_resume_id)
         if resume is None:
             raise HTTPException(status_code=404, detail="Master resume not found")
         resume_text = resume.get("content") or ""
 
-    existing = api_module._jobs.find_by_dedupe_key(
+    existing = context._jobs.find_by_dedupe_key(
         user["user_id"],
-        api_module._workbench_service._library_dedupe_key(jd_text),
+        context._workbench_service._library_dedupe_key(jd_text),
     )
     evaluation = _evaluate(resume_text, jd_text, master_resume_id)
     return {

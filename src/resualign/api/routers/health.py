@@ -2,7 +2,7 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
-import resualign.api as api_module
+from ...app.context import context
 
 router = APIRouter()
 
@@ -17,21 +17,21 @@ _CACHE_PROBE_CONTENT = "health-check"
 @router.get('/', response_class=HTMLResponse)
 def index():
     """Serve the frontend HTML."""
-    if not api_module._static_dir.is_dir():
+    if not context._static_dir.is_dir():
         return HTMLResponse('<h1>ResuAlign API</h1><p>Frontend not available.</p>')
-    return HTMLResponse((api_module._static_dir / 'index.html').read_text(encoding='utf-8'))
+    return HTMLResponse((context._static_dir / 'index.html').read_text(encoding='utf-8'))
 
 
 def _check_db() -> dict:
     """Readiness: the job database must answer a trivial read."""
-    ok = api_module._registry.ping()
+    ok = context._registry.ping()
     return {"ok": ok, "detail": "database readable" if ok else "database check failed"}
 
 
 def _check_cache() -> dict:
     """Readiness: the content cache must accept a write-read roundtrip."""
     try:
-        cache = api_module._cache
+        cache = context._cache
         probe = {"probe": True}
         cache.put(
             _CACHE_PROBE_TENANT,

@@ -137,7 +137,7 @@ def test_is_local_node_remote_url():
 def test_probe_local_network_error_blocks():
     """Phase E: a local node (Ollama) with network_error must block queueing."""
     with patch(
-        "resualign.api.services.jobs.api_module._llm_nodes.get_usable_node",
+        "resualign.app.context.context._llm_nodes.get_usable_node",
         return_value={
             "provider": "ollama",
             "api_key": None,
@@ -145,7 +145,7 @@ def test_probe_local_network_error_blocks():
             "base_url": "http://localhost:11434",
         },
     ), patch(
-        "resualign.api.routers.settings.probe_llm_connection",
+        "resualign.api.services.llm_probe.probe_llm_connection",
         return_value={
             "ok": False,
             "status": "network_error",
@@ -161,7 +161,7 @@ def test_probe_local_network_error_blocks():
 def test_probe_local_timeout_blocks():
     """Phase E: a local node timeout must also block."""
     with patch(
-        "resualign.api.services.jobs.api_module._llm_nodes.get_usable_node",
+        "resualign.app.context.context._llm_nodes.get_usable_node",
         return_value={
             "provider": "ollama",
             "api_key": None,
@@ -169,7 +169,7 @@ def test_probe_local_timeout_blocks():
             "base_url": "http://localhost:11434",
         },
     ), patch(
-        "resualign.api.routers.settings.probe_llm_connection",
+        "resualign.api.services.llm_probe.probe_llm_connection",
         return_value={
             "ok": False,
             "status": "timeout",
@@ -185,7 +185,7 @@ def test_probe_local_timeout_blocks():
 def test_probe_remote_network_error_non_blocking():
     """Phase E: a remote node with network_error must NOT block."""
     with patch(
-        "resualign.api.services.jobs.api_module._llm_nodes.get_usable_node",
+        "resualign.app.context.context._llm_nodes.get_usable_node",
         return_value={
             "provider": "deepseek",
             "api_key": fake_api_key("test"),
@@ -193,7 +193,7 @@ def test_probe_remote_network_error_non_blocking():
             "base_url": "https://api.deepseek.com",
         },
     ), patch(
-        "resualign.api.routers.settings.probe_llm_connection",
+        "resualign.api.services.llm_probe.probe_llm_connection",
         return_value={
             "ok": False,
             "status": "network_error",
@@ -208,7 +208,7 @@ def test_probe_remote_network_error_non_blocking():
 def test_probe_http_402_blocks():
     """Phase A1: HTTP 402 still blocks on any node."""
     with patch(
-        "resualign.api.services.jobs.api_module._llm_nodes.get_usable_node",
+        "resualign.app.context.context._llm_nodes.get_usable_node",
         return_value={
             "provider": "deepseek",
             "api_key": fake_api_key("test"),
@@ -216,7 +216,7 @@ def test_probe_http_402_blocks():
             "base_url": "https://api.deepseek.com",
         },
     ), patch(
-        "resualign.api.routers.settings.probe_llm_connection",
+        "resualign.api.services.llm_probe.probe_llm_connection",
         return_value={
             "ok": False,
             "status": "http_402",

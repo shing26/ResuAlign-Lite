@@ -10,8 +10,7 @@ import time
 
 from fastapi import APIRouter
 
-import resualign.api as api_module
-
+from ...app.context import context
 from ...llm import llm_metrics_snapshot
 
 router = APIRouter(tags=["ops"])
@@ -22,11 +21,11 @@ _STARTED_AT = time.monotonic()
 @router.get("/api/ops/metrics", include_in_schema=False)
 def metrics() -> dict:
     """Return lightweight JSON metrics about the analysis pipeline."""
-    registry = api_module._registry
+    registry = context._registry
     outcomes = registry.outcome_stats()
     terminal = outcomes.get("succeeded", 0) + outcomes.get("failed", 0)
     llm_snapshot = llm_metrics_snapshot()
-    llm_snapshot["daily"] = api_module.llm_daily_status("local")
+    llm_snapshot["daily"] = context.llm_daily_status("local")
     return {
         "queue": {
             "depth": registry.queue_depth(),

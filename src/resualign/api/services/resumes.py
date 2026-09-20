@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-import resualign.api as api_module
+from ...app.context import context
 
 logger = logging.getLogger(__name__)
 
@@ -19,22 +19,22 @@ def _cached_diagnosis(resume: dict[str, Any], config: Any, tenant_id: str) -> Op
     latest_job_id = resume.get('latest_diagnosis_job_id')
     diag: Optional[dict[str, Any]] = None
     if latest_job_id:
-        snapshot = api_module._registry.snapshot(
+        snapshot = context._registry.snapshot(
             latest_job_id, tenant_id=tenant_id
         )
         if snapshot is not None and snapshot.get('status') == 'succeeded':
             result = snapshot.get('result') or {}
-            if result.get('diagnosis_source_hash') == api_module._content_sha256(
+            if result.get('diagnosis_source_hash') == context._content_sha256(
                 resume.get('content') or ''
             ):
                 diag = result.get('diagnosis') or {}
     if not diag and resume.get('resume_id'):
-        persisted = api_module._resumes.get_latest_diagnosis_snapshot(
+        persisted = context._resumes.get_latest_diagnosis_snapshot(
             tenant_id, resume['resume_id']
         )
         if persisted is not None:
             stored_diag, source_hash = persisted
-            if source_hash == api_module._content_sha256(
+            if source_hash == context._content_sha256(
                 resume.get('content') or ''
             ):
                 diag = stored_diag
@@ -48,10 +48,10 @@ def _cached_diagnosis(resume: dict[str, Any], config: Any, tenant_id: str) -> Op
 def backfill_diagnosis_snapshots() -> int:
     """Persist currently-valid registry diagnosis results into master resumes."""
     written = 0
-    for ref in api_module._resumes.list_resume_diagnosis_refs():
+    for ref in context._resumes.list_resume_diagnosis_refs():
         if ref['has_snapshot']:
             continue
-        snapshot = api_module._registry.snapshot(
+        snapshot = context._registry.snapshot(
             ref['latest_diagnosis_job_id'],
             tenant_id=ref['tenant_id'],
         )
@@ -64,7 +64,7 @@ def backfill_diagnosis_snapshots() -> int:
         diagnosis = result.get('diagnosis') or {}
         if not diagnosis:
             continue
-        updated = api_module._resumes.set_latest_diagnosis_snapshot(
+        updated = context._resumes.set_latest_diagnosis_snapshot(
             ref['tenant_id'],
             ref['resume_id'],
             diagnosis,
@@ -119,7 +119,7 @@ class _ProfileSchema(BaseModel):
 def extract_resume_profile(user: dict[str, Any], resume_id: str) -> dict[str, Any]:
     """Extract (and persist) the structured profile for one master resume."""
     tenant_id = user["user_id"]
-    resume = api_module._resumes.get_master_resume(tenant_id, resume_id)
+    resume = context._resumes.get_master_resume(tenant_id, resume_id)
     if resume is None:
         from fastapi import HTTPException
 
@@ -130,7 +130,7 @@ def extract_resume_profile(user: dict[str, Any], resume_id: str) -> dict[str, An
 
         raise HTTPException(status_code=422, detail="主简历内容为空，无法抽取")
 
-    config = api_module.build_config()
+    config = context.build_config()
     if not config.is_llm_configured:
         from fastapi import HTTPException
 
@@ -172,7 +172,7 @@ def extract_resume_profile(user: dict[str, Any], resume_id: str) -> dict[str, An
     from ...local_fallback import enrich_profile_from_text
 
     profile = enrich_profile_from_text(content, profile)
-    saved = api_module._resumes.save_resume_profile(
+    saved = context._resumes.save_resume_profile(
         tenant_id,
         resume_id,
         profile,

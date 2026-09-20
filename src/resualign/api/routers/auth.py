@@ -3,8 +3,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-import resualign.api as api_module
-
+from ...app.context import context
 from ...observability import log_event
 from ..deps import _bearer_token, get_current_user
 from ..schemas import LoginRequest, SignupRequest
@@ -41,10 +40,10 @@ def _safe_signup_detail(exc: Exception) -> str:
 @router.post("/api/auth/signup", status_code=201)
 def signup(req: SignupRequest, request: Request):
     """Create a user account."""
-    api_module._enforce_rate_limit(request, api_module._auth_rate_limiter)
+    context._enforce_rate_limit(request, context._auth_rate_limiter)
     try:
-        user = api_module._users.create_user(req.email, req.password)
-    except api_module.UserStoreError as exc:
+        user = context._users.create_user(req.email, req.password)
+    except context.UserStoreError as exc:
         raise HTTPException(status_code=409, detail=_safe_signup_detail(exc)) from exc
     return user
 
@@ -52,10 +51,10 @@ def signup(req: SignupRequest, request: Request):
 @router.post("/api/auth/login")
 def login(req: LoginRequest, request: Request):
     """Verify credentials and return an opaque bearer token."""
-    api_module._enforce_rate_limit(request, api_module._auth_rate_limiter)
+    context._enforce_rate_limit(request, context._auth_rate_limiter)
     try:
-        token = api_module._users.login(req.email, req.password)
-    except api_module.UserStoreError as exc:
+        token = context._users.login(req.email, req.password)
+    except context.UserStoreError as exc:
         if str(exc) != _LOGIN_DETAIL:
             log_event(
                 _auth_logger,
@@ -64,7 +63,7 @@ def login(req: LoginRequest, request: Request):
                 extra={"stage": "login", "error": str(exc)},
             )
         raise HTTPException(status_code=401, detail=_LOGIN_DETAIL) from exc
-    user = api_module._users.user_for_token(token)
+    user = context._users.user_for_token(token)
     return {"token": token, "user": user}
 
 
@@ -72,7 +71,7 @@ def login(req: LoginRequest, request: Request):
 def logout(token: Optional[str] = Depends(_bearer_token)):
     """Revoke the current bearer token."""
     if token is not None:
-        api_module._users.revoke_token(token)
+        context._users.revoke_token(token)
     return {"status": "ok"}
 
 

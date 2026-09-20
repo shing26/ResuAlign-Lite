@@ -15,8 +15,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 
-import resualign.api as api_module
-
+from ...app.context import context
 from ...config import EnvSettings
 from ...llm_providers import (
     default_base_url,
@@ -29,7 +28,11 @@ from ..schemas import (
     LLMNodeCreateRequest,
     LLMNodeUpdateRequest,
 )
-from .settings import _http_error_detail, mask_api_key, probe_llm_connection
+from ..services.llm_probe import (
+    http_error_detail,
+    mask_api_key,
+    probe_llm_connection,
+)
 
 router = APIRouter()
 
@@ -39,7 +42,7 @@ _NODE_TEST_TIMEOUT = 10.0
 
 
 def _nodes_store() -> Any:
-    store = getattr(api_module, "_llm_nodes", None)
+    store = getattr(context, "_llm_nodes", None)
     if store is None:
         raise HTTPException(status_code=503, detail="LLM node store unavailable")
     return store
@@ -189,7 +192,7 @@ def list_llm_models(
         else:
             detail = (
                 f"服务返回错误（HTTP {status}）："
-                f"{_http_error_detail(exc)}"
+                f"{http_error_detail(exc)}"
             )
         raise HTTPException(status_code=502, detail=detail) from exc
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
@@ -225,7 +228,7 @@ def create_llm_node(
             model=req.model,
             disable_thinking=req.disable_thinking,
         )
-    except api_module.UserStoreError as exc:
+    except context.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _public_node(node)
 
@@ -259,7 +262,7 @@ def update_llm_node(
         node = _nodes_store().update_node(
             user["user_id"], node_id, updates
         )
-    except api_module.UserStoreError as exc:
+    except context.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if node is None:
         raise HTTPException(status_code=404, detail="LLM 节点不存在")

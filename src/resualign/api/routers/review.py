@@ -13,8 +13,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
-import resualign.api as api_module
-
+from ...app.context import context
 from ...job_library.status_lifecycle import canonical_status
 from ..deps import get_current_user
 from ..schemas import (
@@ -102,7 +101,7 @@ def _attribution_summary(
 def get_review(user: dict[str, Any] = Depends(get_current_user)):
     """Return the weekly delivery review payload (deterministic, zero LLM)."""
     tenant_id = user["user_id"]
-    jobs = api_module._jobs.list_jobs(tenant_id, limit=None)
+    jobs = context._jobs.list_jobs(tenant_id, limit=None)
     now = time.time()
     today = _date_str(now)
 

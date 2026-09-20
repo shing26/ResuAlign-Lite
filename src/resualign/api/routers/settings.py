@@ -1,29 +1,23 @@
 
-import time
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
 
-import resualign.api as api_module
-
+from ...app.context import context
 from ...config import (
     clear_runtime_llm,
     register_stored_llm_provider,
     set_runtime_llm,
 )
 from ...job_library import JOB_STATUSES
-from ...llm import _DEFAULT_PROVIDER_URLS
 from ...llm_providers import resolve_provider
 from ...role_router import usable_active_node
 from ...settings_store import default_settings
 from ..deps import get_current_user
 from ..schemas import SettingsTestConnectionRequest, SettingsUpdateRequest
+from ..services.llm_probe import mask_api_key, probe_llm_connection
 
 router = APIRouter()
-
-# Probe timeout: keep "test connection" snappy even when a provider hangs.
-_TEST_CONNECT_TIMEOUT = 10.0
 
 
 def _stored_llm_snapshot() -> dict[str, Any]:
@@ -40,11 +34,11 @@ def _stored_llm_snapshot() -> dict[str, Any]:
     has no nodes. The callback is re-invoked per ``build_config()`` call, so
     activating a different node hot-reloads the pipeline config.
     """
-    store = getattr(api_module, "_settings_store", None)
-    if store is None or not getattr(api_module, "_PERSONAL_MODE", False):
+    store = getattr(context, "_settings_store", None)
+    if store is None or not getattr(context, "_PERSONAL_MODE", False):
         return {}
     try:
-        nodes = getattr(api_module, "_llm_nodes", None)
+        nodes = getattr(context, "_llm_nodes", None)
         if nodes is not None:
             # Ticket #103: breaker-filtered (a sole auto-disabled node must
             # not stay primary — that keeps traffic off the broken node and
@@ -67,18 +61,9 @@ def _stored_llm_snapshot() -> dict[str, Any]:
 
 # Wire the persisted settings store into build_config() as the layer between
 # the runtime override and .env. Registration happens at import time; the
-# callback reads api_module attributes lazily so tests that swap the store
+# callback reads context attributes lazily so tests that swap the store
 # keep working.
 register_stored_llm_provider(_stored_llm_snapshot)
-
-
-def mask_api_key(api_key: str | None) -> str | None:
-    """Mask a key for display: ``sk-abc1234`` -> ``sk-a••••1234``."""
-    if not api_key:
-        return None
-    if len(api_key) <= 8:
-        return "••••"
-    return f"{api_key[:4]}••••{api_key[-4:]}"
 
 
 def _public_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -89,20 +74,6 @@ def _public_settings(settings: dict[str, Any]) -> dict[str, Any]:
         llm["api_key"] = mask_api_key(llm["api_key"])
     public["llm"] = llm
     return public
-
-
-def _http_error_detail(exc: httpx.HTTPStatusError) -> str:
-    try:
-        data = exc.response.json()
-    except Exception:
-        data = None
-    if isinstance(data, dict):
-        error = data.get("error")
-        if isinstance(error, dict) and error.get("message"):
-            return str(error["message"])
-        if data.get("detail"):
-            return str(data["detail"])
-    return str(exc)
 
 
 def _validate_vocabulary_update(req: SettingsUpdateRequest) -> None:
@@ -154,7 +125,7 @@ def _validate_vocabulary_update(req: SettingsUpdateRequest) -> None:
 @router.get('/api/settings/role-bindings')
 def get_role_bindings(user: dict[str, Any] = Depends(get_current_user)):
     """Return the current role-to-node bindings, available roles, and nodes."""
-    nodes = getattr(api_module, "_llm_nodes", None)
+    nodes = getattr(context, "_llm_nodes", None)
     if nodes is None:
         return {"roles": [], "nodes": [], "bindings": {}}
     bindings = nodes.get_role_bindings(user["user_id"])
@@ -180,7 +151,7 @@ def update_role_bindings(
     user: dict[str, Any] = Depends(get_current_user),
 ):
     """Update role bindings. Accepts a dict of {role: node_id_or_null}."""
-    nodes = getattr(api_module, "_llm_nodes", None)
+    nodes = getattr(context, "_llm_nodes", None)
     if nodes is None:
         raise HTTPException(status_code=503, detail="LLM node store not available")
     for role, node_id in body.items():
@@ -202,7 +173,7 @@ def apply_role_preset(
     user: dict[str, Any] = Depends(get_current_user),
 ):
     """Apply a one-click preset: unified, hybrid, or local."""
-    nodes = getattr(api_module, "_llm_nodes", None)
+    nodes = getattr(context, "_llm_nodes", None)
     if nodes is None:
         raise HTTPException(status_code=503, detail="LLM node store not available")
     preset = (body.get("preset") or "").strip().lower()
@@ -242,12 +213,12 @@ def apply_role_preset(
 @router.get('/api/settings')
 def get_settings(user: dict[str, Any]=Depends(get_current_user)):
     """Return the current user's editable workbench settings."""
-    settings = api_module._settings_store.get_settings(user['user_id'])
+    settings = context._settings_store.get_settings(user['user_id'])
     if not settings.get('local_ingest_token'):
-        api_module._settings_store.get_or_create_local_ingest_token(
+        context._settings_store.get_or_create_local_ingest_token(
             user['user_id']
         )
-        settings = api_module._settings_store.get_settings(user['user_id'])
+        settings = context._settings_store.get_settings(user['user_id'])
     return _public_settings(settings)
 
 
@@ -256,7 +227,7 @@ def reset_local_ingest_token(
     user: dict[str, Any] = Depends(get_current_user),
 ):
     """Generate a fresh local-ingest token, invalidating the old one."""
-    token = api_module._settings_store.reset_local_ingest_token(
+    token = context._settings_store.reset_local_ingest_token(
         user['user_id']
     )
     return {'local_ingest_token': token}
@@ -283,10 +254,10 @@ def update_settings(req: SettingsUpdateRequest, user: dict[str, Any]=Depends(get
         # value untouched, while explicit nulls clear them.
         updates["llm"] = req.llm.model_dump(exclude_unset=True)
     try:
-        saved = api_module._settings_store.update_settings(
+        saved = context._settings_store.update_settings(
             user['user_id'], updates
         )
-    except api_module.UserStoreError as exc:
+    except context.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if "llm_provider" in updates or "llm_model" in updates or "llm" in updates:
         set_runtime_llm(
@@ -299,115 +270,23 @@ def update_settings(req: SettingsUpdateRequest, user: dict[str, Any]=Depends(get
 @router.get('/api/settings/status')
 def settings_status(user: dict[str, Any] = Depends(get_current_user)):
     """Return runtime status so the settings page is not just raw forms."""
-    config = api_module.build_config()
-    daily = api_module.llm_daily_status(user["user_id"])
+    config = context.build_config()
+    daily = context.llm_daily_status(user["user_id"])
     return {
         "api_key_configured": config.is_llm_configured,
         "provider": config.provider,
         "model": config.model,
-        "personal_mode": api_module._PERSONAL_MODE,
+        "personal_mode": context._PERSONAL_MODE,
         "resume_count": len(
-            api_module._resumes.list_master_resumes(user["user_id"])
+            context._resumes.list_master_resumes(user["user_id"])
         ),
         "job_count": len(
-            api_module._jobs.list_jobs(user["user_id"], limit=500)
+            context._jobs.list_jobs(user["user_id"], limit=500)
         ),
         "application_count": len(
-            api_module._applications.list_applications(user["user_id"])
+            context._applications.list_applications(user["user_id"])
         ),
         "daily": daily,
-    }
-
-
-def probe_llm_connection(
-    *,
-    provider: str,
-    api_key: str | None,
-    model: str,
-    base_url: str | None,
-    timeout: float = _TEST_CONNECT_TIMEOUT,
-) -> dict[str, Any]:
-    """Probe an LLM provider with a minimal one-token chat request.
-
-    Shared by ``/api/settings/test-connection`` (current effective config)
-    and ``/api/llm/nodes/{id}/test`` (a specific node). Returns
-    ``{ok, status, latency_ms, message}`` with a readable failure reason
-    (auth, model missing, timeout, network).
-    """
-    if not api_key and provider != "ollama":
-        return {
-            "ok": False,
-            "status": "missing_key",
-            "latency_ms": None,
-            "message": (
-                "尚未配置 API Key：请先在表单中填写并保存，或通过 .env 配置。"
-            ),
-        }
-    headers: dict[str, str] = {}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    base = (
-        base_url
-        or _DEFAULT_PROVIDER_URLS.get(provider, "https://api.openai.com/v1")
-    )
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 1,
-    }
-    start = time.monotonic()
-    try:
-        response = httpx.post(
-            f"{base.rstrip('/')}/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=timeout,
-        )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        status = exc.response.status_code
-        readable = {
-            400: "请求被拒绝：请检查模型名称与参数",
-            401: "认证失败：API Key 无效或已过期",
-            402: (
-                "余额不足：请给该节点充值，或到「系统设置 → 模型节点」"
-                "切换可用节点后重试"
-            ),
-            403: "权限不足：该 Key 无权访问所选模型，可到「系统设置 → 模型节点」更换",
-            404: "模型或端点不存在：请检查模型名称与 Base URL",
-            429: "请求过于频繁：已触发限流，请稍后再试",
-        }
-        message = readable.get(
-            status, f"服务返回错误（HTTP {status}）：{_http_error_detail(exc)}"
-        )
-        return {
-            "ok": False,
-            "status": f"http_{status}",
-            "latency_ms": (time.monotonic() - start) * 1000,
-            "message": message,
-        }
-    except httpx.TimeoutException:
-        return {
-            "ok": False,
-            "status": "timeout",
-            "latency_ms": (time.monotonic() - start) * 1000,
-            "message": (
-                f"连接超时（{int(timeout)} 秒）："
-                "请检查网络、Base URL 或服务可用性"
-            ),
-        }
-    except httpx.HTTPError as exc:
-        return {
-            "ok": False,
-            "status": "network_error",
-            "latency_ms": (time.monotonic() - start) * 1000,
-            "message": f"网络错误：{exc}",
-        }
-    return {
-        "ok": True,
-        "status": "ok",
-        "latency_ms": (time.monotonic() - start) * 1000,
-        "message": f"连接成功：{provider} · {model}",
     }
 
 
@@ -427,7 +306,7 @@ def test_llm_connection(
         if req.provider
         else None
     )
-    config = api_module.build_config(
+    config = context.build_config(
         provider=provider,
         api_key=req.api_key,
         model=req.model,
@@ -444,12 +323,12 @@ def test_llm_connection(
 @router.post('/api/settings/reset')
 def reset_settings(user: dict[str, Any] = Depends(get_current_user)):
     """Restore the built-in vocabulary and default settings."""
-    api_module._settings_store.update_settings(user["user_id"], default_settings())
+    context._settings_store.update_settings(user["user_id"], default_settings())
     # The local-ingest token is a security credential, not a preference:
     # restoring defaults keeps the current token so the userscript keeps
     # working until the user explicitly resets it.
-    api_module._settings_store.get_or_create_local_ingest_token(
+    context._settings_store.get_or_create_local_ingest_token(
         user["user_id"]
     )
     clear_runtime_llm()
-    return _public_settings(api_module._settings_store.get_settings(user["user_id"]))
+    return _public_settings(context._settings_store.get_settings(user["user_id"]))

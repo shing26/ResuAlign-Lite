@@ -9,9 +9,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-import resualign.api as api_module
-
 from ...alignment_lifecycle import transition_alignment
+from ...app.context import context
 from ...llm_usage import llm_tenant_context
 from ...role_router import call_with_role
 from ..deps import get_current_user, get_local_ingest_user
@@ -41,7 +40,7 @@ def _match_inputs(user_id: str, job: dict[str, Any]) -> tuple[str, str | None]:
     resume_id = job.get("workbench_resume_id")
     if not resume_id:
         return "", None
-    resume = api_module._resumes.get_master_resume(user_id, resume_id)
+    resume = context._resumes.get_master_resume(user_id, resume_id)
     return (resume["content"] if resume else ""), resume_id
 
 
@@ -50,7 +49,7 @@ def _match_stale(user_id: str, job: dict[str, Any]) -> bool:
     if not job.get("match_updated_at"):
         return True
     resume_text, resume_id = _match_inputs(user_id, job)
-    return not api_module.snapshot_matches(
+    return not context.snapshot_matches(
         job.get("match_score_detail"),
         job.get("jd_text"),
         resume_text,
@@ -72,7 +71,7 @@ def _llm_match_reason(
 ) -> str | None:
     """Generate a one-sentence recommendation, returning None on failure."""
     try:
-        config = api_module.build_config()
+        config = context.build_config()
         if not config.is_llm_configured:
             return None
         system = (
@@ -86,7 +85,7 @@ def _llm_match_reason(
             f"简历：{(resume_text or '')[:2000]}\n"
             f"四维分：{detail}"
         )
-        with api_module.OpenAIClient(config, timeout=30.0) as client:
+        with context.OpenAIClient(config, timeout=30.0) as client:
             result = client.chat_json(system, user)
         if isinstance(result, str):
             return result.strip() or None
@@ -101,14 +100,14 @@ def _llm_match_reason(
 @router.post('/api/jobs', status_code=201)
 def create_library_job(req: JobCreateRequest, request: Request, user: dict[str, Any]=Depends(get_current_user)):
     """Ingest one job from pasted text or a JD URL."""
-    api_module._enforce_rate_limit(request, api_module._import_rate_limiter)
-    api_module.enforce_daily_llm_cap(user['user_id'])
+    context._enforce_rate_limit(request, context._import_rate_limiter)
+    context.enforce_daily_llm_cap(user['user_id'])
     if not (req.jd_text or '').strip() and (not (req.jd_url or '').strip()):
         raise HTTPException(status_code=422, detail='Either jd_text or jd_url is required')
     try:
         with llm_tenant_context(user['user_id']):
-            return api_module._create_job_from_source(user, {'title': req.title, 'jd_text': req.jd_text, 'jd_url': req.jd_url, 'company': req.company, 'location': req.location, 'salary_min': req.salary_min, 'salary_max': req.salary_max, 'salary_currency': req.salary_currency, 'source_type': req.source_type, 'source_url': req.source_url, 'job_function': req.job_function, 'seniority': req.seniority, 'tech_tags': req.tech_tags, 'status': req.status, 'posting_date': req.posting_date})
-    except api_module.UserStoreError as exc:
+            return context._create_job_from_source(user, {'title': req.title, 'jd_text': req.jd_text, 'jd_url': req.jd_url, 'company': req.company, 'location': req.location, 'salary_min': req.salary_min, 'salary_max': req.salary_max, 'salary_currency': req.salary_currency, 'source_type': req.source_type, 'source_url': req.source_url, 'job_function': req.job_function, 'seniority': req.seniority, 'tech_tags': req.tech_tags, 'status': req.status, 'posting_date': req.posting_date})
+    except context.UserStoreError as exc:
         if 'Duplicate job' in str(exc):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -120,11 +119,11 @@ def local_ingest(
     user: dict[str, Any] = Depends(get_local_ingest_user),
 ):
     """Ingest a job from the collector userscript without LLM classification."""
-    api_module._enforce_rate_limit(request, api_module._import_rate_limiter)
+    context._enforce_rate_limit(request, context._import_rate_limiter)
     if not (req.jd_text or '').strip():
         raise HTTPException(status_code=422, detail='jd_text is required')
     try:
-        return api_module._local_ingest_job(
+        return context._local_ingest_job(
             user,
             {
                 'title': req.title,
@@ -136,28 +135,28 @@ def local_ingest(
                 'site': req.site,
             },
         )
-    except api_module.UserStoreError as exc:
+    except context.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 @router.post('/api/jobs/import')
 def import_library_jobs(req: JobImportRequest, request: Request, user: dict[str, Any]=Depends(get_current_user)):
     """Queue a batch import so LLM classification never blocks the API."""
-    api_module._enforce_rate_limit(request, api_module._import_rate_limiter)
-    api_module.enforce_daily_llm_cap(user['user_id'])
-    rows = api_module._collect_import_rows(req)
+    context._enforce_rate_limit(request, context._import_rate_limiter)
+    context.enforce_daily_llm_cap(user['user_id'])
+    rows = context._collect_import_rows(req)
     if not rows:
         return {'queued': False, 'total': 0, 'created': 0, 'skipped': 0}
-    if len(rows) > api_module._MAX_IMPORT_ROWS:
-        raise HTTPException(status_code=422, detail=f'Import exceeds maximum of {api_module._MAX_IMPORT_ROWS} rows')
+    if len(rows) > context._MAX_IMPORT_ROWS:
+        raise HTTPException(status_code=422, detail=f'Import exceeds maximum of {context._MAX_IMPORT_ROWS} rows')
     import_id = uuid.uuid4().hex
-    api_module._import_batches[import_id] = {'user_id': user['user_id'], 'rows': rows, 'created': 0, 'skipped': 0, 'errors': [], 'done': False}
-    threading.Thread(target=api_module._run_import, args=(import_id,), daemon=True).start()
+    context._import_batches[import_id] = {'user_id': user['user_id'], 'rows': rows, 'created': 0, 'skipped': 0, 'errors': [], 'done': False}
+    threading.Thread(target=context._run_import, args=(import_id,), daemon=True).start()
     return {'queued': True, 'import_id': import_id, 'total': len(rows), 'created': 0, 'skipped': 0, 'errors': []}
 
 @router.get('/api/jobs/import/{import_id}')
 def import_status(import_id: str, user: dict[str, Any]=Depends(get_current_user)):
     """Return the progress of a queued import batch."""
-    batch = api_module._import_batches.get(import_id)
+    batch = context._import_batches.get(import_id)
     if batch is None or batch['user_id'] != user['user_id']:
         raise HTTPException(status_code=404, detail='Import batch not found')
     return {'queued': not batch['done'], 'total': len(batch['rows']), 'created': batch['created'], 'skipped': batch['skipped'], 'errors': batch['errors']}
@@ -168,7 +167,7 @@ def list_library_jobs(job_function: str | None=None, seniority: str | None=None,
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
     try:
-        jobs = api_module._jobs.list_jobs(
+        jobs = context._jobs.list_jobs(
             user['user_id'],
             job_function=job_function,
             seniority=seniority,
@@ -178,7 +177,7 @@ def list_library_jobs(job_function: str | None=None, seniority: str | None=None,
             offset=offset,
             sort=sort,
         )
-    except api_module.UserStoreError as exc:
+    except context.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     for job in jobs:
         job["match_stale"] = _match_stale(user['user_id'], job)
@@ -187,11 +186,11 @@ def list_library_jobs(job_function: str | None=None, seniority: str | None=None,
 @router.get('/api/jobs/{job_id}')
 def get_library_job(job_id: str, user: dict[str, Any]=Depends(get_current_user)):
     """Return one library job, falling back to an analysis job snapshot."""
-    job = api_module._jobs.get_job(user['user_id'], job_id)
+    job = context._jobs.get_job(user['user_id'], job_id)
     if job is not None:
         job["match_stale"] = _match_stale(user['user_id'], job)
         return job
-    return api_module.job_status(job_id, user)
+    return context.job_status(job_id, user)
 
 
 @router.get('/api/jobs/{job_id}/snapshots')
@@ -199,7 +198,7 @@ def list_application_snapshots(
     job_id: str, user: dict[str, Any] = Depends(get_current_user)
 ):
     """Return a job's immutable applied-draft snapshots, newest first."""
-    return api_module._jobs.list_application_snapshots(
+    return context._jobs.list_application_snapshots(
         user['user_id'], job_id
     )
 
@@ -209,7 +208,7 @@ def get_analysis_status(
     job_id: str, user: dict[str, Any]=Depends(get_current_user)
 ):
     """Return an analysis job snapshot, treating a missing job as expired."""
-    snapshot = api_module._registry.snapshot(
+    snapshot = context._registry.snapshot(
         job_id, tenant_id=user['user_id']
     )
     if snapshot is None:
@@ -219,19 +218,19 @@ def get_analysis_status(
 @router.post('/api/jobs/{job_id}/cancel')
 def cancel_analysis_job(job_id: str, user: dict[str, Any]=Depends(get_current_user)):
     """Cancel a queued analysis job; running jobs cannot be interrupted."""
-    job = api_module._registry.get(job_id, tenant_id=user['user_id'])
+    job = context._registry.get(job_id, tenant_id=user['user_id'])
     if job is None:
         raise HTTPException(status_code=404, detail='Job not found')
-    if not api_module._registry.cancel(job_id):
+    if not context._registry.cancel(job_id):
         raise HTTPException(status_code=409, detail='Only queued jobs can be canceled')
-    stored = api_module._registry.get_payload(job_id)
+    stored = context._registry.get_payload(job_id)
     if stored and stored[2]:
-        api_module._applications.set_application_job(user['user_id'], stored[2], job_id, 'draft')
+        context._applications.set_application_job(user['user_id'], stored[2], job_id, 'draft')
     if stored and (stored[0] or {}).get('library_job_id'):
         # 取消后把徽标从 queued 拉回 idle，避免看板出现永远排队的岗位。
         try:
             transition_alignment(
-                api_module._jobs,
+                context._jobs,
                 user['user_id'],
                 stored[0]['library_job_id'],
                 'idle',
@@ -248,25 +247,25 @@ def cancel_analysis_job(job_id: str, user: dict[str, Any]=Depends(get_current_us
 @router.post('/api/jobs/{job_id}/reclassify')
 def reclassify_library_job(job_id: str, user: dict[str, Any]=Depends(get_current_user)):
     """Rerun LLM classification and clear the pending flag on success."""
-    job = api_module._jobs.get_job(user['user_id'], job_id)
+    job = context._jobs.get_job(user['user_id'], job_id)
     if job is None:
         raise HTTPException(status_code=404, detail='Job not found')
     jd_text = (job.get('jd_text') or '').strip()
     if not jd_text:
         raise HTTPException(status_code=422, detail='Job description text is required')
-    job_functions, seniorities = api_module._settings_vocabulary(user['user_id'])
-    api_module.enforce_daily_llm_cap(user['user_id'])
+    job_functions, seniorities = context._settings_vocabulary(user['user_id'])
+    context.enforce_daily_llm_cap(user['user_id'])
     with llm_tenant_context(user['user_id']):
         try:
-            classification = api_module._classify_job(
+            classification = context._classify_job(
                 jd_text, job_functions, seniorities, tenant=user['user_id']
             )
-        except api_module.LLMResponseError as exc:
+        except context.LLMResponseError as exc:
             logger.warning('Reclassification failed for job %s: %s', job_id, exc)
             raise HTTPException(status_code=502, detail='自动分类暂时不可用，岗位已保留为分类待定，可稍后重试') from exc
     try:
-        updated = api_module._jobs.update_job(user['user_id'], job_id, job_function=classification.get('job_function'), seniority=classification.get('seniority'), tech_tags=classification.get('tech_tags') or [], classification_pending=0, allowed_job_functions=job_functions, allowed_seniorities=seniorities)
-    except api_module.UserStoreError as exc:
+        updated = context._jobs.update_job(user['user_id'], job_id, job_function=classification.get('job_function'), seniority=classification.get('seniority'), tech_tags=classification.get('tech_tags') or [], classification_pending=0, allowed_job_functions=job_functions, allowed_seniorities=seniorities)
+    except context.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if updated is None:
         raise HTTPException(status_code=404, detail='Job not found')
@@ -276,13 +275,13 @@ def reclassify_library_job(job_id: str, user: dict[str, Any]=Depends(get_current
 def save_final_draft(job_id: str, req: FinalDraftRequest, user: dict[str, Any]=Depends(get_current_user)):
     """Persist a job-specific final draft and return its new version."""
     try:
-        saved = api_module._jobs.save_final_draft(
+        saved = context._jobs.save_final_draft(
             user['user_id'],
             job_id,
             req.draft,
             accepted_diff_ids=req.accepted_diff_ids,
         )
-    except api_module.UserStoreError as exc:
+    except context.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if saved is None:
         raise HTTPException(status_code=404, detail='Job not found')
@@ -299,7 +298,7 @@ def export_final_draft(
     user: dict[str, Any] = Depends(get_current_user),
 ) -> JobExportResponse:
     """Export a persisted final draft as Markdown, JSON, or print HTML."""
-    job = api_module._jobs.get_job(user['user_id'], job_id)
+    job = context._jobs.get_job(user['user_id'], job_id)
     if job is None:
         raise HTTPException(status_code=404, detail='Job not found')
     if not (job.get('final_draft') or '').strip():
@@ -313,8 +312,8 @@ def export_final_draft(
 @router.patch('/api/jobs/{job_id}')
 async def update_library_job(job_id: str, req: JobUpdateRequest, request: Request, user: dict[str, Any]=Depends(get_current_user)):
     """Update editable job fields such as tags, salary, and status."""
-    job_functions, seniorities = api_module._settings_vocabulary(user['user_id'])
-    raw_timeline = await api_module._read_timeline_extras(request)
+    job_functions, seniorities = context._settings_vocabulary(user['user_id'])
+    raw_timeline = await context._read_timeline_extras(request)
     # Explicit null and empty string both clear a timeline field (U10);
     # the store turns "" into a NULL write while None stays "unchanged".
     timeline = {
@@ -322,8 +321,8 @@ async def update_library_job(job_id: str, req: JobUpdateRequest, request: Reques
         for key, value in raw_timeline.items()
     }
     try:
-        job = api_module._jobs.update_job(user['user_id'], job_id, title=req.title, jd_text=req.jd_text, company=req.company, location=req.location, salary_min=req.salary_min, salary_max=req.salary_max, salary_currency=req.salary_currency, source_type=req.source_type, source_url=req.source_url, job_function=req.job_function, seniority=req.seniority, tech_tags=req.tech_tags, status=req.status, posting_date=req.posting_date, applied_at=timeline.get('applied_at'), next_step=timeline.get('next_step'), notes=timeline.get('notes'), offer_at=timeline.get('offer_at'), rejected_at=timeline.get('rejected_at'), next_step_due_at=timeline.get('next_step_due_at'), interview_stage=timeline.get('interview_stage'), application_result=req.application_result, deadline=req.deadline, tailor_granularity=req.tailor_granularity, tailor_focus=req.tailor_focus, custom_prompt=req.custom_prompt, allowed_job_functions=job_functions, allowed_seniorities=seniorities)
-    except api_module.UserStoreError as exc:
+        job = context._jobs.update_job(user['user_id'], job_id, title=req.title, jd_text=req.jd_text, company=req.company, location=req.location, salary_min=req.salary_min, salary_max=req.salary_max, salary_currency=req.salary_currency, source_type=req.source_type, source_url=req.source_url, job_function=req.job_function, seniority=req.seniority, tech_tags=req.tech_tags, status=req.status, posting_date=req.posting_date, applied_at=timeline.get('applied_at'), next_step=timeline.get('next_step'), notes=timeline.get('notes'), offer_at=timeline.get('offer_at'), rejected_at=timeline.get('rejected_at'), next_step_due_at=timeline.get('next_step_due_at'), interview_stage=timeline.get('interview_stage'), application_result=req.application_result, deadline=req.deadline, tailor_granularity=req.tailor_granularity, tailor_focus=req.tailor_focus, custom_prompt=req.custom_prompt, allowed_job_functions=job_functions, allowed_seniorities=seniorities)
+    except context.UserStoreError as exc:
         if 'Duplicate job' in str(exc):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -334,28 +333,28 @@ async def update_library_job(job_id: str, req: JobUpdateRequest, request: Reques
 @router.delete('/api/jobs/{job_id}', status_code=204)
 def delete_library_job(job_id: str, user: dict[str, Any]=Depends(get_current_user)):
     """Delete a library job and any pinned analysis job."""
-    deleted, workbench_job_id = api_module._jobs.delete_job(
+    deleted, workbench_job_id = context._jobs.delete_job(
         user['user_id'], job_id
     )
     if not deleted:
         raise HTTPException(status_code=404, detail='Job not found')
     if workbench_job_id:
-        api_module._registry.delete(workbench_job_id, tenant_id=user['user_id'])
+        context._registry.delete(workbench_job_id, tenant_id=user['user_id'])
     return None
 
 @router.post('/api/jobs/{job_id}/workbench', status_code=202)
 def run_workbench(job_id: str, req: WorkbenchRunRequest, request: Request, user: dict[str, Any]=Depends(get_current_user)):
     """Queue a per-job pipeline run pinned to a Master Resume version."""
-    api_module._enforce_rate_limit(request, api_module._analyze_rate_limiter)
+    context._enforce_rate_limit(request, context._analyze_rate_limiter)
     # P1-1：_queue_job 内部会原子预留每日 cap 名额，这里只做非预留预检。
-    api_module.check_daily_llm_cap(user['user_id'])
-    job = api_module._jobs.get_job(user['user_id'], job_id)
+    context.check_daily_llm_cap(user['user_id'])
+    job = context._jobs.get_job(user['user_id'], job_id)
     if job is None:
         raise HTTPException(status_code=404, detail='Job not found')
-    resume = api_module._resumes.get_master_resume(user['user_id'], req.master_resume_id)
+    resume = context._resumes.get_master_resume(user['user_id'], req.master_resume_id)
     if resume is None:
         raise HTTPException(status_code=404, detail='Master resume not found')
-    config = api_module.build_config()
+    config = context.build_config()
     if not config.is_llm_configured:
         raise HTTPException(status_code=503, detail='LLM 未配置。请设置 API Key（远程供应商）或激活 Ollama 本地节点。')
     # Phase A1/E: pre-flight probe of the serving node. Definitive
@@ -364,29 +363,29 @@ def run_workbench(job_id: str, req: WorkbenchRunRequest, request: Request, user:
     # then a failed job. Remote network/timeout states stay non-blocking
     # so a cloud flake never blocks queueing; failures still surface via
     # last_alignment_error (A3).
-    probe_ok, probe_message = api_module._probe_active_llm_quick(
+    probe_ok, probe_message = context._probe_active_llm_quick(
         user['user_id']
     )
     if not probe_ok:
         raise HTTPException(
             status_code=422, detail=probe_message or '模型服务鉴权失败，请检查设置'
         )
-    cached_diagnosis = api_module._cached_diagnosis(resume, config, user['user_id'])
+    cached_diagnosis = context._cached_diagnosis(resume, config, user['user_id'])
     # F1: per-run Eval switch. Explicit True/False from the request wins;
     # None (not specified) falls back to the settings-page global default.
     run_eval = req.run_eval
     if run_eval is None:
-        run_eval = api_module._settings_store.get_settings(
+        run_eval = context._settings_store.get_settings(
             user['user_id']
         ).get('eval_default', False)
     payload = {'resume_text': resume['content'], 'jd_text': job['jd_text'], 'jd_url': job.get('source_url'), 'run_eval': run_eval, 'granularity': req.granularity, 'prompt_focus': req.prompt_focus, 'custom_prompt': req.custom_prompt, 'master_resume_id': req.master_resume_id, 'library_job_id': job_id}
     if cached_diagnosis is not None:
         payload['precomputed_diagnosis'] = cached_diagnosis
-    analysis_job_id = api_module._queue_job(user, payload, workbench=True)
+    analysis_job_id = context._queue_job(user, payload, workbench=True)
     # 重跑时把 alignment_status 拉回 queued：否则上一轮的 succeeded 会残留，
     # 轮询方（前端/冒烟）会误判新任务已完成而读到旧的 diffs（2026-08-27 CI 复现）。
     transition_alignment(
-        api_module._jobs,
+        context._jobs,
         user['user_id'],
         job_id,
         'queued',
@@ -401,19 +400,19 @@ def run_workbench(job_id: str, req: WorkbenchRunRequest, request: Request, user:
 @router.post('/api/jobs/{job_id}/workbench/accept')
 def accept_workbench_diffs(job_id: str, req: WorkbenchAcceptRequest, user: dict[str, Any]=Depends(get_current_user)):
     """Apply accepted diff indices to the pinned resume and return a draft."""
-    job = api_module._jobs.get_job(user['user_id'], job_id)
+    job = context._jobs.get_job(user['user_id'], job_id)
     if job is None:
         raise HTTPException(status_code=404, detail='Job not found')
-    analysis_job = api_module._registry.get(job.get('workbench_job_id') or '', tenant_id=user['user_id'])
+    analysis_job = context._registry.get(job.get('workbench_job_id') or '', tenant_id=user['user_id'])
     if analysis_job is None or analysis_job.status != 'succeeded':
         raise HTTPException(status_code=404, detail='Workbench job not found or not finished')
     result = analysis_job.result or {}
     diffs = result.get('diffs') or []
-    pinned = api_module._resumes.get_master_resume(user['user_id'], job.get('workbench_resume_id') or '')
+    pinned = context._resumes.get_master_resume(user['user_id'], job.get('workbench_resume_id') or '')
     if pinned is None:
         raise HTTPException(status_code=404, detail='Pinned master resume not found')
     base_text = pinned['content']
-    draft, applied_count = api_module._apply_diffs(base_text, diffs, req.accepted_indices)
+    draft, applied_count = context._apply_diffs(base_text, diffs, req.accepted_indices)
     return {'draft': draft, 'accepted_count': applied_count, 'total_diffs': len(diffs)}
 
 
@@ -435,7 +434,7 @@ def _preanalyze_cache_hit(
             from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
 
             prompt_version = JD_PROFILER_PROMPT_VERSION
-        cached = api_module._cache.get(
+        cached = context._cache.get(
             user_id,
             config.model,
             prompt_version,
@@ -456,8 +455,8 @@ def preanalyze_library_job(
     user: dict[str, Any] = Depends(get_current_user),
 ):
     """Run classifier + JD profile/gap without tailoring; idempotent."""
-    api_module._enforce_rate_limit(request, api_module._analyze_rate_limiter)
-    job = api_module._jobs.get_job(user['user_id'], job_id)
+    context._enforce_rate_limit(request, context._analyze_rate_limiter)
+    job = context._jobs.get_job(user['user_id'], job_id)
     if job is None:
         raise HTTPException(status_code=404, detail='Job not found')
     jd_text = (job.get('jd_text') or '').strip()
@@ -484,25 +483,25 @@ def preanalyze_library_job(
             cache_hit=True,
         )
 
-    job_functions, seniorities = api_module._settings_vocabulary(user['user_id'])
-    api_module.enforce_daily_llm_cap(user['user_id'])
+    job_functions, seniorities = context._settings_vocabulary(user['user_id'])
+    context.enforce_daily_llm_cap(user['user_id'])
     with llm_tenant_context(user['user_id']):
         try:
-            classification = api_module._classify_job(
+            classification = context._classify_job(
                 jd_text, job_functions, seniorities, tenant=user['user_id']
             )
-        except api_module.LLMResponseError as exc:
+        except context.LLMResponseError as exc:
             logger.warning('Preanalyze classification failed for %s: %s', job_id, exc)
             classification = {}
 
     resume = None
     if job.get('workbench_resume_id'):
-        resume = api_module._resumes.get_master_resume(
+        resume = context._resumes.get_master_resume(
             user['user_id'], job['workbench_resume_id']
         )
     resume_text = resume['content'] if resume else ''
     resume_id = resume['resume_id'] if resume else None
-    config = api_module.build_config()
+    config = context.build_config()
     if not config.is_llm_configured:
         raise HTTPException(
             status_code=503,
@@ -514,39 +513,39 @@ def preanalyze_library_job(
     profile_dict = None
     gap_dict = None
     with llm_tenant_context(user['user_id']):
-        with api_module.OpenAIClient(config, timeout=60.0) as client:
+        with context.OpenAIClient(config, timeout=60.0) as client:
             if resume_text.strip():
                 try:
                     profile, _ = call_with_role(
-                        'profiler', api_module.profile_jd,
-                        api_module._llm_nodes, user['user_id'],
+                        'profiler', context.profile_jd,
+                        context._llm_nodes, user['user_id'],
                         fn_kwargs={
                             'jd_text': jd_text,
-                            'cache': api_module._cache,
+                            'cache': context._cache,
                             'tenant': user['user_id'],
                         },
                     )
                 except Exception:
-                    profile = api_module.profile_jd(
+                    profile = context.profile_jd(
                         client,
                         jd_text,
-                        cache=api_module._cache,
+                        cache=context._cache,
                         tenant=user['user_id'],
                     )
-                profile_dict = api_module.jd_profile_to_dict(profile)
+                profile_dict = context.jd_profile_to_dict(profile)
                 import json as _json
                 _profile_str = _json.dumps(profile_dict, ensure_ascii=False)
                 try:
                     gap, _ = call_with_role(
-                        'gap_analyzer', api_module.analyze_gaps,
-                        api_module._llm_nodes, user['user_id'],
+                        'gap_analyzer', context.analyze_gaps,
+                        context._llm_nodes, user['user_id'],
                         fn_kwargs={
                             'resume_text': resume_text,
                             'jd_profile_text': _profile_str,
                         },
                     )
                 except Exception:
-                    gap = api_module.analyze_gaps(
+                    gap = context.analyze_gaps(
                         client,
                         resume_text,
                         _profile_str,
@@ -555,29 +554,29 @@ def preanalyze_library_job(
             else:
                 try:
                     profile, _ = call_with_role(
-                        'profiler', api_module.profile_jd,
-                        api_module._llm_nodes, user['user_id'],
+                        'profiler', context.profile_jd,
+                        context._llm_nodes, user['user_id'],
                         fn_kwargs={
                             'jd_text': jd_text,
-                            'cache': api_module._cache,
+                            'cache': context._cache,
                             'tenant': user['user_id'],
                         },
                     )
                 except Exception:
-                    profile = api_module.proactive_jd_profile(
+                    profile = context.proactive_jd_profile(
                         client,
                         jd_text,
-                        cache=api_module._cache,
+                        cache=context._cache,
                         tenant=user['user_id'],
                     )
-                profile_dict = api_module.jd_profile_to_dict(profile)
-    match_score = api_module._gap_match_score(
+                profile_dict = context.jd_profile_to_dict(profile)
+    match_score = context._gap_match_score(
         {'gap_report': gap_dict}
     ) if gap_dict else None
     match_detail = None
     match_reason = None
     if resume_id and profile_dict and gap_dict:
-        match_detail = api_module.compute_match_score(
+        match_detail = context.compute_match_score(
             jd_text,
             profile_dict,
             gap_dict,
@@ -585,13 +584,13 @@ def preanalyze_library_job(
             resume_text,
             resume_id,
         )
-        match_reason = api_module.fallback_match_reason(
+        match_reason = context.fallback_match_reason(
             match_detail,
             gap_dict.get("missing_keywords") or [],
         )
         match_score = match_detail["total"]
 
-    updated = api_module._jobs.update_job(
+    updated = context._jobs.update_job(
         user['user_id'],
         job_id,
         job_function=classification.get('job_function'),
@@ -610,9 +609,9 @@ def preanalyze_library_job(
     if updated is None:
         raise HTTPException(status_code=404, detail='Job not found')
 
-    session = api_module._session_store.find_by_job(job_id, user['user_id'])
+    session = context._session_store.find_by_job(job_id, user['user_id'])
     if session is not None:
-        api_module._session_store.update(
+        context._session_store.update(
             session['session_id'],
             {
                 'status': 'ready',
@@ -627,7 +626,7 @@ def preanalyze_library_job(
                 },
             },
         )
-        api_module._session_store.emit(
+        context._session_store.emit(
             session['session_id'],
             'job.gap_ready',
             {
@@ -663,7 +662,7 @@ def recompute_job_match(
     user: dict[str, Any] = Depends(get_current_user),
 ) -> MatchScoreResponse:
     """Recompute the four-dimension match score with a one-sentence reason."""
-    job = api_module._jobs.get_job(user['user_id'], job_id)
+    job = context._jobs.get_job(user['user_id'], job_id)
     if job is None:
         raise HTTPException(status_code=404, detail='Job not found')
     resume_text, resume_id = _match_inputs(user['user_id'], job)
@@ -679,7 +678,7 @@ def recompute_job_match(
             match_reason="请先选择主简历并完成 JD 画像与差距分析",
             match_stale=True,
         )
-    detail = api_module.compute_match_score(
+    detail = context.compute_match_score(
         job.get("jd_text"),
         job.get("jd_profile"),
         job.get("gap_report"),
@@ -687,7 +686,7 @@ def recompute_job_match(
         resume_text,
         resume_id,
     )
-    if job.get("match_updated_at") and api_module.snapshot_matches(
+    if job.get("match_updated_at") and context.snapshot_matches(
         job.get("match_score_detail"),
         job.get("jd_text"),
         resume_text,
@@ -706,17 +705,17 @@ def recompute_job_match(
             match_updated_at=job.get("match_updated_at"),
             match_stale=False,
         )
-    api_module.enforce_daily_llm_cap(user['user_id'])
+    context.enforce_daily_llm_cap(user['user_id'])
     with llm_tenant_context(user['user_id']):
         reason = _llm_match_reason(job, detail, resume_text)
     source = "llm" if reason else "fallback"
     if reason is None:
-        reason = api_module.fallback_match_reason(
+        reason = context.fallback_match_reason(
             detail,
             (job.get("gap_report") or {}).get("missing_keywords") or [],
         )
     now = time.time()
-    updated = api_module._jobs.update_job(
+    updated = context._jobs.update_job(
         user['user_id'],
         job_id,
         match_score=detail["total"],
@@ -750,8 +749,8 @@ def rewrite_workbench_bullet(
     user: dict[str, Any] = Depends(get_current_user),
 ):
     """Rewrite one persisted bullet by stable diff_id."""
-    api_module._enforce_rate_limit(request, api_module._analyze_rate_limiter)
-    job = api_module._jobs.get_job(user['user_id'], job_id)
+    context._enforce_rate_limit(request, context._analyze_rate_limiter)
+    job = context._jobs.get_job(user['user_id'], job_id)
     if job is None:
         raise HTTPException(status_code=404, detail='Job not found')
     diffs = list(job.get('diffs') or []) + list(job.get('invalid_diffs') or [])
@@ -764,13 +763,13 @@ def rewrite_workbench_bullet(
     original = (target.get('original') or '').strip()
     if not original:
         raise HTTPException(status_code=422, detail='Original bullet is empty')
-    config = api_module.build_config()
+    config = context.build_config()
     if not config.is_llm_configured:
         raise HTTPException(
             status_code=503,
             detail='LLM 未配置。请设置 API Key（远程供应商）或激活 Ollama 本地节点。',
         )
-    api_module.enforce_daily_llm_cap(user['user_id'])
+    context.enforce_daily_llm_cap(user['user_id'])
     jd_context = json.dumps(
         {
             'jd_profile': job.get('jd_profile'),
@@ -780,18 +779,18 @@ def rewrite_workbench_bullet(
         ensure_ascii=False,
     )
     with llm_tenant_context(user['user_id']):
-        with api_module.OpenAIClient(
+        with context.OpenAIClient(
             config,
             timeout=45.0,
             # R4 P0-2：bullet 改写非 role 直连调用，输出钳制 256（03-AIE §③）。
             max_tokens=256,
         ) as client:
-            rewritten = api_module.rewrite_bullet(
+            rewritten = context.rewrite_bullet(
                 client,
                 original,
                 req.instruction,
                 jd_context=jd_context,
-                cache=api_module._cache,
+                cache=context._cache,
                 tenant=user['user_id'],
             )
 
@@ -835,7 +834,7 @@ def rewrite_workbench_bullet(
     ]
     if not verified_rewrite:
         new_invalid_diffs.append(replacement)
-    api_module._jobs.update_job(
+    context._jobs.update_job(
         user['user_id'],
         job_id,
         diffs=new_diffs,
@@ -855,7 +854,7 @@ def job_status(job_id: str, user: dict[str, Any]=Depends(get_current_user)):
     Not registered as a route: GET /api/jobs/{job_id} is served by
     get_library_job, which falls back here for analysis job snapshots.
     """
-    snapshot = api_module._registry.snapshot(job_id, tenant_id=user['user_id'])
+    snapshot = context._registry.snapshot(job_id, tenant_id=user['user_id'])
     if snapshot is None:
         raise HTTPException(status_code=404, detail='Job not found')
     return snapshot

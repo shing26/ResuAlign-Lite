@@ -102,15 +102,14 @@ def test_state_singleton_types():
     assert isinstance(state._batch_store, BatchAlignStore)
 
 
-def test_swapping_package_attribute_leaves_state_untouched(tmp_path):
-    """Tests replace api_module._registry; state keeps its own instance and
-    routers (which resolve api_module._registry at call time) see the swap."""
+def test_swapping_package_attribute_updates_state_context(tmp_path):
+    """Tests replace api_module._registry; the shared app context sees it."""
     old = api_module._registry
     replacement = JobRegistry(db_path=tmp_path / "swap.db")
     try:
         api_module._registry = replacement
         assert api_module._registry is replacement
-        assert state._registry is not replacement
+        assert state._registry is replacement
     finally:
         api_module._registry = old
 

@@ -16,7 +16,9 @@ from __future__ import annotations
 import logging
 import logging.config
 import os
+import sys
 import threading
+import types
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -264,43 +266,24 @@ from .services.cost_guard import (
     llm_daily_status,
     record_daily_llm_usage,
 )
+from ..app.context import context as _context
 
 from ..rules import RuleFilterEngine, RuleVerdict  # noqa: E402
 
-_settings_vocabulary = _jobs_service._settings_vocabulary
-_classify_job = _jobs_service._classify_job
-_derive_title = _jobs_service._derive_title
-_extract_company_location = _jobs_service._extract_company_location
-_create_job_from_source = _jobs_service._create_job_from_source
-_deterministic_job_fields = _jobs_service._deterministic_job_fields
-_local_ingest_job = _jobs_service._local_ingest_job
-_collect_import_rows = _jobs_service._collect_import_rows
-_run_import = _jobs_service._run_import
-_prune_import_batches = _jobs_service._prune_import_batches
-_queue_job = _jobs_service._queue_job
-_run_job = _jobs_service._run_job
-_job_failure_detail = _jobs_service._job_failure_detail
-_probe_active_llm_quick = _jobs_service._probe_active_llm_quick
-
-_report_to_dict = _workbench_service._report_to_dict
-_build_diagnosis_section = _workbench_service._build_diagnosis_section
-_gap_match_score = _workbench_service._gap_match_score
-_read_timeline_extras = _workbench_service._read_timeline_extras
-_apply_diffs = _workbench_service._apply_diffs
-_alignment_notice = _workbench_service.alignment_notice
-_library_dedupe_key = _workbench_service._library_dedupe_key
-
-_content_sha256 = _resumes_service._content_sha256
-_cached_diagnosis = _resumes_service._cached_diagnosis
-_backfill_diagnosis_snapshots = _resumes_service.backfill_diagnosis_snapshots
-extract_resume_profile = _resumes_service.extract_resume_profile
-
-_run_resume_optimize = _resume_optimize_service.run_resume_optimize
-apply_resume_optimize_items = _resume_optimize_service.apply_resume_optimize_items
-
-_queue_batch_align = _batch_service.queue_batch_align
-_get_batch_align = _batch_service.get_batch_align
-_cancel_batch_align = _batch_service.cancel_batch_align
+_context.bind_service_layer(
+    jobs=_jobs_service,
+    workbench=_workbench_service,
+    batch=_batch_service,
+    resumes=_resumes_service,
+    resume_optimize=_resume_optimize_service,
+    watchdog=_watchdog_service,
+)
+_session_store = _context._session_store
+_queue_batch_align = _context._queue_batch_align
+_get_batch_align = _context._get_batch_align
+_cancel_batch_align = _context._cancel_batch_align
+_run_resume_optimize = _context._run_resume_optimize
+apply_resume_optimize_items = _context.apply_resume_optimize_items
 
 
 def _recover_stale_alignments() -> None:
@@ -311,10 +294,10 @@ def _recover_stale_alignments() -> None:
     Alignment fields are preserved so the UI keeps the last product while
     marking the job rerunnable.
     """
-    for job in _jobs.list_alignment_pending():
+    for job in _context._jobs.list_alignment_pending():
         workbench_job_id = job.get('workbench_job_id')
         if workbench_job_id:
-            registry_job = _registry.get(workbench_job_id)
+            registry_job = _context._registry.get(workbench_job_id)
             if registry_job is not None and registry_job.status in (
                 'queued',
                 'running',
@@ -322,7 +305,7 @@ def _recover_stale_alignments() -> None:
                 # Still in flight; the requeue path below owns it.
                 continue
         transition_alignment(
-            _jobs,
+            _context._jobs,
             job['tenant_id'],
             job['job_id'],
             'failed',
@@ -339,13 +322,17 @@ def _recover_stale_alignments() -> None:
 def _recover_pending_jobs() -> None:
     """Requeue queued/running jobs left behind by a previous process."""
     _recover_stale_alignments()
-    for job_id in _registry.pending_job_ids():
+    for job_id in _context._registry.pending_job_ids():
         # Ticket #101: recovered work is attributable to the restart, not to
         # the original click — requeue mints a fresh request id (the requeued
         # event carries recovered=True) and _run_job binds it from the row.
-        _registry.requeue_interrupted(job_id, request_id=new_request_id())
+        _context._registry.requeue_interrupted(
+            job_id, request_id=new_request_id()
+        )
         logger.info("Recovering interrupted analysis job %s", job_id)
-        threading.Thread(target=_run_job, args=(job_id,), daemon=True).start()
+        threading.Thread(
+            target=_context._run_job, args=(job_id,), daemon=True
+        ).start()
 
 
 @asynccontextmanager
@@ -353,17 +340,17 @@ async def lifespan(_: FastAPI):
     logger.info(
         "Runtime data directory: %s (job db: %s, cache db: %s)",
         resolve_data_dir(),
-        _registry.db_path,
-        _cache.db_path,
+        _context._registry.db_path,
+        _context._cache.db_path,
     )
     logger.info(
         "Analysis worker concurrency: %s (RESUALIGN_WORKER_CONCURRENCY=1 means serial)",
-        _WORKER_CONCURRENCY,
+        _context._WORKER_CONCURRENCY,
     )
-    if _PERSONAL_MODE:
-        _settings_store.get_or_create_local_ingest_token("local")
+    if _context._PERSONAL_MODE:
+        _context._settings_store.get_or_create_local_ingest_token("local")
     register_daily_usage_recorder(record_daily_llm_usage)
-    _backfill_diagnosis_snapshots()
+    _context._backfill_diagnosis_snapshots()
     _recover_pending_jobs()
     # Ticket #102: running-job watchdog (None when disabled via
     # RESUALIGN_JOB_MAX_RUNTIME_S=0). Recovery ran first so restored jobs
@@ -424,7 +411,7 @@ async def _limit_request_body_size(request: Request, call_next):
     content_length = request.headers.get("content-length")
     if content_length:
         try:
-            if int(content_length) > _MAX_BODY_BYTES:
+            if int(content_length) > _context._MAX_BODY_BYTES:
                 from fastapi.responses import JSONResponse
 
                 _rid = request_id_of(request)
@@ -433,7 +420,7 @@ async def _limit_request_body_size(request: Request, call_next):
                     content={
                         "detail": (
                             "Request body too large (max "
-                            f"{_MAX_BODY_BYTES} bytes)"
+                            f"{_context._MAX_BODY_BYTES} bytes)"
                         ),
                         "request_id": _rid,
                     },
@@ -595,6 +582,37 @@ activate_llm_node = _nodes_router.activate_llm_node
 test_llm_node = _nodes_router.test_llm_node
 optimize_master_resume = _optimize_router.optimize_master_resume
 apply_resume_optimize = _optimize_router.apply_resume_optimize
+
+_context.bind_names(globals())
+_context._static_dir = _static_dir
+
+
+class _ApiModule(types.ModuleType):
+    """Keep legacy package reads and test swaps pointed at the app context."""
+
+    def __getattr__(self, name: str):
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        try:
+            return getattr(_context, name)
+        except AttributeError as exc:
+            raise AttributeError(
+                f"module {self.__name__!r} has no attribute {name!r}"
+            ) from exc
+
+    def __setattr__(self, name: str, value: object) -> None:
+        super().__setattr__(name, value)
+        if name.startswith("__") and name.endswith("__"):
+            return
+        if hasattr(_context, name):
+            setattr(_context, name, value)
+
+
+sys.modules[__name__].__class__ = _ApiModule
+
+for _context_name, _context_value in list(vars(_context).items()):
+    if _context_name.startswith("_"):
+        setattr(sys.modules[__name__], _context_name, _context_value)
 
 
 # ---------------------------------------------------------------------------

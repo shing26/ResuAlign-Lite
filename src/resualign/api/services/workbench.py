@@ -1,4 +1,6 @@
 
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
@@ -11,17 +13,18 @@ from typing import Any, Optional
 
 from fastapi import Request
 
-import resualign.api as api_module
 from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
 from resualign.llm_usage import reset_llm_tenant, set_llm_tenant
 from resualign.role_router import call_with_role
+
+from ...app.context import context
 
 logger = logging.getLogger(__name__)
 SESSION_TTL_SECONDS = 30 * 60
 _SESSION_EVENT_QUEUE_SIZE = 512
 
 
-def _report_to_dict(report: api_module.Report) -> dict:
+def _report_to_dict(report: context.Report) -> dict:
     """Convert the Report dataclass tree to a plain JSON-safe dict."""
     data = asdict(report)
     profile = data.get("jd_profile")
@@ -104,7 +107,7 @@ async def _read_timeline_extras(request: Request) -> dict[str, Any]:
         payload = await request.json()
     except Exception:
         return {}
-    return {key: payload.get(key) for key in api_module._TIMELINE_FIELDS if key in payload}
+    return {key: payload.get(key) for key in context._TIMELINE_FIELDS if key in payload}
 
 def _apply_diffs(base_text: str, diffs: list[dict[str, Any]], accepted_indices: list[int]) -> tuple[str, int]:
     """Apply accepted diffs to base text in a deterministic, ordered way."""
@@ -380,7 +383,7 @@ def _available_resumes(tenant_id: str) -> list[dict[str, Any]]:
             "title": resume["title"],
             "current_version": resume["current_version"],
         }
-        for resume in api_module._resumes.list_master_resumes(tenant_id)
+        for resume in context._resumes.list_master_resumes(tenant_id)
     ]
 
 
@@ -391,20 +394,20 @@ def _create_library_job_without_llm(
     jd_text = (payload.get("jd_text") or "").strip()
     jd_url = (payload.get("jd_url") or "").strip()
     if not jd_text:
-        raise api_module.UserStoreError("Job description text is required")
-    title = (payload.get("title") or "").strip() or api_module._derive_title(jd_text)
+        raise context.UserStoreError("Job description text is required")
+    title = (payload.get("title") or "").strip() or context._derive_title(jd_text)
     company = (payload.get("company") or "").strip() or None
     location = (payload.get("location") or "").strip() or None
     if not company or not location:
         extracted_company, extracted_location = (
-            api_module._extract_company_location(jd_text)
+            context._extract_company_location(jd_text)
         )
         company = company or extracted_company
         location = location or extracted_location
     salary_min = payload.get("salary_min")
     salary_max = payload.get("salary_max")
-    job_functions, seniorities = api_module._settings_vocabulary(user["user_id"])
-    return api_module._jobs.create_job(
+    job_functions, seniorities = context._settings_vocabulary(user["user_id"])
+    return context._jobs.create_job(
         tenant_id=user["user_id"],
         title=title,
         jd_text=jd_text,
@@ -522,8 +525,8 @@ def _session_sections_from_job(
 
 def _profile_cache_hit(jd_text: str) -> bool:
     try:
-        config = api_module.build_config()
-        cached = api_module._cache.get(
+        config = context.build_config()
+        cached = context._cache.get(
             "default",
             config.model,
             JD_PROFILER_PROMPT_VERSION,
@@ -540,7 +543,7 @@ def _run_session_pipeline(session_id: str) -> None:
     Emits job.stage, job.gap_ready, and job.error events into the in-memory
     event bus. Tailor/eval remain explicitly user-triggered.
     """
-    session = api_module._session_store.get(session_id)
+    session = context._session_store.get(session_id)
     if session is None:
         return
     tenant_id = session["tenant_id"]
@@ -550,23 +553,23 @@ def _run_session_pipeline(session_id: str) -> None:
         if job is None:
             # Crawl retirement (2026-08-30): URL-only sessions are rejected
             # at session/init, so a jobless session here is an anomaly.
-            api_module._session_store.emit(
+            context._session_store.emit(
                 session_id, "job.error", {"error": "Job could not be created"}
             )
-            api_module._session_store.update(session_id, {"status": "failed"})
+            context._session_store.update(session_id, {"status": "failed"})
             return
 
-        api_module._session_store.emit(
+        context._session_store.emit(
             session_id,
             "job.stage",
             {"stage": "classifying", "message": "Classifying job"},
         )
-        job_functions, seniorities = api_module._settings_vocabulary(tenant_id)
+        job_functions, seniorities = context._settings_vocabulary(tenant_id)
         try:
-            classification = api_module._classify_job(
+            classification = context._classify_job(
                 job["jd_text"], job_functions, seniorities
             )
-            api_module._jobs.update_job(
+            context._jobs.update_job(
                 tenant_id,
                 job["job_id"],
                 job_function=classification.get("job_function"),
@@ -576,8 +579,8 @@ def _run_session_pipeline(session_id: str) -> None:
                 allowed_job_functions=job_functions,
                 allowed_seniorities=seniorities,
             )
-        except api_module.LLMResponseError as exc:
-            api_module._session_store.emit(
+        except context.LLMResponseError as exc:
+            context._session_store.emit(
                 session_id,
                 "job.stage",
                 {
@@ -585,9 +588,9 @@ def _run_session_pipeline(session_id: str) -> None:
                     "message": f"Classification pending: {exc}",
                 },
             )
-        job = api_module._jobs.get_job(tenant_id, job["job_id"]) or job
+        job = context._jobs.get_job(tenant_id, job["job_id"]) or job
 
-        api_module._session_store.emit(
+        context._session_store.emit(
             session_id,
             "job.stage",
             {"stage": "jd_analysis", "message": "Extracting JD profile"},
@@ -598,47 +601,47 @@ def _run_session_pipeline(session_id: str) -> None:
             or (session.get("resume") or {}).get("selected_resume_id")
         )
         if master_resume_id:
-            resume = api_module._resumes.get_master_resume(
+            resume = context._resumes.get_master_resume(
                 tenant_id, master_resume_id
             )
         resume_text = session.get("resume_text") or (
             resume["content"] if resume else ""
         )
         cache_hit = _profile_cache_hit(job["jd_text"])
-        config = api_module.build_config()
+        config = context.build_config()
         profile_dict: Optional[dict[str, Any]] = None
         gap_dict: Optional[dict[str, Any]] = None
         gap_score: Optional[float] = None
-        with api_module.OpenAIClient(config, timeout=90.0) as client:
+        with context.OpenAIClient(config, timeout=90.0) as client:
             if resume_text.strip():
                 # Role-based: JD profiler + gap analyst
                 # Use same client for both (simpler than parallel for SSE)
                 try:
                     profile, meta_profile = call_with_role(
-                        "profiler", api_module.profile_jd,
-                        api_module._llm_nodes, tenant_id,
+                        "profiler", context.profile_jd,
+                        context._llm_nodes, tenant_id,
                         fn_kwargs={
                             "jd_text": job["jd_text"],
-                            "cache": api_module._cache,
+                            "cache": context._cache,
                             "tenant": tenant_id,
                         },
                     )
-                    profile_dict = api_module.jd_profile_to_dict(profile)
+                    profile_dict = context.jd_profile_to_dict(profile)
                 except Exception:
                     # Fallback to single client
-                    profile = api_module.profile_jd(
+                    profile = context.profile_jd(
                         client,
                         job["jd_text"],
-                        cache=api_module._cache,
+                        cache=context._cache,
                         tenant=tenant_id,
                     )
-                    profile_dict = api_module.jd_profile_to_dict(profile)
+                    profile_dict = context.jd_profile_to_dict(profile)
                 import json as _json
                 _profile_str = _json.dumps(profile_dict, ensure_ascii=False)
                 try:
                     gap, meta_gap = call_with_role(
-                        "gap_analyzer", api_module.analyze_gaps,
-                        api_module._llm_nodes, tenant_id,
+                        "gap_analyzer", context.analyze_gaps,
+                        context._llm_nodes, tenant_id,
                         fn_kwargs={
                             "resume_text": resume_text,
                             "jd_profile_text": _profile_str,
@@ -646,7 +649,7 @@ def _run_session_pipeline(session_id: str) -> None:
                     )
                     gap_dict = asdict(gap)
                 except Exception:
-                    gap = api_module.analyze_gaps(
+                    gap = context.analyze_gaps(
                         client,
                         resume_text,
                         _profile_str,
@@ -657,27 +660,27 @@ def _run_session_pipeline(session_id: str) -> None:
             else:
                 try:
                     profile, meta_profile = call_with_role(
-                        "profiler", api_module.profile_jd,
-                        api_module._llm_nodes, tenant_id,
+                        "profiler", context.profile_jd,
+                        context._llm_nodes, tenant_id,
                         fn_kwargs={
                             "jd_text": job["jd_text"],
-                            "cache": api_module._cache,
+                            "cache": context._cache,
                             "tenant": tenant_id,
                         },
                     )
-                    profile_dict = api_module.jd_profile_to_dict(profile)
+                    profile_dict = context.jd_profile_to_dict(profile)
                 except Exception:
-                    profile = api_module.profile_jd(
+                    profile = context.profile_jd(
                         client,
                         job["jd_text"],
-                        cache=api_module._cache,
+                        cache=context._cache,
                         tenant=tenant_id,
                     )
-                    profile_dict = api_module.jd_profile_to_dict(profile)
+                    profile_dict = context.jd_profile_to_dict(profile)
                 gap_status = "blocked"
 
         try:
-            persisted = api_module._jobs.update_job(
+            persisted = context._jobs.update_job(
                 tenant_id,
                 job["job_id"],
                 jd_profile=profile_dict,
@@ -688,12 +691,12 @@ def _run_session_pipeline(session_id: str) -> None:
             )
             if persisted is not None:
                 job = persisted
-        except api_module.UserStoreError:
+        except context.UserStoreError:
             logger.exception(
                 "Could not persist JD profile for library job %s",
                 job["job_id"],
             )
-        api_module._session_store.update(
+        context._session_store.update(
             session_id,
             {
                 "status": "ready",
@@ -708,7 +711,7 @@ def _run_session_pipeline(session_id: str) -> None:
                 },
             },
         )
-        api_module._session_store.emit(
+        context._session_store.emit(
             session_id,
             "job.gap_ready",
             {
@@ -719,8 +722,8 @@ def _run_session_pipeline(session_id: str) -> None:
                 "cache_hit": cache_hit,
             },
         )
-    except api_module.LLMResponseError as exc:
-        api_module._session_store.update(
+    except context.LLMResponseError as exc:
+        context._session_store.update(
             session_id,
             {
                 "status": "failed",
@@ -731,17 +734,17 @@ def _run_session_pipeline(session_id: str) -> None:
                 },
             },
         )
-        api_module._session_store.emit(
+        context._session_store.emit(
             session_id,
             "job.error",
             {"error": f"JD analysis failed: {exc}", "stage": "jd_analysis"},
         )
     except Exception as exc:
-        api_module._session_store.update(
+        context._session_store.update(
             session_id,
             {"status": "failed", "jd": {"profile": None, "status": "failed", "error": str(exc)}},
         )
-        api_module._session_store.emit(
+        context._session_store.emit(
             session_id,
             "job.error",
             {"error": f"Session pipeline failed: {exc}", "stage": "pipeline"},

@@ -186,7 +186,7 @@ def layering_violations(
 
 
 def api_module_refs(files: list[Path]) -> dict[str, int]:
-    """Count ``api_module._private`` reference sites as ``file::attr`` keys.
+    """Count private API-module reference sites as ``file::attr`` keys.
 
     Line numbers are deliberately excluded so the ratchet tracks coupling
     structure, not formatting churn.

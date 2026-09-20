@@ -6,8 +6,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-import resualign.api as api_module
-
+from ...app.context import context
 from ...llm_usage import estimate_call_cost
 
 CAP_REACHED_DETAIL = {
@@ -22,8 +21,8 @@ def llm_daily_status(tenant_id: str) -> dict[str, Any]:
     P1-1（2026-09-06 安全审查）：blocked/remaining 按实际调用 + 未消费预留
     计算（``calls + reserves``），入队即占坑，任务真正调用时消费。
     """
-    settings = api_module._settings_store.get_settings(tenant_id)
-    usage = api_module._llm_usage.get_usage(tenant_id)
+    settings = context._settings_store.get_settings(tenant_id)
+    usage = context._llm_usage.get_usage(tenant_id)
     cap = settings.get("daily_llm_cap")
     cap_value = int(cap) if cap is not None else None
     effective_calls = usage["calls"] + usage.get("reserves", 0)
@@ -67,7 +66,7 @@ def enforce_daily_llm_cap(tenant_id: str) -> None:
     （record_call）消费；走 _queue_job 的任务结束时未消费的由 _run_job
     释放，未释放的随「当日」边界过期（保守方向：只会少用不会多用）。
     """
-    settings = api_module._settings_store.get_settings(tenant_id)
+    settings = context._settings_store.get_settings(tenant_id)
     cap = settings.get("daily_llm_cap")
     if cap is None:
         return
@@ -77,7 +76,7 @@ def enforce_daily_llm_cap(tenant_id: str) -> None:
             status_code=429,
             detail=CAP_REACHED_DETAIL,
         )
-    if not api_module._llm_usage.reserve_call(tenant_id, cap_value):
+    if not context._llm_usage.reserve_call(tenant_id, cap_value):
         raise HTTPException(
             status_code=429,
             detail=CAP_REACHED_DETAIL,
@@ -104,11 +103,11 @@ def enforce_llm_task_entry(
     Returns whether a daily-cap slot was reserved (P1-1) so the queue can
     carry the flag for release-at-completion.
     """
-    settings = api_module._settings_store.get_settings(tenant_id)
+    settings = context._settings_store.get_settings(tenant_id)
     reserved = settings.get("daily_llm_cap") is not None
     enforce_daily_llm_cap(tenant_id)
     if job_ref_key:
-        streak = api_module._registry.recent_fail_streak(tenant_id, job_ref_key)
+        streak = context._registry.recent_fail_streak(tenant_id, job_ref_key)
         if streak >= _FAIL_STREAK_LIMIT:
             # 熔断拒绝时保留已成功的预留（保守占用，随当日边界过期），
             # 不再走反向释放路径。
@@ -134,7 +133,7 @@ def record_daily_llm_usage(usage: dict[str, Any] | None = None) -> None:
         # against the real data directory.
         return
     try:
-        settings = api_module._settings_store.get_settings(tenant)
+        settings = context._settings_store.get_settings(tenant)
     except Exception:  # noqa: BLE001 - usage accounting must never break calls
         settings = {}
     tokens_in = None
@@ -148,7 +147,7 @@ def record_daily_llm_usage(usage: dict[str, Any] | None = None) -> None:
         tokens_in=tokens_in,
         tokens_out=tokens_out,
     )
-    api_module._llm_usage.record_call(
+    context._llm_usage.record_call(
         tenant,
         estimated_cost=cost,
         tokens_in=tokens_in,

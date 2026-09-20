@@ -11,8 +11,7 @@ import threading
 import time
 from typing import Any, Optional
 
-import resualign.api as api_module
-
+from ...app.context import context
 from ...batch import (
     BatchAlignRequest,
     BatchAlignStore,
@@ -31,7 +30,7 @@ __all__ = [
 
 def _sync_batch(batch_id: str, tenant_id: str) -> None:
     """Refresh row statuses and summaries from the durable job registry."""
-    store = api_module._batch_store
+    store = context._batch_store
     batch = store.get(batch_id, tenant_id)
     if batch is None:
         return
@@ -41,7 +40,7 @@ def _sync_batch(batch_id: str, tenant_id: str) -> None:
         analysis_job_id = row.get('analysis_job_id')
         if not analysis_job_id:
             continue
-        snapshot = api_module._registry.snapshot(
+        snapshot = context._registry.snapshot(
             analysis_job_id, tenant_id=tenant_id
         )
         if snapshot is None:
@@ -76,14 +75,14 @@ def _pending_library_jobs(tenant_id: str) -> list[dict[str, Any]]:
     or already terminal — the badge says queued but nobody is working on
     it (pre-state-machine leftovers).
     """
-    jobs = api_module._jobs.list_jobs(tenant_id, limit=None)
+    jobs = context._jobs.list_jobs(tenant_id, limit=None)
     pending = []
     for job in jobs:
         status = job.get('alignment_status') or 'idle'
         if status in ('idle', 'failed'):
             pending.append(job)
         elif status == 'queued':
-            registered = api_module._registry.get(
+            registered = context._registry.get(
                 job.get('workbench_job_id') or '',
                 tenant_id=tenant_id,
             )
@@ -117,7 +116,7 @@ def queue_batch_align(
             )
         master_resume_id = request.master_resume_id
         if not master_resume_id:
-            resumes = api_module._resumes.list_master_resumes(tenant_id)
+            resumes = context._resumes.list_master_resumes(tenant_id)
             if not resumes:
                 raise HTTPException(
                     status_code=422,
@@ -127,7 +126,7 @@ def queue_batch_align(
     else:
         master_resume_id = request.master_resume_id
         jobs = []
-    resume = api_module._resumes.get_master_resume(
+    resume = context._resumes.get_master_resume(
         tenant_id, master_resume_id
     )
     if resume is None:
@@ -137,22 +136,22 @@ def queue_batch_align(
         if request.jd_urls:
             for jd_url in request.jd_urls:
                 try:
-                    created = api_module._create_job_from_source(
+                    created = context._create_job_from_source(
                         user, {'jd_url': jd_url, 'source_type': 'url'}
                     )
-                except api_module.UserStoreError as exc:
+                except context.UserStoreError as exc:
                     raise HTTPException(status_code=422, detail=str(exc)) from exc
                 jobs.append(created)
         else:
             for job_id in request.job_ids:
-                job = api_module._jobs.get_job(tenant_id, job_id)
+                job = context._jobs.get_job(tenant_id, job_id)
                 if job is None:
                     raise HTTPException(
                         status_code=404, detail=f'Job not found: {job_id}'
                     )
                 jobs.append(job)
 
-    config = api_module.build_config()
+    config = context.build_config()
     if not config.is_llm_configured:
         raise HTTPException(
             status_code=503,
@@ -161,7 +160,7 @@ def queue_batch_align(
             ),
         )
 
-    cached_diagnosis = api_module._cached_diagnosis(
+    cached_diagnosis = context._cached_diagnosis(
         resume, config, tenant_id
     )
     rows = [
@@ -176,7 +175,7 @@ def queue_batch_align(
         }
         for job in jobs
     ]
-    batch_id = api_module._batch_store.create(
+    batch_id = context._batch_store.create(
         tenant_id,
         master_resume_id,
         rows,
@@ -189,7 +188,7 @@ def queue_batch_align(
     # None (not specified) falls back to the settings-page global default.
     run_eval = request.run_eval
     if run_eval is None:
-        run_eval = api_module._settings_store.get_settings(
+        run_eval = context._settings_store.get_settings(
             tenant_id
         ).get('eval_default', False)
 
@@ -207,8 +206,8 @@ def queue_batch_align(
         }
         if cached_diagnosis is not None:
             payload['precomputed_diagnosis'] = cached_diagnosis
-        analysis_job_id = api_module._queue_job(user, payload, workbench=True)
-        api_module._batch_store.set_analysis_job(
+        analysis_job_id = context._queue_job(user, payload, workbench=True)
+        context._batch_store.set_analysis_job(
             batch_id, tenant_id, job['job_id'], analysis_job_id
         )
 
@@ -223,7 +222,7 @@ def get_batch_align(
 ) -> Optional[dict[str, Any]]:
     """Return a synced batch snapshot with per-row results and a summary."""
     _sync_batch(batch_id, tenant_id)
-    batch = api_module._batch_store.get(batch_id, tenant_id)
+    batch = context._batch_store.get(batch_id, tenant_id)
     if batch is None:
         return None
     result = {
@@ -244,7 +243,7 @@ def cancel_batch_align(
 ) -> Optional[dict[str, Any]]:
     """Cancel queued rows; running rows are left for the registry to finish."""
     _sync_batch(batch_id, tenant_id)
-    batch = api_module._batch_store.get(batch_id, tenant_id)
+    batch = context._batch_store.get(batch_id, tenant_id)
     if batch is None:
         return None
     canceled = 0
@@ -254,7 +253,7 @@ def cancel_batch_align(
             continue
         analysis_job_id = row.get('analysis_job_id')
         snapshot = (
-            api_module._registry.get(analysis_job_id, tenant_id=tenant_id)
+            context._registry.get(analysis_job_id, tenant_id=tenant_id)
             if analysis_job_id
             else None
         )
@@ -267,12 +266,12 @@ def cancel_batch_align(
             row['error'] = '分析任务已过期或丢失，请重新运行'
             failed += 1
             continue
-        if snapshot.status == 'queued' and api_module._registry.cancel(
+        if snapshot.status == 'queued' and context._registry.cancel(
             analysis_job_id
         ):
             row['status'] = 'canceled'
             canceled += 1
-    api_module._batch_store.update_rows(batch_id, tenant_id, batch['rows'])
+    context._batch_store.update_rows(batch_id, tenant_id, batch['rows'])
     return {
         'batch_id': batch_id,
         'canceled': canceled,

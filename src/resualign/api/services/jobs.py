@@ -10,15 +10,14 @@ import urllib.parse
 import uuid
 from typing import Any
 
-import resualign.api as api_module
-
 from ...alignment_lifecycle import transition_alignment
+from ...app.context import context
 from ...contracts.errors import LlmFailureCode
 from ...job_library import _normalize_source_url, _text_dedupe_key
 from ...llm_usage import reset_llm_tenant, set_llm_tenant
 from ...observability import new_request_id, reset_request_id, set_request_id
 from ...role_router import usable_active_node
-from ..schemas import JobImportRequest
+from . import llm_probe
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +94,7 @@ def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
     Returns ``(ok, message)``; ok=True means "proceed".
     """
     try:
-        node = usable_active_node(api_module._llm_nodes, tenant_id)
+        node = usable_active_node(context._llm_nodes, tenant_id)
         provider = ''
         base_url = None
         if node is not None:
@@ -104,7 +103,7 @@ def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
             model = node.get("model", '')
             base_url = node.get("base_url")
         else:
-            config = api_module.build_config()
+            config = context.build_config()
             provider = config.provider
             api_key = config.api_key
             model = config.model
@@ -112,9 +111,7 @@ def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
         if not api_key and provider != 'ollama':
             # Missing key is caught upstream by is_llm_configured (503).
             return True, ''
-        from ..routers.settings import probe_llm_connection
-
-        probe = probe_llm_connection(
+        probe = llm_probe.probe_llm_connection(
             provider=provider,
             api_key=api_key,
             model=model,
@@ -127,7 +124,7 @@ def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
         node_id = node.get("node_id") if node is not None else None
         if node_id and status == 'ok':
             try:
-                api_module._llm_nodes.record_node_health(
+                context._llm_nodes.record_node_health(
                     tenant_id, node_id, 'ok', probe.get('latency_ms')
                 )
             except Exception:  # noqa: BLE001 - telemetry must not block runs
@@ -135,7 +132,7 @@ def _probe_active_llm_quick(tenant_id: str) -> tuple[bool, str]:
         if status in ('http_401', 'http_402', 'http_403'):
             if node_id:
                 try:
-                    api_module._llm_nodes.record_node_health(
+                    context._llm_nodes.record_node_health(
                         tenant_id, node_id, status, probe.get('latency_ms')
                     )
                 except Exception:  # noqa: BLE001 - telemetry must not block runs
@@ -195,9 +192,9 @@ def _prune_payload_cache() -> None:
     registry's stored payload on execution (``_run_job`` reads it when the
     in-memory entry is gone), so pruning never loses a runnable job.
     """
-    while len(api_module._payloads) > _MAX_CACHED_PAYLOADS:
-        oldest = next(iter(api_module._payloads))
-        api_module._payloads.pop(oldest, None)
+    while len(context._payloads) > _MAX_CACHED_PAYLOADS:
+        oldest = next(iter(context._payloads))
+        context._payloads.pop(oldest, None)
 
 
 def _sync_alignment_status(
@@ -214,7 +211,7 @@ def _sync_alignment_status(
         return
     try:
         transition_alignment(
-            api_module._jobs, tenant_id, library_job_id, new_status
+            context._jobs, tenant_id, library_job_id, new_status
         )
     except Exception:
         logger.exception(
@@ -224,7 +221,7 @@ def _sync_alignment_status(
         )
 
 
-def _run_local_fallback_report(resume_text: str, jd_text: str) -> "api_module.Report":
+def _run_local_fallback_report(resume_text: str, jd_text: str) -> "context.Report":
     """Build a deterministic rules-only Report when no LLM is configured.
 
     Mirrors the LLM-backed surface (score / skills / issues / gap report /
@@ -324,7 +321,7 @@ def _job_failure_detail(
     """
     stage_label = _STAGE_LABELS.get(stage, stage or "未知阶段")
     message = str(exc) or exc.__class__.__name__
-    if isinstance(exc, api_module.LLMResponseError):
+    if isinstance(exc, context.LLMResponseError):
         # R4 P0-1（03-AIE §③）：结构化 code 优先分支，杜绝 message substring 漂移
         # 误归因；code == "other"（旧调用方/测试构造的无 code 异常）回退文本分类。
         code = getattr(exc, "code", LlmFailureCode.OTHER.value)
@@ -402,7 +399,7 @@ def _job_failure_detail(
 
 def _settings_vocabulary(user_id: str) -> tuple[list[str], list[str]]:
     """Return the tenant's editable classification vocabulary."""
-    vocabulary = api_module._settings_store.get_settings(user_id)['classification_vocabulary']
+    vocabulary = context._settings_store.get_settings(user_id)['classification_vocabulary']
     return ([str(item) for item in vocabulary.get('job_functions') or []], [str(item) for item in vocabulary.get('seniorities') or []])
 
 def _classify_job(jd_text: str, job_functions: list[str] | None=None, seniorities: list[str] | None=None, tenant: str="default") -> dict[str, Any]:
@@ -411,19 +408,19 @@ def _classify_job(jd_text: str, job_functions: list[str] | None=None, senioritie
     The ``tenant`` scopes the content cache key so classifications never
     leak across tenants (S1). Callers pass the owning user id.
     """
-    config = api_module.build_config()
-    with api_module.OpenAIClient(
+    config = context.build_config()
+    with context.OpenAIClient(
         config,
         timeout=45.0,
         # R4 P0-2：classifier 非 role 直连调用，输出钳制 128（03-AIE §③）。
         max_tokens=128,
     ) as client:
-        return api_module.classify_job(
+        return context.classify_job(
             client,
             jd_text,
             job_functions=job_functions,
             seniorities=seniorities,
-            cache=api_module._cache,
+            cache=context._cache,
             tenant=tenant,
         )
 
@@ -540,7 +537,7 @@ def _extract_company_location(
 def _deterministic_job_fields(payload: dict[str, Any]) -> dict[str, Any]:
     """Resolve title/company/location/salary without any LLM round-trip."""
     jd_text = (payload.get('jd_text') or '').strip()
-    title = (payload.get('title') or '').strip() or api_module._derive_title(jd_text)
+    title = (payload.get('title') or '').strip() or context._derive_title(jd_text)
     company = (payload.get('company') or '').strip() or None
     location = (payload.get('location') or '').strip() or None
     if not company or not location:
@@ -569,11 +566,11 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
     jd_text = (payload.get('jd_text') or '').strip()
     jd_url = (payload.get('jd_url') or '').strip()
     if jd_url and (not jd_text):
-        raise api_module.UserStoreError(
+        raise context.UserStoreError(
             '该岗位只有链接没有 JD 文本：请用浏览器油猴插件抓取，或用「粘贴 JD」方式录入'
         )
     if not jd_text:
-        raise api_module.UserStoreError('Job description text is required')
+        raise context.UserStoreError('Job description text is required')
     payload['jd_text'] = jd_text
     fields = _deterministic_job_fields(payload)
     title = fields['title']
@@ -581,20 +578,20 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
     location = fields['location']
     salary_min = fields['salary_min']
     salary_max = fields['salary_max']
-    job_functions, seniorities = api_module._settings_vocabulary(user['user_id'])
+    job_functions, seniorities = context._settings_vocabulary(user['user_id'])
     classification = {}
     classification_pending = 0
     try:
-        classification = api_module._classify_job(
+        classification = context._classify_job(
             jd_text, job_functions, seniorities, tenant=user['user_id']
         )
-    except api_module.LLMResponseError as exc:
+    except context.LLMResponseError as exc:
         logger.warning('Job classification failed, storing as pending: %s', exc)
         classification_pending = 1
     source_type = payload.get('source_type') or ('url' if jd_url else 'paste')
     job_function = payload.get('job_function') or classification.get('job_function')
     seniority = payload.get('seniority') or classification.get('seniority')
-    return api_module._jobs.create_job(tenant_id=user['user_id'], title=title, jd_text=jd_text, company=company, location=location, salary_min=salary_min, salary_max=salary_max, salary_currency=payload.get('salary_currency') or 'CNY', source_type=source_type, source_url=payload.get('source_url') or (jd_url or None), job_function=job_function, seniority=seniority, tech_tags=payload.get('tech_tags') or classification.get('tech_tags') or [], status=payload.get('status') or '未投递', classification_pending=classification_pending, posting_date=payload.get('posting_date'), applied_at=payload.get('applied_at'), next_step=payload.get('next_step'), notes=payload.get('notes'), offer_at=payload.get('offer_at'), rejected_at=payload.get('rejected_at'), allowed_job_functions=job_functions, allowed_seniorities=seniorities)
+    return context._jobs.create_job(tenant_id=user['user_id'], title=title, jd_text=jd_text, company=company, location=location, salary_min=salary_min, salary_max=salary_max, salary_currency=payload.get('salary_currency') or 'CNY', source_type=source_type, source_url=payload.get('source_url') or (jd_url or None), job_function=job_function, seniority=seniority, tech_tags=payload.get('tech_tags') or classification.get('tech_tags') or [], status=payload.get('status') or '未投递', classification_pending=classification_pending, posting_date=payload.get('posting_date'), applied_at=payload.get('applied_at'), next_step=payload.get('next_step'), notes=payload.get('notes'), offer_at=payload.get('offer_at'), rejected_at=payload.get('rejected_at'), allowed_job_functions=job_functions, allowed_seniorities=seniorities)
 
 
 def _local_ingest_job(
@@ -608,7 +605,7 @@ def _local_ingest_job(
     """
     jd_text = (payload.get('jd_text') or '').strip()
     if not jd_text:
-        raise api_module.UserStoreError('Job description text is required')
+        raise context.UserStoreError('Job description text is required')
     site = (payload.get('site') or 'universal').strip().lower()
     job_page_url = (payload.get('job_page_url') or '').strip()
     fields = _deterministic_job_fields(payload)
@@ -623,7 +620,7 @@ def _local_ingest_job(
             if normalized_url
             else _text_dedupe_key(jd_text)
         )
-    existing = api_module._jobs.find_by_dedupe_key(
+    existing = context._jobs.find_by_dedupe_key(
         user['user_id'], dedupe_key
     )
     if existing is not None:
@@ -632,7 +629,7 @@ def _local_ingest_job(
             'job_id': existing['job_id'],
             'job': existing,
         }
-    job = api_module._jobs.create_job(
+    job = context._jobs.create_job(
         tenant_id=user['user_id'],
         title=fields['title'],
         jd_text=jd_text,
@@ -649,7 +646,7 @@ def _local_ingest_job(
     )
     return {'status': 'created', 'job_id': job['job_id'], 'job': job}
 
-def _collect_import_rows(req: JobImportRequest) -> list[dict[str, Any]]:
+def _collect_import_rows(req: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = list(req.jobs or [])
     if (req.csv_text or '').strip():
         reader = csv.DictReader(io.StringIO(req.csv_text))
@@ -659,7 +656,7 @@ def _collect_import_rows(req: JobImportRequest) -> list[dict[str, Any]]:
 
 def _run_import(import_id: str) -> None:
     """Process a queued import batch on a daemon worker thread."""
-    batch = api_module._import_batches.get(import_id)
+    batch = context._import_batches.get(import_id)
     if batch is None:
         return
     user = {'user_id': batch['user_id']}
@@ -671,9 +668,9 @@ def _run_import(import_id: str) -> None:
                 batch['errors'].append(f"{row.get('title') or 'Untitled'}: empty JD")
                 continue
             try:
-                api_module._create_job_from_source(user, row)
+                context._create_job_from_source(user, row)
                 batch['created'] += 1
-            except (api_module.UserStoreError, api_module.LLMResponseError) as exc:
+            except (context.UserStoreError, context.LLMResponseError) as exc:
                 batch['skipped'] += 1
                 batch['errors'].append(f"{row.get('title') or 'Untitled'}: {exc}")
     except Exception as exc:
@@ -682,35 +679,35 @@ def _run_import(import_id: str) -> None:
     finally:
         reset_llm_tenant(_llm_tenant_token)
         batch['done'] = True
-        api_module._prune_import_batches()
+        context._prune_import_batches()
 
 def _prune_import_batches(max_kept: int=50) -> None:
     """Drop finished import batches once the in-memory backlog grows."""
-    done_ids = [import_id for import_id, batch in api_module._import_batches.items() if batch.get('done')]
+    done_ids = [import_id for import_id, batch in context._import_batches.items() if batch.get('done')]
     if len(done_ids) <= max_kept:
         return
     for import_id in sorted(done_ids)[:len(done_ids) - max_kept]:
-        api_module._import_batches.pop(import_id, None)
+        context._import_batches.pop(import_id, None)
 
 def _queue_job(user: dict[str, Any], payload: dict[str, Any], application_id: str | None=None, workbench: bool=False) -> str:
     """Create a job row, keep its payload in memory, and start the worker."""
-    config = api_module.build_config()
+    config = context.build_config()
     # R4 P0-6（03-AIE §③）：入口统一护栏 —— 每日 cap + 同一 job 连续失败熔断
     # （防无脑重试烧额度）。job_ref_key 仅工作台重试携带（library_job_id）。
     # P1-1：enforce 内部已原子预留每日 cap 名额，把预留标记带进 payload，
     # 任务结束时未消费则释放。
-    reserved_slot = api_module.enforce_llm_task_entry(
+    reserved_slot = context.enforce_llm_task_entry(
         user['user_id'], job_ref_key=(payload or {}).get('library_job_id')
     )
     if reserved_slot:
         payload['llm_slot_reserved'] = True
-    job = api_module._registry.create(payload, config, tenant_id=user['user_id'], application_id=application_id)
+    job = context._registry.create(payload, config, tenant_id=user['user_id'], application_id=application_id)
     payload['workbench'] = workbench
-    api_module._payloads[job.job_id] = (payload, config, application_id, user['user_id'])
+    context._payloads[job.job_id] = (payload, config, application_id, user['user_id'])
     _prune_payload_cache()
     if application_id:
-        api_module._applications.set_application_job(user['user_id'], application_id, job.job_id, 'running')
-    threading.Thread(target=api_module._run_job, args=(job.job_id,), daemon=True).start()
+        context._applications.set_application_job(user['user_id'], application_id, job.job_id, 'running')
+    threading.Thread(target=context._run_job, args=(job.job_id,), daemon=True).start()
     return job.job_id
 
 def _run_job(job_id: str) -> None:
@@ -727,14 +724,14 @@ def _run_job(job_id: str) -> None:
     the triggering click.
     """
     _request_id_token = set_request_id(
-        api_module._registry.request_id_for(job_id) or new_request_id()
+        context._registry.request_id_for(job_id) or new_request_id()
     )
     try:
-        entry = api_module._payloads.get(job_id)
+        entry = context._payloads.get(job_id)
         if entry is not None:
             tenant_id = entry[3]
         else:
-            stored = api_module._registry.get_payload(job_id)
+            stored = context._registry.get_payload(job_id)
             if stored is None:
                 return
             tenant_id = stored[1]
@@ -750,16 +747,16 @@ def _run_job(job_id: str) -> None:
 
 def _run_job_holding_gate(job_id: str) -> None:
     """Run one queued analysis job; caller already holds the tenant gate."""
-    with api_module._WORKER_SEMAPHORE:
-        entry = api_module._payloads.get(job_id)
+    with context._WORKER_SEMAPHORE:
+        entry = context._payloads.get(job_id)
         if entry is not None:
             payload, config, application_id, tenant_id = entry
         else:
-            stored = api_module._registry.get_payload(job_id)
+            stored = context._registry.get_payload(job_id)
             if stored is None:
                 return
             payload, tenant_id, application_id = stored
-            config = api_module.build_config()
+            config = context.build_config()
         _llm_tenant_token = set_llm_tenant(tenant_id)
         # P1-1（2026-09-06 安全审查）：入队时若预留了每日 cap 名额，记录
         # 起点调用数；任务结束一次真实 LLM 调用都没发生（缓存全命中或早期
@@ -767,15 +764,15 @@ def _run_job_holding_gate(job_id: str) -> None:
         # record_call 已消费预留，无需释放。
         reserved_slot = bool(payload.get('llm_slot_reserved'))
         calls_before = (
-            api_module._llm_usage.get_usage(tenant_id)['calls']
+            context._llm_usage.get_usage(tenant_id)['calls']
             if reserved_slot
             else None
         )
         try:
-            job = api_module._registry.get(job_id)
+            job = context._registry.get(job_id)
             if job is None or job.status != 'queued':
                 return
-            if not api_module._registry.claim_running(job_id):
+            if not context._registry.claim_running(job_id):
                 # Another worker already claimed this job; do not double-run.
                 return
             _sync_alignment_status(tenant_id, payload, 'running')
@@ -785,14 +782,14 @@ def _run_job_holding_gate(job_id: str) -> None:
             def on_stage(stage: str, message: str) -> None:
                 nonlocal failed_stage
                 failed_stage = stage
-                api_module._registry.update_progress(job_id, stage, message)
+                context._registry.update_progress(job_id, stage, message)
                 library_id = payload.get('library_job_id')
                 if library_id:
-                    session = api_module._session_store.find_by_job(
+                    session = context._session_store.find_by_job(
                         library_id, tenant_id
                     )
                     if session is not None:
-                        api_module._session_store.emit(
+                        context._session_store.emit(
                             session["session_id"],
                             "job.stage",
                             {
@@ -806,21 +803,21 @@ def _run_job_holding_gate(job_id: str) -> None:
             # De-bloat: backend crawling retired; a URL-only queued job
             # without JD text cannot be recovered and fails with a clear reason.
             if payload.get('jd_url') and (not jd_text):
-                api_module._registry.fail(
+                context._registry.fail(
                     job_id,
                     '该岗位只有链接没有 JD 文本：请用浏览器油猴插件抓取，或用「粘贴 JD」方式重新录入',
                 )
                 _sync_alignment_status(tenant_id, payload, 'failed')
                 return
             if payload.get('optimize_resume'):
-                result = api_module._run_resume_optimize(
+                result = context._run_resume_optimize(
                     payload, on_stage, tenant_id
                 )
-                api_module._registry.succeed(job_id, result)
+                context._registry.succeed(job_id, result)
                 return
             use_local_fallback = (
                 not config.is_llm_configured
-                and usable_active_node(api_module._llm_nodes, tenant_id) is None
+                and usable_active_node(context._llm_nodes, tenant_id) is None
             )
             t0 = time.monotonic()
             if use_local_fallback:
@@ -828,7 +825,7 @@ def _run_job_holding_gate(job_id: str) -> None:
                     payload['resume_text'], jd_text
                 )
             else:
-                report = api_module.run(
+                report = context.run(
                     config,
                     payload['resume_text'],
                     jd_text,
@@ -838,16 +835,16 @@ def _run_job_holding_gate(job_id: str) -> None:
                     custom_prompt=payload.get('custom_prompt', ''),
                     diagnosis=payload.get('precomputed_diagnosis'),
                     on_stage=on_stage,
-                    cache=api_module._cache,
+                    cache=context._cache,
                     tenant=tenant_id,
-                    node_store=api_module._llm_nodes,
+                    node_store=context._llm_nodes,
                     tenant_id=tenant_id,
                 )
             report.elapsed_seconds = round(time.monotonic() - t0, 1)
-            result = api_module._report_to_dict(report)
+            result = context._report_to_dict(report)
             if payload.get('diagnosis'):
-                result['diagnosis'] = api_module._build_diagnosis_section(result)
-                result['diagnosis_source_hash'] = api_module._content_sha256(payload.get('resume_text') or '')
+                result['diagnosis'] = context._build_diagnosis_section(result)
+                result['diagnosis_source_hash'] = context._content_sha256(payload.get('resume_text') or '')
                 # R4 §3.6：诊断快照内嵌提示词版本（P3，04b-PE 建议），随快照整包
                 # JSON 序列化持久化，便于追溯快照对应的提示词文本。
                 from resualign.llm import DIAG_PROMPT_VERSION
@@ -855,7 +852,7 @@ def _run_job_holding_gate(job_id: str) -> None:
                 master_resume_id = payload.get('master_resume_id')
                 if master_resume_id:
                     try:
-                        api_module._resumes.set_latest_diagnosis_snapshot(
+                        context._resumes.set_latest_diagnosis_snapshot(
                             tenant_id,
                             master_resume_id,
                             result['diagnosis'],
@@ -887,15 +884,15 @@ def _run_job_holding_gate(job_id: str) -> None:
                     else None
                 )
                 if match_score is None:
-                    match_score = api_module._gap_match_score(result)
+                    match_score = context._gap_match_score(result)
                 match_detail = None
                 match_reason = None
                 match_updated_at = None
-                library_job = api_module._jobs.get_job(
+                library_job = context._jobs.get_job(
                     tenant_id, library_job_id
                 )
                 if library_job and library_job.get("workbench_resume_id"):
-                    resume = api_module._resumes.get_master_resume(
+                    resume = context._resumes.get_master_resume(
                         tenant_id,
                         library_job["workbench_resume_id"],
                     )
@@ -907,7 +904,7 @@ def _run_job_holding_gate(job_id: str) -> None:
                         and result.get("jd_profile")
                         and result.get("gap_report")
                     ):
-                        match_detail = api_module.compute_match_score(
+                        match_detail = context.compute_match_score(
                             library_job.get("jd_text"),
                             result.get("jd_profile"),
                             result.get("gap_report"),
@@ -915,7 +912,7 @@ def _run_job_holding_gate(job_id: str) -> None:
                             resume_text,
                             library_job["workbench_resume_id"],
                         )
-                        match_reason = api_module.fallback_match_reason(
+                        match_reason = context.fallback_match_reason(
                             match_detail,
                             (result.get("gap_report") or {}).get(
                                 "missing_keywords"
@@ -924,12 +921,12 @@ def _run_job_holding_gate(job_id: str) -> None:
                         )
                         match_updated_at = time.time()
                         match_score = match_detail["total"]
-                session = api_module._session_store.find_by_job(
+                session = context._session_store.find_by_job(
                     library_job_id, tenant_id
                 )
                 if session is not None:
                     for index, diff in enumerate(result.get("diffs") or []):
-                        api_module._session_store.emit(
+                        context._session_store.emit(
                             session["session_id"],
                             "tailor.diff",
                             {
@@ -1017,7 +1014,7 @@ def _run_job_holding_gate(job_id: str) -> None:
                         )
                     )
                 try:
-                    api_module._jobs.save_alignment(
+                    context._jobs.save_alignment(
                         tenant_id,
                         library_job_id,
                         jd_profile=result.get('jd_profile'),
@@ -1053,12 +1050,12 @@ def _run_job_holding_gate(job_id: str) -> None:
                     )
                     raise
                 # 度量 A：一次产出结果的运行（含 tailor 降级）计一次 run。
-                api_module._jobs.record_alignment_run(tenant_id)
+                context._jobs.record_alignment_run(tenant_id)
                 if session is not None:
-                    api_module._session_store.update(
+                    context._session_store.update(
                         session["session_id"],
                         {
-                            "job": api_module._jobs.get_job(
+                            "job": context._jobs.get_job(
                                 tenant_id, library_job_id
                             ),
                             "alignment": {
@@ -1071,7 +1068,7 @@ def _run_job_holding_gate(job_id: str) -> None:
                                 "draft": draft,
                                 "eval_score": eval_score,
                                 "notice": (
-                                    api_module._alignment_notice(
+                                    context._alignment_notice(
                                         result.get("diffs") or [],
                                         tailored.get("invalid_diffs") or [],
                                         draft,
@@ -1080,7 +1077,7 @@ def _run_job_holding_gate(job_id: str) -> None:
                             },
                         },
                     )
-                    api_module._session_store.emit(
+                    context._session_store.emit(
                         session["session_id"],
                         "job.result",
                         {
@@ -1088,10 +1085,10 @@ def _run_job_holding_gate(job_id: str) -> None:
                             "result": result,
                         },
                     )
-            api_module._registry.succeed(job_id, result)
+            context._registry.succeed(job_id, result)
             if application_id:
                 try:
-                    api_module._applications.set_application_job(
+                    context._applications.set_application_job(
                         tenant_id, application_id, job_id, 'succeeded'
                     )
                 except Exception:
@@ -1117,18 +1114,18 @@ def _run_job_holding_gate(job_id: str) -> None:
             if payload.get('diagnosis'):
                 # G4（03-AIE §②-gap G4）：诊断分支不再硬编码「请检查 API Key 与
                 # 网络连接」——经由 _job_failure_detail 按结构化 code 分类归因。
-                error = api_module._job_failure_detail(
+                error = context._job_failure_detail(
                     failed_stage or 'diagnose', exc, elapsed_secs
                 ).replace('对齐分析', '诊断任务')
             elif payload.get('optimize_resume'):
-                error = api_module._job_failure_detail(
+                error = context._job_failure_detail(
                     failed_stage, exc, elapsed_secs
                 ).replace('对齐分析', '简历优化')
             else:
-                error = api_module._job_failure_detail(
+                error = context._job_failure_detail(
                     failed_stage, exc, elapsed_secs
                 )
-            api_module._registry.fail(job_id, error, stage=failed_stage or None)
+            context._registry.fail(job_id, error, stage=failed_stage or None)
             # Phase 3 + A3: persist the failure reason on the library job so a
             # failed alignment stays diagnosable after the in-memory registry
             # restarts. Kept as a direct update_job (instead of
@@ -1138,7 +1135,7 @@ def _run_job_holding_gate(job_id: str) -> None:
             library_job_id = payload.get('library_job_id')
             if library_job_id:
                 try:
-                    api_module._jobs.update_job(
+                    context._jobs.update_job(
                         tenant_id,
                         library_job_id,
                         alignment_status='failed',
@@ -1151,7 +1148,7 @@ def _run_job_holding_gate(job_id: str) -> None:
                     )
             if application_id:
                 try:
-                    api_module._applications.set_application_job(tenant_id, application_id, job_id, 'failed')
+                    context._applications.set_application_job(tenant_id, application_id, job_id, 'failed')
                 except Exception:
                     logger.exception(
                         'Failed to link application %s after failure %s',
@@ -1162,17 +1159,17 @@ def _run_job_holding_gate(job_id: str) -> None:
             reset_llm_tenant(_llm_tenant_token)
             if calls_before is not None:
                 try:
-                    calls_after = api_module._llm_usage.get_usage(tenant_id)[
+                    calls_after = context._llm_usage.get_usage(tenant_id)[
                         'calls'
                     ]
                     if calls_after == calls_before:
-                        api_module._llm_usage.release_call(tenant_id)
+                        context._llm_usage.release_call(tenant_id)
                 except Exception:  # noqa: BLE001 - accounting must not break jobs
                     logger.exception(
                         'Failed to release daily LLM slot for job %s', job_id
                     )
-            api_module._registry.delete_payload(job_id)
-            api_module._payloads.pop(job_id, None)
+            context._registry.delete_payload(job_id)
+            context._payloads.pop(job_id, None)
 
 
 def _export_filename(job: dict[str, Any], ext: str) -> str:

@@ -12,8 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
-import resualign.api as api_module
-
+from ...app.context import context
 from ..deps import get_current_user
 from ..schemas import (
     AlignmentQuality,
@@ -61,8 +60,8 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
       finished, it falls back to the most recently updated job.
     """
     tenant_id = user["user_id"]
-    jobs = api_module._jobs.list_dashboard_jobs(tenant_id)
-    resume_count = len(api_module._resumes.list_master_resumes(tenant_id))
+    jobs = context._jobs.list_dashboard_jobs(tenant_id)
+    resume_count = len(context._resumes.list_master_resumes(tenant_id))
 
     applied = 0
     interview = 0
@@ -128,7 +127,7 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
         ),
         skill_gaps=skill_gaps,
         quick_continue=quick_continue,
-        quality=AlignmentQuality(**api_module._jobs.alignment_quality_summary(
+        quality=AlignmentQuality(**context._jobs.alignment_quality_summary(
             user["user_id"]
         )),
     )
