@@ -295,9 +295,11 @@ test("#81: 失败终态——三阶段清单不再停在 pending", () => {
   assert.match(mainSrc, /markAlignmentBlocked/);
   const canvasSrc = read("split-canvas.js");
   assert.match(canvasSrc, /export async function markAlignmentBlocked\(/);
-  // 后端 402 文案带指路（无裸英文+HTTP 码直达用户）
+  // 后端 402 文案带指路（无裸英文+HTTP 码直达用户）。
+  // R1 把探测逻辑从 routers/settings.py 下沉到 services/llm_probe.py，
+  // 文案的权威落点随之迁移。
   const backendSrc = readFileSync(
-    join(here, "../../src/resualign/api/routers/settings.py"),
+    join(here, "../../src/resualign/api/services/llm_probe.py"),
     "utf8",
   );
   assert.match(backendSrc, /余额不足：请给该节点充值，或到「系统设置 → 模型节点」/);
