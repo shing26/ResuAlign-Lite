@@ -316,8 +316,9 @@ def _job_failure_detail(
     stage_label = _STAGE_LABELS.get(stage, stage or "未知阶段")
     message = str(exc) or exc.__class__.__name__
     if isinstance(exc, context.LLMResponseError):
-        # R4 P0-1（03-AIE §③）：结构化 code 优先分支，杜绝 message substring 漂移
-        # 误归因；code == "other"（旧调用方/测试构造的无 code 异常）回退文本分类。
+        # R4 P0-1（03-AIE §③）：只按结构化 code 归因，杜绝 message substring
+        # 漂移误归因。R4 残余已删除 5 组 21 个片段回退：生产 raise 点全部带
+        # code；真正的 other（未分类异常）统一给中性文案，不猜限流/超时/Key。
         code = getattr(exc, "code", LlmFailureCode.OTHER.value)
         if code != LlmFailureCode.OTHER:
             if code == LlmFailureCode.RATE_LIMIT:
@@ -341,52 +342,7 @@ def _job_failure_detail(
             else:
                 reason = "模型服务暂时不可用，请稍后重试"
         else:
-            lowered = message.lower()
-            if "429" in message or "rate limit" in lowered:
-                reason = "模型服务繁忙（限流），请稍后重试"
-            elif (
-                "401" in message
-                or "403" in message
-                or "unauthorized" in lowered
-                or "authentication" in lowered
-                or "invalid api key" in lowered
-                or "api key" in lowered
-            ):
-                # P0-1: 只有 auth 类失败才引导用户检查 API Key（2026-08-25 走查实测
-                # Key 有效+连通正常时，超时才是真因，不能一概归因到 Key/网络）。
-                reason = "API Key 无效或缺少权限，请检查模型设置"
-            elif (
-                "timeout" in lowered
-                or "timed out" in lowered
-                or "time-out" in lowered
-            ):
-                if elapsed_secs is not None:
-                    reason = (
-                        "模型响应超时（本次耗时 "
-                        f"{elapsed_secs:.1f} 秒），可尝试更换更快的模型或稍后重试"
-                    )
-                else:
-                    reason = "模型响应超时，可尝试更换更快的模型或稍后重试"
-            elif (
-                "empty response" in lowered
-                or "empty content" in lowered
-                or "returned empty" in lowered
-                or "was empty" in lowered
-                or "empty after" in lowered
-            ):
-                reason = "模型返回为空，请重试"
-            elif (
-                "expecting value" in lowered
-                or "no json object found" in lowered
-                or "not a json object" in lowered
-                or "invalid json" in lowered
-                or "schema validation" in lowered
-                or "failed validation" in lowered
-            ):
-                reason = "模型返回内容格式异常，请重试或更换模型"
-            else:
-                # P0-1: 未分类失败不再归因 API Key/网络（仅 auth 分支引导查 Key）。
-                reason = "模型服务暂时不可用，请稍后重试"
+            reason = "模型服务暂时不可用，请稍后重试"
     else:
         reason = message[:300] or "内部错误"
     return f"对齐分析在「{stage_label}」阶段失败：{reason}"

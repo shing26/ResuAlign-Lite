@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 
+from .contracts.errors import LlmFailureCode
 from .engine import MAX_RESUME_INPUT_CHARS, truncate_text
 from .llm import LLMClient, LLMResponseError
 from .prompt_versions import RESUME_POLISH as _RESUME_POLISH_STAGE
@@ -380,7 +381,9 @@ def polish_project_module(
     data = client.chat_json(POLISH_PROMPT, user)
     optimized = (data.get("optimized") or "").strip()
     if not optimized:
-        raise LLMResponseError("empty response")
+        raise LLMResponseError(
+            "empty response", code=LlmFailureCode.EMPTY
+        )
     return {
         **_module_basics(module),
         "status": "ok",

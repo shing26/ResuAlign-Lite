@@ -112,7 +112,10 @@ def _extract_balanced_json(text: str) -> str:
     """
     start = text.find("{")
     if start < 0:
-        raise LLMResponseError("No JSON object found in LLM response")
+        raise LLMResponseError(
+            "No JSON object found in LLM response",
+            code=LlmFailureCode.PARSE,
+        )
     depth = 0
     in_str = False
     esc = False
@@ -183,7 +186,9 @@ def _parse_json_object(content: str) -> dict[str, Any]:
     """
     text = _strip_json_wrapping(content)
     if not text:
-        raise LLMResponseError("Empty LLM response")
+        raise LLMResponseError(
+            "Empty LLM response", code=LlmFailureCode.EMPTY
+        )
 
     candidates: list[str] = [text]
     try:
@@ -206,7 +211,8 @@ def _parse_json_object(content: str) -> dict[str, Any]:
             except json.JSONDecodeError:
                 pass
     raise LLMResponseError(
-        f"Unable to parse LLM JSON response: {text[:120]!r}"
+        f"Unable to parse LLM JSON response: {text[:120]!r}",
+        code=LlmFailureCode.PARSE,
     )
 
 

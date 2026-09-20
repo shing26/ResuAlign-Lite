@@ -396,7 +396,8 @@ def test_workbench_timeout_error_names_timeout_stage():
         "tailoring",
         LLMResponseError(
             "Structured LLM call failed after 1 attempt (network timeout): "
-            "The read operation timed out"
+            "The read operation timed out",
+            code="timeout",
         ),
     )
     assert "简历定制" in detail
@@ -409,7 +410,8 @@ def test_workbench_json_parse_error_gets_actionable_message():
         "tailoring",
         LLMResponseError(
             "Structured response failed schema validation after 2 attempts: "
-            "Expecting value: line 1 column 1 (char 0)"
+            "Expecting value: line 1 column 1 (char 0)",
+            code="schema",
         ),
     )
     assert "简历定制" in detail
@@ -423,7 +425,8 @@ def test_workbench_rate_limit_error_gets_retry_message():
         LLMResponseError(
             "LLM call failed after 2 attempts: "
             "Server error '429 Too Many Requests' for url "
-            "https://api.deepseek.com/chat/completions"
+            "https://api.deepseek.com/chat/completions",
+            code="rate_limit",
         ),
     )
     assert "繁忙" in detail
@@ -435,7 +438,8 @@ def test_workbench_timeout_quotes_elapsed_when_available():
         "jd_analysis",
         LLMResponseError(
             "Structured LLM call failed after 1 attempt (network timeout): "
-            "The read operation timed out"
+            "The read operation timed out",
+            code="timeout",
         ),
         elapsed_secs=166.2,
     )
@@ -448,7 +452,9 @@ def test_workbench_timeout_quotes_elapsed_when_available():
 def test_workbench_empty_response_gets_retry_message():
     detail = api_module._job_failure_detail(
         "tailoring",
-        LLMResponseError("Structured response was empty after 2 attempts"),
+        LLMResponseError(
+            "Structured response was empty after 2 attempts", code="empty"
+        ),
     )
     assert "模型返回为空" in detail
     assert "API Key" not in detail
@@ -460,7 +466,8 @@ def test_workbench_api_key_only_mentioned_for_auth_failures():
         LLMResponseError(
             "Structured LLM call failed after 2 attempts: "
             "Client error '401 Unauthorized' for url "
-            "https://api.openai.com/chat/completions"
+            "https://api.openai.com/chat/completions",
+            code="auth",
         ),
     )
     assert "API Key" in detail

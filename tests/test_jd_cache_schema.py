@@ -181,7 +181,7 @@ def test_run_job_failure_records_stage_and_readable_reason():
         on_stage = kwargs.get("on_stage")
         if on_stage is not None:
             on_stage("jd_analysis", "Extracting JD profile and analyzing gaps...")
-        raise api_module.LLMResponseError("provider timeout")
+        raise api_module.LLMResponseError("provider timeout", code="timeout")
 
     with patch("resualign.api._run_job"), patch(
         "resualign.api.build_config", return_value=_config()

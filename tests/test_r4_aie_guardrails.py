@@ -122,11 +122,13 @@ def test_job_failure_detail_branches_by_code():
     assert "模型服务暂时不可用" in _job_failure_detail(
         "jd_analysis", LLMResponseError("mystery text", code="http")
     )
-    # code="other"（无 code 构造）回退文本分类：401 文本仍识别为 auth。
-    assert "API Key" in _job_failure_detail(
+    # R4 残余：code="other" 不再嗅探 message 文本，统一中性文案。
+    other_detail = _job_failure_detail(
         "jd_analysis",
         LLMResponseError("Client error '401 Unauthorized' for url ..."),
     )
+    assert "API Key" not in other_detail
+    assert "模型服务暂时不可用" in other_detail
 
 
 # ---------------------------------------------------------------------------

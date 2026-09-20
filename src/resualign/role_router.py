@@ -20,6 +20,7 @@ import logging
 import os
 from typing import Any
 
+from .contracts.errors import LlmFailureCode
 from .llm import LLMResponseError, OpenAIClient, StreamConnectionError
 from .llm_nodes import LLMNodeStore
 
@@ -278,7 +279,9 @@ def call_with_role(
         fallback_node = usable_active_node(node_store, tenant_id)
         if fallback_node is None:
             meta["error"] = "No default node available for fallback"
-            raise LLMResponseError(meta["error"])
+            raise LLMResponseError(
+                meta["error"], code=LlmFailureCode.HTTP
+            )
         from .models import ResuAlignConfig
         fallback_config = ResuAlignConfig(
             provider=fallback_node.get("provider", ""),
@@ -377,7 +380,9 @@ def call_with_role_streaming(
     fallback_node = usable_active_node(node_store, tenant_id)
     if fallback_node is None:
         meta["error"] = "No default node available for fallback"
-        raise LLMResponseError(meta["error"])
+        raise LLMResponseError(
+            meta["error"], code=LlmFailureCode.HTTP
+        )
     from .models import ResuAlignConfig
     fallback_config = ResuAlignConfig(
         provider=fallback_node.get("provider", ""),
