@@ -6,6 +6,8 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from ...app.context import context
+from ...prompt_versions import RESUME_PROFILE as _RESUME_PROFILE_STAGE
+from ...prompt_versions import get_prompt_version
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +84,7 @@ def backfill_diagnosis_snapshots() -> int:
 # 结构化档案抽取（网申回填数据源，#61 预研方案 A）
 # ---------------------------------------------------------------------------
 
-PROFILE_PROMPT_VERSION = "resume-profile:v1"
+PROFILE_PROMPT_VERSION = get_prompt_version(_RESUME_PROFILE_STAGE)
 
 
 class ResumeProfileOut(BaseModel):

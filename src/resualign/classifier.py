@@ -7,6 +7,8 @@ from typing import Any, Sequence
 
 from .job_library import JOB_FUNCTIONS, SENIORITIES
 from .llm import _structured_or_json
+from .prompt_versions import CLASSIFIER as _CLASSIFIER_STAGE
+from .prompt_versions import get_prompt_version
 from .schema_registry import ClassifierResultSchema
 
 _CLASSIFIER_SYSTEM_PROMPT = """PROMPT_VERSION: classifier/v2
@@ -27,7 +29,7 @@ _CLASSIFIER_SYSTEM_PROMPT = """PROMPT_VERSION: classifier/v2
 
 # 运行时版本标记（2026-08-25 新增）。缓存键仍用 sha256(prompt+词表)，
 # 词表变化自动失效；本常量服务于指标/日志追溯。
-CLASSIFIER_PROMPT_VERSION = "v2"
+CLASSIFIER_PROMPT_VERSION = get_prompt_version(_CLASSIFIER_STAGE)
 
 
 def normalize_enum(

@@ -1,5 +1,7 @@
 from .llm import LLMClient, _structured_or_json
 from .models import GapReport
+from .prompt_versions import GAP_ANALYZER as _GAP_ANALYZER_STAGE
+from .prompt_versions import get_prompt_version
 from .schema_registry import GapReportSchema
 
 # PROMPT_VERSION bump: gap_analyzer/v1 -> v2（2026-08-25，对照 04b-PE §2.3）
@@ -9,7 +11,7 @@ from .schema_registry import GapReportSchema
 # - 变更点 3：删除「evidence-oriented 长配对短语」强推与假指令 Max tokens
 # - 缓存影响：版本常量随文本变更 bump，缓存键自动失效（cache.py 以 prompt_version 为键）；
 #   若只改文本不 bump，新旧提示词结果互串缓存（B3 类事故）。
-GAP_ANALYZER_PROMPT_VERSION = "v2"
+GAP_ANALYZER_PROMPT_VERSION = get_prompt_version(_GAP_ANALYZER_STAGE)
 
 
 GAP_ANALYSIS_PROMPT = """PROMPT_VERSION: gap_analyzer/v2

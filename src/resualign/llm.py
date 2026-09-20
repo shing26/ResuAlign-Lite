@@ -13,6 +13,7 @@ from .archive.llm_trace import record_llm_trace, trace_enabled
 from .contracts.errors import KNOWN_LLM_FAILURE_CODES, LlmFailureCode
 from .llm_providers import PROVIDER_DEFAULT_URLS
 from .observability import CallStats, log_event
+from .prompt_versions import DIAGNOSE, get_prompt_version
 
 STRUCTURED_MAX_EXTRA_RETRIES = 2
 _logger = logging.getLogger(__name__)
@@ -1044,7 +1045,7 @@ DIAG_PROMPT = """PROMPT_VERSION: diagnose/v3
 # - 变更点 3：删除假指令 Max tokens/Temperature（拼接缺陷消失），控制权归调用层
 # - 缓存影响：版本常量随文本变更 bump，缓存键自动失效（cache.py 以 prompt_version 为键）；
 #   若只改文本不 bump，新旧提示词结果互串缓存（B3 类事故）。
-DIAG_PROMPT_VERSION = "v3"
+DIAG_PROMPT_VERSION = get_prompt_version(DIAGNOSE)
 # Kept as a private alias for existing imports while provider metadata lives
 # in one place.
 _DEFAULT_PROVIDER_URLS = PROVIDER_DEFAULT_URLS

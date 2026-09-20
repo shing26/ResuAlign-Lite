@@ -7,6 +7,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .llm import LLMClient, _structured_or_json
 from .models import DiffItem, TailoredResume
+from .prompt_versions import BULLET_REWRITE as _BULLET_REWRITE_STAGE
+from .prompt_versions import TAILOR as _TAILOR_STAGE
+from .prompt_versions import get_prompt_version
 from .schema_registry import DiffItemSchema, TailoredResumeSchema
 
 # PROMPT_VERSION bump: bullet_rewrite/v2 -> v3（2026-08-27，黄金核心 1：Few-Shot 强动词库）
@@ -14,7 +17,7 @@ from .schema_registry import DiffItemSchema, TailoredResumeSchema
 # - 变更点 1：新增强动词库（构建/设计/落地/优化…）与禁止弱动词（负责/参与/协助…）
 # - 变更点 2：proposed 强制「强动词 + 具象机制 + 量化插槽」三件套，杜绝「负责系统优化」空话
 # - 缓存影响：版本常量随文本变更 bump，缓存键自动失效。
-BULLET_REWRITE_PROMPT_VERSION = "v3"
+BULLET_REWRITE_PROMPT_VERSION = get_prompt_version(_BULLET_REWRITE_STAGE)
 # PROMPT_VERSION bump: tailor/v1 -> v2（2026-08-25，对照 04b-PE §2.5）
 # 本次升级说明：
 # - 变更点 1：14 条编号规则压缩为 7 条，去掉「用 JD 原话」重复堆砌
@@ -24,7 +27,7 @@ BULLET_REWRITE_PROMPT_VERSION = "v3"
 # - 变更点 3：删除假指令 Max tokens: 1500 / Temperature（editor 90s×2 超时风险）
 # - 变更点 4：provenance/original 必须逐字匹配原文，add 型 original 为空字符串
 # - 缓存影响：版本常量随文本变更 bump，缓存键自动失效。
-TAILOR_PROMPT_VERSION = "v2"
+TAILOR_PROMPT_VERSION = get_prompt_version(_TAILOR_STAGE)
 
 BULLET_REWRITE_PROMPT = """PROMPT_VERSION: bullet_rewrite/v3
 

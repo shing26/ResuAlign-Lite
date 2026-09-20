@@ -24,6 +24,8 @@ import re
 
 from .engine import MAX_RESUME_INPUT_CHARS, truncate_text
 from .llm import LLMClient, LLMResponseError
+from .prompt_versions import RESUME_POLISH as _RESUME_POLISH_STAGE
+from .prompt_versions import get_prompt_version
 from .role_router import _role_timeout
 from .rule_diagnose import _SKILL_KEYWORDS, diagnose_resume_local
 
@@ -281,7 +283,7 @@ POLISH_PROMPT = """PROMPT_VERSION: polish/v2
 
 # 运行时版本标记（2026-08-25 新增）。调用点为 chat_json（无 schema），
 # 版本常量服务于日志/指标追溯（polish 仍走 chat_json，调用点不动）。
-POLISH_PROMPT_VERSION = "v2"
+POLISH_PROMPT_VERSION = get_prompt_version(_RESUME_POLISH_STAGE)
 
 
 def _module_basics(module: dict) -> dict:

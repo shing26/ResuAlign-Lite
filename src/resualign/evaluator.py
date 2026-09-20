@@ -1,5 +1,7 @@
 from .llm import _structured_or_json
 from .models import EvalScore
+from .prompt_versions import EVALUATOR as _EVALUATOR_STAGE
+from .prompt_versions import get_prompt_version
 from .schema_registry import EvalScoreSchema
 from .tailor import parse_diff_with_provenance
 
@@ -9,7 +11,7 @@ from .tailor import parse_diff_with_provenance
 # - 变更点 2：hallucination 判定边界收紧（措辞调整/同义改写不视为幻觉），details 0-5 条
 # - 变更点 3：删除假指令 Max tokens/Temperature
 # - 缓存影响：版本常量随文本变更 bump，缓存键自动失效。
-EVALUATOR_PROMPT_VERSION = "v2"
+EVALUATOR_PROMPT_VERSION = get_prompt_version(_EVALUATOR_STAGE)
 
 
 EVAL_PROMPT = """PROMPT_VERSION: evaluator/v2

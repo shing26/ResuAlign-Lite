@@ -1,5 +1,7 @@
 from .llm import LLMClient, _structured_or_json
 from .models import JDProfile
+from .prompt_versions import JD_PROFILER as _JD_PROFILER_STAGE
+from .prompt_versions import get_prompt_version
 from .schema_registry import JDProfileSchema
 
 # PROMPT_VERSION bump: jd_profiler/v1 -> v2（2026-08-25，对照 04b-PE §2.2）
@@ -10,7 +12,7 @@ from .schema_registry import JDProfileSchema
 # - 变更点 3：删除假指令 Max tokens/Temperature 与 error 分支（空输入由调用层拦截）
 # - 缓存影响：版本常量随文本变更 bump，缓存键自动失效（cache.py 以 prompt_version 为键）；
 #   若只改文本不 bump，新旧提示词结果互串缓存（B3 类事故）。
-JD_PROFILER_PROMPT_VERSION = "v2"
+JD_PROFILER_PROMPT_VERSION = get_prompt_version(_JD_PROFILER_STAGE)
 
 # Fields the current JDProfile model accepts. Cached payloads are filtered
 # against this whitelist on read so legacy/extra keys never reach the

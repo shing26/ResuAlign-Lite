@@ -8,6 +8,8 @@ from typing import Any
 from .jd_profiler import profile_jd
 from .llm import LLMClient
 from .models import GapReport, JDProfile
+from .prompt_versions import JD_ANALYSIS as _JD_ANALYSIS_STAGE
+from .prompt_versions import get_prompt_version
 
 # Cache schema version for the combined JD profile + gap analysis. Bumped to
 # v2 because v1 entries were written with legacy alias keys
@@ -22,7 +24,7 @@ from .models import GapReport, JDProfile
 # - 说明：profile_and_gaps 为死代码路径（M3，无生产调用方），仍保留最小维护
 # - 缓存影响：版本常量随文本变更 bump（api/routers/jobs.py:475-482 预分析缓存键
 #   直接引用本常量，漏 bump 会新旧结果串扰）。
-JD_ANALYSIS_PROMPT_VERSION = "jd-analysis-v3"
+JD_ANALYSIS_PROMPT_VERSION = get_prompt_version(_JD_ANALYSIS_STAGE)
 
 # Fields the current JDProfile model accepts. Cache payloads are filtered
 # against this whitelist on read so extra keys are ignored instead of
