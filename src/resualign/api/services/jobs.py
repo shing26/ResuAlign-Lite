@@ -18,38 +18,10 @@ from ...llm_usage import reset_llm_tenant, set_llm_tenant
 from ...observability import new_request_id, reset_request_id, set_request_id
 from ...role_router import usable_active_node
 from . import llm_probe
+from .alignment_rules import is_noop_diff as _is_noop_diff  # noqa: F401
+from .alignment_writer import AlignmentOutcome, persist_alignment
 
 logger = logging.getLogger(__name__)
-
-
-def _is_noop_diff(diff: dict[str, Any]) -> bool:
-    """Return True when a modify/remove diff changes nothing.
-
-    Phase A2 (2026-08-30): whole-document editors occasionally emit a
-    ``modify`` diff whose ``proposed`` equals ``original`` (model states
-    "no measurable outcomes... remains unchanged" yet still returns a
-    diff). Such no-op suggestions consume UI slots without adding value;
-    they are moved to ``invalid_diffs`` instead of counting as advice.
-    """
-    if diff.get("type") not in ("modify", "remove"):
-        return False
-    original = (diff.get("original") or "").strip()
-    proposed = (diff.get("proposed") or "").strip()
-    return bool(original) and original == proposed
-
-
-def _report_has_gap(gap_report: Any) -> bool:
-    """#111 / ADR-0041 决定 5 分型谓词：缺口证据 = missing/misaligned 非空。
-
-    None/空报告一律视为「无缺口」——7B 摆烂与真无缺口数据同形，宁可保守
-    （零产出但无证据时保 succeeded + 「无缺口 · 无需改写」徽章，由换模型
-    引导兜底），也不凭猜把一轮 run 判成质量失败。
-    """
-    if not isinstance(gap_report, dict):
-        return False
-    return bool(gap_report.get("missing_keywords")) or bool(
-        gap_report.get("misaligned_emphasis")
-    )
 
 
 _LOCAL_HOST_PATTERN = re.compile(
@@ -219,6 +191,28 @@ def _sync_alignment_status(
             new_status,
             library_job_id,
         )
+
+
+def _emit_stage_progress(
+    payload: dict[str, Any], tenant_id: str, stage: str, message: str
+) -> None:
+    """Push a stage update to the workbench SSE session, when one is bound."""
+    library_id = payload.get('library_job_id')
+    if not library_id:
+        return
+    session = context._session_store.find_by_job(library_id, tenant_id)
+    if session is None:
+        return
+    context._session_store.emit(
+        session["session_id"],
+        "job.stage",
+        {
+            "stage": stage,
+            "message": message,
+            "job_id": library_id,
+            "workbench": True,
+        },
+    )
 
 
 def _run_local_fallback_report(resume_text: str, jd_text: str) -> "context.Report":
@@ -748,15 +742,10 @@ def _run_job(job_id: str) -> None:
 def _run_job_holding_gate(job_id: str) -> None:
     """Run one queued analysis job; caller already holds the tenant gate."""
     with context._WORKER_SEMAPHORE:
-        entry = context._payloads.get(job_id)
-        if entry is not None:
-            payload, config, application_id, tenant_id = entry
-        else:
-            stored = context._registry.get_payload(job_id)
-            if stored is None:
-                return
-            payload, tenant_id, application_id = stored
-            config = context.build_config()
+        claimed = _claim_queued_job(job_id)
+        if claimed is None:
+            return
+        payload, config, application_id, tenant_id = claimed
         _llm_tenant_token = set_llm_tenant(tenant_id)
         # P1-1（2026-09-06 安全审查）：入队时若预留了每日 cap 名额，记录
         # 起点调用数；任务结束一次真实 LLM 调用都没发生（缓存全命中或早期
@@ -768,410 +757,314 @@ def _run_job_holding_gate(job_id: str) -> None:
             if reserved_slot
             else None
         )
+        failed_stage: str = ''
+        # t0 is set once the run phase starts; the shared list lets the
+        # failure classifier quote the real elapsed time without NameError
+        # for claims that fail before the run phase.
+        t0: list[float | None] = [None]
+
+        def on_stage(stage: str, message: str) -> None:
+            nonlocal failed_stage
+            failed_stage = stage
+            context._registry.update_progress(job_id, stage, message)
+            _emit_stage_progress(payload, tenant_id, stage, message)
+
         try:
-            job = context._registry.get(job_id)
-            if job is None or job.status != 'queued':
-                return
-            if not context._registry.claim_running(job_id):
-                # Another worker already claimed this job; do not double-run.
-                return
-            _sync_alignment_status(tenant_id, payload, 'running')
-
-            failed_stage: str = ''
-
-            def on_stage(stage: str, message: str) -> None:
-                nonlocal failed_stage
-                failed_stage = stage
-                context._registry.update_progress(job_id, stage, message)
-                library_id = payload.get('library_job_id')
-                if library_id:
-                    session = context._session_store.find_by_job(
-                        library_id, tenant_id
-                    )
-                    if session is not None:
-                        context._session_store.emit(
-                            session["session_id"],
-                            "job.stage",
-                            {
-                                "stage": stage,
-                                "message": message,
-                                "job_id": library_id,
-                                "workbench": True,
-                            },
-                        )
-            jd_text = (payload.get('jd_text') or '').strip()
-            # De-bloat: backend crawling retired; a URL-only queued job
-            # without JD text cannot be recovered and fails with a clear reason.
-            if payload.get('jd_url') and (not jd_text):
-                context._registry.fail(
-                    job_id,
-                    '该岗位只有链接没有 JD 文本：请用浏览器油猴插件抓取，或用「粘贴 JD」方式重新录入',
-                )
-                _sync_alignment_status(tenant_id, payload, 'failed')
-                return
-            if payload.get('optimize_resume'):
-                result = context._run_resume_optimize(
-                    payload, on_stage, tenant_id
-                )
-                context._registry.succeed(job_id, result)
-                return
-            use_local_fallback = (
-                not config.is_llm_configured
-                and usable_active_node(context._llm_nodes, tenant_id) is None
+            result = _execute_claimed_job(
+                job_id, payload, config, tenant_id, on_stage, t0
             )
-            t0 = time.monotonic()
-            if use_local_fallback:
-                report = _run_local_fallback_report(
-                    payload['resume_text'], jd_text
-                )
-            else:
-                report = context.run(
-                    config,
-                    payload['resume_text'],
-                    jd_text,
-                    run_eval=bool(payload.get('run_eval', False)),
-                    granularity=payload.get('granularity', 'medium'),
-                    prompt_focus=payload.get('prompt_focus', 'balanced'),
-                    custom_prompt=payload.get('custom_prompt', ''),
-                    diagnosis=payload.get('precomputed_diagnosis'),
-                    on_stage=on_stage,
-                    cache=context._cache,
-                    tenant=tenant_id,
-                    node_store=context._llm_nodes,
-                    tenant_id=tenant_id,
-                )
-            report.elapsed_seconds = round(time.monotonic() - t0, 1)
-            result = context._report_to_dict(report)
-            if payload.get('diagnosis'):
-                result['diagnosis'] = context._build_diagnosis_section(result)
-                result['diagnosis_source_hash'] = context._content_sha256(payload.get('resume_text') or '')
-                # R4 §3.6：诊断快照内嵌提示词版本（P3，04b-PE 建议），随快照整包
-                # JSON 序列化持久化，便于追溯快照对应的提示词文本。
-                from resualign.llm import DIAG_PROMPT_VERSION
-                result['diagnosis']['prompt_version'] = DIAG_PROMPT_VERSION
-                master_resume_id = payload.get('master_resume_id')
-                if master_resume_id:
-                    try:
-                        context._resumes.set_latest_diagnosis_snapshot(
-                            tenant_id,
-                            master_resume_id,
-                            result['diagnosis'],
-                            result['diagnosis_source_hash'],
-                        )
-                    except Exception:
-                        logger.exception(
-                            'Failed to persist diagnosis snapshot for '
-                            'master resume %s',
-                            master_resume_id,
-                        )
-            # Persist the library alignment product BEFORE marking the
-            # registry job succeeded. If save_alignment crashes, the registry
-            # job stays non-terminal and startup recovery can requeue or flag
-            # it instead of leaving a succeeded job with no durable product.
+            if result is None:
+                return
             library_job_id = payload.get('library_job_id')
             if library_job_id:
-                tailored = result.get('tailored_resume') or {}
-                sections = tailored.get('sections') or {}
-                draft = (
-                    "\n\n".join(str(value) for value in sections.values())
-                    if sections
-                    else None
+                # Persist the library alignment product BEFORE marking the
+                # registry job succeeded. If save_alignment crashes, the
+                # registry job stays non-terminal and startup recovery can
+                # requeue or flag it instead of leaving a succeeded job with
+                # no durable product.
+                outcome = persist_alignment(
+                    tenant_id, job_id, payload, result
                 )
-                eval_score = result.get('eval_score')
-                match_score = (
-                    eval_score.get('jd_match_score')
-                    if eval_score
-                    else None
-                )
-                if match_score is None:
-                    match_score = context._gap_match_score(result)
-                match_detail = None
-                match_reason = None
-                match_updated_at = None
-                library_job = context._jobs.get_job(
-                    tenant_id, library_job_id
-                )
-                if library_job and library_job.get("workbench_resume_id"):
-                    resume = context._resumes.get_master_resume(
-                        tenant_id,
-                        library_job["workbench_resume_id"],
-                    )
-                    resume_text = payload.get("resume_text") or (
-                        resume["content"] if resume else ""
-                    )
-                    if (
-                        resume_text
-                        and result.get("jd_profile")
-                        and result.get("gap_report")
-                    ):
-                        match_detail = context.compute_match_score(
-                            library_job.get("jd_text"),
-                            result.get("jd_profile"),
-                            result.get("gap_report"),
-                            eval_score,
-                            resume_text,
-                            library_job["workbench_resume_id"],
-                        )
-                        match_reason = context.fallback_match_reason(
-                            match_detail,
-                            (result.get("gap_report") or {}).get(
-                                "missing_keywords"
-                            )
-                            or [],
-                        )
-                        match_updated_at = time.time()
-                        match_score = match_detail["total"]
-                session = context._session_store.find_by_job(
-                    library_job_id, tenant_id
-                )
-                if session is not None:
-                    for index, diff in enumerate(result.get("diffs") or []):
-                        context._session_store.emit(
-                            session["session_id"],
-                            "tailor.diff",
-                            {
-                                "job_id": library_job_id,
-                                "diff_id": diff.get("diff_id"),
-                                "index": index,
-                                "tentative": True,
-                            },
-                        )
-                # R4 §3.2：保存对齐时写入组合提示词版本串（旧值 'engine.v1' 过时，
-                # 04-PE 写 jobs.py:572 已修正为最新位置 605）。用局部 import 避免
-                # 顶层循环依赖（本文件走 api_module 间接风格、无顶层提示词 import）。
-                from resualign.evaluator import EVALUATOR_PROMPT_VERSION
-                from resualign.gap_analyzer import GAP_ANALYZER_PROMPT_VERSION
-                from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
-                from resualign.llm import DIAG_PROMPT_VERSION
-                from resualign.tailor import TAILOR_PROMPT_VERSION
-                # Phase A2: drop no-op diffs (original == proposed) from the
-                # accepted advice; fold them into invalid_diffs so the UI can
-                # explain "the model returned no actionable edits".
-                raw_diffs = list(result.get("diffs") or [])
-                # P0（2026-09-06 安全审查 #74）：evaluator 自评判定幻觉时
-                # 硬阻断——本轮 diffs 不作为已验证建议保存，整体降级 invalid
-                # （ADR-0019 零幻觉硬门；此前只在匹配分里扣 5 分，不阻断）。
-                eval_hallucinated = bool(
-                    isinstance(eval_score, dict)
-                    and eval_score.get("hallucination_detected")
-                )
-                if eval_hallucinated and raw_diffs:
-                    blocked = []
-                    for diff in raw_diffs:
-                        diff = dict(diff)
-                        diff["provenance_state"] = "fabricated"
-                        reason = (diff.get("reason") or "").rstrip("；;。 ")
-                        diff["reason"] = (
-                            f"{reason}；真实性评估判定本轮改写存在无依据内容，已整体拦截"
-                            if reason
-                            else "真实性评估判定本轮改写存在无依据内容，已整体拦截"
-                        )
-                        blocked.append(diff)
-                    logger.warning(
-                        "library job %s: evaluator flagged hallucination; "
-                        "blocked %d diff(s) from verified advice",
-                        library_job_id, len(raw_diffs),
-                    )
-                    kept_diffs = []
-                    noop_diffs = []
-                    invalid = list(tailored.get("invalid_diffs") or []) + blocked
-                else:
-                    noop_diffs = [d for d in raw_diffs if _is_noop_diff(d)]
-                    kept_diffs = [d for d in raw_diffs if not _is_noop_diff(d)]
-                    invalid = list(tailored.get("invalid_diffs") or [])
-                    if noop_diffs:
-                        logger.info(
-                            "library job %s: filtered %d no-op diff(s) out of %d",
-                            library_job_id, len(noop_diffs), len(raw_diffs),
-                        )
-                        invalid.extend(noop_diffs)
-                result["diffs"] = kept_diffs
-                if result.get('tailor_degraded'):
-                    alignment_error = (
-                        '改写阶段多次失败，本轮只产出诊断与缺口分析；'
-                        '点击「重新运行对齐」补齐改写建议（已缓存阶段会跳过）'
-                    )
-                elif eval_hallucinated and not kept_diffs:
-                    alignment_error = (
-                        '真实性评估判定本轮改写存在无依据内容，'
-                        '全部建议已拦截；请核对后重试对齐'
-                    )
-                else:
-                    alignment_error = None
-                # ADR-0041 决定 5 分型甲（#111）：有缺口 ∧ usable=0 = 质量
-                # 失败——就该红、可重跑（旧语义「全 noop/全拦截仍 succeeded」
-                # 废除）。「no_output: 」前缀是机读契约，投影据此派生
-                # alignment_reason；无缺口 ∧ usable=0 维持 succeeded，
-                # 由前端渲染「无缺口 · 无需改写」。
-                alignment_status = "succeeded"
-                if not kept_diffs and _report_has_gap(result.get("gap_report")):
-                    alignment_status = "failed"
-                    alignment_error = (
-                        "no_output: "
-                        + (
-                            alignment_error
-                            or "该岗位存在能力/经验缺口，但本轮未产出任何可用改写建议"
-                        )
-                    )
-                try:
-                    context._jobs.save_alignment(
-                        tenant_id,
-                        library_job_id,
-                        jd_profile=result.get('jd_profile'),
-                        gap_report=result.get('gap_report'),
-                        match_score=match_score,
-                        match_score_detail=match_detail,
-                        match_reason=match_reason,
-                        match_updated_at=match_updated_at,
-                        diffs=kept_diffs,
-                        invalid_diffs=invalid,
-                        draft=draft,
-                        eval_score=eval_score,
-                        model=result.get('model') or '',
-                        prompt_version=(
-                            f"engine:diag:{DIAG_PROMPT_VERSION};"
-                            f"profiler:{JD_PROFILER_PROMPT_VERSION};"
-                            f"gap:{GAP_ANALYZER_PROMPT_VERSION};"
-                            f"tailor:{TAILOR_PROMPT_VERSION};"
-                            f"eval:{EVALUATOR_PROMPT_VERSION}"
-                        ),
-                        alignment_status=alignment_status,
-                        usable_diffs=len(kept_diffs),
-                        # tailor 降级 / eval 幻觉拦截 / no_output 分型时把原因
-                        # 写进提示字段：前端橙色徽标与工作台说明都读这里。
-                        last_alignment_error=alignment_error,
-                    )
-                except Exception:
-                    logger.exception(
-                        'Failed to persist alignment for library job %s; '
-                        'keeping analysis job %s non-terminal for recovery',
-                        library_job_id,
-                        job_id,
-                    )
-                    raise
-                # 度量 A：一次产出结果的运行（含 tailor 降级）计一次 run。
-                context._jobs.record_alignment_run(tenant_id)
-                if session is not None:
-                    context._session_store.update(
-                        session["session_id"],
-                        {
-                            "job": context._jobs.get_job(
-                                tenant_id, library_job_id
-                            ),
-                            "alignment": {
-                                "status": alignment_status,
-                                "stage": "done",
-                                "diffs": result.get("diffs") or [],
-                                "invalid_diffs": (
-                                    tailored.get("invalid_diffs") or []
-                                ),
-                                "draft": draft,
-                                "eval_score": eval_score,
-                                "notice": (
-                                    context._alignment_notice(
-                                        result.get("diffs") or [],
-                                        tailored.get("invalid_diffs") or [],
-                                        draft,
-                                    )
-                                ),
-                            },
-                        },
-                    )
-                    context._session_store.emit(
-                        session["session_id"],
-                        "job.result",
-                        {
-                            "job_id": library_job_id,
-                            "result": result,
-                        },
-                    )
+                _notify_alignment_outcome(tenant_id, payload, result, outcome)
             context._registry.succeed(job_id, result)
-            if application_id:
-                try:
-                    context._applications.set_application_job(
-                        tenant_id, application_id, job_id, 'succeeded'
-                    )
-                except Exception:
-                    # The analysis itself succeeded; an application link
-                    # update failure must not flip the job to failed.
-                    logger.exception(
-                        'Failed to link application %s to succeeded job %s',
-                        application_id,
-                        job_id,
-                    )
-        except Exception as exc:
-            # De-bloat: the CrawlError branch was removed with the crawler;
-            # every failure (including LLM/structure errors) now lands here
-            # and is classified into a user-readable reason below.
-            logger.exception('Analysis job %s failed', job_id)
-            # t0 is only bound once the try body reached the run phase; guard
-            # so claims that fail earlier never NameError here.
-            elapsed_secs = (
-                round(time.monotonic() - t0, 1)
-                if 't0' in locals() and t0 is not None
-                else None
+            _link_application_job(
+                tenant_id, application_id, job_id, 'succeeded'
             )
-            if payload.get('diagnosis'):
-                # G4（03-AIE §②-gap G4）：诊断分支不再硬编码「请检查 API Key 与
-                # 网络连接」——经由 _job_failure_detail 按结构化 code 分类归因。
-                error = context._job_failure_detail(
-                    failed_stage or 'diagnose', exc, elapsed_secs
-                ).replace('对齐分析', '诊断任务')
-            elif payload.get('optimize_resume'):
-                error = context._job_failure_detail(
-                    failed_stage, exc, elapsed_secs
-                ).replace('对齐分析', '简历优化')
-            else:
-                error = context._job_failure_detail(
-                    failed_stage, exc, elapsed_secs
-                )
-            context._registry.fail(job_id, error, stage=failed_stage or None)
-            # Phase 3 + A3: persist the failure reason on the library job so a
-            # failed alignment stays diagnosable after the in-memory registry
-            # restarts. Kept as a direct update_job (instead of
-            # _sync_alignment_status) because the sync helper does not carry
-            # last_alignment_error; transition legality is not at risk here —
-            # failed is a terminal state reachable from any live state.
-            library_job_id = payload.get('library_job_id')
-            if library_job_id:
-                try:
-                    context._jobs.update_job(
-                        tenant_id,
-                        library_job_id,
-                        alignment_status='failed',
-                        last_alignment_error=error,
-                    )
-                except Exception:
-                    logger.exception(
-                        'Failed to persist alignment error for library job %s',
-                        library_job_id,
-                    )
-            if application_id:
-                try:
-                    context._applications.set_application_job(tenant_id, application_id, job_id, 'failed')
-                except Exception:
-                    logger.exception(
-                        'Failed to link application %s after failure %s',
-                        application_id,
-                        job_id,
-                    )
+        except Exception as exc:
+            _fail_claimed_job(
+                job_id,
+                payload,
+                tenant_id,
+                application_id,
+                failed_stage,
+                exc,
+                t0[0],
+            )
         finally:
-            reset_llm_tenant(_llm_tenant_token)
-            if calls_before is not None:
-                try:
-                    calls_after = context._llm_usage.get_usage(tenant_id)[
-                        'calls'
-                    ]
-                    if calls_after == calls_before:
-                        context._llm_usage.release_call(tenant_id)
-                except Exception:  # noqa: BLE001 - accounting must not break jobs
-                    logger.exception(
-                        'Failed to release daily LLM slot for job %s', job_id
+            _release_job_resources(
+                job_id, tenant_id, calls_before, _llm_tenant_token
+            )
+
+
+def _claim_queued_job(
+    job_id: str,
+) -> tuple[dict[str, Any], Any, str | None, str] | None:
+    """Resolve the payload/config and atomically claim a queued job.
+
+    Returns ``None`` when the payload is gone or another worker already
+    claimed the job. Keeps the tenant gate held by the caller.
+    """
+    entry = context._payloads.get(job_id)
+    if entry is not None:
+        payload, config, application_id, tenant_id = entry
+    else:
+        stored = context._registry.get_payload(job_id)
+        if stored is None:
+            return None
+        payload, tenant_id, application_id = stored
+        config = context.build_config()
+    job = context._registry.get(job_id)
+    if job is None or job.status != 'queued':
+        return None
+    if not context._registry.claim_running(job_id):
+        # Another worker already claimed this job; do not double-run.
+        return None
+    _sync_alignment_status(tenant_id, payload, 'running')
+    return payload, config, application_id, tenant_id
+
+
+def _execute_claimed_job(
+    job_id: str,
+    payload: dict[str, Any],
+    config: Any,
+    tenant_id: str,
+    on_stage: Any,
+    t0: list[float | None],
+) -> dict[str, Any] | None:
+    """Run the claimed job's actual work; ``None`` means already finalized."""
+    jd_text = (payload.get('jd_text') or '').strip()
+    # De-bloat: backend crawling retired; a URL-only queued job without JD
+    # text cannot be recovered and fails with a clear reason.
+    if payload.get('jd_url') and (not jd_text):
+        context._registry.fail(
+            job_id,
+            '该岗位只有链接没有 JD 文本：请用浏览器油猴插件抓取，或用「粘贴 JD」方式重新录入',
+        )
+        _sync_alignment_status(tenant_id, payload, 'failed')
+        return None
+    if payload.get('optimize_resume'):
+        result = context._run_resume_optimize(payload, on_stage, tenant_id)
+        context._registry.succeed(job_id, result)
+        return None
+    use_local_fallback = (
+        not config.is_llm_configured
+        and usable_active_node(context._llm_nodes, tenant_id) is None
+    )
+    t0[0] = time.monotonic()
+    if use_local_fallback:
+        report = _run_local_fallback_report(payload['resume_text'], jd_text)
+    else:
+        report = context.run(
+            config,
+            payload['resume_text'],
+            jd_text,
+            run_eval=bool(payload.get('run_eval', False)),
+            granularity=payload.get('granularity', 'medium'),
+            prompt_focus=payload.get('prompt_focus', 'balanced'),
+            custom_prompt=payload.get('custom_prompt', ''),
+            diagnosis=payload.get('precomputed_diagnosis'),
+            on_stage=on_stage,
+            cache=context._cache,
+            tenant=tenant_id,
+            node_store=context._llm_nodes,
+            tenant_id=tenant_id,
+        )
+    report.elapsed_seconds = round(time.monotonic() - t0[0], 1)
+    result = context._report_to_dict(report)
+    if payload.get('diagnosis'):
+        result['diagnosis'] = context._build_diagnosis_section(result)
+        result['diagnosis_source_hash'] = context._content_sha256(
+            payload.get('resume_text') or ''
+        )
+        # R4 §3.6：诊断快照内嵌提示词版本（P3，04b-PE 建议），随快照整包
+        # JSON 序列化持久化，便于追溯快照对应的提示词文本。
+        from resualign.llm import DIAG_PROMPT_VERSION
+
+        result['diagnosis']['prompt_version'] = DIAG_PROMPT_VERSION
+        _persist_diagnosis_snapshot(tenant_id, payload, result)
+    return result
+
+
+def _persist_diagnosis_snapshot(
+    tenant_id: str, payload: dict[str, Any], result: dict[str, Any]
+) -> None:
+    """Best-effort diagnosis snapshot persistence for a master resume."""
+    master_resume_id = payload.get('master_resume_id')
+    if not master_resume_id:
+        return
+    try:
+        context._resumes.set_latest_diagnosis_snapshot(
+            tenant_id,
+            master_resume_id,
+            result['diagnosis'],
+            result['diagnosis_source_hash'],
+        )
+    except Exception:
+        logger.exception(
+            'Failed to persist diagnosis snapshot for master resume %s',
+            master_resume_id,
+        )
+
+
+def _link_application_job(
+    tenant_id: str,
+    application_id: str | None,
+    job_id: str,
+    status: str,
+) -> None:
+    """Best-effort application link update; never flips the analysis outcome."""
+    if not application_id:
+        return
+    try:
+        context._applications.set_application_job(
+            tenant_id, application_id, job_id, status
+        )
+    except Exception:
+        logger.exception(
+            'Failed to link application %s to %s job %s',
+            application_id,
+            status,
+            job_id,
+        )
+
+
+def _fail_claimed_job(
+    job_id: str,
+    payload: dict[str, Any],
+    tenant_id: str,
+    application_id: str | None,
+    failed_stage: str,
+    exc: BaseException,
+    started_at: float | None,
+) -> None:
+    """Classify and persist a failed run, then update linked state."""
+    # De-bloat: the CrawlError branch was removed with the crawler; every
+    # failure (including LLM/structure errors) now lands here and is
+    # classified into a user-readable reason below.
+    logger.exception('Analysis job %s failed', job_id)
+    elapsed_secs = (
+        round(time.monotonic() - started_at, 1)
+        if started_at is not None
+        else None
+    )
+    if payload.get('diagnosis'):
+        # G4（03-AIE §②-gap G4）：诊断分支不再硬编码「请检查 API Key 与
+        # 网络连接」——经由 _job_failure_detail 按结构化 code 分类归因。
+        error = context._job_failure_detail(
+            failed_stage or 'diagnose', exc, elapsed_secs
+        ).replace('对齐分析', '诊断任务')
+    elif payload.get('optimize_resume'):
+        error = context._job_failure_detail(
+            failed_stage, exc, elapsed_secs
+        ).replace('对齐分析', '简历优化')
+    else:
+        error = context._job_failure_detail(failed_stage, exc, elapsed_secs)
+    context._registry.fail(job_id, error, stage=failed_stage or None)
+    # Phase 3 + A3: persist the failure reason on the library job so a failed
+    # alignment stays diagnosable after the in-memory registry restarts.
+    # Kept as a direct update_job (instead of _sync_alignment_status) because
+    # the sync helper does not carry last_alignment_error; transition
+    # legality is not at risk here — failed is a terminal state reachable
+    # from any live state.
+    library_job_id = payload.get('library_job_id')
+    if library_job_id:
+        try:
+            context._jobs.update_job(
+                tenant_id,
+                library_job_id,
+                alignment_status='failed',
+                last_alignment_error=error,
+            )
+        except Exception:
+            logger.exception(
+                'Failed to persist alignment error for library job %s',
+                library_job_id,
+            )
+    _link_application_job(tenant_id, application_id, job_id, 'failed')
+
+
+def _release_job_resources(
+    job_id: str,
+    tenant_id: str,
+    calls_before: int | None,
+    llm_tenant_token: Any,
+) -> None:
+    """Reset LLM tenant state, release an unused daily slot, drop the payload."""
+    reset_llm_tenant(llm_tenant_token)
+    if calls_before is not None:
+        try:
+            calls_after = context._llm_usage.get_usage(tenant_id)['calls']
+            if calls_after == calls_before:
+                context._llm_usage.release_call(tenant_id)
+        except Exception:  # noqa: BLE001 - accounting must not break jobs
+            logger.exception(
+                'Failed to release daily LLM slot for job %s', job_id
+            )
+    context._registry.delete_payload(job_id)
+    context._payloads.pop(job_id, None)
+
+
+def _notify_alignment_outcome(
+    tenant_id: str,
+    payload: dict[str, Any],
+    result: dict[str, Any],
+    outcome: "AlignmentOutcome",
+) -> None:
+    """Emit the workbench result events for a persisted alignment run."""
+    library_job_id = outcome.library_job_id
+    session = context._session_store.find_by_job(library_job_id, tenant_id)
+    if session is None:
+        return
+    for index, diff in enumerate(outcome.kept_diffs):
+        context._session_store.emit(
+            session["session_id"],
+            "tailor.diff",
+            {
+                "job_id": library_job_id,
+                "diff_id": diff.get("diff_id"),
+                "index": index,
+                "tentative": True,
+            },
+        )
+    context._session_store.update(
+        session["session_id"],
+        {
+            "job": context._jobs.get_job(tenant_id, library_job_id),
+            "alignment": {
+                "status": outcome.alignment_status,
+                "stage": "done",
+                "diffs": result.get("diffs") or [],
+                "invalid_diffs": outcome.invalid_diffs,
+                "draft": outcome.draft,
+                "eval_score": outcome.eval_score,
+                "notice": (
+                    context._alignment_notice(
+                        result.get("diffs") or [],
+                        outcome.invalid_diffs,
+                        outcome.draft,
                     )
-            context._registry.delete_payload(job_id)
-            context._payloads.pop(job_id, None)
-
-
+                ),
+            },
+        },
+    )
+    context._session_store.emit(
+        session["session_id"],
+        "job.result",
+        {
+            "job_id": library_job_id,
+            "result": result,
+        },
+    )
 def _export_filename(job: dict[str, Any], ext: str) -> str:
     """Build a filesystem-friendly suggested export filename."""
     title = re.sub(r'[\\/:*?"<>|]+', "-", (job.get("title") or "job").strip())
@@ -1466,4 +1359,3 @@ def _export_print_html(
         f"{accepted_html}"
         "</article>"
     )
-
