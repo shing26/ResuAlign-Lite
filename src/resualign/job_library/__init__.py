@@ -49,6 +49,291 @@ __all__ = [
 # （对齐 vs 未对齐简历的通过率）。空串清除（ADR-0027 clear-on-empty）。
 APPLICATION_RESULTS = ("screen_pass", "ats_reject", "no_response", "other")
 
+_JOB_UPDATE_PARAMETERS = (
+    "title",
+    "jd_text",
+    "company",
+    "location",
+    "salary_min",
+    "salary_max",
+    "salary_currency",
+    "source_type",
+    "source_url",
+    "job_function",
+    "seniority",
+    "tech_tags",
+    "status",
+    "classification_pending",
+    "final_draft",
+    "final_draft_updated_at",
+    "final_draft_version",
+    "posting_date",
+    "applied_at",
+    "next_step",
+    "notes",
+    "offer_at",
+    "rejected_at",
+    "next_step_due_at",
+    "interview_stage",
+    "match_stale",
+    "jd_profile",
+    "gap_report",
+    "match_score",
+    "match_score_detail",
+    "match_reason",
+    "match_updated_at",
+    "alignment_status",
+    "diffs",
+    "invalid_diffs",
+    "draft",
+    "eval_score",
+    "model",
+    "prompt_version",
+    "generated_at",
+    "workbench_job_id",
+    "workbench_resume_id",
+    "tailor_granularity",
+    "tailor_focus",
+    "custom_prompt",
+    "allowed_job_functions",
+    "allowed_seniorities",
+    "last_alignment_error",
+    "application_result",
+    "deadline",
+)
+
+# Policy inputs for enum validation. They are never persisted as columns.
+_JOB_UPDATE_CONSTRAINT_PARAMETERS = (
+    "allowed_job_functions",
+    "allowed_seniorities",
+)
+
+
+def _collect_job_update_fields(scope: dict[str, Any]) -> dict[str, Any]:
+    """Snapshot ``update_job`` parameters plus enum-validation policy inputs."""
+    fields = {name: scope[name] for name in _JOB_UPDATE_PARAMETERS}
+    fields.update(
+        {name: scope[name] for name in _JOB_UPDATE_CONSTRAINT_PARAMETERS}
+    )
+    return fields
+
+
+_JOB_UPDATE_SIMPLE_FIELDS = (
+    ("title", "title", lambda _store, value: value.strip() or "未命名岗位"),
+    ("jd_text", "jd_text", lambda _store, value: value.strip()),
+    ("company", "company", None),
+    ("location", "location", None),
+    ("salary_min", "salary_min", None),
+    ("salary_max", "salary_max", None),
+    ("salary_currency", "salary_currency", None),
+    ("source_type", "source_type", None),
+    ("source_url", "source_url", None),
+    ("job_function", "job_function", None),
+    ("seniority", "seniority", None),
+    ("status", "status", None),
+    ("classification_pending", "classification_pending", None),
+    ("final_draft", "final_draft", None),
+    ("final_draft_updated_at", "final_draft_updated_at", None),
+    ("final_draft_version", "final_draft_version", None),
+    ("posting_date", "posting_date", None),
+    ("match_stale", "match_stale", None),
+    ("match_score", "match_score", None),
+    ("match_reason", "match_reason", None),
+    ("match_updated_at", "match_updated_at", None),
+    ("alignment_status", "alignment_status", None),
+    ("draft", "draft", None),
+    ("model", "model", None),
+    ("prompt_version", "prompt_version", None),
+    ("generated_at", "generated_at", None),
+    ("workbench_job_id", "workbench_job_id", None),
+    ("workbench_resume_id", "workbench_resume_id", None),
+    ("tailor_granularity", "tailor_granularity", None),
+    ("tailor_focus", "tailor_focus", None),
+    ("custom_prompt", "custom_prompt", None),
+    ("last_alignment_error", "last_alignment_error", None),
+)
+
+_JOB_UPDATE_JSON_FIELDS = (
+    (
+        "tech_tags",
+        "tech_tags",
+        lambda store, value: json.dumps(
+            store._normalize_tags(value), ensure_ascii=False
+        ),
+    ),
+    ("jd_profile", "jd_profile_json", lambda _store, value: json.dumps(
+        value, ensure_ascii=False
+    )),
+    ("gap_report", "gap_report_json", lambda _store, value: json.dumps(
+        value, ensure_ascii=False
+    )),
+    (
+        "match_score_detail",
+        "match_score_detail_json",
+        lambda _store, value: json.dumps(value, ensure_ascii=False),
+    ),
+    ("diffs", "diffs_json", lambda _store, value: json.dumps(
+        value, ensure_ascii=False
+    )),
+    ("invalid_diffs", "invalid_diffs_json", lambda _store, value: json.dumps(
+        value, ensure_ascii=False
+    )),
+    ("eval_score", "eval_score_json", lambda _store, value: json.dumps(
+        value, ensure_ascii=False
+    )),
+)
+
+_JOB_UPDATE_CLEARABLE_FIELDS = (
+    ("applied_at", "applied_at"),
+    ("next_step", "next_step"),
+    ("notes", "notes"),
+    ("offer_at", "offer_at"),
+    ("rejected_at", "rejected_at"),
+    ("next_step_due_at", "next_step_due_at"),
+    ("interview_stage", "interview_stage"),
+    ("application_result", "application_result"),
+    ("deadline", "deadline"),
+)
+
+
+def _validate_job_update(fields: dict[str, Any]) -> None:
+    functions = _effective_choices(
+        JOB_FUNCTIONS, fields.get("allowed_job_functions")
+    )
+    seniorities = _effective_choices(
+        SENIORITIES, fields.get("allowed_seniorities")
+    )
+    job_function = fields.get("job_function")
+    if job_function is not None and job_function not in functions:
+        raise UserStoreError(f"Invalid job_function: {job_function}")
+    seniority = fields.get("seniority")
+    if seniority is not None and seniority not in seniorities:
+        raise UserStoreError(f"Invalid seniority: {seniority}")
+    if fields.get("status") is not None:
+        fields["status"] = canonical_status(_validate_status(fields["status"]))
+    classification_pending = fields.get("classification_pending")
+    if (
+        classification_pending is not None
+        and classification_pending not in (0, 1)
+    ):
+        raise UserStoreError("classification_pending must be 0 or 1")
+    final_draft = fields.get("final_draft")
+    if final_draft is not None and not final_draft.strip():
+        raise UserStoreError("Final draft cannot be empty")
+    tailor_granularity = fields.get("tailor_granularity")
+    if (
+        tailor_granularity is not None
+        and tailor_granularity not in TAILOR_GRANULARITIES
+    ):
+        raise UserStoreError(
+            f"Invalid tailor_granularity: {tailor_granularity}"
+        )
+    tailor_focus = fields.get("tailor_focus")
+    if tailor_focus is not None and tailor_focus not in TAILOR_FOCUSES:
+        raise UserStoreError(f"Invalid tailor_focus: {tailor_focus}")
+    if fields.get("custom_prompt") is not None:
+        fields["custom_prompt"] = fields["custom_prompt"].strip()
+    match_stale = fields.get("match_stale")
+    if match_stale is not None and match_stale not in (0, 1):
+        raise UserStoreError("match_stale must be 0 or 1")
+    application_result = fields.get("application_result")
+    if (
+        application_result is not None
+        and application_result != ""
+        and application_result not in APPLICATION_RESULTS
+    ):
+        raise UserStoreError(
+            f"Invalid application_result: {application_result}"
+        )
+    jd_text = fields.get("jd_text")
+    if jd_text is not None and not jd_text.strip():
+        raise UserStoreError("Job description text cannot be empty")
+    alignment_status = fields.get("alignment_status")
+    if alignment_status is not None and alignment_status not in (
+        "idle",
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+    ):
+        raise UserStoreError(f"Invalid alignment_status: {alignment_status}")
+
+
+def _resolve_job_update_lifecycle(
+    store: "JobLibraryStore",
+    tenant_id: str,
+    job_id: str,
+    fields: dict[str, Any],
+) -> tuple[bool, str | None, bool]:
+    """Resolve status transitions and return ``(append_only, applied_at, found)``."""
+    status = fields.get("status")
+    if status is None:
+        return False, None, True
+    current = store.get_job(tenant_id, job_id)
+    if current is None:
+        return False, None, False
+    if (
+        canonical_status(status) == "applied"
+        and canonical_status(current["status"]) != "draft"
+    ):
+        return (
+            True,
+            fields.get("applied_at")
+            or current.get("applied_at")
+            or time.strftime("%Y-%m-%d"),
+            True,
+        )
+    lifecycle = status_lifecycle_fields(
+        current,
+        status,
+        provided={
+            "applied_at": fields.get("applied_at"),
+            "offer_at": fields.get("offer_at"),
+            "rejected_at": fields.get("rejected_at"),
+            "next_step": fields.get("next_step"),
+            "next_step_due_at": fields.get("next_step_due_at"),
+            "interview_stage": fields.get("interview_stage"),
+        },
+    )
+    for field, value in lifecycle.items():
+        if field in fields:
+            fields[field] = value
+    return False, None, True
+
+
+def _build_job_update_assignments(
+    store: "JobLibraryStore",
+    fields: dict[str, Any],
+    *,
+    skip_status: bool,
+) -> tuple[list[str], list[Any]]:
+    sets = ["updated_at = ?"]
+    values: list[Any] = [time.time()]
+    for field, column, converter in _JOB_UPDATE_SIMPLE_FIELDS:
+        value = fields.get(field)
+        if value is None or (field == "status" and skip_status):
+            continue
+        if converter is not None:
+            value = converter(store, value)
+        sets.append(f"{column} = ?")
+        values.append(value)
+    for field, column, converter in _JOB_UPDATE_JSON_FIELDS:
+        value = fields.get(field)
+        if value is None:
+            continue
+        sets.append(f"{column} = ?")
+        values.append(converter(store, value))
+    for field, column in _JOB_UPDATE_CLEARABLE_FIELDS:
+        value = fields.get(field)
+        if value is None:
+            continue
+        if value == "":
+            sets.append(f"{column} = NULL")
+        else:
+            sets.append(f"{column} = ?")
+            values.append(value)
+    return sets, values
+
 _JOB_LIBRARY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS library_jobs (
     job_id TEXT PRIMARY KEY,
@@ -885,301 +1170,58 @@ class JobLibraryStore(_SqliteStore):
         string clears the stored value to NULL (U10), while None leaves it
         untouched.
         """
-        functions = _effective_choices(JOB_FUNCTIONS, allowed_job_functions)
-        seniorities = _effective_choices(SENIORITIES, allowed_seniorities)
-        if job_function is not None and job_function not in functions:
-            raise UserStoreError(f"Invalid job_function: {job_function}")
-        if seniority is not None and seniority not in seniorities:
-            raise UserStoreError(f"Invalid seniority: {seniority}")
-        if status is not None:
-            status = canonical_status(_validate_status(status))
-        if (
-            classification_pending is not None
-            and classification_pending not in (0, 1)
-        ):
-            raise UserStoreError(
-                "classification_pending must be 0 or 1"
+        updates = _collect_job_update_fields(locals())
+        _validate_job_update(updates)
+        append_only_snapshot, snapshot_applied_at, lifecycle_found = (
+            _resolve_job_update_lifecycle(
+                self, tenant_id, job_id, updates
             )
-        if final_draft is not None and not final_draft.strip():
-            raise UserStoreError("Final draft cannot be empty")
-        if (
-            tailor_granularity is not None
-            and tailor_granularity not in TAILOR_GRANULARITIES
-        ):
-            raise UserStoreError(
-                f"Invalid tailor_granularity: {tailor_granularity}"
-            )
-        if tailor_focus is not None and tailor_focus not in TAILOR_FOCUSES:
-            raise UserStoreError(f"Invalid tailor_focus: {tailor_focus}")
-        if custom_prompt is not None:
-            custom_prompt = custom_prompt.strip()
-        if match_stale is not None and match_stale not in (0, 1):
-            raise UserStoreError("match_stale must be 0 or 1")
-        if (
-            application_result is not None
-            and application_result != ""
-            and application_result not in APPLICATION_RESULTS
-        ):
-            raise UserStoreError(
-                f"Invalid application_result: {application_result}"
-            )
-        if jd_text is not None and not jd_text.strip():
-            raise UserStoreError("Job description text cannot be empty")
-
-        lifecycle: dict[str, str] = {}
-        append_only_snapshot = False
-        snapshot_applied_at: str | None = None
-        if status is not None:
-            current = self.get_job(tenant_id, job_id)
-            if current is None:
-                return None
-            if (
-                canonical_status(status) == "applied"
-                and canonical_status(current["status"]) != "draft"
-            ):
-                # Re-recording an already-submitted job appends a new
-                # immutable snapshot without downgrading status or rewriting
-                # the existing timeline history (ADR-0028).
-                append_only_snapshot = True
-                snapshot_applied_at = (
-                    applied_at
-                    or current.get("applied_at")
-                    or time.strftime("%Y-%m-%d")
-                )
-            else:
-                lifecycle = status_lifecycle_fields(
-                    current,
-                    status,
-                    provided={
-                        "applied_at": applied_at,
-                        "offer_at": offer_at,
-                        "rejected_at": rejected_at,
-                        "next_step": next_step,
-                        "next_step_due_at": next_step_due_at,
-                        "interview_stage": interview_stage,
-                    },
-                )
-                for field, value in lifecycle.items():
-                    if field == "applied_at":
-                        applied_at = value
-                    elif field == "offer_at":
-                        offer_at = value
-                    elif field == "rejected_at":
-                        rejected_at = value
-                    elif field == "next_step":
-                        next_step = value
-                    elif field == "next_step_due_at":
-                        next_step_due_at = value
-                    elif field == "interview_stage":
-                        interview_stage = value
-
-        if append_only_snapshot:
-            # ADR-0028: re-recording an applied job freezes a new snapshot
-            # without downgrading the stored status or rewriting the existing
-            # timeline history. An explicitly provided applied_at is still
-            # written so a 200 response never silently drops it (Bug-02);
-            # None still leaves the stored value unchanged and "" still
-            # clears per the clear-on-empty contract.
-            pass
-
-        sets = ["updated_at = ?"]
-        values: list[Any] = [time.time()]
-        if title is not None:
-            sets.append("title = ?")
-            values.append(title.strip() or "未命名岗位")
-        if jd_text is not None:
-            sets.append("jd_text = ?")
-            values.append(jd_text.strip())
-        if company is not None:
-            sets.append("company = ?")
-            values.append(company)
-        if location is not None:
-            sets.append("location = ?")
-            values.append(location)
-        if salary_min is not None:
-            sets.append("salary_min = ?")
-            values.append(salary_min)
-        if salary_max is not None:
-            sets.append("salary_max = ?")
-            values.append(salary_max)
-        if salary_currency is not None:
-            sets.append("salary_currency = ?")
-            values.append(salary_currency)
-        if source_type is not None:
-            sets.append("source_type = ?")
-            values.append(source_type)
-        if source_url is not None:
-            sets.append("source_url = ?")
-            values.append(source_url)
-        if job_function is not None:
-            sets.append("job_function = ?")
-            values.append(job_function)
-        if seniority is not None:
-            sets.append("seniority = ?")
-            values.append(seniority)
-        if tech_tags is not None:
-            sets.append("tech_tags = ?")
-            values.append(
-                json.dumps(self._normalize_tags(tech_tags), ensure_ascii=False)
-            )
-        if status is not None and not append_only_snapshot:
-            sets.append("status = ?")
-            values.append(status)
-        if classification_pending is not None:
-            sets.append("classification_pending = ?")
-            values.append(classification_pending)
-        if final_draft is not None:
-            sets.append("final_draft = ?")
-            values.append(final_draft)
-        if final_draft_updated_at is not None:
-            sets.append("final_draft_updated_at = ?")
-            values.append(final_draft_updated_at)
-        if final_draft_version is not None:
-            sets.append("final_draft_version = ?")
-            values.append(final_draft_version)
-        if posting_date is not None:
-            sets.append("posting_date = ?")
-            values.append(posting_date)
-        # Timeline fields: None = unchanged, "" = clear to NULL (U10).
-        if applied_at is not None:
-            if applied_at == "":
-                sets.append("applied_at = NULL")
-            else:
-                sets.append("applied_at = ?")
-                values.append(applied_at)
-        if next_step is not None:
-            if next_step == "":
-                sets.append("next_step = NULL")
-            else:
-                sets.append("next_step = ?")
-                values.append(next_step)
-        if notes is not None:
-            if notes == "":
-                sets.append("notes = NULL")
-            else:
-                sets.append("notes = ?")
-                values.append(notes)
-        if offer_at is not None:
-            if offer_at == "":
-                sets.append("offer_at = NULL")
-            else:
-                sets.append("offer_at = ?")
-                values.append(offer_at)
-        if rejected_at is not None:
-            if rejected_at == "":
-                sets.append("rejected_at = NULL")
-            else:
-                sets.append("rejected_at = ?")
-                values.append(rejected_at)
-        if next_step_due_at is not None:
-            if next_step_due_at == "":
-                sets.append("next_step_due_at = NULL")
-            else:
-                sets.append("next_step_due_at = ?")
-                values.append(next_step_due_at)
-        if interview_stage is not None:
-            if interview_stage == "":
-                sets.append("interview_stage = NULL")
-            else:
-                sets.append("interview_stage = ?")
-                values.append(interview_stage)
-        if application_result is not None:
-            if application_result == "":
-                sets.append("application_result = NULL")
-            else:
-                sets.append("application_result = ?")
-                values.append(application_result)
-        if deadline is not None:
-            if deadline == "":
-                sets.append("deadline = NULL")
-            else:
-                sets.append("deadline = ?")
-                values.append(deadline)
-        if match_stale is not None:
-            sets.append("match_stale = ?")
-            values.append(match_stale)
-        if jd_profile is not None:
-            sets.append("jd_profile_json = ?")
-            values.append(
-                json.dumps(jd_profile, ensure_ascii=False)
-            )
-        if gap_report is not None:
-            sets.append("gap_report_json = ?")
-            values.append(
-                json.dumps(gap_report, ensure_ascii=False)
-            )
-        if match_score is not None:
-            sets.append("match_score = ?")
-            values.append(match_score)
-        if match_score_detail is not None:
-            sets.append("match_score_detail_json = ?")
-            values.append(
-                json.dumps(match_score_detail, ensure_ascii=False)
-            )
-        if match_reason is not None:
-            sets.append("match_reason = ?")
-            values.append(match_reason)
-        if match_updated_at is not None:
-            sets.append("match_updated_at = ?")
-            values.append(match_updated_at)
-        if alignment_status is not None:
-            if alignment_status not in (
-                "idle",
-                "queued",
-                "running",
-                "succeeded",
-                "failed",
-            ):
-                raise UserStoreError(
-                    f"Invalid alignment_status: {alignment_status}"
-                )
-            sets.append("alignment_status = ?")
-            values.append(alignment_status)
-        if diffs is not None:
-            sets.append("diffs_json = ?")
-            values.append(json.dumps(diffs, ensure_ascii=False))
-        if invalid_diffs is not None:
-            sets.append("invalid_diffs_json = ?")
-            values.append(json.dumps(invalid_diffs, ensure_ascii=False))
-        if draft is not None:
-            sets.append("draft = ?")
-            values.append(draft)
-        if eval_score is not None:
-            sets.append("eval_score_json = ?")
-            values.append(json.dumps(eval_score, ensure_ascii=False))
-        if model is not None:
-            sets.append("model = ?")
-            values.append(model)
-        if prompt_version is not None:
-            sets.append("prompt_version = ?")
-            values.append(prompt_version)
-        if generated_at is not None:
-            sets.append("generated_at = ?")
-            values.append(generated_at)
-        if last_alignment_error is not None:
-            sets.append("last_alignment_error = ?")
-            values.append(last_alignment_error)
-        if workbench_job_id is not None:
-            sets.append("workbench_job_id = ?")
-            values.append(workbench_job_id)
-        if workbench_resume_id is not None:
-            sets.append("workbench_resume_id = ?")
-            values.append(workbench_resume_id)
-        if tailor_granularity is not None:
-            sets.append("tailor_granularity = ?")
-            values.append(tailor_granularity)
-        if tailor_focus is not None:
-            sets.append("tailor_focus = ?")
-            values.append(tailor_focus)
-        if custom_prompt is not None:
-            sets.append("custom_prompt = ?")
-            values.append(custom_prompt)
-        recompute_dedupe = (
-            jd_text is not None
-            or source_type is not None
-            or source_url is not None
         )
+        if not lifecycle_found:
+            return None
+        sets, values = _build_job_update_assignments(
+            self, updates, skip_status=append_only_snapshot
+        )
+        dedupe_fields = (
+            updates.get("jd_text"),
+            updates.get("source_type"),
+            updates.get("source_url"),
+        )
+        if not self._persist_job_update(
+            tenant_id,
+            job_id,
+            sets,
+            values,
+            recompute_dedupe=any(value is not None for value in dedupe_fields),
+            jd_text=dedupe_fields[0],
+            source_type=dedupe_fields[1],
+            source_url=dedupe_fields[2],
+            append_only_snapshot=append_only_snapshot,
+            snapshot_applied_at=snapshot_applied_at,
+            status=updates.get("status"),
+        ):
+            return None
+        return self.get_job(tenant_id, job_id)
 
+    def _persist_job_update(
+        self,
+        tenant_id: str,
+        job_id: str,
+        sets: list[str],
+        values: list[Any],
+        *,
+        recompute_dedupe: bool,
+        jd_text: str | None,
+        source_type: str | None,
+        source_url: str | None,
+        append_only_snapshot: bool,
+        snapshot_applied_at: str | None,
+        status: str | None,
+    ) -> bool:
+        """Write one job update and any applied-snapshot row atomically."""
+        should_snapshot = append_only_snapshot or (
+            status is not None and canonical_status(status) == "applied"
+        )
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
@@ -1231,11 +1273,7 @@ class JobLibraryStore(_SqliteStore):
                         "Duplicate job already exists"
                     ) from exc
                 if cursor.rowcount == 0:
-                    return None
-                should_snapshot = append_only_snapshot or (
-                    status is not None
-                    and canonical_status(status) == "applied"
-                )
+                    return False
                 if should_snapshot:
                     snapshot_row = conn.execute(
                         "SELECT final_draft, match_score, "
@@ -1265,7 +1303,7 @@ class JobLibraryStore(_SqliteStore):
                                 )
                             ),
                         )
-        return self.get_job(tenant_id, job_id)
+        return True
 
     @staticmethod
     def _bump_alignment_metrics(

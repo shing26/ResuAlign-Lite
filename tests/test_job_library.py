@@ -4,6 +4,7 @@ import sqlite3
 
 import pytest
 
+import resualign.job_library as job_library
 from resualign.job_library import (
     JOB_FUNCTIONS,
     SENIORITIES,
@@ -392,6 +393,145 @@ def test_update_job_missing_returns_none(db_path):
     store = _store(db_path)
 
     assert store.update_job("tenant-1", "missing", title="Anything") is None
+
+
+_PATCH_EXPECTED = {
+    "title": "Staff Platform Engineer",
+    "jd_text": "Rust platform role with Kubernetes.",
+    "company": "Initech",
+    "location": "Beijing",
+    "salary_min": 31000,
+    "salary_max": 49000,
+    "salary_currency": "USD",
+    "source_type": "url",
+    "source_url": "https://example.com/jobs/patch",
+    "job_function": JOB_FUNCTIONS[0],
+    "seniority": SENIORITIES[0],
+    "tech_tags": ["Rust", "Kubernetes"],
+    "status": "已投递",
+    "classification_pending": 1,
+    "final_draft": "Patched final draft",
+    "final_draft_updated_at": 4321.5,
+    "final_draft_version": 7,
+    "posting_date": "2026-09-01",
+    "applied_at": "2026-09-02",
+    "next_step": "Technical screen",
+    "notes": "Recruiter prefers async.",
+    "offer_at": "2026-09-10",
+    "rejected_at": "2026-09-11",
+    "next_step_due_at": "2026-09-08",
+    "interview_stage": "onsite",
+    "match_stale": 1,
+    "jd_profile": {"title": "Platform Engineer", "skills": ["Rust"]},
+    "gap_report": {"missing_keywords": ["Kubernetes"]},
+    "match_score": 88.5,
+    "match_score_detail": {"skill": 90, "experience": 87},
+    "match_reason": "Strong overlap on systems work.",
+    "match_updated_at": 8765.5,
+    "alignment_status": "succeeded",
+    "diffs": [{"section": "summary", "proposed": "Patched"}],
+    "invalid_diffs": [{"reason": "noop"}],
+    "draft": "Draft body",
+    "eval_score": {"overall": 0.91},
+    "model": "meta/muse-glimmer-30b",
+    "prompt_version": "v3",
+    "generated_at": 9999.5,
+    "workbench_job_id": "wj-patch",
+    "workbench_resume_id": "wr-patch",
+    "tailor_granularity": "medium",
+    "tailor_focus": "skills",
+    "custom_prompt": "Keep it concise.",
+    "last_alignment_error": "none",
+    "application_result": "screen_pass",
+    "deadline": "2026-09-30",
+}
+
+
+def test_update_parameter_whitelist_covers_every_buildable_field():
+    covered = {
+        field
+        for field, _column, _converter in job_library._JOB_UPDATE_SIMPLE_FIELDS
+    }
+    covered.update(
+        field
+        for field, _column, _converter in job_library._JOB_UPDATE_JSON_FIELDS
+    )
+    covered.update(
+        field for field, _column in job_library._JOB_UPDATE_CLEARABLE_FIELDS
+    )
+    persisted = set(job_library._JOB_UPDATE_PARAMETERS) - set(
+        job_library._JOB_UPDATE_CONSTRAINT_PARAMETERS
+    )
+    assert set(_PATCH_EXPECTED) == persisted
+    assert covered == persisted
+
+
+def test_update_whitelist_and_expected_payload_are_in_sync(db_path):
+    store = _store(db_path)
+    job = store.create_job(**_job_payload())
+
+    assert set(job) <= set(job_library._JOB_UPDATE_PARAMETERS) | {
+        "job_id",
+        "tenant_id",
+        "usable_diffs",
+        "has_gap",
+        "alignment_reason",
+        "analysis_ready",
+        "status_canonical",
+        "status_label",
+        "created_at",
+        "updated_at",
+    }
+
+
+_PERSISTED_UPDATE_FIELDS = tuple(
+    field
+    for field in job_library._JOB_UPDATE_PARAMETERS
+    if field not in job_library._JOB_UPDATE_CONSTRAINT_PARAMETERS
+)
+
+
+@pytest.mark.parametrize("field", _PERSISTED_UPDATE_FIELDS)
+def test_update_job_patches_each_field_independently(db_path, field):
+    store = _store(db_path)
+    job = store.create_job(**_job_payload())
+    baseline = store.get_job("tenant-1", job["job_id"])
+    expected = _PATCH_EXPECTED[field]
+
+    updated = store.update_job("tenant-1", job["job_id"], **{field: expected})
+
+    if field == "status":
+        assert updated[field] == "applied"
+    elif field == "match_stale":
+        assert updated[field] is True
+    else:
+        assert updated[field] == expected
+    derived_changes = {
+        "updated_at",
+        "status_canonical",
+        "status_label",
+    }
+    if field == "status":
+        derived_changes |= {"applied_at", "analysis_ready"}
+    if field == "gap_report":
+        derived_changes |= {"has_gap", "alignment_reason"}
+    if field == "alignment_status":
+        derived_changes |= {"alignment_reason", "analysis_ready"}
+    for other in baseline:
+        if other == field or other in derived_changes:
+            continue
+        assert updated[other] == baseline[other]
+
+
+@pytest.mark.parametrize("field", _PERSISTED_UPDATE_FIELDS)
+def test_update_job_leaves_each_field_untouched_when_none(db_path, field):
+    store = _store(db_path)
+    job = store.create_job(**_job_payload())
+    baseline = store.get_job("tenant-1", job["job_id"])
+
+    updated = store.update_job("tenant-1", job["job_id"], **{field: None})
+
+    assert updated[field] == baseline[field]
 
 
 _LEGACY_SCHEMA = """
