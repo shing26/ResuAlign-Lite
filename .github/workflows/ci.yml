@@ -73,6 +73,10 @@ jobs:
         run: python benchmarks/run_benchmark.py --offline
         env:
           PYTHONPATH: src
+      - name: Degradation fault-injection evidence
+        run: python benchmarks/degradation_benchmark.py --trials 5
+        env:
+          PYTHONPATH: src
 
   playwright-smoke:
     name: Stage 3 - Playwright smoke

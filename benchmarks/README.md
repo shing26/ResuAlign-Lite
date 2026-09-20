@@ -53,3 +53,18 @@ per-case report, expected direction, and keyword-overlap metrics, and prints a
 readable summary to stdout.
 
 Use `--cases-dir` and `--results-dir` to override the default directories.
+
+## Evidence hardening benchmarks
+
+These scripts produce the reproducible numbers used by ADR-0054. They never
+call a real model.
+
+```powershell
+$env:PYTHONPATH='src'
+python benchmarks\degradation_benchmark.py --trials 5 --json-out degradation.json
+```
+
+- `degradation_benchmark.py` injects HTTP 503 failures into a local primary
+  node, verifies breaker trip/fallback/recovery, and records recovery time.
+
+Generated JSON belongs in CI artifacts or a temporary directory, not in git.
