@@ -63,6 +63,7 @@ call a real model.
 $env:PYTHONPATH='src'
 python benchmarks\degradation_benchmark.py --trials 5 --json-out degradation.json
 python benchmarks\capacity_benchmark.py --check-baseline --json-out capacity.json
+python benchmarks\cold_start_benchmark.py --trials 5 --check-baseline --json-out cold-start.json
 ```
 
 - `degradation_benchmark.py` injects HTTP 503 failures into a local primary
@@ -70,8 +71,11 @@ python benchmarks\capacity_benchmark.py --check-baseline --json-out capacity.jso
 - `capacity_benchmark.py` runs a deterministic API mix against an isolated
   uvicorn process and records QPS plus P50/P95/P99 by concurrency, compared
   against `benchmarks/baselines/capacity-ci.json`.
+- `cold_start_benchmark.py` records native process cold starts and, with
+  Docker, no-cache image build plus empty-volume container startup, compared
+  against `benchmarks/baselines/cold-start-ci.json`.
 
-The capacity gate is enforced on CI (`GITHUB_ACTIONS=true`);
+The capacity and cold-start gates are enforced on CI (`GITHUB_ACTIONS=true`);
 local Windows runs print `ADVISORY` instead of failing (ADR-0054). Set
 `RESUALIGN_BENCHMARK_STRICT=1` to force gating locally.
 

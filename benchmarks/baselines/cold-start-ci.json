@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-21T06:24:10+00:00",
+  "git_sha": "3c18743931f2de1ae949d3f38efd9df3cbb0fb05",
+  "platform": "Linux (GitHub Actions ubuntu-latest, Python 3.11.16)",
+  "python": "3.11.16",
+  "command": "python benchmarks/cold_start_benchmark.py --trials 5 --check-baseline",
+  "note": "Established by the first Docker-capable CI run (run 35568275867, Stage 4). container_startup_ms is gated as max(2x baseline, baseline + 5000ms); no-cache image build time is recorded only. Refresh only via an explicit --update-baseline from a CI artifact.",
+  "native_p50_ms": 616.8,
+  "native_p95_ms": 1260.9,
+  "container_startup_ms": 808.5
+}
