@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | B9 测试体系 | 已完成 | 本节测试快照与 CI artifact |
 | B3 超时与熔断 | 已完成 | `benchmarks/degradation_benchmark.py` |
-| B6 性能与容量 | 待补 | `benchmarks/capacity_benchmark.py` |
+| B6 性能与容量 | 已完成（正式数字待 CI 刷新） | `benchmarks/capacity_benchmark.py` |
 | B11 可部署与复现 | 待补 | `benchmarks/cold_start_benchmark.py` |
 
 ## B9 — 测试数字现场核验
@@ -94,3 +94,42 @@ python benchmarks\degradation_benchmark.py --trials 5 --json-out degradation.jso
 恢复耗时 p50 = 2016 ms（Windows 交叉验证；正式环境为 Ubuntu CI）。
 现有 `tests/test_llm_node_breaker.py` 等单测保留为语义契约，本脚本提供
 “现场触发数字”，并作为 CI Stage 2 门禁（任一不变量失败即红）。
+
+## B6 — 确定性 API 容量曲线
+
+`benchmarks/capacity_benchmark.py` 在独立 uvicorn 子进程 + 临时
+`RESUALIGN_DATA_DIR` 下重放固定 50/25/25 负载（`POST /api/quick-eval`、
+`GET /api/jobs`、`GET /health`），无真实 LLM、凭据或外网。并发档位
+`1,2,4,8,16,32`，每档 200 请求、重复 3 次取中位数。
+
+```powershell
+$env:PYTHONPATH='src'
+python benchmarks\capacity_benchmark.py --check-baseline --json-out capacity.json
+```
+
+本机 Windows 交叉验证（非门禁），三次运行的**保守包络**（同档 QPS 取最小、
+P99 取最大）写入 `benchmarks/baselines/capacity-ci.json`：
+
+| 并发 | QPS（包络下限） | P50 (ms) | P95 (ms) | P99 (ms) | 错误 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 15.0 | 63.0 | 125.0 | 172.47 | 0 |
+| 2 | 25.3 | 78.0 | 157.0 | 234.00 | 0 |
+| 4 | 45.7 | 109.0 | 141.0 | 203.15 | 0 |
+| 8 | 63.4 | 141.0 | 188.0 | 219.00 | 0 |
+| 16 | 65.3 | 250.0 | 437.8 | 515.00 | 0 |
+| 32 | 87.7 | 390.5 | 500.0 | 516.00 | 0 |
+
+- 所有档位**错误率为 0**；容量拐点（QPS 增幅首次 < 20%）在 Windows 三次
+  运行中为 `2 / 16 / 16`，抖动来自本机线程调度，**正式拐点以 CI Ubuntu
+  为准**。
+- 门禁（`check_baseline`）：错误率为 0、分位数单调（P50 ≤ P95 ≤ P99）、
+  同档 QPS ≥ 基线 50%、P99 ≤ `max(2×基线, 基线+100ms)`。
+- 阈值只由 `--update-baseline` 显式更新；首次 CI 运行建立机器可比基线。
+
+### 门禁口径（ADR-0054）
+
+正式性能环境是 CI Ubuntu；本机 Windows 数字只作交叉验证。因此
+`--check-baseline` 在 CI（`GITHUB_ACTIONS=true`）强制判定，在本机打印
+`ADVISORY` 不判红；`RESUALIGN_BENCHMARK_STRICT=1` 可在本机强制门禁。
+提交的 `capacity-ci.json` 是 Windows 保守包络**种子**，首次 CI 运行后由
+`--update-baseline` 替换为 Linux 快照。

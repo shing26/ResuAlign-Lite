@@ -62,9 +62,17 @@ call a real model.
 ```powershell
 $env:PYTHONPATH='src'
 python benchmarks\degradation_benchmark.py --trials 5 --json-out degradation.json
+python benchmarks\capacity_benchmark.py --check-baseline --json-out capacity.json
 ```
 
 - `degradation_benchmark.py` injects HTTP 503 failures into a local primary
   node, verifies breaker trip/fallback/recovery, and records recovery time.
+- `capacity_benchmark.py` runs a deterministic API mix against an isolated
+  uvicorn process and records QPS plus P50/P95/P99 by concurrency, compared
+  against `benchmarks/baselines/capacity-ci.json`.
+
+The capacity gate is enforced on CI (`GITHUB_ACTIONS=true`);
+local Windows runs print `ADVISORY` instead of failing (ADR-0054). Set
+`RESUALIGN_BENCHMARK_STRICT=1` to force gating locally.
 
 Generated JSON belongs in CI artifacts or a temporary directory, not in git.

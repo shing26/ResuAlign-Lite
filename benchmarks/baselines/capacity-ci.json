@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-21T06:25:22+00:00",
+  "git_sha": "3c18743931f2de1ae949d3f38efd9df3cbb0fb05",
+  "platform": "Linux (GitHub Actions ubuntu-latest, Python 3.11.16)",
+  "python": "3.11.16",
+  "command": "python benchmarks/capacity_benchmark.py --check-baseline",
+  "seed": 1337,
+  "requests_per_repeat": 200,
+  "repeats": 3,
+  "knee_threshold": 0.2,
+  "knee_concurrency": 8,
+  "note": "Established by the first Ubuntu CI run (run 35568275867, Stage 2). Refresh only via an explicit `--update-baseline` from a CI artifact; thresholds must not be silently loosened.",
+  "levels": {
+    "1": {
+      "qps": 47.0,
+      "p50_ms": 27.58,
+      "p95_ms": 29.0,
+      "p99_ms": 32.1,
+      "errors": 0
+    },
+    "2": {
+      "qps": 90.5,
+      "p50_ms": 28.07,
+      "p95_ms": 30.54,
+      "p99_ms": 32.96,
+      "errors": 0
+    },
+    "4": {
+      "qps": 121.2,
+      "p50_ms": 40.85,
+      "p95_ms": 48.96,
+      "p99_ms": 52.77,
+      "errors": 0
+    },
+    "8": {
+      "qps": 122.2,
+      "p50_ms": 75.38,
+      "p95_ms": 115.37,
+      "p99_ms": 130.14,
+      "errors": 0
+    },
+    "16": {
+      "qps": 118.1,
+      "p50_ms": 150.59,
+      "p95_ms": 231.53,
+      "p99_ms": 251.56,
+      "errors": 0
+    },
+    "32": {
+      "qps": 120.5,
+      "p50_ms": 272.82,
+      "p95_ms": 447.66,
+      "p99_ms": 480.28,
+      "errors": 0
+    }
+  }
+}

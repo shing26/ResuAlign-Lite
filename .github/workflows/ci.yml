@@ -77,6 +77,10 @@ jobs:
         run: python benchmarks/degradation_benchmark.py --trials 5
         env:
           PYTHONPATH: src
+      - name: Capacity curve (baseline gate)
+        run: python benchmarks/capacity_benchmark.py --check-baseline
+        env:
+          PYTHONPATH: src
 
   playwright-smoke:
     name: Stage 3 - Playwright smoke
