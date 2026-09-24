@@ -1,0 +1,3 @@
+# Font license files are byte-pinned by tests/frontend/fonts.test.mjs.
+src/resualign/static/fonts/LICENSE-Inter.txt text eol=lf
+src/resualign/static/fonts/LICENSE-JetBrainsMono.txt text eol=lf

@@ -226,17 +226,25 @@ WCAG AA、路由矩阵、硬门禁建议卡渲染契约）与 `css-structure.tes
 （花括号平衡、关键布局选择器 v3 定义存活、简历网格行高约束）；
 `tests/extension/` 覆盖回填扩展的纯函数核心（档案平铺、字段匹配、
 受控组件赋值、空框跳转）。
-当前基线：**840 个 pytest + 501 个前端/扩展 node 测试**（2026-09-01 实测）。
+当前基线：**1148 个 pytest（7 skipped，89.54% 覆盖率）+ 542 个前端/扩展
+node 测试 + 7 个 E2E**（2026-09-21，`codex/shortfall-evidence-hardening`
+（含 B9 line-ending guard + B6/B11 benchmark 契约测试）；CI JUnit/coverage
+artifact 是持续事实源，本行是带日期与命令的历史快照）。
 
 ## CI
 
-三阶段（GitHub Actions，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)）：
+四阶段（GitHub Actions，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)）：
 
 1. **Stage 1**：ruff 门禁 + 单元/契约测试（并行，85% 覆盖率门槛）+
    前端/扩展 node:test 全量 + ESM import 图检查。
-2. **Stage 2**：延迟/调用次数基准门禁 + 离线基准套件。
+2. **Stage 2**：延迟/调用次数基准门禁 + 离线基准套件 + 降级故障注入 +
+   容量曲线基线门禁（`benchmarks/degradation_benchmark.py`、
+   `benchmarks/capacity_benchmark.py`）。
 3. **Stage 3**：Phase 20 关键路径 Playwright 冒烟（假 LLM，桌面 + 移动
    双视口，失败自动落盘诊断产物）+ e2e 套件。
+4. **Stage 4**：分层冷启动门禁（原生进程 + `docker build --no-cache` +
+   空数据卷容器启动到 `/health`，断言 UID 1000；见
+   `benchmarks/cold_start_benchmark.py`）。
 
 ## 文档
 
