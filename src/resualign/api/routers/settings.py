@@ -10,7 +10,7 @@ from ...config import (
     set_runtime_llm,
 )
 from ...engine.llm_providers import resolve_provider
-from ...engine.role_router import usable_active_node
+from ...engine.role_router import role_timeouts, usable_active_node
 from ...job_library import JOB_STATUSES
 from ...settings_store import default_settings
 from ..deps import get_current_user
@@ -253,6 +253,10 @@ def update_settings(req: SettingsUpdateRequest, user: dict[str, Any]=Depends(get
         # Keep only explicitly-set fields so omitted keys leave the stored
         # value untouched, while explicit nulls clear them.
         updates["llm"] = req.llm.model_dump(exclude_unset=True)
+    if req.job_table is not None:
+        # Same partial-merge contract as ``llm``: the settings form saves one
+        # section at a time and must not wipe the rest of the job-table config.
+        updates["job_table"] = req.job_table.model_dump(exclude_unset=True)
     try:
         saved = context._settings_store.update_settings(
             user['user_id'], updates
@@ -277,6 +281,11 @@ def settings_status(user: dict[str, Any] = Depends(get_current_user)):
         "provider": config.provider,
         "model": config.model,
         "personal_mode": context._PERSONAL_MODE,
+        # Runtime guardrail facts, read from the process that enforces them.
+        # The settings page used to hardcode "40s / 并发 1"; the real per-role
+        # timeouts are 45-90s (env-overridable), so the display must not guess.
+        "worker_concurrency": context._WORKER_CONCURRENCY,
+        "role_timeouts": role_timeouts(),
         "resume_count": len(
             context._resumes.list_master_resumes(user["user_id"])
         ),

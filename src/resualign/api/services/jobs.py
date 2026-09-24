@@ -2,20 +2,27 @@
 import csv
 import html
 import io
+import json
 import logging
 import re
 import threading
 import time
 import urllib.parse
 import uuid
+from dataclasses import asdict
 from typing import Any
 
 from ...alignment_lifecycle import transition_alignment
 from ...app.context import context
 from ...contracts.errors import LlmFailureCode
-from ...engine.role_router import usable_active_node
-from ...job_library import _normalize_source_url, _text_dedupe_key
-from ...llm_usage import reset_llm_tenant, set_llm_tenant
+from ...engine.role_router import call_with_role, usable_active_node
+from ...job_library import (
+    _dedupe_key_for,
+    _normalize_source_url,
+    _parse_salary_text,
+    _text_dedupe_key,
+)
+from ...llm_usage import llm_tenant_context, reset_llm_tenant, set_llm_tenant
 from ...observability import new_request_id, reset_request_id, set_request_id
 from . import llm_probe
 from .alignment_rules import is_noop_diff as _is_noop_diff  # noqa: F401
@@ -362,8 +369,12 @@ def _classify_job(jd_text: str, job_functions: list[str] | None=None, senioritie
     with context.OpenAIClient(
         config,
         timeout=45.0,
-        # R4 P0-2：classifier 非 role 直连调用，输出钳制 128（03-AIE §③）。
-        max_tokens=128,
+        # R4 P0-2：classifier 非 role 直连调用，输出钳制（03-AIE §③）。
+        # 2026-09-24：128 是「纯 JSON 输出」的预算，但推理模型会把整个预算
+        # 烧在 reasoning_content 上（NVIDIA NIM 忽略 thinking:disabled），
+        # content 为空或被截断——分类因此间歇失败。512 让推理 + JSON 都放得
+        # 下；模型仍会在 stop 处停下，正常路径不比原来慢。
+        max_tokens=512,
     ) as client:
         return context.classify_job(
             client,
@@ -496,6 +507,11 @@ def _deterministic_job_fields(payload: dict[str, Any]) -> dict[str, Any]:
         location = location or extracted_location
     salary_min = payload.get('salary_min')
     salary_max = payload.get('salary_max')
+    if salary_min is None and salary_max is None:
+        # The collector scrapes the salary line as text ("20-30K·15薪");
+        # without this the job form's salary fields stay empty even though
+        # the page showed a range. Unparseable text stays (None, None).
+        salary_min, salary_max = _parse_salary_text(payload.get('salary_text'))
     return {
         'title': title,
         'company': company,
@@ -522,6 +538,17 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
     if not jd_text:
         raise context.UserStoreError('Job description text is required')
     payload['jd_text'] = jd_text
+    source_type = payload.get('source_type') or ('url' if jd_url else 'paste')
+    source_url = payload.get('source_url') or (jd_url or None)
+    dedupe_key = payload.get('dedupe_key') or _dedupe_key_for(
+        source_type, source_url, jd_text
+    )
+    # Duplicate rejection must come before classification: the dedupe key is
+    # deterministic, while _classify_job costs a real LLM round-trip. Re-importing
+    # an unchanged batch is a no-op for the library, so it must also be a no-op
+    # for the LLM bill (2026-09-22: 47 duplicate rows burned 47 calls).
+    if context._jobs.find_by_dedupe_key(user['user_id'], dedupe_key) is not None:
+        raise context.UserStoreError('Duplicate job already exists')
     fields = _deterministic_job_fields(payload)
     title = fields['title']
     company = fields['company']
@@ -538,10 +565,9 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
     except context.LLMResponseError as exc:
         logger.warning('Job classification failed, storing as pending: %s', exc)
         classification_pending = 1
-    source_type = payload.get('source_type') or ('url' if jd_url else 'paste')
     job_function = payload.get('job_function') or classification.get('job_function')
     seniority = payload.get('seniority') or classification.get('seniority')
-    return context._jobs.create_job(tenant_id=user['user_id'], title=title, jd_text=jd_text, company=company, location=location, salary_min=salary_min, salary_max=salary_max, salary_currency=payload.get('salary_currency') or 'CNY', source_type=source_type, source_url=payload.get('source_url') or (jd_url or None), job_function=job_function, seniority=seniority, tech_tags=payload.get('tech_tags') or classification.get('tech_tags') or [], status=payload.get('status') or '未投递', classification_pending=classification_pending, posting_date=payload.get('posting_date'), applied_at=payload.get('applied_at'), next_step=payload.get('next_step'), notes=payload.get('notes'), offer_at=payload.get('offer_at'), rejected_at=payload.get('rejected_at'), allowed_job_functions=job_functions, allowed_seniorities=seniorities)
+    return context._jobs.create_job(tenant_id=user['user_id'], title=title, jd_text=jd_text, company=company, location=location, salary_min=salary_min, salary_max=salary_max, salary_currency=payload.get('salary_currency') or 'CNY', source_type=source_type, source_url=source_url, dedupe_key=dedupe_key, job_function=job_function, seniority=seniority, tech_tags=payload.get('tech_tags') or classification.get('tech_tags') or [], status=payload.get('status') or '未投递', classification_pending=classification_pending, posting_date=payload.get('posting_date'), applied_at=payload.get('applied_at'), next_step=payload.get('next_step'), notes=payload.get('notes'), offer_at=payload.get('offer_at'), rejected_at=payload.get('rejected_at'), allowed_job_functions=job_functions, allowed_seniorities=seniorities)
 
 
 def _local_ingest_job(
@@ -604,6 +630,32 @@ def _collect_import_rows(req: Any) -> list[dict[str, Any]]:
             rows.append({key: value or None for key, value in row.items()})
     return rows
 
+def _preanalyze_imported_job(
+    batch: dict[str, Any], user: dict[str, Any], job: dict[str, Any]
+) -> None:
+    """Best-effort zero-click preanalysis for one imported job.
+
+    A failing LLM must never fail the import: rows stay in the library as
+    classification-pending and the reason is recorded on the batch.
+    """
+    label = job.get('title') or 'Untitled'
+    try:
+        result = preanalyze_job(user, job['job_id'])
+    except PreanalyzeUnavailable as exc:
+        batch['preanalyze'] = False
+        batch.setdefault('analyze_errors', []).append(f'预分析已停止：{exc}')
+        return
+    except Exception as exc:
+        batch.setdefault('analyze_errors', []).append(f'{label}: {exc}')
+        return
+    if result is None:
+        return
+    if result.get('jd_profile'):
+        batch['analyzed'] = batch.get('analyzed', 0) + 1
+    else:
+        batch.setdefault('analyze_errors', []).append(f'{label}: 预分析未产出画像')
+
+
 def _run_import(import_id: str) -> None:
     """Process a queued import batch on a daemon worker thread."""
     batch = context._import_batches.get(import_id)
@@ -618,11 +670,15 @@ def _run_import(import_id: str) -> None:
                 batch['errors'].append(f"{row.get('title') or 'Untitled'}: empty JD")
                 continue
             try:
-                context._create_job_from_source(user, row)
-                batch['created'] += 1
+                job = context._create_job_from_source(user, row)
             except (context.UserStoreError, context.LLMResponseError) as exc:
                 batch['skipped'] += 1
                 batch['errors'].append(f"{row.get('title') or 'Untitled'}: {exc}")
+                continue
+            batch['created'] += 1
+            batch.setdefault('job_ids', []).append(job['job_id'])
+            if batch.get('preanalyze'):
+                _preanalyze_imported_job(batch, user, job)
     except Exception as exc:
         logger.exception('Import batch %s failed', import_id)
         batch['errors'].append(f'Import batch failed: {exc}')
@@ -638,6 +694,396 @@ def _prune_import_batches(max_kept: int=50) -> None:
         return
     for import_id in sorted(done_ids)[:len(done_ids) - max_kept]:
         context._import_batches.pop(import_id, None)
+
+
+class PreanalyzeUnavailable(Exception):
+    """Preanalysis cannot run: no LLM configured, or the daily cap is hit."""
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int = 503,
+        detail: Any = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.detail = detail if detail is not None else message
+
+
+_DEFINITIVE_LLM_FAILURE_CODES = frozenset(
+    {LlmFailureCode.AUTH.value, LlmFailureCode.QUOTA.value}
+)
+
+
+def _preanalyze_unavailable_from_llm(
+    exc: BaseException,
+) -> PreanalyzeUnavailable | None:
+    """Map a definitive auth/quota LLM failure to an actionable error.
+
+    A 402/401/403 used to escape ``preanalyze_job`` as a raw
+    ``LLMResponseError``: the single-job route answered an opaque 500 and the
+    bulk sweep swallowed it per job, burning two attempts on every row. The
+    failure code (``quota`` for 402, ``auth`` for 401/403) is the stable
+    contract, so branch on it instead of the message text.
+    """
+    if getattr(exc, 'code', '') not in _DEFINITIVE_LLM_FAILURE_CODES:
+        return None
+    return PreanalyzeUnavailable(
+        '模型服务不可用（鉴权失败或余额不足）',
+        status_code=503,
+        detail=(
+            '模型服务返回鉴权失败或余额不足，预分析已停止。'
+            '请到「系统设置 → 模型节点」充值或切换可用节点后重试。'
+        ),
+    )
+
+
+def _match_inputs(user_id: str, job: dict[str, Any]) -> tuple[str, str | None]:
+    """Return the pinned master resume text and id for match scoring."""
+    resume_id = job.get('workbench_resume_id')
+    if not resume_id:
+        return '', None
+    resume = context._resumes.get_master_resume(user_id, resume_id)
+    return (resume['content'] if resume else ''), resume_id
+
+
+def _match_stale(user_id: str, job: dict[str, Any]) -> bool:
+    """Return whether a job's match score no longer reflects its inputs."""
+    if not job.get('match_updated_at'):
+        return True
+    resume_text, resume_id = _match_inputs(user_id, job)
+    return not context.snapshot_matches(
+        job.get('match_score_detail'),
+        job.get('jd_text'),
+        resume_text,
+        resume_id,
+    )
+
+
+def _match_reason_source(job: dict[str, Any]) -> str | None:
+    reason = job.get('match_reason') or ''
+    if reason.startswith('基于规则评分：'):
+        return 'fallback'
+    return 'llm' if reason else None
+
+
+def _preanalyze_cache_hit(
+    user_id: str, config: Any, resume_text: str, jd_text: str
+) -> bool:
+    """Return whether the preanalyze LLM product is already cached."""
+    try:
+        if (resume_text or '').strip():
+            content = f'{resume_text}\n\n{jd_text}'
+            from ...jd_analysis import JD_ANALYSIS_PROMPT_VERSION
+
+            prompt_version = JD_ANALYSIS_PROMPT_VERSION
+        else:
+            content = jd_text
+            from ...jd_profiler import JD_PROFILER_PROMPT_VERSION
+
+            prompt_version = JD_PROFILER_PROMPT_VERSION
+        cached = context._cache.get(user_id, config.model, prompt_version, content)
+        return cached is not None
+    except Exception:
+        return False
+
+
+def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
+    """Run classifier + JD profile/gap without tailoring; idempotent.
+
+    Returns the preanalysis payload, or ``None`` when the job is gone.
+    Raises ``PreanalyzeUnavailable`` when no LLM is usable, and
+    ``UserStoreError`` when the job has no JD text.
+    """
+    job = context._jobs.get_job(user['user_id'], job_id)
+    if job is None:
+        return None
+    jd_text = (job.get('jd_text') or '').strip()
+    if not jd_text:
+        raise context.UserStoreError('Job description text is required')
+    classification = {
+        'job_function': job.get('job_function'),
+        'seniority': job.get('seniority'),
+        'tech_tags': job.get('tech_tags') or [],
+    }
+    if job.get('jd_profile') and not job.get('classification_pending'):
+        return {
+            'job_id': job_id,
+            'status': 'ready',
+            'jd_profile': job.get('jd_profile'),
+            'gap_report': job.get('gap_report'),
+            'match_score': job.get('match_score'),
+            'match_score_detail': job.get('match_score_detail'),
+            'match_reason': job.get('match_reason'),
+            'match_reason_source': _match_reason_source(job),
+            'match_updated_at': job.get('match_updated_at'),
+            'match_stale': _match_stale(user['user_id'], job),
+            'classification': classification,
+            'cache_hit': True,
+        }
+    job_functions, seniorities = context._settings_vocabulary(user['user_id'])
+    try:
+        context.enforce_daily_llm_cap(user['user_id'])
+    except Exception as exc:
+        raise PreanalyzeUnavailable(
+            str(getattr(exc, 'detail', None) or exc),
+            status_code=getattr(exc, 'status_code', 429) or 429,
+            detail=getattr(exc, 'detail', None),
+        ) from exc
+    config = context.build_config()
+    if not config.is_llm_configured:
+        raise PreanalyzeUnavailable(
+            'LLM 未配置',
+            status_code=503,
+            detail='LLM 未配置。请设置 API Key（远程供应商）或激活 Ollama 本地节点。',
+        )
+    # Phase A1 for the preanalyze path: probe the serving node before the
+    # first call so a definitive auth/quota block stops the request (and the
+    # whole bulk batch) immediately with an actionable message.
+    probe_ok, probe_message = context._probe_active_llm_quick(user['user_id'])
+    if not probe_ok:
+        raise PreanalyzeUnavailable(
+            probe_message or '模型服务不可用',
+            status_code=503,
+            detail=probe_message
+            or '模型服务鉴权失败或余额不足，请检查「系统设置 → 模型节点」。',
+        )
+    with llm_tenant_context(user['user_id']):
+        try:
+            classification = context._classify_job(
+                jd_text, job_functions, seniorities, tenant=user['user_id']
+            )
+        except context.LLMResponseError as exc:
+            unavailable = _preanalyze_unavailable_from_llm(exc)
+            if unavailable is not None:
+                raise unavailable from exc
+            logger.warning(
+                'Preanalyze classification failed for %s: %s', job_id, exc
+            )
+            classification = {}
+    resume = None
+    if job.get('workbench_resume_id'):
+        resume = context._resumes.get_master_resume(
+            user['user_id'], job['workbench_resume_id']
+        )
+    resume_text = resume['content'] if resume else ''
+    resume_id = resume['resume_id'] if resume else None
+    cache_hit = _preanalyze_cache_hit(
+        user['user_id'], config, resume_text, jd_text
+    )
+    profile_dict = None
+    gap_dict = None
+    try:
+        with llm_tenant_context(user['user_id']):
+            with context.OpenAIClient(config, timeout=60.0) as client:
+                if resume_text.strip():
+                    try:
+                        profile, _ = call_with_role(
+                            'profiler', context.profile_jd,
+                            context._llm_nodes, user['user_id'],
+                            fn_kwargs={
+                                'jd_text': jd_text,
+                                'cache': context._cache,
+                                'tenant': user['user_id'],
+                            },
+                        )
+                    except Exception:
+                        profile = context.profile_jd(
+                            client, jd_text,
+                            cache=context._cache, tenant=user['user_id'],
+                        )
+                    profile_dict = context.jd_profile_to_dict(profile)
+                    _profile_str = json.dumps(
+                        profile_dict, ensure_ascii=False
+                    )
+                    try:
+                        gap, _ = call_with_role(
+                            'gap_analyzer', context.analyze_gaps,
+                            context._llm_nodes, user['user_id'],
+                            fn_kwargs={
+                                'resume_text': resume_text,
+                                'jd_profile_text': _profile_str,
+                            },
+                        )
+                    except Exception:
+                        gap = context.analyze_gaps(
+                            client, resume_text, _profile_str
+                        )
+                    gap_dict = asdict(gap)
+                else:
+                    try:
+                        profile, _ = call_with_role(
+                            'profiler', context.profile_jd,
+                            context._llm_nodes, user['user_id'],
+                            fn_kwargs={
+                                'jd_text': jd_text,
+                                'cache': context._cache,
+                                'tenant': user['user_id'],
+                            },
+                        )
+                    except Exception:
+                        profile = context.proactive_jd_profile(
+                            client, jd_text,
+                            cache=context._cache, tenant=user['user_id'],
+                        )
+                    profile_dict = context.jd_profile_to_dict(profile)
+    except context.LLMResponseError as exc:
+        unavailable = _preanalyze_unavailable_from_llm(exc)
+        if unavailable is not None:
+            raise unavailable from exc
+        raise
+    match_score = (
+        context._gap_match_score({'gap_report': gap_dict}) if gap_dict else None
+    )
+    match_detail = None
+    match_reason = None
+    if resume_id and profile_dict and gap_dict:
+        match_detail = context.compute_match_score(
+            jd_text, profile_dict, gap_dict, None, resume_text, resume_id,
+        )
+        match_reason = context.fallback_match_reason(
+            match_detail, gap_dict.get('missing_keywords') or [],
+        )
+        match_score = match_detail['total']
+    updated = context._jobs.update_job(
+        user['user_id'],
+        job_id,
+        job_function=classification.get('job_function'),
+        seniority=classification.get('seniority'),
+        tech_tags=classification.get('tech_tags') or [],
+        classification_pending=0,
+        jd_profile=profile_dict,
+        gap_report=gap_dict,
+        match_score=match_score,
+        match_score_detail=match_detail,
+        match_reason=match_reason,
+        match_updated_at=time.time() if match_detail else None,
+        allowed_job_functions=job_functions,
+        allowed_seniorities=seniorities,
+    )
+    if updated is None:
+        return None
+    session = context._session_store.find_by_job(job_id, user['user_id'])
+    if session is not None:
+        context._session_store.update(
+            session['session_id'],
+            {
+                'status': 'ready',
+                'job': updated,
+                'jd': {'profile': profile_dict, 'status': 'ready', 'error': None},
+                'gap': {
+                    'status': 'ready' if gap_dict else 'blocked',
+                    'score': match_score,
+                    'gap_report': gap_dict,
+                    'cache_hit': cache_hit,
+                    'error': None,
+                },
+            },
+        )
+        context._session_store.emit(
+            session['session_id'],
+            'job.gap_ready',
+            {
+                'job_id': job_id,
+                'jd_profile': profile_dict,
+                'gap_report': gap_dict,
+                'status': 'ready' if gap_dict else 'blocked',
+                'cache_hit': cache_hit,
+            },
+        )
+    return {
+        'job_id': job_id,
+        'status': 'ready',
+        'jd_profile': profile_dict,
+        'gap_report': gap_dict,
+        'match_score': match_score,
+        'match_score_detail': updated.get('match_score_detail'),
+        'match_reason': updated.get('match_reason'),
+        'match_reason_source': _match_reason_source(updated),
+        'match_updated_at': updated.get('match_updated_at'),
+        'match_stale': False,
+        'classification': classification,
+        'cache_hit': cache_hit,
+    }
+
+
+_MAX_PREANALYZE_BATCH = 200
+
+
+def job_needs_preanalyze(job: dict[str, Any]) -> bool:
+    """Return True when a job has JD text but no stored preanalysis product.
+
+    This is the single skip predicate for the bulk sweep: a job is only
+    re-analyzed when it has no ``jd_profile`` yet, or its classification is
+    still pending (a failed earlier attempt).
+    """
+    if not (job.get('jd_text') or '').strip():
+        return False
+    if job.get('classification_pending'):
+        return True
+    return not job.get('jd_profile')
+
+
+def collect_pending_preanalyze_job_ids(
+    user_id: str, limit: int = _MAX_PREANALYZE_BATCH
+) -> list[str]:
+    """Ids of jobs that still need a first preanalysis, newest first."""
+    jobs = context._jobs.list_jobs(user_id, limit=None)
+    pending = [job['job_id'] for job in jobs if job_needs_preanalyze(job)]
+    return pending[:limit]
+
+
+def _prune_preanalyze_batches(max_kept: int = 20) -> None:
+    """Drop finished preanalyze batches once the in-memory backlog grows."""
+    done_ids = [
+        batch_id
+        for batch_id, batch in context._preanalyze_batches.items()
+        if batch.get('done')
+    ]
+    if len(done_ids) <= max_kept:
+        return
+    for batch_id in sorted(done_ids)[:len(done_ids) - max_kept]:
+        context._preanalyze_batches.pop(batch_id, None)
+
+
+def _run_preanalyze_batch(batch_id: str) -> None:
+    """Preanalyze every still-unanalyzed job in a queued batch."""
+    batch = context._preanalyze_batches.get(batch_id)
+    if batch is None:
+        return
+    user = {'user_id': batch['user_id']}
+    _llm_tenant_token = set_llm_tenant(batch['user_id'])
+    try:
+        for job_id in batch['job_ids']:
+            job = context._jobs.get_job(batch['user_id'], job_id)
+            if job is None or not job_needs_preanalyze(job):
+                batch['skipped'] += 1
+                continue
+            try:
+                result = preanalyze_job(user, job_id)
+            except PreanalyzeUnavailable as exc:
+                batch['stopped'] = True
+                batch['errors'].append(f'预分析已停止：{exc}')
+                break
+            except Exception as exc:
+                batch['errors'].append(
+                    f"{job.get('title') or 'Untitled'}: {exc}"
+                )
+                continue
+            if result and result.get('jd_profile'):
+                batch['analyzed'] += 1
+            else:
+                batch['errors'].append(
+                    f"{job.get('title') or 'Untitled'}: 预分析未产出画像"
+                )
+    except Exception as exc:
+        logger.exception('Preanalyze batch %s failed', batch_id)
+        batch['errors'].append(f'Preanalyze batch failed: {exc}')
+    finally:
+        reset_llm_tenant(_llm_tenant_token)
+        batch['done'] = True
+        _prune_preanalyze_batches()
+
 
 def _queue_job(user: dict[str, Any], payload: dict[str, Any], application_id: str | None=None, workbench: bool=False) -> str:
     """Create a job row, keep its payload in memory, and start the worker."""

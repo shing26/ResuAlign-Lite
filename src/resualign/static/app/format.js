@@ -3222,7 +3222,8 @@ export function collectAcceptedOptimizeItems(modules, accepted) {
  *   GET/POST/DELETE /api/automation/rules（Sprint 3 已有）
  *     rule: {rule_id, rule_type(blacklist|city_whitelist|min_salary),
  *            value, label, enabled}
- * Guardrails：后端 Read Timeout 40s + 并发额度 1（只读展示）。
+ * 运行护栏：超时与并发都是后端真值（GET /api/settings/status 回传），
+ * 前端不再写死数字。
  */
 
 export const LLM_NODE_PROVIDERS = [
@@ -3276,19 +3277,49 @@ export function automationRuleTypeLabel(ruleType) {
   return AUTOMATION_RULE_TYPE_LABELS[ruleType] || String(ruleType || "");
 }
 
-export const GUARDRAIL_READ_TIMEOUT_S = 40;
-export const GUARDRAIL_CONCURRENCY = 1;
+/* 运行护栏真值：per-role LLM timeout（RESUALIGN_ROLE_TIMEOUT_<ROLE> 可覆盖）
+ * 与 worker 并发（RESUALIGN_WORKER_CONCURRENCY 可覆盖）。下面的 fallback
+ * 只在 /api/settings/status 还没回来时短暂显示，数值必须与后端默认一致。 */
+export const ROLE_TIMEOUT_FALLBACK_S = {
+  diagnose: 45,
+  profiler: 75,
+  gap_analyzer: 60,
+  editor: 90,
+  evaluator: 60,
+};
+export const WORKER_CONCURRENCY_FALLBACK = 1;
+
+/** 把 per-role timeout 压成一行区间文案；缺值时回落到后端默认表。 */
+export function roleTimeoutSummary(roleTimeouts) {
+  const source =
+    roleTimeouts && typeof roleTimeouts === "object"
+      ? roleTimeouts
+      : ROLE_TIMEOUT_FALLBACK_S;
+  const values = Object.values(source)
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  if (!values.length) return "—";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return min === max ? `${min} 秒` : `${min}–${max} 秒`;
+}
 
 /* --- T1: Hero Bento 概览 --- */
 /* 4 列 Bento 卡：活跃模型 ID / 架构模式 / Timeout 护栏 / API 延迟。
  * activeNode 为 GET /api/llm/nodes 中 is_active 的节点（可为 null）；
  * latency 为最近一次节点 test 的 latency_ms（null 表示尚未测试）；
- * Timeout 护栏沿用后端 Read Timeout 40s + 并发额度 1 契约。 */
-export function settingsBentoHtml(activeNode, latency) {
+ * runtime 为 GET /api/settings/status 的 {worker_concurrency, role_timeouts}。 */
+export function settingsBentoHtml(activeNode, latency, runtime) {
   const node = activeNode && typeof activeNode === "object" ? activeNode : null;
   const model = node && String(node.model || "").trim() ? String(node.model) : "—";
   const provider = node && String(node.provider || "").trim() ? String(node.provider) : "";
   const activeLabel = provider ? `${provider} · ${model}` : model;
+  const info = runtime && typeof runtime === "object" ? runtime : {};
+  const concurrency = Number(info.worker_concurrency);
+  const concurrencyText =
+    Number.isFinite(concurrency) && concurrency > 0
+      ? concurrency
+      : WORKER_CONCURRENCY_FALLBACK;
   const latencyNum =
     latency == null || latency === "" ? NaN : Number(latency);
   const hasLatency = Number.isFinite(latencyNum) && latencyNum >= 0;
@@ -3306,71 +3337,14 @@ export function settingsBentoHtml(activeNode, latency) {
         <span class="settings-bento__hint">单机部署，数据全部落本地</span>
       </div>
       <div class="settings-bento__card metric-cell settings-bento__card--timeout" data-bento-timeout>
-        <span class="settings-bento__label">Timeout 护栏</span>
-        <strong class="settings-bento__value">${GUARDRAIL_READ_TIMEOUT_S} 秒</strong>
-        <span class="settings-bento__hint">并发: ${GUARDRAIL_CONCURRENCY}</span>
+        <span class="settings-bento__label">超时护栏</span>
+        <strong class="settings-bento__value">${roleTimeoutSummary(info.role_timeouts)}</strong>
+        <span class="settings-bento__hint">按角色 · 并发: ${concurrencyText}</span>
       </div>
       <div class="settings-bento__card metric-cell" data-bento-latency>
         <span class="settings-bento__label">API 延迟</span>
         <strong class="settings-bento__value">${esc(latencyText)}</strong>
         <span class="settings-bento__hint">${hasLatency ? "最近一次节点连通测试" : "尚未测试，可点节点卡「测试连通性」"}</span>
-      </div>
-    </section>`;
-}
-
-/** Cost-guard panel: today's usage plus the daily cap / price form.
- *
- * settings comes from GET /api/settings; daily comes from the status
- * endpoint so the page can show the live block state.
- */
-export function costGuardPanelHtml(settings, daily = {}) {
-  const s = settings && typeof settings === "object" ? settings : {};
-  const capValue = s.daily_llm_cap == null ? "" : String(s.daily_llm_cap);
-  const inValue =
-    s.llm_cost_per_1k_in == null ? "" : String(s.llm_cost_per_1k_in);
-  const outValue =
-    s.llm_cost_per_1k_out == null ? "" : String(s.llm_cost_per_1k_out);
-  const callsNum = Number(daily.calls);
-  const calls = Number.isFinite(callsNum) ? callsNum : 0;
-  const costNum = Number(daily.estimated_cost);
-  const cost = Number.isFinite(costNum) ? costNum : 0;
-  const hasCap = daily.cap != null && daily.cap !== "";
-  const capLabel = hasCap ? String(daily.cap) : "不限制";
-  const remainingLabel =
-    hasCap && daily.remaining != null ? String(daily.remaining) : "—";
-  const blocked = Boolean(daily.blocked);
-  return `
-    <section class="panel cost-guard-panel" data-cost-guard-panel>
-      <div class="panel-head">
-        <div>
-          <h2>成本护栏</h2>
-          <p>每日 LLM 调用上限、估算成本与拦截状态</p>
-        </div>
-        ${blocked ? '<span class="badge badge-red" data-cost-blocked>今日已阻止新 LLM 任务</span>' : ""}
-      </div>
-      <div class="panel-body">
-        <div class="cost-guard-status" data-cost-status data-cost-blocked="${blocked ? "true" : "false"}">
-          <div><span>今日调用</span><strong data-daily-calls>${esc(calls)}</strong></div>
-          <div><span>估算成本</span><strong data-daily-cost>¥${esc(cost.toFixed(4))}</strong></div>
-          <div><span>今日上限</span><strong data-daily-cap>${esc(capLabel)}</strong></div>
-          <div><span>剩余额度</span><strong data-daily-remaining>${esc(remainingLabel)}</strong></div>
-        </div>
-        <form data-form="settings-cost-guard" class="cost-guard-form">
-          <div class="form-grid">
-            <div class="field"><label>每日调用上限</label>
-              <input type="number" name="daily_llm_cap" min="0" step="1" value="${esc(capValue)}" placeholder="留空表示不限制">
-              <span class="small muted">达到上限后新任务返回 429，缓存命中不受影响</span></div>
-            <div class="field"><label>每 1k 输入 token（元）</label>
-              <input type="number" name="llm_cost_per_1k_in" min="0" step="0.001" value="${esc(inValue)}" placeholder="例如 0.5">
-              <span class="small muted">仅用于成本估算</span></div>
-            <div class="field"><label>每 1k 输出 token（元）</label>
-              <input type="number" name="llm_cost_per_1k_out" min="0" step="0.001" value="${esc(outValue)}" placeholder="例如 1.5">
-              <span class="small muted">仅用于成本估算</span></div>
-          </div>
-          <div class="row" style="margin-top:10px">
-            <button class="btn btn-outline btn-sm" type="submit">保存成本护栏</button>
-          </div>
-        </form>
       </div>
     </section>`;
 }
@@ -3577,7 +3551,7 @@ export function simpleLlmSetupHtml(node, lastTest) {
           </div>
         </form>
         <div data-llm-node-test-result>${testResult}</div>
-        ${isEdit ? "" : '<p class="small muted">保存后第一个节点自动启用。备用节点、成本护栏等高级配置可在「专家模式」中调整；多节点分工（本地分析 + 云端写作）也在那里配置。</p>'}
+    ${isEdit ? "" : '<p class="small muted">保存后第一个节点自动启用。备用节点、角色分工（本地分析 + 云端写作）与自动化规则在「专家模式」中配置。</p>'}
       </div>
     </section>`;
 }

@@ -590,3 +590,104 @@ def test_legacy_database_migrates_three_new_columns(db_path):
         "final_draft_updated_at",
         "final_draft_version",
     } <= columns
+
+
+class TestSourceUrlNormalization:
+    """Posting identity often lives in the query or the hash route."""
+
+    def test_keeps_identity_query_and_drops_tracking_noise(self):
+        normalize = job_library._normalize_source_url
+        assert normalize(
+            "https://join.qq.com/post_detail.html?postid=120079"
+        ) == "https://join.qq.com/post_detail.html?postid=120079"
+        assert normalize(
+            "https://join.qq.com/post_detail.html?utm_source=x&postid=120079"
+        ) == "https://join.qq.com/post_detail.html?postid=120079"
+        # locale/activity noise is dropped, the identity param survives.
+        assert normalize(
+            "https://aspire.zhiye.com/campus/detail"
+            "?jobAdId=2921&activityGuid=abc&ActivityJumpPage=PortalPage"
+        ) == "https://aspire.zhiye.com/campus/detail?jobadid=2921"
+
+    def test_keeps_spa_hash_route(self):
+        normalize = job_library._normalize_source_url
+        assert normalize(
+            "https://campus.xunlei.com/campus-recruitment/xunlei/26600"
+            "#/job/1c77fe7e-ce43-4b2f-9b9a-1f2e3d4c5b6a"
+        ) == (
+            "https://campus.xunlei.com/campus-recruitment/xunlei/26600"
+            "#/job/1c77fe7e-ce43-4b2f-9b9a-1f2e3d4c5b6a"
+        )
+
+    def test_empty_url_stays_empty(self):
+        assert job_library._normalize_source_url("") == ""
+        assert job_library._normalize_source_url(None) == ""
+
+
+class TestSalaryTextParsing:
+    def test_requires_a_magnitude_unit(self):
+        parse = job_library._parse_salary_text
+        assert parse("20-30K") == (20000, 30000)
+        assert parse("15-25K·15薪") == (15000, 25000)
+        assert parse("1.2万-2万") == (12000, 20000)
+        assert parse("面议") == (None, None)
+        assert parse("200-300元/天") == (None, None)
+        assert parse("8000-12000") == (None, None)
+        assert parse(None) == (None, None)
+
+
+def test_two_postings_on_one_host_both_create(db_path):
+    store = _store(db_path)
+    first = store.create_job(
+        **_job_payload(
+            title="岗位 A",
+            jd_text="岗位 A 的 JD 正文",
+            source_type="url",
+            source_url="https://join.qq.com/post_detail.html?postid=AAA",
+        )
+    )
+    second = store.create_job(
+        **_job_payload(
+            title="岗位 B",
+            jd_text="岗位 B 的 JD 正文",
+            source_type="url",
+            source_url="https://join.qq.com/post_detail.html?postid=BBB",
+        )
+    )
+    assert first["job_id"] != second["job_id"]
+
+
+def test_reconcile_rekeys_legacy_over_stripped_url_rows(db_path):
+    store = _store(db_path)
+    job = store.create_job(
+        **_job_payload(
+            source_type="url",
+            source_url="https://join.qq.com/post_detail.html?postid=AAA",
+        )
+    )
+    # Simulate the pre-fix key that stripped everything after "?".
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE library_jobs SET dedupe_key = ? WHERE job_id = ?",
+            ("url:https://join.qq.com/post_detail.html", job["job_id"]),
+        )
+
+    reopened = _store(db_path)
+    reopened.list_jobs("tenant-1")  # first query runs the migrations+reconcile
+    with sqlite3.connect(db_path) as conn:
+        key = conn.execute(
+            "SELECT dedupe_key FROM library_jobs WHERE job_id = ?",
+            (job["job_id"],),
+        ).fetchone()[0]
+    assert key == "url:https://join.qq.com/post_detail.html?postid=aaa"
+
+    # The re-keyed row no longer swallows a distinct posting on the host.
+    second = reopened.create_job(
+        **_job_payload(
+            title="岗位 B",
+            jd_text="岗位 B 的 JD 正文",
+            source_type="url",
+            source_url="https://join.qq.com/post_detail.html?postid=BBB",
+        )
+    )
+    assert second["job_id"] != job["job_id"]

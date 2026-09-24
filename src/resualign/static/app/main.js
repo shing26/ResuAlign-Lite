@@ -78,7 +78,6 @@ import {
   buildJobsBackup,
   collectAcceptedOptimizeItems,
   buildLiveCompareHtml,
-  costGuardPanelHtml,
   isJdUrl,
   jobApplyLinkHtml,
   jobEditFormHtml,
@@ -109,11 +108,9 @@ import {
 import { icon } from "./icons.js";
 import {
   buildAutomationRulePayload,
-  buildCostGuardPayload,
   buildLlmNodePayload,
   evalDefaultFromForm,
   validateAutomationRule,
-  validateCostGuardPayload,
   validateLlmNodePayload,
 } from "./settings-form.js";
 
@@ -149,7 +146,7 @@ const PAGE_META = {
   workspace: ["对齐工作台", "岗位上下文、Diff 画布与 JD/Live Sheet 辅助舱"],
   jobs: ["岗位库", "Pipeline 看板与 JD 粘贴建库"],
   resume: ["简历中心", "Markdown 双态编辑、ATS 健康度与版本时间线"],
-  settings: ["系统设置", "LLM 节点、Guardrails、自动化规则与词表"],
+    settings: ["系统设置", "LLM 节点、自动化规则与本地摄入 Token"],
 };
 
 function parseHash() {
@@ -266,58 +263,6 @@ async function handleRoute(app) {
   }
 }
 
-/* 侧栏 footer 配额条：与设置页成本护栏同源（GET /api/settings/status 的
- * status.daily），消除「今日额度」数据不一致。 */
-let railQuotaInFlight = false;
-async function refreshRailQuota() {
-  if (railQuotaInFlight) return;
-  railQuotaInFlight = true;
-  try {
-    const status = await api("/api/settings/status", {
-      cacheKey: "rail:status",
-    });
-    fillRailQuota((status && status.daily) || {});
-  } catch {
-    /* 保留占位状态，不打断路由渲染 */
-  } finally {
-    railQuotaInFlight = false;
-  }
-}
-
-function fillRailQuota(daily = {}) {
-  const root = $("[data-rail-quota]");
-  if (!root || typeof daily !== "object") return;
-  const callsNum = Number(daily.calls);
-  const calls = Number.isFinite(callsNum) ? callsNum : 0;
-  const costNum = Number(daily.estimated_cost);
-  const cost = Number.isFinite(costNum) ? costNum : 0;
-  const hasCap = daily.cap != null && daily.cap !== "";
-  const capNum = Number(daily.cap);
-  const capLabel = hasCap ? String(daily.cap) : "不限制";
-  const remainingLabel = hasCap && daily.remaining != null ? String(daily.remaining) : "—";
-  const blocked = Boolean(daily.blocked);
-  const costEl = $("[data-rail-quota-cost]", root);
-  if (costEl) costEl.textContent = `¥${cost.toFixed(4)} / ¥${capLabel}`;
-  const percent = hasCap && Number.isFinite(capNum) && capNum > 0 ? Math.min(100, (cost / capNum) * 100) : 0;
-  const trackEl = $("[data-rail-quota-track]", root);
-  if (trackEl) {
-    trackEl.classList.toggle("is-blocked", blocked);
-    trackEl.setAttribute("aria-valuenow", String(Math.round(percent)));
-  }
-  const fillEl = $("[data-rail-quota-fill]", root);
-  if (fillEl) fillEl.style.width = `${percent}%`;
-  const remainingEl = $("[data-rail-quota-remaining]", root);
-  if (remainingEl) remainingEl.textContent = `剩余 ¥${remainingLabel}`;
-  const callsEl = $("[data-rail-quota-calls]", root);
-  if (callsEl) callsEl.textContent = `${calls} 次调用`;
-  const statusEl = $("[data-rail-quota-status]", root);
-  if (statusEl) {
-    statusEl.textContent = blocked ? "今日已阻止新 LLM 任务" : "";
-    statusEl.classList.toggle("is-error", blocked);
-  }
-  root.hidden = false;
-}
-
 async function render() {
   state.route = parseHash();
   closeSplitCanvas();
@@ -351,7 +296,6 @@ async function render() {
     app.innerHTML = `<div class="panel"><h3>出错了</h3><p class="muted">${esc(error.message)}</p>
       <div class="row" style="margin-top:12px"><button class="btn btn-primary" data-action="reload">重试</button></div></div>`;
   }
-  refreshRailQuota();
 }
 
 /* ------------------------------------------------------------------ */
@@ -465,9 +409,36 @@ const JOB_IMPORT_FORM_HTML = `
       <div class="field"><label>粘贴 CSV 或 JSON 数组（字段含 title / jd_text / company / location；jd_url 需同时提供 jd_text，否则该行会被跳过）</label>
         <textarea name="import_text" rows="6" placeholder='title,jd_text,location&#10;后端工程师,要求 Python 和 FastAPI,上海'></textarea></div>
       <div class="field"><label>或选择文件（.csv / .json）</label><input type="file" name="import_file" accept=".csv,.json,text/csv,application/json"></div>
+      <label class="eval-option">
+        <input type="checkbox" name="preanalyze" checked>
+        <span>导入后自动 AI 预分析（分类 + 岗位画像 + 差距）</span>
+      </label>
+      <div class="small muted" style="margin:-4px 0 6px">每条都会调用 LLM，导入会明显变慢；不勾选则只入库，之后可在岗位详情手动「AI 预分析」。重复岗位会直接跳过，不会重复入库。</div>
       <div class="row"><button class="btn btn-primary" type="submit">开始导入</button>
         <button class="btn btn-ghost" type="button" data-action="cancel-import">取消</button>
         <span class="small muted" data-import-status></span></div>
+      <h3>岗位表自动同步</h3>
+      <div class="field wide"><label>岗位表 CSV 路径（WorkBuddy 每日追加的那张表）</label>
+        <input type="text" name="job_table_path" placeholder="C:\\Users\\...\\job-radar\\岗位总表.csv"></div>
+      <div class="field wide"><label>JD 文件夹（可选：表里只写 JD 文件名时，从这里读取正文）</label>
+        <input type="text" name="job_table_jd_dir" placeholder="C:\\Users\\...\\job-radar\\JD库"></div>
+      <label class="eval-option">
+        <input type="checkbox" name="job_table_auto_sync">
+        <span>后台自动同步（按下面的间隔重读岗位表，只补没导入过的行）</span>
+      </label>
+      <label class="eval-option">
+        <input type="checkbox" name="job_table_preanalyze">
+        <span>同步后 AI 预分析</span>
+      </label>
+      <div class="field"><label>同步间隔</label>
+        <select name="job_table_interval_minutes">
+          <option value="30">每 30 分钟</option>
+          <option value="60" selected>每小时</option>
+          <option value="360">每 6 小时</option>
+          <option value="1440">每天</option>
+        </select></div>
+      <div class="row"><button class="btn btn-secondary" type="button" data-action="sync-job-table">同步岗位表</button>
+        <span class="small muted" data-job-table-status></span></div>
     </form>`;
 
 async function openJobDetail(job) {
@@ -605,6 +576,7 @@ async function renderSettingsView(app) {
     api("/api/settings/role-bindings").catch(() => null),
   ]);
   state.settings = settings;
+  state.settingsStatus = status;
   state.llmNodes = Array.isArray(nodes) ? nodes : [];
   state.automationRules = Array.isArray(rules) ? rules : [];
   state.roleBindings =
@@ -626,8 +598,7 @@ async function renderSettingsView(app) {
   const modeSwitchHtml = settingsModeSwitchHtml(settingsMode);
   const simpleSetupNode = activeNode || state.llmNodes[0] || null;
   const expertPanelsHtml = `
-      ${settingsBentoHtml(activeNode, latency)}
-      ${costGuardPanelHtml(settings, status.daily || {})}
+      ${settingsBentoHtml(activeNode, latency, status)}
       ${roleBindingsPanelHtml(
         (state.roleBindings && state.roleBindings.roles) || [],
         state.llmNodes,
@@ -677,18 +648,7 @@ async function renderSettingsView(app) {
             </form>
           </div>
         </section>
-        <aside class="panel" data-guardrails-panel>
-          <div class="panel-head">
-            <div>
-              <h2>Guardrails</h2>
-              <p>运行护栅与评估默认</p>
-            </div>
-          </div>
-          <div class="guardrail-box">
-            <div class="guardrail-row"><span>超时熔断</span><b>40s</b></div>
-            <div class="guardrail-row"><span>并发额度</span><b>1</b></div>
-            <div class="guardrail-row"><span>评估默认</span><label class="check-line"><input type="checkbox" checked> 默认运行对齐评估</label></div>
-          </div>
+        <aside class="panel" data-automation-panel>
           <div class="panel-head">
             <div>
               <h2>自动化规则</h2>
@@ -703,7 +663,7 @@ async function renderSettingsView(app) {
     <div class="view view-scroll settings-view">
       <div class="settings-head">
         <div>
-          <p>连接 AI 助手并管理运行护栏${settingsMode === "expert" ? "（专家模式）" : ""}</p>
+          <p>连接 AI 助手、配置节点与自动化规则${settingsMode === "expert" ? "（专家模式）" : ""}</p>
         </div>
         <div class="settings-head-actions">
           <span class="status-line"><span class="dot ${status.api_key_configured ? "dot-success" : "dot-warn"}" aria-hidden="true"></span>${status.api_key_configured ? "LLM 已配置" : "LLM 未配置"}</span>
@@ -754,7 +714,7 @@ function updateSettingsBento(app = $("#app-router-view")) {
     ? (state.llmNodeTests || {})[activeNode.node_id]
     : null;
   const latency = lastTest && lastTest.ok ? lastTest.latency_ms : null;
-  mount.outerHTML = settingsBentoHtml(activeNode, latency);
+  mount.outerHTML = settingsBentoHtml(activeNode, latency, state.settingsStatus);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1369,12 +1329,133 @@ const actions = {
       "info",
     );
   },
-  "show-import": () => {
-    $('[data-form="job-import"]').hidden = false;
+  "show-import": async () => {
+    const form = $('[data-form="job-import"]');
+    form.hidden = false;
     $('[data-form="job-create"]').hidden = true;
+    await fillJobTableForm(form);
   },
   "cancel-import": () => {
     $('[data-form="job-import"]').hidden = true;
+  },
+  "sync-job-table": async (button) => {
+    const form = button.closest("form");
+    const statusNode = form && form.querySelector("[data-job-table-status]");
+    const value = (name) => {
+      const node = form && form.querySelector(`[name="${name}"]`);
+      return node ? String(node.value || "").trim() : "";
+    };
+    const checked = (name) => {
+      const node = form && form.querySelector(`[name="${name}"]`);
+      return !!(node && node.checked);
+    };
+    const path = value("job_table_path");
+    if (!path) {
+      toast("请先填写岗位表 CSV 路径", "error");
+      return;
+    }
+    button.disabled = true;
+    if (statusNode) statusNode.textContent = "正在保存配置...";
+    try {
+      await api("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          job_table: {
+            path,
+            jd_dir: value("job_table_jd_dir") || null,
+            auto_sync: checked("job_table_auto_sync"),
+            preanalyze: checked("job_table_preanalyze"),
+            interval_minutes: Number(value("job_table_interval_minutes") || 60),
+          },
+        }),
+      });
+      if (statusNode) statusNode.textContent = "正在读取岗位表...";
+      const start = await api("/api/jobs/job-table/sync", { method: "POST" });
+      if (!start.queued) {
+        button.disabled = false;
+        const detail = (start.errors && start.errors[0]) || "没有可导入的行";
+        if (statusNode) statusNode.textContent = detail;
+        toast(detail, "info");
+        return;
+      }
+      if (statusNode) statusNode.textContent = `已提交 ${start.total} 行，正在导入...`;
+      const timer = window.setInterval(async () => {
+        try {
+          const status = await api(`/api/jobs/import/${start.import_id}`);
+          if (statusNode) {
+            statusNode.textContent = `同步中：新建 ${status.created}，跳过 ${status.skipped}`;
+          }
+          if (!status.queued) {
+            window.clearInterval(timer);
+            button.disabled = false;
+            if (statusNode) {
+              statusNode.textContent = `同步完成：新建 ${status.created}，跳过 ${status.skipped}`;
+            }
+            toast(
+              `岗位表同步完成：新建 ${status.created}，跳过 ${status.skipped}`,
+              status.created ? "success" : "info",
+            );
+            render();
+          }
+        } catch (error) {
+          window.clearInterval(timer);
+          button.disabled = false;
+          if (statusNode) statusNode.textContent = `同步失败：${error.message}`;
+        }
+      }, 800);
+    } catch (error) {
+      button.disabled = false;
+      if (statusNode) statusNode.textContent = `同步失败：${error.message}`;
+      toast(error.message, "error");
+    }
+  },
+  "preanalyze-pending": async (button) => {
+    const label = button.textContent;
+    button.disabled = true;
+    try {
+      const start = await api("/api/jobs/preanalyze-pending", { method: "POST" });
+      if (!start.queued) {
+        button.disabled = false;
+        toast("没有待预分析的岗位", "success");
+        return;
+      }
+      button.textContent = `预分析中 0/${start.total}`;
+      const timer = window.setInterval(async () => {
+        try {
+          const status = await api(
+            `/api/jobs/preanalyze-pending/${start.batch_id}`,
+          );
+          button.textContent = `预分析中 ${status.analyzed}/${status.total}`;
+          if (!status.queued) {
+            window.clearInterval(timer);
+            button.textContent = label;
+            button.disabled = false;
+            const failed = (status.errors || []).length;
+            if (status.stopped && failed) {
+              /* 定义性阻断（欠费/鉴权）会让整批在首行停下：把后端给的
+               * 可执行原因直接透出，而不是只报「失败 1」。 */
+              toast(status.errors[0], "error");
+            } else {
+              toast(
+                `预分析完成：已分析 ${status.analyzed}，跳过 ${status.skipped}` +
+                  (failed ? `，失败 ${failed}` : ""),
+                status.analyzed ? "success" : "error",
+              );
+            }
+            render();
+          }
+        } catch (error) {
+          window.clearInterval(timer);
+          button.textContent = label;
+          button.disabled = false;
+          toast(error.message, "error");
+        }
+      }, 1500);
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = label;
+      toast(error.message, "error");
+    }
   },
   "clear-filters": () => {
     state.filters = {
@@ -3397,21 +3478,6 @@ async function handleForm(formName, data, form) {
       render();
       break;
     }
-    case "settings-cost-guard": {
-      const payload = buildCostGuardPayload(data);
-      const validation = validateCostGuardPayload(payload);
-      if (!validation.ok) {
-        toast(validation.message, "error");
-        return;
-      }
-      await api("/api/settings", {
-        method: "PUT",
-        body: JSON.stringify(payload),
-      });
-      toast("成本护栏已保存", "success");
-      render();
-      break;
-    }
     /* Sprint 5 T2: LLM 节点新增（POST） / 编辑（PUT，隐藏 node_id 非空）。 */
     case "llm-node-form": {
       const payload = buildLlmNodePayload(data);
@@ -3514,9 +3580,44 @@ async function handleForm(formName, data, form) {
   }
 }
 
+/* Fill the job-table sync section from the stored config. Failure is
+ * non-fatal: the manual import above still works without the section. */
+async function fillJobTableForm(form) {
+  if (!form) return;
+  let config = null;
+  try {
+    const body = await api("/api/jobs/job-table");
+    config = body && body.job_table ? body.job_table : null;
+  } catch (error) {
+    return;
+  }
+  if (!config) return;
+  const setValue = (name, value) => {
+    const node = form.querySelector(`[name="${name}"]`);
+    if (node && value != null) node.value = value;
+  };
+  const setChecked = (name, value) => {
+    const node = form.querySelector(`[name="${name}"]`);
+    if (node) node.checked = !!value;
+  };
+  setValue("job_table_path", config.path || "");
+  setValue("job_table_jd_dir", config.jd_dir || "");
+  setValue("job_table_interval_minutes", config.interval_minutes || 60);
+  setChecked("job_table_auto_sync", config.auto_sync);
+  setChecked("job_table_preanalyze", config.preanalyze);
+  const statusNode = form.querySelector("[data-job-table-status]");
+  if (statusNode && config.last_result) {
+    const when = config.last_sync_at
+      ? new Date(config.last_sync_at * 1000).toLocaleString()
+      : "";
+    statusNode.textContent = `上次同步：${config.last_result.detail || ""} ${when}`.trim();
+  }
+}
+
 async function submitImport(data, form) {
   const file = form.querySelector('[name="import_file"]').files[0];
   const pasted = data.import_text || "";
+  const preanalyze = !!(form.querySelector('[name="preanalyze"]') || {}).checked;
   let payload = {};
   if (file) {
     const text = await file.text();
@@ -3538,6 +3639,7 @@ async function submitImport(data, form) {
     toast("没有可导入的岗位数据", "error");
     return;
   }
+  payload.preanalyze = preanalyze;
   const statusNode = form.querySelector("[data-import-status]");
   statusNode.textContent = "已提交，正在处理...";
   const body = await api("/api/jobs/import", {
@@ -3552,11 +3654,13 @@ async function submitImport(data, form) {
   const timer = window.setInterval(async () => {
     try {
       const status = await api(`/api/jobs/import/${body.import_id}`);
-      statusNode.textContent = `处理中：新建 ${status.created}，跳过 ${status.skipped}`;
+      const analyzed = status.analyzed || 0;
+      const analyzeSuffix = preanalyze ? `，预分析 ${analyzed}` : "";
+      statusNode.textContent = `处理中：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}`;
       if (!status.queued) {
         window.clearInterval(timer);
-        statusNode.textContent = `完成：新建 ${status.created}，跳过 ${status.skipped}`;
-        toast(`导入完成：新建 ${status.created}，跳过 ${status.skipped}`, status.created ? "success" : "error");
+        statusNode.textContent = `完成：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}`;
+        toast(`导入完成：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}`, status.created ? "success" : "error");
         render();
       }
     } catch (error) {

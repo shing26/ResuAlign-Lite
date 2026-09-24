@@ -204,6 +204,47 @@ def test_structured_json_mode_expands_budget_on_reasoning_length(httpx_mock, cli
     assert bodies[0]["max_tokens"] == 16384
     assert bodies[1]["max_tokens"] == 32768
     assert bodies[0]["thinking"] == {"type": "disabled"}
+
+
+def test_structured_json_mode_expands_budget_on_truncated_content(
+    httpx_mock, client
+):
+    """Reasoning can also cut the JSON off mid-object, not just empty it.
+
+    Regression (2026-09-24): only *empty* content doubled the budget, so a
+    response truncated at ``{"job_function":`` retried at the same size and
+    died on schema validation (NVIDIA muse-glimmer-30b, whose provider
+    ignores the ``thinking: disabled`` opt-out).
+    """
+    from resualign.schema_registry import AnalysisSchema
+
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"score":',
+                        "reasoning_content": "thinking...",
+                    },
+                    "finish_reason": "length",
+                }
+            ]
+        }
+    )
+    httpx_mock.add_response(
+        json={
+            "choices": [
+                {"message": {"content": '{"score": 77, "skills": ["Go"]}'}}
+            ]
+        }
+    )
+    result = client.chat_structured("system", "user", AnalysisSchema)
+    assert result["score"] == 77
+    bodies = [json.loads(r.read()) for r in httpx_mock.get_requests()]
+    assert bodies[0]["max_tokens"] == 16384
+    assert bodies[1]["max_tokens"] == 32768
+
+
 def test_structured_json_mode_corrects_schema_with_feedback(httpx_mock, client):
     """Bug-01: schema validation failure retries once with error feedback."""
     from resualign.schema_registry import AnalysisSchema

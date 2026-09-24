@@ -94,6 +94,15 @@ def _role_timeout(role: str) -> float:
     return _ROLE_TIMEOUT_DEFAULTS.get(role, 30.0)
 
 
+def role_timeouts() -> dict[str, float]:
+    """Return every role's effective timeout, env overrides applied.
+
+    Read-only introspection for the settings status endpoint so the UI shows
+    the numbers this process actually enforces instead of a hardcoded guess.
+    """
+    return {role: _role_timeout(role) for role in _ROLE_TIMEOUT_DEFAULTS}
+
+
 def resolve_config_for_role(
     node_store: LLMNodeStore,
     tenant_id: str,

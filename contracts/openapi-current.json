@@ -416,6 +416,171 @@
         }
       }
     },
+    "/api/jobs/preanalyze-pending": {
+      "post": {
+        "summary": "Preanalyze Pending Jobs",
+        "description": "Queue zero-click preanalysis for every not-yet-analyzed library job.",
+        "operationId": "preanalyze_pending_jobs_api_jobs_preanalyze_pending_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/preanalyze-pending/{batch_id}": {
+      "get": {
+        "summary": "Preanalyze Pending Status",
+        "description": "Return the progress of a queued bulk preanalysis sweep.",
+        "operationId": "preanalyze_pending_status_api_jobs_preanalyze_pending__batch_id__get",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Batch Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/job-table": {
+      "get": {
+        "summary": "Job Table Status",
+        "description": "Return the configured job-table sync settings and last outcome.",
+        "operationId": "job_table_status_api_jobs_job_table_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/job-table/sync": {
+      "post": {
+        "summary": "Sync Job Table Route",
+        "description": "Read the configured job table and queue its rows for import.",
+        "operationId": "sync_job_table_route_api_jobs_job_table_sync_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs/{job_id}": {
       "get": {
         "summary": "Get Library Job",
@@ -4372,6 +4537,11 @@
               }
             ],
             "title": "Csv Text"
+          },
+          "preanalyze": {
+            "type": "boolean",
+            "title": "Preanalyze",
+            "default": false
           }
         },
         "type": "object",
@@ -4515,6 +4685,72 @@
           "job_id"
         ],
         "title": "JobPreanalyzeResponse"
+      },
+      "JobTableSettingsUpdate": {
+        "properties": {
+          "path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "jd_dir": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jd Dir"
+          },
+          "auto_sync": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Sync"
+          },
+          "interval_minutes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10080.0,
+                "minimum": 5.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Minutes"
+          },
+          "preanalyze": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preanalyze"
+          }
+        },
+        "type": "object",
+        "title": "JobTableSettingsUpdate",
+        "description": "Job-table auto-sync config (server-side paths + schedule)."
       },
       "JobUpdateRequest": {
         "properties": {
@@ -6145,6 +6381,16 @@
               }
             ],
             "title": "Llm Cost Per 1K Out"
+          },
+          "job_table": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobTableSettingsUpdate"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

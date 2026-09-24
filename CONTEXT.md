@@ -337,6 +337,16 @@ deterministic parsing on the request path, marks new jobs
 `classification_pending=1`, and never overwrites an existing Job on duplicate.
 _Avoid_: 复用批量导入, 公网导入入口
 
+**岗位表同步 (Job Table Sync)**
+The server-side pull path for a user-maintained job table CSV: the `job_table`
+settings section stores a filesystem path (plus an optional JD folder), and a
+background loop re-reads it on the configured interval so only rows the library
+has never seen are added. Re-running an unchanged table is a no-op for both the
+library and the LLM bill, because the dedupe check runs before classification.
+Rows without an application URL use the stable `jobtable:` identity
+(company/title/location) so a rewritten JD body does not mint a duplicate.
+_Avoid_: 网络爬取岗位表, 客户端定时任务, 按文件名判重
+
 **Local Ingest Token**
 The secret carried in the `X-ResuAlign-Token` request header for the
 local-ingest endpoint. The server generates it on first start, the settings

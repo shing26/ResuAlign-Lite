@@ -104,7 +104,7 @@ test("index.html: rail brand, jobs count badge and topbar title slots", () => {
   assert.match(html, /id="page-subtitle"/, "dynamic topbar subtitle");
   assert.doesNotMatch(html, /quick-jd-btn/, "A1: quick import JD button removed");
   assert.doesNotMatch(html, /快速导入 JD/, "A1: quick import JD label removed");
-  assert.match(html, /data-rail-quota/, "rail foot quota card slot (A1/rail quota)");
+  assert.doesNotMatch(html, /data-rail-quota/, "cloud quota board removed from rail foot");
   assert.match(html, /class="nav-index\b/, "numbered rail indicators");
   assert.match(html, />驾驶舱</, "dashboard rail label");
   assert.match(html, />工作台</, "workspace rail label");
@@ -168,7 +168,7 @@ test("main.js: route meta, rail count and resume list route", () => {
   assert.match(src, /refreshHeaderMeta\(\)/, "header meta refreshed per route");
   assert.match(src, /refreshJobsRailCount\(/, "jobs rail count refresh");
   assert.match(src, /#\/resume\/list/, "explicit resume list route");
-  assert.match(src, /settingsBentoHtml\(activeNode, latency\)/, "settings runtime status bento");
+  assert.match(src, /settingsBentoHtml\(activeNode, latency, status\)/, "settings runtime status bento");
   assert.match(src, /data-llm-nodes-panel/, "settings LLM node panel");
   assert.match(src, /\.jobs-topbar"\) \|\| app\.querySelector\("\.page-header"\)/, "jobs strip hooks target the top bar");
   assert.doesNotMatch(src, /page-header--jobs \.row/, "old fetch-bar hook removed");
@@ -248,4 +248,48 @@ test("resume-center.js: default route opens the latest resume detail", () => {
   assert.match(src, /showList/, "list route flag accepted");
   assert.match(src, /renderResumeDetailView\(app, first\.resume_id\)/, "defaults to latest resume detail");
   assert.match(src, /renderResumeListView/, "list view still available");
+});
+
+test("批量导入：预分析开关默认开启并随请求下发", () => {
+  const src = read("main.js");
+  assert.match(
+    src,
+    /name="preanalyze" checked/,
+    "import form renders the preanalysis checkbox checked by default",
+  );
+  assert.match(
+    src,
+    /payload\.preanalyze = preanalyze/,
+    "submitImport forwards the preanalysis flag to /api/jobs/import",
+  );
+  assert.match(
+    src,
+    /analyzeSuffix/,
+    "import status reports the analyzed count",
+  );
+});
+
+test("岗位库：一键预分析按钮与批量预分析接线", () => {
+  const kanban = read("kanban.js");
+  const src = read("main.js");
+  assert.match(
+    kanban,
+    /data-action="preanalyze-pending"/,
+    "jobs toolbar exposes the one-click preanalysis button",
+  );
+  assert.match(
+    src,
+    /"preanalyze-pending": async \(button\)/,
+    "action handler is registered",
+  );
+  assert.match(
+    src,
+    /\/api\/jobs\/preanalyze-pending/,
+    "handler calls the bulk preanalysis endpoint",
+  );
+  assert.match(
+    src,
+    /status\.stopped && failed/,
+    "a stopped batch surfaces the backend's actionable reason",
+  );
 });

@@ -8,6 +8,7 @@ import re
 import sqlite3
 import statistics
 import time
+import urllib.parse
 import uuid
 from datetime import datetime
 from typing import Any, Optional, Sequence
@@ -438,11 +439,121 @@ CREATE INDEX IF NOT EXISTS idx_application_snapshots_job
 """
 
 
+_URL_NOISE_QUERY_KEYS = frozenset(
+    {
+        "locale",
+        "lang",
+        "from",
+        "src",
+        "source",
+        "ref",
+        "referrer",
+        "spm",
+        "ga",
+        "_ga",
+        "fbclid",
+        "gclid",
+        "share",
+        "shareid",
+        "share_id",
+        "activityguid",
+        "activityjumppage",
+    }
+)
+
+
+def _is_noise_query_key(key: str) -> bool:
+    """Return True for tracking/locale params that never identify a posting."""
+    lowered = (key or "").lower()
+    return lowered in _URL_NOISE_QUERY_KEYS or lowered.startswith("utm_")
+
+
+def _normalize_query(raw: str) -> str:
+    pairs = [
+        (key, value)
+        for key, value in urllib.parse.parse_qsl(
+            raw or "", keep_blank_values=True
+        )
+        if not _is_noise_query_key(key)
+    ]
+    pairs.sort()
+    return urllib.parse.urlencode(pairs)
+
+
 def _normalize_source_url(url: str) -> str:
-    """Return a stable normalization of a source URL for dedupe."""
+    """Return a stable normalization of a source URL for dedupe.
+
+    Posting identity on most careers sites lives in the query or the
+    fragment (``?postId=``, ``?jobAdId=``, ``#/job/<uuid>``), so both are
+    preserved; only known tracking/locale noise is dropped so the same
+    posting shared with different tags still dedupes to one row. Stripping
+    the query/fragment outright collapsed every posting on a site into a
+    single key (2026-09-24 regression).
+    """
     value = (url or "").strip()
-    value = re.sub(r"[?#].*$", "", value).rstrip("/")
-    return value.lower()
+    if not value:
+        return ""
+    try:
+        parts = urllib.parse.urlsplit(value)
+    except ValueError:
+        return re.sub(r"[?#].*$", "", value).rstrip("/").lower()
+    fragment = parts.fragment
+    if "?" in fragment:
+        frag_path, _, frag_query = fragment.partition("?")
+        cleaned = _normalize_query(frag_query)
+        fragment = f"{frag_path}?{cleaned}" if cleaned else frag_path
+    rebuilt = urllib.parse.urlunsplit(
+        (
+            parts.scheme.lower(),
+            parts.netloc.lower(),
+            parts.path.rstrip("/"),
+            _normalize_query(parts.query),
+            fragment,
+        )
+    )
+    return rebuilt.lower()
+
+
+_SALARY_UNIT_FACTORS = {"k": 1000, "千": 1000, "万": 10000}
+_SALARY_RANGE_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*([kK千万])?\s*[-~到至]\s*"
+    r"(\d+(?:\.\d+)?)\s*([kK千万])?"
+)
+_SALARY_SINGLE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([kK千万])")
+
+
+def _salary_unit_factor(*units: str | None) -> int | None:
+    for unit in units:
+        if unit:
+            return _SALARY_UNIT_FACTORS.get(unit.lower())
+    return None
+
+
+def _parse_salary_text(text: str | None) -> tuple[int | None, int | None]:
+    """Best-effort parse of "4-6K/月" / "20-30K" / "1.2万-2万" salary text.
+
+    A magnitude unit (K/千/万) is required: without one the number could be a
+    daily rate, an experience range, or a headcount, and guessing would put
+    wrong money in the library. Anything unparseable returns ``(None, None)``.
+    """
+    value = (text or "").replace("，", ",").strip()
+    if not value:
+        return None, None
+    match = _SALARY_RANGE_RE.search(value)
+    if match:
+        factor = _salary_unit_factor(match.group(2), match.group(4))
+        if factor:
+            return (
+                int(float(match.group(1)) * factor),
+                int(float(match.group(3)) * factor),
+            )
+    match = _SALARY_SINGLE_RE.search(value)
+    if match:
+        factor = _salary_unit_factor(match.group(2))
+        if factor:
+            single = int(float(match.group(1)) * factor)
+            return single, single
+    return None, None
 
 
 def _normalize_jd_text(text: str) -> str:
@@ -452,6 +563,43 @@ def _normalize_jd_text(text: str) -> str:
 def _text_dedupe_key(text: str) -> str:
     normalized = _normalize_jd_text(text)
     return "text:" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _dedupe_key_for(
+    source_type: str | None,
+    source_url: str | None,
+    text: str,
+) -> str:
+    """Derive the tenant-scoped dedupe key for one library job.
+
+    URL-identified rows dedupe on the normalized source URL; everything else
+    falls back to the normalized JD text hash. The import path reuses this so
+    its pre-insert duplicate check looks at exactly the key ``create_job``
+    would write.
+    """
+    normalized_url = (
+        _normalize_source_url(source_url)
+        if source_type == "url" and source_url
+        else ""
+    )
+    if normalized_url:
+        return "url:" + normalized_url
+    return _text_dedupe_key(text)
+
+
+def _job_identity_key(
+    company: str | None, title: str | None, location: str | None
+) -> str:
+    """Normalized company|title|location key for job-table dedupe.
+
+    WorkBuddy rewrites a posting's JD body as the posting evolves, so the
+    body hash is not a stable identity. Company/title/location is; the cost is
+    that two genuinely distinct postings sharing all three look alike.
+    """
+    return "|".join(
+        re.sub(r"\s+", " ", str(part or "").strip().lower())
+        for part in (company, title, location)
+    )
 
 
 def _parse_due_datetime(value: str | None) -> datetime | None:
@@ -625,6 +773,40 @@ class JobLibraryStore(_SqliteStore):
         """Return a validated stored status value for the kanban model."""
         return _validate_status(status)
 
+    def _apply_migrations(self, conn: sqlite3.Connection) -> None:
+        super()._apply_migrations(conn)
+        self._reconcile_url_dedupe_keys(conn)
+
+    def _reconcile_url_dedupe_keys(self, conn: sqlite3.Connection) -> None:
+        """Re-key legacy URL rows after the query/fragment dedupe fix.
+
+        Before 2026-09-24 ``_normalize_source_url`` stripped everything after
+        ``?``/``#``, so distinct postings on one careers site shared a key and
+        later ingests were rejected as duplicates. Recompute each URL row's
+        key from its own ``source_url``; a row whose new key collides with an
+        existing row is left alone (the already-merged data cannot be
+        reconstructed here). Idempotent: rows whose key already matches are
+        skipped without a write.
+        """
+        rows = conn.execute(
+            "SELECT job_id, source_url, dedupe_key FROM library_jobs"
+            " WHERE source_type = 'url' AND source_url IS NOT NULL"
+        ).fetchall()
+        for row in rows:
+            normalized = _normalize_source_url(row["source_url"])
+            if not normalized:
+                continue
+            key = "url:" + normalized
+            if key == row["dedupe_key"]:
+                continue
+            try:
+                conn.execute(
+                    "UPDATE library_jobs SET dedupe_key = ? WHERE job_id = ?",
+                    (key, row["job_id"]),
+                )
+            except sqlite3.IntegrityError:
+                continue
+
     def create_job(
         self,
         tenant_id: str,
@@ -702,16 +884,7 @@ class JobLibraryStore(_SqliteStore):
             raise UserStoreError(f"Invalid alignment_status: {alignment_status}")
 
         if dedupe_key is None:
-            normalized_url = (
-                _normalize_source_url(source_url)
-                if source_type == "url" and source_url
-                else ""
-            )
-            dedupe_key = (
-                "url:" + normalized_url
-                if normalized_url
-                else _text_dedupe_key(text)
-            )
+            dedupe_key = _dedupe_key_for(source_type, source_url, text)
         else:
             dedupe_key = dedupe_key.strip()
         job_id = uuid.uuid4().hex
@@ -823,6 +996,26 @@ class JobLibraryStore(_SqliteStore):
                     (tenant_id, dedupe_key),
                 ).fetchone()
                 return self._row_to_library_job(row) if row else None
+
+    def list_job_identity_keys(self, tenant_id: str) -> set[str]:
+        """Return normalized company/title/location keys for the tenant.
+
+        Used by the job-table sync to recognize a posting whose JD body was
+        rewritten after it was first imported (its dedupe key changed, its
+        identity did not).
+        """
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT company, title, location FROM library_jobs "
+                    "WHERE tenant_id = ?",
+                    (tenant_id,),
+                ).fetchall()
+        return {
+            _job_identity_key(row["company"], row["title"], row["location"])
+            for row in rows
+        }
 
     def find_job_by_application_source(
         self,
