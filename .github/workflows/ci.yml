@@ -73,6 +73,14 @@ jobs:
         run: python benchmarks/run_benchmark.py --offline
         env:
           PYTHONPATH: src
+      - name: Degradation fault-injection evidence
+        run: python benchmarks/degradation_benchmark.py --trials 5
+        env:
+          PYTHONPATH: src
+      - name: Capacity curve (baseline gate)
+        run: python benchmarks/capacity_benchmark.py --check-baseline
+        env:
+          PYTHONPATH: src
 
   playwright-smoke:
     name: Stage 3 - Playwright smoke
@@ -109,3 +117,19 @@ jobs:
         with:
           name: playwright-artifacts
           path: .scratch/phase-20/shots/
+
+  cold-start-gate:
+    name: Stage 4 - cold start gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+      - name: Native + container cold start (baseline gate)
+        run: python benchmarks/cold_start_benchmark.py --trials 5 --check-baseline
+        env:
+          PYTHONPATH: src

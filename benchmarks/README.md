@@ -53,3 +53,30 @@ per-case report, expected direction, and keyword-overlap metrics, and prints a
 readable summary to stdout.
 
 Use `--cases-dir` and `--results-dir` to override the default directories.
+
+## Evidence hardening benchmarks
+
+These scripts produce the reproducible numbers used by ADR-0054. They never
+call a real model.
+
+```powershell
+$env:PYTHONPATH='src'
+python benchmarks\degradation_benchmark.py --trials 5 --json-out degradation.json
+python benchmarks\capacity_benchmark.py --check-baseline --json-out capacity.json
+python benchmarks\cold_start_benchmark.py --trials 5 --check-baseline --json-out cold-start.json
+```
+
+- `degradation_benchmark.py` injects HTTP 503 failures into a local primary
+  node, verifies breaker trip/fallback/recovery, and records recovery time.
+- `capacity_benchmark.py` runs a deterministic API mix against an isolated
+  uvicorn process and records QPS plus P50/P95/P99 by concurrency, compared
+  against `benchmarks/baselines/capacity-ci.json`.
+- `cold_start_benchmark.py` records native process cold starts and, with
+  Docker, no-cache image build plus empty-volume container startup, compared
+  against `benchmarks/baselines/cold-start-ci.json`.
+
+The capacity and cold-start gates are enforced on CI (`GITHUB_ACTIONS=true`);
+local Windows runs print `ADVISORY` instead of failing (ADR-0054). Set
+`RESUALIGN_BENCHMARK_STRICT=1` to force gating locally.
+
+Generated JSON belongs in CI artifacts or a temporary directory, not in git.
