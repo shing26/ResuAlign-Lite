@@ -4,14 +4,12 @@ import logging
 import threading
 import time
 import uuid
-from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ...alignment_lifecycle import transition_alignment
 from ...app.context import context
-from ...engine.role_router import call_with_role
 from ...llm_usage import llm_tenant_context
 from ..deps import get_current_user, get_local_ingest_user
 from ..schemas import (
@@ -29,39 +27,16 @@ from ..schemas import (
     WorkbenchRewriteResponse,
     WorkbenchRunRequest,
 )
-from ..services.jobs import build_job_export
+from ..services.jobs import (
+    PreanalyzeUnavailable,
+    _match_inputs,
+    _match_reason_source,
+    _match_stale,
+    build_job_export,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-def _match_inputs(user_id: str, job: dict[str, Any]) -> tuple[str, str | None]:
-    """Return the pinned master resume text and id for match scoring."""
-    resume_id = job.get("workbench_resume_id")
-    if not resume_id:
-        return "", None
-    resume = context._resumes.get_master_resume(user_id, resume_id)
-    return (resume["content"] if resume else ""), resume_id
-
-
-def _match_stale(user_id: str, job: dict[str, Any]) -> bool:
-    """Return whether a job's match score no longer reflects its inputs."""
-    if not job.get("match_updated_at"):
-        return True
-    resume_text, resume_id = _match_inputs(user_id, job)
-    return not context.snapshot_matches(
-        job.get("match_score_detail"),
-        job.get("jd_text"),
-        resume_text,
-        resume_id,
-    )
-
-
-def _match_reason_source(job: dict[str, Any]) -> str | None:
-    reason = job.get("match_reason") or ""
-    if reason.startswith("基于规则评分："):
-        return "fallback"
-    return "llm" if reason else None
 
 
 def _llm_match_reason(
@@ -149,7 +124,18 @@ def import_library_jobs(req: JobImportRequest, request: Request, user: dict[str,
     if len(rows) > context._MAX_IMPORT_ROWS:
         raise HTTPException(status_code=422, detail=f'Import exceeds maximum of {context._MAX_IMPORT_ROWS} rows')
     import_id = uuid.uuid4().hex
-    context._import_batches[import_id] = {'user_id': user['user_id'], 'rows': rows, 'created': 0, 'skipped': 0, 'errors': [], 'done': False}
+    context._import_batches[import_id] = {
+        'user_id': user['user_id'],
+        'rows': rows,
+        'created': 0,
+        'skipped': 0,
+        'errors': [],
+        'done': False,
+        'preanalyze': bool(req.preanalyze),
+        'analyzed': 0,
+        'job_ids': [],
+        'analyze_errors': [],
+    }
     threading.Thread(target=context._run_import, args=(import_id,), daemon=True).start()
     return {'queued': True, 'import_id': import_id, 'total': len(rows), 'created': 0, 'skipped': 0, 'errors': []}
 
@@ -159,7 +145,97 @@ def import_status(import_id: str, user: dict[str, Any]=Depends(get_current_user)
     batch = context._import_batches.get(import_id)
     if batch is None or batch['user_id'] != user['user_id']:
         raise HTTPException(status_code=404, detail='Import batch not found')
-    return {'queued': not batch['done'], 'total': len(batch['rows']), 'created': batch['created'], 'skipped': batch['skipped'], 'errors': batch['errors']}
+    return {
+        'queued': not batch['done'],
+        'total': len(batch['rows']),
+        'created': batch['created'],
+        'skipped': batch['skipped'],
+        'errors': batch['errors'],
+        'analyzed': batch.get('analyzed', 0),
+        'analyze_errors': batch.get('analyze_errors', []),
+    }
+
+
+@router.post('/api/jobs/preanalyze-pending')
+def preanalyze_pending_jobs(
+    request: Request,
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Queue zero-click preanalysis for every not-yet-analyzed library job."""
+    context._enforce_rate_limit(request, context._analyze_rate_limiter)
+    job_ids = context._collect_pending_preanalyze_job_ids(user['user_id'])
+    if not job_ids:
+        return {
+            'queued': False,
+            'batch_id': None,
+            'total': 0,
+            'analyzed': 0,
+            'skipped': 0,
+            'errors': [],
+        }
+    batch_id = uuid.uuid4().hex
+    context._preanalyze_batches[batch_id] = {
+        'user_id': user['user_id'],
+        'job_ids': job_ids,
+        'analyzed': 0,
+        'skipped': 0,
+        'errors': [],
+        'done': False,
+        'stopped': False,
+    }
+    threading.Thread(
+        target=context._run_preanalyze_batch,
+        args=(batch_id,),
+        daemon=True,
+    ).start()
+    return {
+        'queued': True,
+        'batch_id': batch_id,
+        'total': len(job_ids),
+        'analyzed': 0,
+        'skipped': 0,
+        'errors': [],
+    }
+
+
+@router.get('/api/jobs/preanalyze-pending/{batch_id}')
+def preanalyze_pending_status(
+    batch_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Return the progress of a queued bulk preanalysis sweep."""
+    batch = context._preanalyze_batches.get(batch_id)
+    if batch is None or batch['user_id'] != user['user_id']:
+        raise HTTPException(status_code=404, detail='Preanalyze batch not found')
+    return {
+        'queued': not batch['done'],
+        'total': len(batch['job_ids']),
+        'analyzed': batch['analyzed'],
+        'skipped': batch['skipped'],
+        'errors': batch['errors'],
+        'stopped': batch.get('stopped', False),
+    }
+
+
+@router.get('/api/jobs/job-table')
+def job_table_status(user: dict[str, Any] = Depends(get_current_user)):
+    """Return the configured job-table sync settings and last outcome."""
+    return {'job_table': context._job_table_config(user)}
+
+
+@router.post('/api/jobs/job-table/sync')
+def sync_job_table_route(
+    request: Request,
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Read the configured job table and queue its rows for import."""
+    context._enforce_rate_limit(request, context._import_rate_limiter)
+    context.enforce_daily_llm_cap(user['user_id'])
+    try:
+        return context.sync_job_table(user)
+    except context._job_table_error as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 
 @router.get('/api/jobs')
 def list_library_jobs(job_function: str | None=None, seniority: str | None=None, status: str | None=None, search: str | None=None, limit: int=100, offset: int=0, sort: str="updated_at_desc", user: dict[str, Any]=Depends(get_current_user)):
@@ -416,35 +492,6 @@ def accept_workbench_diffs(job_id: str, req: WorkbenchAcceptRequest, user: dict[
     return {'draft': draft, 'accepted_count': applied_count, 'total_diffs': len(diffs)}
 
 
-def _preanalyze_cache_hit(
-    user_id: str,
-    config: Any,
-    resume_text: str,
-    jd_text: str,
-) -> bool:
-    """Return whether the preanalyze LLM product is already cached."""
-    try:
-        if (resume_text or '').strip():
-            content = f"{resume_text}\n\n{jd_text}"
-            from resualign.jd_analysis import JD_ANALYSIS_PROMPT_VERSION
-
-            prompt_version = JD_ANALYSIS_PROMPT_VERSION
-        else:
-            content = jd_text
-            from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
-
-            prompt_version = JD_PROFILER_PROMPT_VERSION
-        cached = context._cache.get(
-            user_id,
-            config.model,
-            prompt_version,
-            content,
-        )
-        return cached is not None
-    except Exception:
-        return False
-
-
 @router.post(
     '/api/jobs/{job_id}/preanalyze',
     response_model=JobPreanalyzeResponse,
@@ -456,201 +503,17 @@ def preanalyze_library_job(
 ):
     """Run classifier + JD profile/gap without tailoring; idempotent."""
     context._enforce_rate_limit(request, context._analyze_rate_limiter)
-    job = context._jobs.get_job(user['user_id'], job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail='Job not found')
-    jd_text = (job.get('jd_text') or '').strip()
-    if not jd_text:
-        raise HTTPException(status_code=422, detail='Job description text is required')
-    classification = {
-        'job_function': job.get('job_function'),
-        'seniority': job.get('seniority'),
-        'tech_tags': job.get('tech_tags') or [],
-    }
-    if job.get('jd_profile') and not job.get('classification_pending'):
-        return JobPreanalyzeResponse(
-            job_id=job_id,
-            status='ready',
-            jd_profile=job.get('jd_profile'),
-            gap_report=job.get('gap_report'),
-            match_score=job.get('match_score'),
-            match_score_detail=job.get('match_score_detail'),
-            match_reason=job.get('match_reason'),
-            match_reason_source=_match_reason_source(job),
-            match_updated_at=job.get('match_updated_at'),
-            match_stale=_match_stale(user['user_id'], job),
-            classification=classification,
-            cache_hit=True,
-        )
-
-    job_functions, seniorities = context._settings_vocabulary(user['user_id'])
-    context.enforce_daily_llm_cap(user['user_id'])
-    with llm_tenant_context(user['user_id']):
-        try:
-            classification = context._classify_job(
-                jd_text, job_functions, seniorities, tenant=user['user_id']
-            )
-        except context.LLMResponseError as exc:
-            logger.warning('Preanalyze classification failed for %s: %s', job_id, exc)
-            classification = {}
-
-    resume = None
-    if job.get('workbench_resume_id'):
-        resume = context._resumes.get_master_resume(
-            user['user_id'], job['workbench_resume_id']
-        )
-    resume_text = resume['content'] if resume else ''
-    resume_id = resume['resume_id'] if resume else None
-    config = context.build_config()
-    if not config.is_llm_configured:
+    try:
+        result = context.preanalyze_job(user, job_id)
+    except PreanalyzeUnavailable as exc:
         raise HTTPException(
-            status_code=503,
-            detail='LLM 未配置。请设置 API Key（远程供应商）或激活 Ollama 本地节点。',
-        )
-    cache_hit = _preanalyze_cache_hit(
-        user['user_id'], config, resume_text, jd_text
-    )
-    profile_dict = None
-    gap_dict = None
-    with llm_tenant_context(user['user_id']):
-        with context.OpenAIClient(config, timeout=60.0) as client:
-            if resume_text.strip():
-                try:
-                    profile, _ = call_with_role(
-                        'profiler', context.profile_jd,
-                        context._llm_nodes, user['user_id'],
-                        fn_kwargs={
-                            'jd_text': jd_text,
-                            'cache': context._cache,
-                            'tenant': user['user_id'],
-                        },
-                    )
-                except Exception:
-                    profile = context.profile_jd(
-                        client,
-                        jd_text,
-                        cache=context._cache,
-                        tenant=user['user_id'],
-                    )
-                profile_dict = context.jd_profile_to_dict(profile)
-                import json as _json
-                _profile_str = _json.dumps(profile_dict, ensure_ascii=False)
-                try:
-                    gap, _ = call_with_role(
-                        'gap_analyzer', context.analyze_gaps,
-                        context._llm_nodes, user['user_id'],
-                        fn_kwargs={
-                            'resume_text': resume_text,
-                            'jd_profile_text': _profile_str,
-                        },
-                    )
-                except Exception:
-                    gap = context.analyze_gaps(
-                        client,
-                        resume_text,
-                        _profile_str,
-                    )
-                gap_dict = asdict(gap)
-            else:
-                try:
-                    profile, _ = call_with_role(
-                        'profiler', context.profile_jd,
-                        context._llm_nodes, user['user_id'],
-                        fn_kwargs={
-                            'jd_text': jd_text,
-                            'cache': context._cache,
-                            'tenant': user['user_id'],
-                        },
-                    )
-                except Exception:
-                    profile = context.proactive_jd_profile(
-                        client,
-                        jd_text,
-                        cache=context._cache,
-                        tenant=user['user_id'],
-                    )
-                profile_dict = context.jd_profile_to_dict(profile)
-    match_score = context._gap_match_score(
-        {'gap_report': gap_dict}
-    ) if gap_dict else None
-    match_detail = None
-    match_reason = None
-    if resume_id and profile_dict and gap_dict:
-        match_detail = context.compute_match_score(
-            jd_text,
-            profile_dict,
-            gap_dict,
-            None,
-            resume_text,
-            resume_id,
-        )
-        match_reason = context.fallback_match_reason(
-            match_detail,
-            gap_dict.get("missing_keywords") or [],
-        )
-        match_score = match_detail["total"]
-
-    updated = context._jobs.update_job(
-        user['user_id'],
-        job_id,
-        job_function=classification.get('job_function'),
-        seniority=classification.get('seniority'),
-        tech_tags=classification.get('tech_tags') or [],
-        classification_pending=0,
-        jd_profile=profile_dict,
-        gap_report=gap_dict,
-        match_score=match_score,
-        match_score_detail=match_detail,
-        match_reason=match_reason,
-        match_updated_at=time.time() if match_detail else None,
-        allowed_job_functions=job_functions,
-        allowed_seniorities=seniorities,
-    )
-    if updated is None:
+            status_code=exc.status_code, detail=exc.detail
+        ) from exc
+    except context.UserStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
         raise HTTPException(status_code=404, detail='Job not found')
-
-    session = context._session_store.find_by_job(job_id, user['user_id'])
-    if session is not None:
-        context._session_store.update(
-            session['session_id'],
-            {
-                'status': 'ready',
-                'job': updated,
-                'jd': {'profile': profile_dict, 'status': 'ready', 'error': None},
-                'gap': {
-                    'status': 'ready' if gap_dict else 'blocked',
-                    'score': match_score,
-                    'gap_report': gap_dict,
-                    'cache_hit': cache_hit,
-                    'error': None,
-                },
-            },
-        )
-        context._session_store.emit(
-            session['session_id'],
-            'job.gap_ready',
-            {
-                'job_id': job_id,
-                'jd_profile': profile_dict,
-                'gap_report': gap_dict,
-                'status': 'ready' if gap_dict else 'blocked',
-                'cache_hit': cache_hit,
-            },
-        )
-    return JobPreanalyzeResponse(
-        job_id=job_id,
-        status='ready',
-        jd_profile=profile_dict,
-        gap_report=gap_dict,
-        match_score=match_score,
-        match_score_detail=updated.get("match_score_detail"),
-        match_reason=updated.get("match_reason"),
-        match_reason_source=_match_reason_source(updated),
-        match_updated_at=updated.get("match_updated_at"),
-        match_stale=False,
-        classification=classification,
-        cache_hit=cache_hit,
-    )
+    return JobPreanalyzeResponse(**result)
 
 
 @router.post(

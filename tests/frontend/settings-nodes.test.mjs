@@ -7,10 +7,10 @@ import { Window } from "happy-dom";
 
 import {
   automationRuleTypeLabel,
-  costGuardPanelHtml,
   llmNodeCardHtml,
   llmNodeFormHtml,
   nodeTestResultHtml,
+  roleTimeoutSummary,
   ruleFormHtml,
   ruleListHtml,
   settingsBentoHtml,
@@ -19,10 +19,8 @@ import {
 } from "../../src/resualign/static/app/format.js";
 import {
   buildAutomationRulePayload,
-  buildCostGuardPayload,
   buildLlmNodePayload,
   validateAutomationRule,
-  validateCostGuardPayload,
   validateLlmNodePayload,
 } from "../../src/resualign/static/app/settings-form.js";
 
@@ -45,12 +43,12 @@ test("settingsBentoHtml renders four bento cards with defaults when empty", () =
   assert.equal(cards.length, 4);
 
   const labels = cards.map((card) => card.querySelector(".settings-bento__label").textContent);
-  assert.deepEqual(labels, ["活跃模型 ID", "架构模式", "Timeout 护栏", "API 延迟"]);
+  assert.deepEqual(labels, ["活跃模型 ID", "架构模式", "超时护栏", "API 延迟"]);
 
   assert.equal(body.querySelector("[data-bento-model] .settings-bento__value").textContent, "—");
   assert.equal(body.querySelector("[data-bento-arch] .settings-bento__value").textContent, "本地 SQLite");
-  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "40 秒");
-  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__hint").textContent, "并发: 1");
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "45–90 秒");
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__hint").textContent, "按角色 · 并发: 1");
   assert.equal(body.querySelector("[data-bento-latency] .settings-bento__value").textContent, "—");
 });
 
@@ -61,17 +59,34 @@ test("settingsBentoHtml shows active node, timeout guardrails and latency", () =
     body.querySelector("[data-bento-model] .settings-bento__value").textContent,
     "deepseek · deepseek-chat",
   );
-  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "40 秒");
-  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__hint").textContent, "并发: 1");
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "45–90 秒");
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__hint").textContent, "按角色 · 并发: 1");
   assert.equal(body.querySelector("[data-bento-latency] .settings-bento__value").textContent, "123 ms");
 });
 
 test("settingsBentoHtml tolerates missing / non-array-ish counts", () => {
   const body = bodyFrom(settingsBentoHtml(null, null));
-  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "40 秒");
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "45–90 秒");
   const body2 = bodyFrom(settingsBentoHtml(null, "abc"));
-  assert.equal(body2.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "40 秒");
+  assert.equal(body2.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "45–90 秒");
   assert.equal(body2.querySelector("[data-bento-latency] .settings-bento__value").textContent, "—");
+});
+
+test("settingsBentoHtml shows the runtime values the backend enforces", () => {
+  const runtime = {
+    worker_concurrency: 3,
+    role_timeouts: { diagnose: 50, profiler: 80, editor: 100 },
+  };
+  const body = bodyFrom(settingsBentoHtml(null, null, runtime));
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "50–100 秒");
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__hint").textContent, "按角色 · 并发: 3");
+});
+
+test("roleTimeoutSummary collapses a single value and rejects junk", () => {
+  assert.equal(roleTimeoutSummary({ editor: 90 }), "90 秒");
+  assert.equal(roleTimeoutSummary({}), "—");
+  assert.equal(roleTimeoutSummary({ editor: "abc" }), "—");
+  assert.equal(roleTimeoutSummary(null), "45–90 秒");
 });
 
 test("settingsBentoHtml escapes model/provider values", () => {
@@ -80,75 +95,6 @@ test("settingsBentoHtml escapes model/provider values", () => {
   assert.equal(body.querySelectorAll("img, b").length, 0);
   const value = body.querySelector("[data-bento-model] .settings-bento__value");
   assert.equal(value.textContent, '<img src=x onerror=1> · <b>x</b>');
-});
-
-/* ------------------------------------------------------------------ */
-/* costGuardPanelHtml: MVP-10 成本护栏面板                              */
-/* ------------------------------------------------------------------ */
-
-test("costGuardPanelHtml renders live usage and blocked state", () => {
-  const settings = {
-    daily_llm_cap: 5,
-    llm_cost_per_1k_in: 0.5,
-    llm_cost_per_1k_out: 1.5,
-  };
-  const daily = {
-    calls: 6,
-    cap: 5,
-    estimated_cost: 12.34,
-    blocked: true,
-    remaining: 0,
-  };
-  const body = bodyFrom(costGuardPanelHtml(settings, daily));
-  assert.equal(body.querySelector("[data-daily-calls]").textContent, "6");
-  assert.equal(body.querySelector("[data-daily-cap]").textContent, "5");
-  assert.equal(body.querySelector("[data-daily-remaining]").textContent, "0");
-  assert.match(body.querySelector("[data-daily-cost]").textContent, /12\.3400/);
-  assert.ok(body.querySelector("[data-cost-blocked]"));
-  assert.equal(body.querySelector("[data-cost-status]").dataset.costBlocked, "true");
-});
-
-test("costGuardPanelHtml shows unlimited when cap is null", () => {
-  const body = bodyFrom(costGuardPanelHtml({}, { calls: 0, cap: null }));
-  assert.equal(body.querySelector("[data-daily-cap]").textContent, "不限制");
-  assert.equal(body.querySelector("[data-daily-remaining]").textContent, "—");
-  assert.equal(body.querySelector("[data-cost-status]").dataset.costBlocked, "false");
-});
-
-test("costGuardPanelHtml escapes hostile values", () => {
-  const body = bodyFrom(
-    costGuardPanelHtml(
-      { daily_llm_cap: "<script>1</script>" },
-      { cap: "<b>9</b>", estimated_cost: "<i>x</i>" },
-    ),
-  );
-  assert.equal(body.querySelector("script, b, i"), null);
-  assert.equal(body.querySelector("[data-daily-cap]").textContent, "<b>9</b>");
-});
-
-test("buildCostGuardPayload maps blank fields to null and numbers otherwise", () => {
-  assert.deepEqual(
-    buildCostGuardPayload({
-      daily_llm_cap: " 12 ",
-      llm_cost_per_1k_in: "0.5",
-      llm_cost_per_1k_out: "",
-    }),
-    { daily_llm_cap: 12, llm_cost_per_1k_in: 0.5, llm_cost_per_1k_out: null },
-  );
-  assert.deepEqual(buildCostGuardPayload({}), {
-    daily_llm_cap: null,
-    llm_cost_per_1k_in: null,
-    llm_cost_per_1k_out: null,
-  });
-});
-
-test("validateCostGuardPayload rejects negative and non-finite values", () => {
-  assert.deepEqual(
-    validateCostGuardPayload({ daily_llm_cap: 1, llm_cost_per_1k_in: 0.2 }),
-    { ok: true, message: "" },
-  );
-  assert.equal(validateCostGuardPayload({ daily_llm_cap: -1 }).ok, false);
-  assert.equal(validateCostGuardPayload({ llm_cost_per_1k_out: Number.NaN }).ok, false);
 });
 
 /* ------------------------------------------------------------------ */
@@ -701,4 +647,23 @@ test("main.js wires the llm-fetch-models action to POST /api/llm/models", () => 
     /input\.value = button\.dataset\.model/,
     "picking a model writes it back into the model input",
   );
+});
+
+/* 2026-09-24：设置页的「Guardrails」面板是写死展示（超时数字 40s 与后端
+ * 实际 per-role 45–90s 不符），且「评估默认」勾选框没有 name / handler，
+ * 点了不生效。真正生效的评估开关在节点卡片下方，故整块删除。 */
+test("settings page no longer ships the decorative Guardrails panel", () => {
+  const mainJs = readFileSync(join(HERE, "../../src/resualign/static/app/main.js"), "utf8");
+  assert.doesNotMatch(mainJs, /data-guardrails-panel/);
+  assert.doesNotMatch(mainJs, /<h2>Guardrails<\/h2>/);
+  assert.doesNotMatch(mainJs, /超时熔断/);
+  assert.doesNotMatch(
+    mainJs,
+    /<input type="checkbox" checked> 默认运行对齐评估/,
+    "the dead eval checkbox must not come back",
+  );
+  /* 自动化规则是真功能，必须留在专家模式里 */
+  assert.match(mainJs, /<h2>自动化规则<\/h2>/);
+  /* 真开关仍在（settings-eval-default 表单） */
+  assert.match(mainJs, /data-form="settings-eval-default"/);
 });

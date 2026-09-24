@@ -81,6 +81,7 @@ class AppContext:
         self._MAX_RESUME_UPLOAD_BYTES = 10 * 1024 * 1024
         self._MAX_BODY_BYTES = 8 * 1024 * 1024
         self._import_batches: dict[str, dict[str, Any]] = {}
+        self._preanalyze_batches: dict[str, dict[str, Any]] = {}
         self._batch_store = BatchAlignStore()
         self._TIMELINE_FIELDS = (
             "applied_at",
@@ -131,6 +132,7 @@ class AppContext:
         self._resumes_service: ModuleType | None = None
         self._resume_optimize_service: ModuleType | None = None
         self._watchdog_service: ModuleType | None = None
+        self._job_table_service: ModuleType | None = None
 
     def _personal_mode_enabled(self) -> bool:
         value = self._env_settings.resualign_personal_mode.strip().lower()
@@ -145,6 +147,7 @@ class AppContext:
         resumes: ModuleType,
         resume_optimize: ModuleType,
         watchdog: ModuleType,
+        job_table: ModuleType | None = None,
     ) -> None:
         """Install service functions after the API bootstrap imports them."""
         self._jobs_service = jobs
@@ -153,6 +156,7 @@ class AppContext:
         self._resumes_service = resumes
         self._resume_optimize_service = resume_optimize
         self._watchdog_service = watchdog
+        self._job_table_service = job_table
 
         self._settings_vocabulary = jobs._settings_vocabulary
         self._classify_job = jobs._classify_job
@@ -164,10 +168,23 @@ class AppContext:
         self._collect_import_rows = jobs._collect_import_rows
         self._run_import = jobs._run_import
         self._prune_import_batches = jobs._prune_import_batches
+        self.preanalyze_job = jobs.preanalyze_job
+        self._job_needs_preanalyze = jobs.job_needs_preanalyze
+        self._collect_pending_preanalyze_job_ids = (
+            jobs.collect_pending_preanalyze_job_ids
+        )
+        self._run_preanalyze_batch = jobs._run_preanalyze_batch
+        self._prune_preanalyze_batches = jobs._prune_preanalyze_batches
         self._queue_job = jobs._queue_job
         self._run_job = jobs._run_job
         self._job_failure_detail = jobs._job_failure_detail
         self._probe_active_llm_quick = jobs._probe_active_llm_quick
+
+        if job_table is not None:
+            self.sync_job_table = job_table.sync_job_table
+            self._job_table_config = job_table.job_table_config
+            self._job_table_sync_once = job_table.sync_once
+            self._job_table_error = job_table.JobTableError
 
         self._report_to_dict = workbench._report_to_dict
         self._build_diagnosis_section = workbench._build_diagnosis_section

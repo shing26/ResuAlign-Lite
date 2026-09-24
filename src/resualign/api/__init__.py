@@ -255,6 +255,7 @@ from .state import (  # noqa: F401, I001  (explicit bindings used below)
 
 from .services import batch as _batch_service
 from .services import jobs as _jobs_service
+from .services import job_table as _job_table_service
 from .services import resumes as _resumes_service
 from .services import resume_optimize as _resume_optimize_service
 from .services import workbench as _workbench_service
@@ -277,6 +278,7 @@ _context.bind_service_layer(
     resumes=_resumes_service,
     resume_optimize=_resume_optimize_service,
     watchdog=_watchdog_service,
+    job_table=_job_table_service,
 )
 _session_store = _context._session_store
 _queue_batch_align = _context._queue_batch_align
@@ -356,9 +358,14 @@ async def lifespan(_: FastAPI):
     # RESUALIGN_JOB_MAX_RUNTIME_S=0). Recovery ran first so restored jobs
     # get their fresh request ids before any sweep can see them.
     _watchdog_stop = _watchdog_service.start()
+    # Job-table auto-sync: reads each opted-in tenant's WorkBuddy CSV and
+    # queues new rows through the normal import worker.
+    _job_table_stop = _job_table_service.start()
     try:
         yield
     finally:
+        if _job_table_stop is not None:
+            _job_table_stop.set()
         if _watchdog_stop is not None:
             _watchdog_stop.set()
 

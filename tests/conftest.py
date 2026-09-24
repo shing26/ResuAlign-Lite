@@ -79,6 +79,31 @@ def stub_workbench_llm_probe(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def isolated_llm_node_store(tmp_path, monkeypatch):
+    """Never resolve an LLM node from the developer's real data/jobs.db.
+
+    The preanalyze path resolves a role node through ``context._llm_nodes``
+    before its first call. Tests run in personal mode with tenant ``local``,
+    which is the same tenant the real store uses, so an unisolated store
+    hands the test the developer's own bindings (e.g. profiler → Ollama) and
+    the suite fires a live HTTP request: a 75s timeout, and the in-flight
+    request can be captured by an unrelated test's ``httpx_mock``.
+
+    Same rationale as #117's log isolation: tests must not touch real
+    instance state.
+    """
+    import resualign.api as api_module
+    from resualign.engine.llm_nodes import LLMNodeStore
+
+    monkeypatch.setattr(
+        api_module,
+        "_llm_nodes",
+        LLMNodeStore(db_path=tmp_path / "llm-nodes.db"),
+    )
+    yield
+
+
 class MockLLMClient:
     """Sequence-based fake LLM client for unit testing pipeline stages.
 

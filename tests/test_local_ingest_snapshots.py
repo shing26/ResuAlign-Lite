@@ -131,10 +131,11 @@ def test_local_ingest_creates_pending_job_with_deterministic_fields():
     assert job["title"] == "后端工程师"
     assert job["company"] == "Acme"
     assert job["location"] == "Shanghai"
-    # De-bloat: salary is no longer auto-extracted from salary_text/JD text;
-    # the field stays populated only when explicitly provided.
-    assert job["salary_min"] is None
-    assert job["salary_max"] is None
+    # 2026-09-24: the collector scrapes the salary line as text; parse it into
+    # the numeric fields so the job form's salary box is populated. JD text is
+    # still never mined for salary (the de-bloat decision stands).
+    assert job["salary_min"] == 20000
+    assert job["salary_max"] == 30000
     assert job["status"] == "draft"  # Bug-12
     assert job["status_label"] == "未投递"  # display layer stays localized
     assert job["source_url"] == "https://www.shixiseng.com/intern/abc"
@@ -173,6 +174,77 @@ def test_local_ingest_specific_dedupe_by_url_never_overwrites():
     assert existing["status"] == "applied"
     assert existing["notes"] == "keep note"
     assert existing["final_draft"] == "# Kept draft"
+
+
+def test_local_ingest_keeps_distinct_postings_on_one_site():
+    """Two postings on one careers site must not collapse into one row.
+
+    Regression (2026-09-24): ``_normalize_source_url`` stripped everything
+    after ``?``/``#``, so every posting under ``join.qq.com`` shared one
+    dedupe key and the second ingest was rejected as a duplicate.
+    """
+    token = _token()
+    first = _ingest(
+        _job_payload(
+            job_page_url="https://join.qq.com/post_detail.html?postid=AAA",
+            title="岗位 A",
+            jd_text="岗位 A 的完整 JD 正文，负责后端服务。",
+        ),
+        token=token,
+    ).json()
+    second = _ingest(
+        _job_payload(
+            job_page_url="https://join.qq.com/post_detail.html?postid=BBB",
+            title="岗位 B",
+            jd_text="岗位 B 的完整 JD 正文，负责前端页面。",
+        ),
+        token=token,
+    ).json()
+    assert first["status"] == "created"
+    assert second["status"] == "created"
+    assert first["job_id"] != second["job_id"]
+
+    # Tracking noise must not defeat dedupe: the same posting shared with a
+    # utm tag and a reordered query is still the same row.
+    again = _ingest(
+        _job_payload(
+            job_page_url=(
+                "https://join.qq.com/post_detail.html"
+                "?utm_source=wechat&postid=AAA"
+            ),
+            title="岗位 A",
+            jd_text="岗位 A 的完整 JD 正文，负责后端服务。",
+        ),
+        token=token,
+    ).json()
+    assert again["status"] == "duplicate"
+    assert again["job_id"] == first["job_id"]
+
+
+def test_local_ingest_leaves_salary_empty_without_a_magnitude_unit():
+    token = _token()
+    negotiable = _ingest(
+        _job_payload(
+            job_page_url="https://example.com/jobs/negotiable",
+            salary_text="面议",
+            jd_text="薪资面议的后端岗位 JD 正文。",
+        ),
+        token=token,
+    ).json()
+    assert negotiable["job"]["salary_min"] is None
+    assert negotiable["job"]["salary_max"] is None
+
+    # A daily rate is not a monthly salary: guessing would store wrong money.
+    daily = _ingest(
+        _job_payload(
+            job_page_url="https://example.com/jobs/daily",
+            salary_text="200-300元/天",
+            jd_text="日薪实习岗位的 JD 正文。",
+        ),
+        token=token,
+    ).json()
+    assert daily["job"]["salary_min"] is None
+    assert daily["job"]["salary_max"] is None
 
 
 def test_local_ingest_universal_dedupe_by_text_hash():

@@ -23,41 +23,6 @@ export function evalDefaultFromForm(data) {
   return value === "on" || value === true;
 }
 
-/** Build the PUT /api/settings cost-guard payload from form field data.
- *
- * Empty fields map to null so the user can explicitly clear the daily cap
- * or prices back to "unlimited / unconfigured".
- */
-export function buildCostGuardPayload(data) {
-  const source = data || {};
-  const parseOrNull = (value) => {
-    const raw = String(value ?? "").trim();
-    return raw === "" ? null : Number(raw);
-  };
-  return {
-    daily_llm_cap: parseOrNull(source.daily_llm_cap),
-    llm_cost_per_1k_in: parseOrNull(source.llm_cost_per_1k_in),
-    llm_cost_per_1k_out: parseOrNull(source.llm_cost_per_1k_out),
-  };
-}
-
-/** Validate a built cost-guard payload before PUT /api/settings. */
-export function validateCostGuardPayload(payload) {
-  const source = payload || {};
-  for (const key of [
-    "daily_llm_cap",
-    "llm_cost_per_1k_in",
-    "llm_cost_per_1k_out",
-  ]) {
-    const value = source[key];
-    if (value == null) continue;
-    if (!Number.isFinite(value) || value < 0) {
-      return { ok: false, message: "成本护栏数值必须是非负数字" };
-    }
-  }
-  return { ok: true, message: "" };
-}
-
 /* ------------------------------------------------------------------ */
 /* Sprint 5: LLM 节点 + 自动化规则表单（纯函数）                          */
 /* ------------------------------------------------------------------ */

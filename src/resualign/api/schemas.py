@@ -99,6 +99,7 @@ class JobUpdateRequest(BaseModel):
 class JobImportRequest(BaseModel):
     jobs: list[dict[str, Any]] | None = None
     csv_text: str | None = Field(default=None, max_length=_CSV_TEXT_MAX)
+    preanalyze: bool = False
 
 
 class LocalIngestRequest(BaseModel):
@@ -144,6 +145,16 @@ class ReminderSettingsUpdate(BaseModel):
     smtp_user: str | None = Field(default=None, max_length=255)
     smtp_from: str | None = Field(default=None, max_length=255)
     smtp_to: str | None = Field(default=None, max_length=255)
+
+
+class JobTableSettingsUpdate(BaseModel):
+    """Job-table auto-sync config (server-side paths + schedule)."""
+
+    path: str | None = Field(default=None, max_length=2000)
+    jd_dir: str | None = Field(default=None, max_length=2000)
+    auto_sync: bool | None = None
+    interval_minutes: int | None = Field(default=None, ge=5, le=10080)
+    preanalyze: bool | None = None
 
 
 class SettingsTestConnectionRequest(BaseModel):
@@ -211,6 +222,7 @@ class SettingsUpdateRequest(BaseModel):
     daily_llm_cap: int | None = Field(default=None, ge=0)
     llm_cost_per_1k_in: float | None = Field(default=None, ge=0)
     llm_cost_per_1k_out: float | None = Field(default=None, ge=0)
+    job_table: JobTableSettingsUpdate | None = None
 
 class WorkbenchRunRequest(BaseModel):
     master_resume_id: str

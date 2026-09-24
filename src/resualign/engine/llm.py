@@ -942,6 +942,7 @@ class OpenAIClient(LLMClient):
 
             for attempt in range(self.max_retries + 1):
                 attempts += 1
+                finish_reason = None
                 try:
                     payload = {**body, "max_tokens": max_tokens}
                     r = _post(payload)
@@ -952,21 +953,29 @@ class OpenAIClient(LLMClient):
                     content = message.get("content") or ""
                     finish_reason = response["choices"][0].get("finish_reason")
                     if (
-                        not content
-                        and finish_reason == "length"
+                        finish_reason == "length"
                         and max_tokens < self._token_cap
                     ):
+                        # A reasoning model can spend the whole budget on
+                        # ``reasoning_content`` (the ``thinking`` opt-out is
+                        # not honoured by every provider, e.g. NVIDIA NIM):
+                        # the JSON then comes back empty *or* truncated
+                        # mid-object. Both are the same symptom, so double
+                        # the budget before giving up. Empty content retries
+                        # here; truncated content falls through to the parse
+                        # below, whose failure retries with the bigger budget.
                         max_tokens = min(
                             max_tokens * 2, self._token_cap
                         )
-                        if attempt < self.max_retries:
-                            time.sleep(1)
-                            continue
-                        raise LLMResponseError(
-                            "Structured response was empty after "
-                            f"{self.max_retries + 1} attempts",
-                            code=LlmFailureCode.EMPTY,
-                        )
+                        if not content:
+                            if attempt < self.max_retries:
+                                time.sleep(1)
+                                continue
+                            raise LLMResponseError(
+                                "Structured response was empty after "
+                                f"{self.max_retries + 1} attempts",
+                                code=LlmFailureCode.EMPTY,
+                            )
                     result = schema_model.model_validate(
                         _parse_json_object(content)
                     ).model_dump()

@@ -88,7 +88,7 @@ test("roleBindingsPanelHtml tolerates null payloads and unknown roles", () => {
 
 test("simpleLlmSetupHtml points to expert mode for multi-node split", () => {
   const body = bodyFrom(simpleLlmSetupHtml(null, null));
-  assert.match(body.textContent, /多节点分工（本地分析 \+ 云端写作）也在那里配置/);
+  assert.match(body.textContent, /角色分工（本地分析 \+ 云端写作）与自动化规则在「专家模式」中配置/);
 });
 
 /* ------------------------------------------------------------------ */

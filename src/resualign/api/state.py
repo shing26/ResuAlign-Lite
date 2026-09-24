@@ -28,6 +28,7 @@ __all__ = [
     "_llm_nodes",
     "_llm_usage",
     "_payloads",
+    "_preanalyze_batches",
     "_registry",
     "_session_store",
     "_settings_store",

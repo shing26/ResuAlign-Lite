@@ -18,7 +18,7 @@ from resualign.workspace import (
     UserStore,
 )
 
-from .conftest import fake_password
+from .conftest import fake_api_key, fake_password
 
 client = TestClient(app)
 _auth_cache = None
@@ -43,6 +43,18 @@ def _wait_import(import_id, timeout=2.0):
             return body
         time.sleep(0.01)
     raise AssertionError(f"import {import_id} did not finish")
+
+
+def _wait_preanalyze(batch_id, timeout=10.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r = client.get(f"/api/jobs/preanalyze-pending/{batch_id}")
+        assert r.status_code == 200
+        body = r.json()
+        if not body["queued"]:
+            return body
+        time.sleep(0.01)
+    raise AssertionError(f"preanalyze {batch_id} did not finish")
 
 
 @pytest.fixture(autouse=True)
@@ -337,6 +349,140 @@ def test_job_import_csv_quoted_fields():
     jobs = client.get("/api/jobs").json()
     assert jobs[0]["title"] == "Backend, Senior"
     assert "Python, FastAPI, Redis" in jobs[0]["jd_text"]
+
+
+def test_job_import_preanalyze_runs_zero_click_analysis():
+    from resualign.models import JDProfile, ResuAlignConfig
+
+    profile = JDProfile(
+        must_have_skills=["Python"],
+        business_scenarios=["high concurrency"],
+    )
+    config = ResuAlignConfig(
+        provider="deepseek",
+        api_key=fake_api_key("test"),
+        model="test-model",
+    )
+    with patch("resualign.api._classify_job", side_effect=_classify), patch(
+        "resualign.api.build_config", return_value=config
+    ), patch("resualign.api.profile_jd", return_value=profile), patch(
+        "resualign.api.proactive_jd_profile", return_value=profile
+    ):
+        r = client.post(
+            "/api/jobs/import",
+            json={
+                "preanalyze": True,
+                "jobs": [{"title": "Backend", "jd_text": "Python backend."}],
+            },
+        )
+        assert r.status_code == 200
+        body = _wait_import(r.json()["import_id"], timeout=10.0)
+    assert body["created"] == 1
+    assert body["analyzed"] == 1
+    job = next(
+        item for item in client.get("/api/jobs").json()
+        if item["title"] == "Backend"
+    )
+    assert job["jd_profile"]
+    assert job["classification_pending"] == 0
+
+    # Opt-in only: a plain import must not touch the LLM for analysis.
+    with patch("resualign.api._classify_job", return_value={}):
+        r = client.post(
+            "/api/jobs/import",
+            json={"jobs": [{"title": "Plain", "jd_text": "Plain JD."}]},
+        )
+        plain = _wait_import(r.json()["import_id"])
+    assert plain["created"] == 1
+    assert plain["analyzed"] == 0
+
+
+def test_preanalyze_pending_skips_already_analyzed_jobs():
+    from resualign.models import JDProfile, ResuAlignConfig
+
+    profile = JDProfile(must_have_skills=["Python"])
+    config = ResuAlignConfig(
+        provider="deepseek",
+        api_key=fake_api_key("test"),
+        model="test-model",
+    )
+    with patch("resualign.api._classify_job", side_effect=_classify):
+        analyzed = client.post(
+            "/api/jobs",
+            json={"title": "Already analyzed", "jd_text": "Python backend A."},
+        ).json()
+        client.post(
+            "/api/jobs",
+            json={"title": "Needs analysis", "jd_text": "Python backend B."},
+        )
+
+    with patch("resualign.api._classify_job", side_effect=_classify), patch(
+        "resualign.api.build_config", return_value=config
+    ), patch("resualign.api.proactive_jd_profile", return_value=profile):
+        # Analyze the first job only, leaving the second un-analyzed.
+        r = client.post(f"/api/jobs/{analyzed['job_id']}/preanalyze")
+        assert r.status_code == 200
+
+        start = client.post("/api/jobs/preanalyze-pending").json()
+        assert start["queued"] is True
+        assert start["total"] == 1, "only the un-analyzed job may be queued"
+        done = _wait_preanalyze(start["batch_id"])
+        assert done["analyzed"] == 1
+        assert done["errors"] == []
+
+        # The already-analyzed job must be filtered out of a second sweep.
+        again = client.post("/api/jobs/preanalyze-pending").json()
+    assert again["queued"] is False
+    assert again["total"] == 0
+
+    jobs = {item["title"]: item for item in client.get("/api/jobs").json()}
+    assert jobs["Already analyzed"]["jd_profile"]
+    assert jobs["Needs analysis"]["jd_profile"]
+    assert jobs["Needs analysis"]["classification_pending"] == 0
+
+
+def test_preanalyze_reports_quota_block_instead_of_500():
+    """A definitive auth/quota block must be actionable, not an opaque 500.
+
+    Regression (2026-09-24): a 402 from the provider escaped
+    ``preanalyze_job`` as a raw ``LLMResponseError``, so the single-job route
+    answered 500 and the bulk sweep kept burning two attempts per row.
+    """
+    from resualign.models import ResuAlignConfig
+
+    config = ResuAlignConfig(
+        provider="deepseek",
+        api_key=fake_api_key("test"),
+        model="test-model",
+    )
+    with patch("resualign.api._classify_job", return_value={}):
+        job = client.post(
+            "/api/jobs",
+            json={"title": "Quota blocked", "jd_text": "Python backend."},
+        ).json()
+
+    blocked = (
+        "余额不足：请给该节点充值，或到「系统设置 → 模型节点」"
+        "切换可用节点后重试"
+    )
+    with patch("resualign.api.build_config", return_value=config), patch(
+        "resualign.api._probe_active_llm_quick",
+        return_value=(False, blocked),
+    ):
+        single = client.post(f"/api/jobs/{job['job_id']}/preanalyze")
+    assert single.status_code == 503
+    assert blocked in single.json()["detail"]
+
+    with patch("resualign.api.build_config", return_value=config), patch(
+        "resualign.api._probe_active_llm_quick",
+        return_value=(False, blocked),
+    ):
+        start = client.post("/api/jobs/preanalyze-pending").json()
+        assert start["total"] == 1
+        done = _wait_preanalyze(start["batch_id"])
+    assert done["stopped"] is True
+    assert done["analyzed"] == 0
+    assert done["errors"]
 
 
 def test_job_import_marks_done_on_unexpected_error():

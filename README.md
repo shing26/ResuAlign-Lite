@@ -226,10 +226,11 @@ WCAG AA、路由矩阵、硬门禁建议卡渲染契约）与 `css-structure.tes
 （花括号平衡、关键布局选择器 v3 定义存活、简历网格行高约束）；
 `tests/extension/` 覆盖回填扩展的纯函数核心（档案平铺、字段匹配、
 受控组件赋值、空框跳转）。
-当前基线：**1148 个 pytest（7 skipped，89.54% 覆盖率）+ 542 个前端/扩展
-node 测试 + 7 个 E2E**（2026-09-21，`codex/shortfall-evidence-hardening`
-（含 B9 line-ending guard + B6/B11 benchmark 契约测试）；CI JUnit/coverage
-artifact 是持续事实源，本行是带日期与命令的历史快照）。
+当前基线：**1179 个 pytest（7 skipped，89.18% 覆盖率）+ 553 个前端/扩展
+node 测试 + 7 个 E2E**（2026-09-25，`codex/product-dogfood-fixes` 合并
+`main@7b17607` 后实测，含 B9 line-ending guard + B6/B11 benchmark 契约
+测试）；CI JUnit/coverage artifact 是持续事实源，本行是带日期与命令的
+历史快照。
 
 ## CI
 

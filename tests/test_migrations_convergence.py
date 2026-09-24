@@ -316,7 +316,8 @@ def test_settings_store_migrates_legacy_db(tmp_path):
     assert updated["llm_model"] == "deepseek-chat"
     assert updated["llm"]["provider"] == "deepseek"
     assert updated["llm"]["model"] == "deepseek-chat"
-    assert _migrated_versions(store) == {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+    # 11 = job_table_json (ADR-0054: job-table auto-sync config).
+    assert _migrated_versions(store) == {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
 
 
 def test_settings_store_backfills_llm_from_legacy_columns(tmp_path):

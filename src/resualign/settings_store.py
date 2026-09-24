@@ -28,9 +28,14 @@ CREATE TABLE IF NOT EXISTS user_settings (
     daily_llm_cap INTEGER,
     llm_cost_per_1k_in REAL,
     llm_cost_per_1k_out REAL,
+    job_table_json TEXT,
     updated_at REAL NOT NULL
 );
 """
+
+
+_JOB_TABLE_MIN_INTERVAL_MINUTES = 5
+_JOB_TABLE_MAX_INTERVAL_MINUTES = 10080
 
 
 def default_settings() -> dict[str, Any]:
@@ -63,6 +68,17 @@ def default_settings() -> dict[str, Any]:
         "llm_cost_per_1k_in": None,
         "llm_cost_per_1k_out": None,
         "local_ingest_token": None,
+        # 岗位表自动同步（WorkBuddy 每日增量 CSV）。path/jd_dir 指向服务端
+        # 文件系统，last_* 由同步服务写入，客户端只读。
+        "job_table": {
+            "path": None,
+            "jd_dir": None,
+            "auto_sync": False,
+            "interval_minutes": 60,
+            "preanalyze": False,
+            "last_sync_at": None,
+            "last_result": None,
+        },
     }
 
 
@@ -171,6 +187,7 @@ class SettingsStore(_SqliteStore):
             "ALTER TABLE user_settings ADD COLUMN "
             "llm_cost_per_1k_out REAL",
         ),
+        (11, "ALTER TABLE user_settings ADD COLUMN job_table_json TEXT"),
     )
 
     def get_or_create_local_ingest_token(self, tenant_id: str) -> str:
@@ -238,7 +255,8 @@ class SettingsStore(_SqliteStore):
                     "SELECT classification_vocabulary_json, llm_provider, "
                     "llm_model, llm_json, eval_default, local_ingest_token, "
                     "reminder_json, daily_llm_cap, "
-                    "llm_cost_per_1k_in, llm_cost_per_1k_out "
+                    "llm_cost_per_1k_in, llm_cost_per_1k_out, "
+                    "job_table_json "
                     "FROM user_settings "
                     "WHERE tenant_id = ?",
                     (tenant_id,),
@@ -253,6 +271,7 @@ class SettingsStore(_SqliteStore):
         if not llm.get("model") and row["llm_model"]:
             llm["model"] = row["llm_model"]
         reminder = _parse_reminder_json(row["reminder_json"])
+        job_table = _parse_job_table_json(row["job_table_json"])
         settings = {
             "classification_vocabulary": json.loads(
                 row["classification_vocabulary_json"] or "{}"
@@ -266,6 +285,7 @@ class SettingsStore(_SqliteStore):
             "llm_cost_per_1k_in": row["llm_cost_per_1k_in"],
             "llm_cost_per_1k_out": row["llm_cost_per_1k_out"],
             "local_ingest_token": row["local_ingest_token"],
+            "job_table": job_table,
         }
         settings = _merge_defaults(defaults, settings)
         settings["local_ingest_token"] = row["local_ingest_token"]
@@ -313,8 +333,8 @@ class SettingsStore(_SqliteStore):
                     "tenant_id, classification_vocabulary_json, "
                     "llm_provider, llm_model, llm_json, eval_default, updated_at"
                     ", local_ingest_token, reminder_json, daily_llm_cap, "
-                    "llm_cost_per_1k_in, llm_cost_per_1k_out"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "llm_cost_per_1k_in, llm_cost_per_1k_out, job_table_json"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(tenant_id) DO UPDATE SET "
                     "classification_vocabulary_json = "
                     "excluded.classification_vocabulary_json, "
@@ -327,6 +347,7 @@ class SettingsStore(_SqliteStore):
                     "daily_llm_cap = excluded.daily_llm_cap, "
                     "llm_cost_per_1k_in = excluded.llm_cost_per_1k_in, "
                     "llm_cost_per_1k_out = excluded.llm_cost_per_1k_out, "
+                    "job_table_json = excluded.job_table_json, "
                     "updated_at = excluded.updated_at",
                     (
                         tenant_id,
@@ -347,9 +368,36 @@ class SettingsStore(_SqliteStore):
                         merged.get("daily_llm_cap"),
                         merged.get("llm_cost_per_1k_in"),
                         merged.get("llm_cost_per_1k_out"),
+                        json.dumps(
+                            merged.get("job_table") or {},
+                            ensure_ascii=False,
+                        ),
                     ),
                 )
         return self.get_settings(tenant_id)
+
+    def list_job_table_auto_sync(self) -> list[tuple[str, dict[str, Any]]]:
+        """Return (tenant_id, job_table) for tenants with auto-sync enabled.
+
+        Used by the job-table sync loop; corrupt rows are skipped rather than
+        failing the sweep.
+        """
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT tenant_id, job_table_json FROM user_settings "
+                    "WHERE job_table_json IS NOT NULL"
+                ).fetchall()
+        enabled: list[tuple[str, dict[str, Any]]] = []
+        for row in rows:
+            try:
+                config = _parse_job_table_json(row["job_table_json"])
+            except Exception:  # pragma: no cover - defensive
+                continue
+            if config.get("auto_sync") and str(config.get("path") or "").strip():
+                enabled.append((row["tenant_id"], config))
+        return enabled
 
     def _ensure_initialized(self) -> None:
         super()._ensure_initialized(_SETTINGS_SCHEMA)
@@ -403,6 +451,44 @@ def _merge_reminder(
     }
 
 
+def _parse_job_table_json(raw: str | None) -> dict[str, Any]:
+    """Parse the job_table_json column, tolerating missing/corrupt values."""
+    stored: dict[str, Any] = {}
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            stored = parsed
+    defaults = default_settings()["job_table"]
+    return {key: stored.get(key, defaults.get(key)) for key in defaults}
+
+
+def _merge_job_table(
+    current: dict[str, Any],
+    updates: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge a partial job_table update, normalizing blank paths to None."""
+    merged = dict(current)
+    job_table_update = updates.get("job_table")
+    if isinstance(job_table_update, dict):
+        for key in merged:
+            if key in job_table_update:
+                merged[key] = job_table_update[key]
+    merged = {
+        key: (value if value != "" else None)
+        for key, value in merged.items()
+    }
+    if merged.get("interval_minutes") is not None:
+        try:
+            merged["interval_minutes"] = int(merged["interval_minutes"])
+        except (TypeError, ValueError):
+            # Leave the raw value for _validate_settings to reject.
+            pass
+    return merged
+
+
 def _merge_llm(current: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
     """Merge llm settings with legacy llm_provider/llm_model updates.
 
@@ -443,6 +529,10 @@ def _merge_defaults(
         defaults.get("reminder") or default_settings()["reminder"],
         updates,
     )
+    merged_job_table = _merge_job_table(
+        defaults.get("job_table") or default_settings()["job_table"],
+        updates,
+    )
     eval_default = updates.get("eval_default")
     merged = {
         "classification_vocabulary": {
@@ -469,6 +559,7 @@ def _merge_defaults(
         "llm_cost_per_1k_out": updates.get(
             "llm_cost_per_1k_out", defaults.get("llm_cost_per_1k_out")
         ),
+        "job_table": merged_job_table,
     }
     return merged
 
@@ -576,6 +667,48 @@ def _validate_settings(settings: dict[str, Any]) -> None:
                 raise UserStoreError(
                     f"{key} must be a non-negative number or null"
                 )
+
+    job_table = settings.get("job_table") or {}
+    if not isinstance(job_table, dict):
+        raise UserStoreError("job_table must be an object")
+    for key in ("path", "jd_dir"):
+        value = job_table.get(key)
+        if value is not None and not isinstance(value, str):
+            raise UserStoreError(f"job_table.{key} must be a string or null")
+    for key in ("auto_sync", "preanalyze"):
+        value = job_table.get(key)
+        if value is not None and not isinstance(value, bool):
+            raise UserStoreError(f"job_table.{key} must be a boolean")
+    interval = job_table.get("interval_minutes")
+    if interval is not None:
+        try:
+            interval = int(interval)
+        except (TypeError, ValueError):
+            raise UserStoreError(
+                "job_table.interval_minutes must be an integer"
+            ) from None
+        if not (
+            _JOB_TABLE_MIN_INTERVAL_MINUTES
+            <= interval
+            <= _JOB_TABLE_MAX_INTERVAL_MINUTES
+        ):
+            raise UserStoreError(
+                "job_table.interval_minutes must be between "
+                f"{_JOB_TABLE_MIN_INTERVAL_MINUTES} and "
+                f"{_JOB_TABLE_MAX_INTERVAL_MINUTES}"
+            )
+    last_sync_at = job_table.get("last_sync_at")
+    if last_sync_at is not None and not isinstance(last_sync_at, (int, float)):
+        raise UserStoreError("job_table.last_sync_at must be a number or null")
+    last_result = job_table.get("last_result")
+    if last_result is not None and not isinstance(last_result, dict):
+        raise UserStoreError("job_table.last_result must be an object or null")
+    if job_table.get("auto_sync") and not (
+        str(job_table.get("path") or "").strip()
+    ):
+        raise UserStoreError(
+            "job_table.path is required when job_table.auto_sync is enabled"
+        )
 
     vocabulary = settings.get("classification_vocabulary") or {}
     for key in ("job_functions", "seniorities", "statuses"):
