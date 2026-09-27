@@ -257,3 +257,13 @@ node 测试 + 7 个 E2E**（2026-09-25，`codex/product-dogfood-fixes` 合并
 - 备份恢复：[docs/backup-restore.md](docs/backup-restore.md) ·
   运维：[docs/operations.md](docs/operations.md)
 - 代理说明：[AGENTS.md](AGENTS.md)
+
+## 许可
+
+[MIT](LICENSE)。
+
+`src/resualign/gate.py` 与 `tests/fixtures/gate/` 是 skill 仓
+[true-tailor](https://github.com/shing26/truetailor) 的 vendor 副本
+（上游同为 MIT，两仓同作者）。改门禁规则须**先改上游再 re-sync**，
+漂移由 `tests/test_skill_vendor_lock.py` 的字节级 hash 与
+`TestDriftLockParity` 双向锁定。
