@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "resualign"
-version = "1.0.0"
+version = "1.1.0"
 description = "Resume alignment and diagnosis tool"
 # 用 table 形式而不是 SPDX 字符串：setuptools <77（本机 69.5.1）只认
 # {text=...}/{file=...}，写成 `license = "MIT"` 会直接 metadata-generation 失败。
