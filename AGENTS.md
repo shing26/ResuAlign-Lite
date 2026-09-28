@@ -102,12 +102,36 @@ ADR-0042 对 ADR-0041 决定 4/9/10 做了**限定性修正**（数值未改，�
   「skill 线冻结、回 app-only」，不终结项目。
 - 护栏：两线阈值均不得中途重谈（要改须新开 ADR 并回答「为什么现在改」）；
   自用线推进期间 **app 冻结令继续有效**，例外须逐项引用 ADR-0042 决定 6e。
-- **冻结期派单防护（2026-09-16）**：未关闭票里挂着 **30 张 `ready-for-agent`**，
-  其中 **28 张是功能票（#20–#69）**，已被 ADR-0041 决定 1 冻结（总闸 = #114
-  `frozen`）——**读到 `ready-for-agent` 不要开工**。例外只有 #98（安装文档，
-  F1 类首跑摩擦）与 #115（归因）。冻结期内唯一可动的代码是 ADR-0042
+- **冻结期派单防护（标签口径 2026-09-28 复核）**：功能票已全部改挂 `frozen`
+  （**32 张**，总闸 = #114）。语义变成：**`frozen` = 冻结令管辖，别排期；
+  `ready-for-agent` = 现在就能领**。`ready-for-agent` 只剩 **2 张** ADR-0042
+  决定 6e 例外（#98 安装文档 F1 类、#115 归因），另有 3 张功能票停在
+  `needs-triage`（**可评估、不可实现**）。冻结期内唯一可动的代码是 ADR-0042
   决定 6e 例外与 F1/F2 首跑摩擦修复。执行计划见
   `docs/probe-window-plan-2026-09-16.md`。
+
+### 模块布局是刻意的：平铺 + 层表，别顺手分包 (2026-09-28)
+
+`src/resualign/` 一级的平铺模块**不是失序**。层归属由
+`src/resualign/tools/modgraph.py` 的 `LAYERS` 声明（接入 / API / 服务 / 引擎 /
+领域 / 存储 / 可观测 / 模型 / 契约），CI Stage 1 的 `modgraph --check` 用集合差
+棘轮**只允许减少**。R7「领域目录分包」施工单
+（`docs/architecture-hardening-plan-2026-09-19.md` §3.3）**只落地了引擎批**
+（`a9515be`：`engine.py` 转包 + 5 个模块移入 `engine/`）；`domain/` 与 `storage/`
+两批于 **2026-09-21 明确暂停**——约 23 个模块、上百处导入，属纯组织性改动，
+收益与风险不匹配。恢复条件 =「出现真实导航痛点」，**目前未触发**。
+**看到「顶层模块偏多」不要直接开工搬目录**；`gate.py` 另受 ADR-0041 决定 11
+漂移锁约束（`VENDOR.json` 按路径记哈希），路径不可动。
+
+`tests/` 同理：子目录 = 不同 runner（`e2e/` `frontend/` `extension/`）加
+`fixtures/`，根层 = 主 pytest 套件。这是既定约定，不是堆积。
+
+### `archive/` 是归档层，不是死代码 (2026-09-28)
+
+`src/resualign/archive/` 存的是**原始 LLM 报文归档**（ADR-0052「归档层」：
+`RESUALIGN_LLM_TRACE` 默认 `0`，开启后落 `<RESUALIGN_LOG_DIR>/llm-traces.jsonl`），
+是在用的模块（`engine/llm.py` 导入），名字与 ADR 用词一致。**别因为名字像
+「已归档」就删。**
 
 ### Production-readiness invariants (2026-09-13, spec #97)
 
