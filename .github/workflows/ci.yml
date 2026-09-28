@@ -97,8 +97,8 @@ jobs:
           pip install -e ".[dev]"
           pip install playwright
           python -m playwright install --with-deps chromium
-      - name: Phase 20 key-path smoke
-        run: python .scratch/phase-20/playwright_smoke.py
+      - name: E2E key-path smoke
+        run: python tests/e2e/playwright_smoke.py
         env:
           PYTHONPATH: src
       - name: E2E suite (settings / import / reclassify / workbench)
@@ -116,7 +116,7 @@ jobs:
         if: always()
         with:
           name: playwright-artifacts
-          path: .scratch/phase-20/shots/
+          path: tests/e2e/screenshots/
 
   cold-start-gate:
     name: Stage 4 - cold start gate

@@ -17,7 +17,12 @@ data/
 data/logs/
 
 # Local agent/tool configuration
-.codex/
+# `.codex/` is local, except the repo's own QA agent registration: AGENTS.md
+# points contributors at it, so a fresh clone must actually have the file.
+.codex/*
+!.codex/agents/
+.codex/agents/*
+!.codex/agents/qa-agent.toml
 .reasonix/
 reasonix.toml
 .opencode/
@@ -26,17 +31,14 @@ uv.lock
 # Local visual scratch previews
 /test.html
 
-# Scratch artifacts: keep only the CI smoke scripts under phase-16/18/20
+# Scratch artifacts: only the legacy phase-16/18 smoke scripts are kept in-tree
 .scratch/*
 !.scratch/phase-16/
 !.scratch/phase-18/
-!.scratch/phase-20/
 .scratch/phase-16/*
 !.scratch/phase-16/*.py
 .scratch/phase-18/*
 !.scratch/phase-18/*.py
-.scratch/phase-20/*
-!.scratch/phase-20/*.py
 
 # Generated reports
 resualign-report-*.json
@@ -68,8 +70,6 @@ Thumbs.db
 _tmp/
 .workbuddy/
 会话历史导出/
-.scratch/phase-20/screenshots/
-.scratch/phase-20/__pycache__/
 dev_null.txt
 _tmp_*.py
 step1_format.py

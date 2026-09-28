@@ -218,7 +218,7 @@ node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs tests/extens
 python benchmarks/run_benchmark.py --offline
 
 # 关键路径冒烟（假 LLM，独立端口自启自停，不烧额度）
-python .scratch/phase-20/playwright_smoke.py
+python tests/e2e/playwright_smoke.py
 
 # 真实 LLM 基准（使用 .env 凭据）
 python benchmarks/run_benchmark.py --online

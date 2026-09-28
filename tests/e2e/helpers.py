@@ -2,7 +2,7 @@
 
 Kept dependency-light on purpose: no pytest-playwright plugin, no hard
 sleeps. All waits are condition-based (Playwright auto-waiting selectors /
-``wait_for_function``), matching the determinism bar of the phase-20 smoke.
+``wait_for_function``), matching the determinism bar of the smoke script.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def capture_errors(page):
 def assert_clean_page(errors: dict, label: str) -> None:
     """Fail on page exceptions and on severe console errors.
 
-    Noise filters mirror the phase-20 smoke (favicon 404s and generic
+    Noise filters mirror the smoke script (favicon 404s and generic
     resource-load failures are environment chatter, not app bugs).
     """
     expect(not errors["page"], f"{label} page errors: {errors['page']}")

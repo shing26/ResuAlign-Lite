@@ -18,7 +18,7 @@ job + resume in a finally block.
 
 fake_llm coverage: the workbench run exercises ``resume auditor`` (diagnose),
 ``job description analyst + gap analyst`` (jd_analysis), and ``precise resume
-editor`` (tailor) — all already routed by .scratch/phase-20/fake_llm.py, so
+editor`` (tailor) — all already routed by tests/e2e/fake_llm.py, so
 no fake-LLM change is required. evaluate is optional and stays off (the
 settings default), matching the task's "(可选)" stage.
 """

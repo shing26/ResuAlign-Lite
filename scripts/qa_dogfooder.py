@@ -24,7 +24,7 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
-PHASE20 = ROOT / ".scratch" / "phase-20"
+E2E_DIR = ROOT / "tests" / "e2e"
 ARTIFACTS = ROOT / ".scratch" / "qa"
 
 FINDINGS: list[dict] = []
@@ -126,7 +126,7 @@ class FakeLLMServer(Server):
                 "--port",
                 str(self.port),
                 "--app-dir",
-                str(PHASE20),
+                str(E2E_DIR),
             ],
             env=os.environ.copy(),
         )

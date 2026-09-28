@@ -1,4 +1,4 @@
-"""Phase 20 key-path smoke: import resume -> crawl JD -> tailor -> export.
+"""E2E key-path smoke: import resume -> crawl JD -> tailor -> export.
 
 The script starts its own FastAPI fake-LLM server plus the ResuAlign app on
 independent ports with a temporary SQLite database, so it never touches user
@@ -24,8 +24,8 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
-PHASE20_DIR = Path(__file__).resolve().parent
-SHOTS = PHASE20_DIR / "screenshots"
+E2E_DIR = Path(__file__).resolve().parent
+SHOTS = E2E_DIR / "screenshots"
 
 
 def expect(condition: bool, message: str) -> None:
@@ -187,7 +187,7 @@ class FakeLLMServer:
     def __init__(self) -> None:
         self.port = free_port()
         self.tmp = tempfile.TemporaryDirectory(
-            prefix="resualign-phase20-llm-"
+            prefix="resualign-e2e-llm-"
         )
         self.tmp_path = Path(self.tmp.name)
         self.proc: subprocess.Popen | None = None
@@ -205,7 +205,7 @@ class FakeLLMServer:
                 "fake_llm:app",
                 "--host", "127.0.0.1",
                 "--port", str(self.port),
-                "--app-dir", str(PHASE20_DIR),
+                "--app-dir", str(E2E_DIR),
             ],
             cwd=str(ROOT),
             stdout=self.out_file,
@@ -255,7 +255,7 @@ class AppServer:
     def __init__(self, llm: FakeLLMServer) -> None:
         self.llm = llm
         self.tmp = tempfile.TemporaryDirectory(
-            prefix="resualign-phase20-app-"
+            prefix="resualign-e2e-app-"
         )
         self.tmp_path = Path(self.tmp.name)
         self.db_path = self.tmp_path / "jobs.db"
@@ -544,7 +544,7 @@ def run_key_path(
 
     slug = prefix.lower().replace(" ", "-")
     page.screenshot(
-        path=str(SHOTS / f"phase20-{slug}-workspace.png"),
+        path=str(SHOTS / f"e2e-{slug}-workspace.png"),
         full_page=True,
     )
     assert_no_overflow(page, f"{prefix} workspace")
@@ -552,7 +552,7 @@ def run_key_path(
     # Export PDF on the desktop viewport from the same final-draft panel.
     # The app writes #print-root, calls window.print(), then clears it, so
     # validate the canonical export payload and re-render it for page.pdf().
-    if prefix == "Phase20":
+    if prefix == "Desktop":
         panel = page.locator("[data-final-draft-panel]:not([hidden])")
         panel.wait_for(timeout=15000)
         with page.expect_response(
@@ -585,7 +585,7 @@ def run_key_path(
             page.locator("#print-root button").count() == 0,
             "final draft print root contains buttons",
         )
-        pdf_path = SHOTS / f"phase20-{slug}-final-draft.pdf"
+        pdf_path = SHOTS / f"e2e-{slug}-final-draft.pdf"
         page.pdf(path=str(pdf_path), format="A4")
         expect(pdf_path.stat().st_size > 1000, "final draft PDF is empty")
     page.close()
@@ -617,7 +617,7 @@ def main() -> None:
                     viewport={"width": 1440, "height": 900},
                     accept_downloads=True,
                 )
-                run_key_path(desktop, errors, base, "Phase20", created)
+                run_key_path(desktop, errors, base, "Desktop", created)
                 desktop.close()
 
                 mobile = browser.new_context(
@@ -626,7 +626,7 @@ def main() -> None:
                     accept_downloads=True,
                 )
                 run_key_path(
-                    mobile, errors, base, "Phase20 Mobile", created
+                    mobile, errors, base, "Mobile", created
                 )
                 mobile.close()
             finally:
@@ -665,12 +665,12 @@ def main() -> None:
                 pass
         app.stop()
         llm.stop()
-    print("PHASE20 SMOKE OK")
+    print("E2E SMOKE OK")
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(f"PHASE20 SMOKE FAILED: {exc}", file=sys.stderr)
+        print(f"E2E SMOKE FAILED: {exc}", file=sys.stderr)
         raise
