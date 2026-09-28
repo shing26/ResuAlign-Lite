@@ -34,7 +34,7 @@ python scripts\qa_dogfooder.py
 
 Harness 行为：
 
-- 启动 fake LLM（`.scratch/phase-20/fake_llm.py`）与真实 App，使用临时
+- 启动 fake LLM（`tests/e2e/fake_llm.py`）与真实 App，使用临时
   SQLite，端口随机，结束后自动清理。
 - 使用 Playwright（headless Chromium）覆盖五个维度，截图与控制台日志写入
   `.scratch/qa/`。

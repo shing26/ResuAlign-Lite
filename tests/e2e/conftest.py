@@ -1,6 +1,6 @@
 ﻿"""Browser E2E fixtures for ResuAlign: fake LLM + app servers, Playwright.
 
-The suite follows the phase-20 smoke pattern: it boots its own FastAPI
+The suite follows the same pattern as the smoke script: it boots its own FastAPI
 fake-LLM server and the real ResuAlign app on independent ports with a
 temporary SQLite database, so tests never touch user data or an existing
 service on port 8000.
@@ -29,7 +29,6 @@ import pytest
 E2E_DIR = Path(__file__).resolve().parent
 ROOT = E2E_DIR.parents[1]
 SRC = ROOT / "src"
-PHASE20_DIR = ROOT / ".scratch" / "phase-20"
 ARTIFACTS_DIR = E2E_DIR / "artifacts"
 
 
@@ -138,7 +137,7 @@ class _SubprocessServer:
 
 
 class FakeLLMServer(_SubprocessServer):
-    """Own FastAPI fake-LLM server (``.scratch/phase-20/fake_llm.py``)."""
+    """Own FastAPI fake-LLM server (``tests/e2e/fake_llm.py``)."""
 
     def __init__(self) -> None:
         super().__init__(prefix="resualign-e2e-llm-")
@@ -151,7 +150,7 @@ class FakeLLMServer(_SubprocessServer):
                 "fake_llm:app",
                 "--host", "127.0.0.1",
                 "--port", str(self.port),
-                "--app-dir", str(PHASE20_DIR),
+                "--app-dir", str(E2E_DIR),
             ],
             env=env,
         )

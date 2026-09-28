@@ -1,4 +1,4 @@
-"""FastAPI fake LLM server used by the phase-20 key-path smoke.
+"""FastAPI fake LLM server used by the E2E key-path smoke.
 
 QA gate (Q2): the server routes by system-prompt keyword, counts hits per
 stage, and treats an unknown system prompt as a hard failure (HTTP 500)
@@ -17,7 +17,7 @@ from collections import Counter
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-app = FastAPI(title="phase20-fake-llm")
+app = FastAPI(title="resualign-e2e-fake-llm")
 
 # Module-level QA state: per-stage hit counters and unknown-prompt log.
 STAGE_HITS: Counter[str] = Counter()
@@ -29,12 +29,12 @@ UNKNOWN_PROMPTS: list[str] = []
 # real API path (POST /api/jobs catches LLMResponseError and stores the job
 # with classification_pending=1). The app retries failed LLM calls
 # max_retries+1 = 3 times, so the test sets fails_left=3 before creating the
-# job; later calls (reclassify) succeed. The phase-20 smoke never sends the
+# job; later calls (reclassify) succeed. The smoke script never sends the
 # marker, so its REQUIRED_STAGES gate is unaffected.
 E2E_CLASSIFY_FAIL_MARKER = "__E2E_CLASSIFY_FAIL__"
 E2E_CLASSIFY_FAILS_LEFT: int = 0
 
-# Stages the phase-20 key-path smoke must exercise at least once:
+# Stages the E2E key-path smoke must exercise at least once:
 #  - classifier    : session pipeline classification (PROMPT_VERSION: classifier/v2)
 #  - diagnose      : workbench diagnosis (PROMPT_VERSION: diagnose/v3)
 #  - jd_profiler   : standalone proactive JD profile (PROMPT_VERSION: jd_profiler/v2)
