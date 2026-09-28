@@ -252,6 +252,9 @@ node 测试 + 7 个 E2E**（2026-09-25，`codex/product-dogfood-fixes` 合并
 
 ## 文档
 
+- 交付状态：[docs/STATUS.md](docs/STATUS.md)（达标项 / 未达标红线 / 冻结策略）
+- 证据台账：[docs/EVIDENCE.md](docs/EVIDENCE.md)（每个数字一行：口径 + 复现命令）
+- 改版记录：[CHANGELOG.md](CHANGELOG.md)
 - 用户手册：[docs/user-guide.md](docs/user-guide.md)
 - 架构决策：[docs/adr/](docs/adr/)（ADR-0026 v3 shell、ADR-0027 投递
   生命周期单一事实源、ADR-0028 本地摄入与投递快照等）
