@@ -70,10 +70,10 @@ of truth** for `gate.py` and the golden fixtures. This repo holds a vendor copy:
 
 - `src/resualign/gate.py` and `tests/fixtures/gate/*` must stay byte-identical to
   upstream (LF-normalized sha256 in `tests/fixtures/gate/VENDOR.json`, asserted by
-  `tests/test_skill_vendor_lock.py`). A rule change goes upstream first, then a
+  `tests/platform/test_skill_vendor_lock.py`). A rule change goes upstream first, then a
   re-sync commit here updates the manifest and `synced_from`.
 - `tailor.py` keeps its own copy of the content check for historical reasons;
-  `tests/test_gate.py::TestDriftLockParity` runs **every** fixture scenario in
+  `tests/engine/test_gate.py::TestDriftLockParity` runs **every** fixture scenario in
   both languages through `tailor.gate_diff_items`, so the two implementations
   cannot diverge silently. Any new gate rule needs both edits plus a fixture.
 - Fixtures are the spec: a new scenario arrives as a diff entry + an
@@ -139,7 +139,7 @@ ADR-0042 对 ADR-0041 决定 4/9/10 做了**限定性修正**（数值未改，�
   byte-preserved and a top-level `request_id` is appended; uncaught
   exceptions → 500 `{code,message,request_id}` (never Starlette text, never
   `str(exc)` passthrough — auth login/signup now return fixed 话术). Runtime
-  lock = `tests/test_error_contract.py`; OpenAPI snapshot is intentionally
+  lock = `tests/api/test_error_contract.py`; OpenAPI snapshot is intentionally
   **not** touched (grilling decision).
 - **#101 request_id**: `jobs` table migration 3 adds `request_id`;
   `_run_job` restores the ContextVar from the row so job.* / llm logs share

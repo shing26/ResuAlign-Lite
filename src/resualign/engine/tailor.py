@@ -593,7 +593,7 @@ def gate_diff_items(
 
     Order is contractual: parse/anchor -> add-empty-support -> content-level
     check (all three types; #119 closed the add hole) -> strict anchor gate.
-    gate.py (skill probe) mirrors this chain verbatim; tests/test_gate.py
+    gate.py (skill probe) mirrors this chain verbatim; tests/engine/test_gate.py
     drives the parity drift lock THROUGH this function, so any change here
     is judged against the same code the app runs. The A2 noop filter lives
     in the job layer (api/services/jobs) and is applied by callers after.

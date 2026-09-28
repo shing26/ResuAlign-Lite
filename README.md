@@ -16,7 +16,7 @@ CLI 和 Web 共用同一套流水线；所有数据落在本地 SQLite，不依�
 > 本仓是它背后的持久化 app（岗位库、版本历史、投递闭环）。
 > 两者共用同一套门禁规则：`src/resualign/gate.py` 与黄金 fixtures 是那边的
 > vendor 副本，**改规则先改上游**
-> （`tests/fixtures/gate/VENDOR.json` + `tests/test_skill_vendor_lock.py`）。
+> （`tests/fixtures/gate/VENDOR.json` + `tests/platform/test_skill_vendor_lock.py`）。
 
 ## 功能总览
 
@@ -268,5 +268,5 @@ node 测试 + 7 个 E2E**（2026-09-25，`codex/product-dogfood-fixes` 合并
 `src/resualign/gate.py` 与 `tests/fixtures/gate/` 是 skill 仓
 [true-tailor](https://github.com/shing26/truetailor) 的 vendor 副本
 （上游同为 MIT，两仓同作者）。改门禁规则须**先改上游再 re-sync**，
-漂移由 `tests/test_skill_vendor_lock.py` 的字节级 hash 与
+漂移由 `tests/platform/test_skill_vendor_lock.py` 的字节级 hash 与
 `TestDriftLockParity` 双向锁定。
