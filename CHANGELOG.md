@@ -27,6 +27,8 @@ Phase A–E + CSS 架构重构 B0–B7），每批改动挂一篇或多篇 ADR�
 - 交付契约五要素补全：[`CHANGELOG.md`](CHANGELOG.md)、[`docs/STATUS.md`](docs/STATUS.md)、
   [`docs/EVIDENCE.md`](docs/EVIDENCE.md)。依据：`项目交付结构复盘_2026-09-20`
   指出的「入口层缺失」——五要素里只有「改版记录」是全局性空洞。
+- 评分重算落盘：ResuAlign-Lite **79/81（97.53%）**，B3/B6/B9/B11 由 2 → 3、
+  B10 保持 2（接受的设计取舍）。ADR-0054 验收闭合，issue #129 关闭。
 
 ### Changed
 
