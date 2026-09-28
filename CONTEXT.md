@@ -1,604 +1,396 @@
 # ResuAlign — Domain Glossary
 
-> 终局：简历-岗位全链路优化平台。
-> CLI 只是前端之一，未来会扩展 Web UI / API 层。
-> 核心引擎前端无关，多阶段 pipeline 可组合，铁律：不捏造事实。
+> 本地优先的求职工作台：简历诊断 / 岗位库 / 单岗对齐精修 / 投递闭环。
+> 核心引擎前端无关（CLI 与 Web 共用同一套流水线），铁律：**不捏造事实**。
 
-## Recovery (2026-08-30, 分阶段重构)
+## 问题 / 目标 / 非目标
 
-- **Phase 0 基线**：爬虫退役收尾固化提交；契约同步（manifest 声明
-  parse-jd/JDParseRequest 移除，清除 WorkstationCrawlSection 残留）→
-  3 个契约测试转绿；油猴插件端口 8011→8000。
-- **Phase 1 布局**：简历详情 65/35 网格行高约束（`align-items:stretch` +
-  `grid-template-rows:minmax(0,1fr)`），正文不再被 overflow:hidden 裁切。
-- **Phase 2 摄入收口**：UI 移除「JD 链接」模式与命令面板 jd_url 发送；
-  批量导入 jd_url 行明确报错；crawl 措辞全库清理。
-- **Phase 3 对齐可靠性**：溯源兜底（original 回退 + 自适应阈值）；
-  sections 推导章节级 diff（模型只回全文时不再 0 建议）；云节点可选
-  map-reduce（`RESUALIGN_BULLET_EDITOR_CLOUD=1`）；失败持久化
-  （library_jobs.last_alignment_error，迁移 42）；离线占位 diffs。
-- **Phase 4 护栏**：`tests/frontend/css-structure.test.mjs` 锁定 CSS
-  结构不变式（括号平衡、关键选择器 v3 存活、网格行高约束）。
-- 壳层选择器自动合并验证发现会破坏 @media 移动端级联，已回滚留待
-  按媒体上下文逐属性合并。
-- **Phase A 对齐运行时收口**：workbench 排队前节点预检
-  （`_probe_active_llm_quick`，5s 探测；401/402/403 确定性失败拦截为
-  422+引导，网络/超时非阻塞）；noop diff 过滤（original==proposed 移入
-  invalid_diffs）；last_alignment_error 透出到 API 与岗位卡片徽章
-  （对齐失败/无建议）；岗位库「批量对齐」入口（idle/失败逐个排队）。
-- **Phase B 爬虫残留清理**：自动化规则移除「城市白名单」死选项
-  （rules.py 标记 deprecated，DB 兼容保留）；油猴占位符 8011→8000；
-  「抓取失败，可重试」徽章改「JD 文本异常」；设置页措辞收口。
-- **Phase C 标题去重**：简历列表页/设置页视图内重复 h2 移除（顶栏
-  PAGE_META 已渲染页标题）；移动端顶栏瘦身（副标题隐藏 + 间距压缩，
-  165→145px）；css-structure 护栏新增单 h2 不变式。
-- **Phase E 对齐收口（2026-08-31）**：批量对齐统一到矩阵接口
-  `/api/batch-align`（`selector="pending"` 覆盖 idle/failed/卡死 queued），
-  删除看板旧的逐条 POST workbench 轻量循环；看板卡片按 alignment_status
-  显示单岗对齐按钮（idle→「开始对齐」，failed/零 diff succeeded→「重新对齐」，
-  直接走 `/api/jobs/{id}/workbench` + medium 粒度 + 最近主简历）；A1 预检按
-  节点类型区分快速失败（本地网络错误/超时硬拦截 422，远程保持非阻塞）；
-  A2 全 noop 保持 succeeded + 0 有效 diff；对齐运行每租户单线程排队
-  （防止 Ollama 7B 被并发拖垮）。
+**问题**：求职者逐岗手工改简历耗时，且容易夸大；LLM 能改写，但会编造事实，
+而编造的简历在面试里会穿。
 
-## Implementation Status (2026-08-03)
+**目标**：把「岗位 → 对齐后的简历 → 投递 → 复盘」做成一条可追溯的本地闭环；
+每条改写都能指回主简历原文（provenance）。
 
-- Core pipeline stages (diagnose, JD profile, gap analysis, tailor, evaluate)
-  are implemented in `src/resualign/`.
-- CLI, FastAPI, web UI, crawler URL input, and two-stage extractor are live.
-- The regression suite covers 300+ pytest tests at 90%+ coverage; benchmark
-  harness is in `benchmarks/` with nine synthetic cases, offline 28/28 goals.
-- Phase 10 adds tenant scoping: email/password accounts, bearer-token
-  sessions, and tenant-owned analysis jobs (ADR-0013).
-- Phase 11 adds a SaaS workbench: versioned Master Resume management,
-  per-tenant applications, pinned resume snapshots, and application reruns.
-- Phase 16 closes the personal workbench loop: independent resume diagnosis,
-  job-specific final drafts with refresh recovery and save-as-new-resume,
-  JD parse failure fallback with salary prefill, classification degradation
-  and reclassification, and frontend vocabulary sync. A unified
-  desktop/mobile Playwright gate covers the new and old flows in CI.
-- Phase 18 redesigns the frontend as a card-based local workbench with
-  CSS-only component motion: list stagger, nav/segmented indicators, progress
-  pulse, diff reveal, toast and skeleton feedback, all gated by
-  `prefers-reduced-motion`. ADR-0026 supersedes the ADR-0017 old-class
-  clause for the v3 shell; `data-*` / `aria-*` and route contracts remain
-  unchanged. ADR-0025 removes the delivery appraisal, delivery-weight
-  evaluation, and salary-benchmark surfaces.
-- Workbench latency optimization (ADR-0018): JD profile + gap analysis are one
-  LLM call, a diagnosis cache is reused when the same resume reruns, and long
-  JD contexts are capped. Cold workbench runs drop from 4 to 3 LLM calls;
-  cached reruns drop to 2. `benchmarks/latency_benchmark.py` reproduces the
-  wall-clock gain at 4.0s -> 3.0s -> 2.0s with simulated 1s calls.
-- The web UI defaults to personal mode: no login screen, anonymous requests
-  map to a stable local tenant, and 401 responses render as readable local
-  errors without login modals. `RESUALIGN_PERSONAL_MODE=0` re-enables the
-  dormant auth branch, but personal mode is the only delivered default.
+**非目标**（明确不做）
 
-## Pipeline Stages (long-term vision)
+- 自动海投、简历代写、信息聚合运营（issue #62，`wontfix`）。
+- 后端爬虫与 `--jd-url`（2026-08 退役，改由油猴插件/粘贴录入）。
+- 生产规模多实例部署、托管 demo / 落地页（ADR-0041 冻结令）。
+- 为评分把「钳制配置」改成「启动期拒绝」（ADR-0054 决定 6）。
 
-**Stage 1 — JD Ingestion**
-Client-side capture via the collector userscript (划词 / 实习僧 Specific 模式)
-or pasted JD text into `POST /api/jobs/local-ingest` / `POST /api/jobs`.
-Backend crawling was retired (2026-08-27 de-bloat): raw text → LLM structured
-extraction → standard JSON; JD links are captured by the userscript, never
-fetched server-side.
+## 关键裁决索引
 
-**Stage 2 — JD Profiling**
-Deep analysis of a JD: extract must-have vs nice-to-have, hard skills vs soft skills, business scenarios (high-concurrency, low-latency, etc.). Produces a \JDProfile\.
+| 主题 | ADR |
+| --- | --- |
+| 防编造 provenance | [0006](docs/adr/0006-anti-hallucination-provenance.md) |
+| 前端无关引擎 | [0005](docs/adr/0005-frontend-agnostic-engine.md) |
+| 多格式输入 / 两阶段抽取 | [0001](docs/adr/0001-multi-format-input.md) · [0008](docs/adr/0008-two-stage-extraction.md) |
+| 异步任务 / 租户与工作台 | [0009](docs/adr/0009-async-analysis-jobs.md) · [0013](docs/adr/0013-auth-tenancy-and-workspace-storage.md) |
+| 投递闭环单事实源 | [0027](docs/adr/0027-delivery-loop-job-single-source.md) · [0028](docs/adr/0028-local-ingest-and-application-snapshot.md) |
+| 角色化 LLM 节点 / 稳定性 | [0030](docs/adr/0030-role-based-llm-split.md) · [0032](docs/adr/0032-llm-provider-stability-and-streaming.md) · [0034](docs/adr/0034-llm-preflight-policy.md) |
+| 密钥加密 / 推理预算 | [0035](docs/adr/0035-api-key-encryption-at-rest.md) · [0058](docs/adr/0058-reasoning-token-budget-for-structured-output.md) |
+| agent 形态与三线门槛 | [0036](docs/adr/0036-agent-shape-a-only-mcp-deferred.md) · [0040](docs/adr/0040-three-gate-and-macro-vs-loop.md) |
+| 探针主线与双线判据 | [0041](docs/adr/0041-pivot-skill-probe-mainline.md) · [0042](docs/adr/0042-pre-registered-reanchor-probe-clock-and-dual-line.md) |
+| CSS 架构与主题 | [0043](docs/adr/0043-at-layer-single-file-css-architecture.md) · [0044](docs/adr/0044-token-single-namespace-convergence.md) · [0047](docs/adr/0047-supersede-adr0033-decision1-dark-default-teal-accent.md) |
+| 加固 / 评分实证 | [0052](docs/adr/0052-freeze-window-hardening-and-layering-ratchet.md) · [0054](docs/adr/0054-score-evidence-hardening.md) |
+| 岗位表同步 / 护栏面板 | [0055](docs/adr/0055-job-table-auto-sync-and-dedupe-precheck.md) · [0056](docs/adr/0056-drop-decorative-guardrails-panel.md) |
 
-**Stage 3 — Gap Analysis**
-Compare Master Resume against JDProfile. Output a structured gap report: missing keywords, misaligned emphasis, weak evidence.
+> 全量决策见 `docs/adr/`（编号 0001–0058；**0029 有意缺号**，见 ADR-0036）。
+> 历史轨迹见 [`CHANGELOG.md`](CHANGELOG.md)，交付状态见 [`docs/STATUS.md`](docs/STATUS.md)。
 
-**Stage 4 — Dynamic Tailoring**
-Rewrite resume sections to close gaps. **Iron rule: never invent.** LLM may rephrase, reorder, or re-emphasize existing facts only. Provenance tracked per diff.
+---
 
-**Stage 5 — Evaluation**
-LLM-as-Judge: compare original vs tailored resume against the JD. Score improvement, flag hallucinations.
-
-## Token Optimization Principle
-
-Two-stage extraction for all long texts:
-1. Lightweight pass (regex / NLP heuristics) to narrow scope
-2. LLM pass for refinement on the narrowed context
-
-Applies to JD ingestion, resume parsing, and gap analysis. Saves 60-80% token cost on long documents.
-
-## Core Entities
+## 核心实体
 
 **Job Description (JD)**
-A textual description of a job opening. In the minimal version, provided inline (\--jd\) or from file (\--jd-file\). In the full version, crawled and structured by the ingestion pipeline.
+一段岗位描述文本。来源是粘贴、文件或油猴摄入，从不服务端抓取。
 
 **JD Profile**
-Structured extraction of a JD: must-have skills, nice-to-have skills, soft skills, business scenarios, required years of experience, education requirements. Used as the target for gap analysis.
+JD 的结构化萃取：必会/加分技能、软技能、业务场景、年限、学历要求。
 
 **Master Resume**
-The candidate's full, un-tailored resume. The single source of truth that all tailored versions derive from. The gap analysis and tailoring engine always reference back to this to prevent hallucination.
-
-**简历中心 (Resume Center)**
-The Master Resume management view. UI canonical routing semantics: the list
-view (all resumes) and the single-resume archive are different entries —
-`#/resume/list` and the legacy plural alias `#/resumes` BOTH open the list;
-only `#/resume/<id>` (or bare `#/resume`, which opens the newest resume's
-archive) enters a single archive page.
-_Avoid_: `#/resumes` opening a single archive (2026-08-28 UX walkthrough P1-A
-regression), list and archive sharing one route without a list sentinel.
-
-**Gap Report**
-Structured comparison between Master Resume and JD Profile. Lists missing keywords, misaligned descriptions (emphasis on wrong aspects), and strength matches (good alignment to keep).
-
-**Tailored Resume**
-A version of the Master Resume rewritten for a specific JD. Every change traces back to a source sentence in the Master Resume. No invented content.
-
-**采纳率 (Adoption Ratio)**
-近 7 天窗口内，保存定稿时被标记为 accepted 的 diff 数 / 定稿时的 diff 总数
-（`alignment_metrics` 按 tenant+日聚合）。零分母如实显示「—」，不伪装成
-100%。它度量"模型建议里有多少被用户认为值得保留"，是对齐质量的核心信号。
-2026-09-10 起驾驶舱 KPI 卡主数字不再展示该比率（低服从率在首页核心位
-构成负向引导），降级为卡内明细「采纳 Y/Z 条建议」。
-_Avoid_: 把 runs（运行次数）当作分母；把单个岗位的历史采纳状态当作窗口采纳率；
-把采纳率百分比当驾驶舱主指标。
-
-**已优化条目 (Optimized Entries)**
-窗口内被用户采纳并进入定稿的 diff 总数。驾驶舱 KPI 卡的主数字口径：
-单调只增、强调"工具帮你改了多少"的进步叙事，与 Aha 指标（采纳溯源卡存
-终稿）同源但口径更宽（Aha 强调首次达成，本指标强调累计量）。
-_Avoid_: 与「采纳率」混用（一个是量、一个是率）；把定稿保存次数当作条目数。
-
-**简单模式 / 专家模式 (Settings Modes)**
-设置页的双视角。简单模式面向求职者：只保留连接 AI 助手所需的最小配置
-（服务商、模型、API Key、测试连接）；专家模式面向运维者：完整暴露节点
-管理、成本护栏、Guardrails、自动化规则与词表。无任何已配置节点时默认
-简单模式；专家需用户显式切换。
-_Avoid_: 把 Guardrails/超时等极客配置塞进简单模式；用「高级设置」折叠
-代替真双模式（2026-09-10 决策）。
-
-**投递结果归因 (Application Result)**
-用户对一份已投递定稿的结局标注：过筛通过 (screen_pass) / 简历挂筛
-(ats_reject) / 暂无回音 (no_response) / 其他 (other)。可选字段，不改变
-投递状态机的任何行为（ADR-0027 时间线照旧）；它是验证"对齐是否有效"
-（对齐 vs 未对齐简历通过率）的原始数据。
-_Avoid_: 把归因当作第六种投递状态；用归因自动推导 Alignment 或看板列。
-
-**Eval Score**
-Quality metric from LLM-as-Judge: how well the tailored resume matches the JD, whether any hallucination was detected, and what fraction of gaps were addressed.
-UI 中称「对齐评估」，区别于「投递评估」（Worth Appraisal）。默认关闭，可在设置页设全局默认、工作台按次勾选。
-_Avoid_: 投递评估 (Worth Appraisal), evaluation tab
-
-**Engine / Pipeline**
-The core orchestration. In the minimal version: parse → diagnose → align → output. In the full version: ingest → profile → gap → tailor → evaluate. Accepts a \ResuAlignConfig\ and returns a \Report\. Frontend-agnostic.
+候选人的完整未裁剪简历，一切对齐版本的唯一事实源。
+_Avoid_: 模板简历、多份主简历并行
 
 **Resume**
-A candidate's professional profile, submitted as a file in PDF, DOCX, or plain-text format. The system extracts raw text for LLM analysis.
+以 PDF / DOCX / 纯文本提交的简历文件，系统抽取纯文本供 LLM 分析。
 
-**Diagnosis** *(minimal version)*
-An LLM-produced evaluation of a resume, containing a score (0–100), a list of detected skills, and a list of textual issues/improvement suggestions. Produced without any JD context.
-UI 中称「诊断分」，不再用作「匹配度」。
+**Gap Report**
+主简历 vs JD Profile 的结构化对比：缺失关键词、错位强调、可保留的强匹配项。
 
-**Match Score**
-The resume-to-JD fit percentage shown on jobs and workbench. Primary source
-is the Gap Report's gap match score; when alignment evaluation (Eval) ran,
-the Eval Score's jd_match_score is used and labeled "来自对齐评估".
-_Avoid_: 匹配率, fit score (ambiguous with Worth Appraisal)
-
-**Alignment** *(minimal version)*
-The process of comparing a resume with a specific JD and generating suggested edits.
-UI 中「对齐」只指该过程；「已对齐」= 该岗位 final draft 的 alignment_status
-为 succeeded（看板 badge 用，不是第 6 种投递状态）。
-_Avoid_: 对齐快照, 对齐成功当状态流转用
+**Tailored Resume**
+针对某个 JD 改写的主简历版本；每处改动都指回主简历原文，不新增事实。
 
 **Diff**
-A single atomic edit suggestion. Carries a type (add/modify/remove), the original sentence, proposed sentence, reason, confidence, and a **provenance field** linking back to the exact source sentence in the Master Resume. Never invents.
+一条原子改写建议：type（add/modify/remove）+ original + proposed + reason +
+confidence + **provenance**（指向主简历原文）。
 
 **无效建议 / noop Diff**
-对齐产出的 modify/remove diff 中 `original` 与 `proposed` 逐字相同者
-（如模型自述"无可用改动"却仍生成一条 modify）。这类 diff 不计入有效建议：
-移入 `invalid_diffs`，`diffs` 只含真实改动。
+modify/remove 中 `original` 与 `proposed` 逐字相同者，移入 `invalid_diffs`，
+不计入有效建议。
 
-**无建议（badge）**
-零可用产出对齐的终端语义，按证据分型（ADR-0041 决定 5 裁决，实现走
-#111）：新增 `usable_diffs` 计数（noop 过滤与 #74 拦截后的有效 diff 数）。
-**有缺口但 usable=0 → `failed` + reason `no_output`**，可重跑；
-**无缺口（gap 报告为空）且 usable=0 → 保 `succeeded`**，徽章
-「无缺口 · 无需改写」，不得渲染为「已对齐」。驾驶舱「完成对齐」分子只数
-`usable_diffs≥1`，「100% 完成率」从制度上不可能出现。旧语义（全 noop 仍
-succeeded + 琥珀「无建议」徽章）自本裁决起废弃。
-_Avoid_: 拿「跑完没报错」当「产出了价值」；把「无缺口」当可信结论——
-小模型摆烂与真无缺口数据同形，徽章文案必须带换模型重跑引导
+**Alignment**
+「简历 vs JD → 建议改动」的过程。UI 中「已对齐」= 该岗位 final draft 的
+`alignment_status` 为 succeeded，**不是**第六种投递状态。
 
-**节点预检（LLM pre-flight probe）**
-对齐排队前对实际服务节点（激活节点，否则 .env/默认配置）做的一次 5s 最小
-连通 + 鉴权探测。确定性 HTTP 失败（401/402/403）对所有节点硬拦截为
-422 + 引导；本地节点（Ollama 或 localhost base_url）的网络错误/超时同样
-硬拦截（本地服务未起是确定性失败）；远程节点的网络错误/超时保持非阻塞，
-由 `last_alignment_error` 延迟透出，避免云服务瞬时抖动误伤。
+**Diagnosis**（最小版）
+不接 JD 的简历评估：0–100 分 + 技能 + 问题/建议。UI 中称「诊断分」。
 
-**单岗对齐 / 批量对齐 / 批量对比矩阵**
-单岗对齐 = 看板卡片按 alignment_status 显示的「开始对齐 / 重新对齐」按钮，
-直接 POST `/api/jobs/{id}/workbench`，默认 medium 粒度 + 最近创建主简历。
-批量对齐 = 看板「批量对齐」按钮，走 `/api/batch-align`（`selector="pending"`，
-覆盖 idle/failed/卡死 queued），结果在「批量对比矩阵」面板展示。两者共用
-同一后端排队与并发上限（每租户同时最多 1 个运行）。
+**Match Score**
+岗位与工作台展示的简历-岗位匹配度。主源是 Gap Report 的匹配分；跑过对齐
+评估时用 Eval 的 `jd_match_score` 并标注「来自对齐评估」。
+_Avoid_: 匹配率、fit score（与投递评估混淆）
 
-**Report** *(current)*
-Combined output: diagnosis + alignment diffs + metadata. Printed to terminal and optionally written to JSON.
+**Eval Score**
+LLM-as-Judge 的对齐质量：匹配度、有无编造、缺口覆盖比例。UI 称「对齐评估」，
+默认关闭，可在设置页设全局默认、工作台按次勾选。
+_Avoid_: 投递评估
 
-**Report** *(full version)*
-Extended output: JD profile + gap report + tailored resume + eval score. All sections referenceable independently by frontends.
+**Report**
+引擎输出：诊断 + 对齐 diffs + 元数据；完整版含 JD Profile + Gap Report +
+Tailored Resume + Eval Score。
 
-## Delivery & Progress
+## 流水线阶段
 
-**Analysis Job**
-An asynchronous run of the alignment pipeline owned by the Web/API layer. It
-transitions through queued, running, succeeded, and failed, and eventually
-holds a Report. Jobs are persisted in SQLite and scoped to the owning tenant;
-queued/running jobs interrupted by a restart end in a clear failed state.
-_Avoid_: request, task
+1. **JD Ingestion**：客户端采集（油猴 Specific/Universal）或粘贴 JD 文本 →
+   `POST /api/jobs/local-ingest` / `POST /api/jobs`。后端抓取已退役（2026-08-27），
+   JD 链接由油猴捕获、从不服务端拉取。
+2. **JD Profiling**：结构化萃取必会/加分技能、软技能、业务场景 → JD Profile。
+3. **Gap Analysis**：主简历 vs JD Profile → 缺口/错位/强匹配。
+4. **Dynamic Tailoring**：改写章节闭合缺口。**铁律：绝不编造**，只改写/重排/
+   强调已有事实，逐 diff 追踪 provenance。
+5. **Evaluation**（可选）：LLM-as-Judge 对比原稿与对齐稿，打分并标记编造。
 
-**User**
-An account with an email and a hashed password that owns a tenant workspace.
-Authentication uses opaque bearer tokens with hashed session records.
-_Avoid_: account holder, login
+## 设计原则
 
-**Tenant**
-The scoping boundary for jobs, master resumes, and applications. Every user is
-a tenant in the MVP; cross-tenant reads behave like missing resources.
-_Avoid_: organization, workspace owner
+**Token Optimization Principle**
+所有长文本走两阶段抽取：① 轻量 pass（正则/启发式）缩小范围；② LLM pass 在缩小
+后的上下文上精修。适用于 JD 摄入、简历解析、差距分析，长文档省 60–80% token。
 
-**Master Resume Version**
-An immutable snapshot of a Master Resume. Updating the resume appends a new
-version; rollback points the current version back without rewriting history.
-_Avoid_: resume edit, history entry
+**Key Quality Attributes**
+provenance（每个词可回溯）、可测试性（LLM 调用在 httpx 传输层可 mock）、
+前端无关引擎（`engine.run()` 收 config + 输入、返回 Report、无 I/O）、
+token 效率、极简依赖、可观测（stderr 警告 + 长操作进度标记）。
 
-**Application** *(legacy)*
-A dormant per-tenant record that previously pinned a Master Resume version
-and analysis job. The delivery loop no longer tracks applications through
-this entity; Job is the single source of truth (ADR-0027).
-_Avoid_: job application, submission
-
-**Stage Progress**
-A notification emitted before each pipeline stage, carrying the stage name and
-a human-readable message. The engine stays I/O-free by handing progress to a
-callback instead of printing.
-_Avoid_: status text, log line
-
-### Delivery Loop (投递闭环)
-
-**投递闭环 (Delivery Loop)**
-The canonical job-hunting journey: 岗位库 → 工作台对齐 → 记录投递 → 安排跟进 →
-终态收口. Job is the single source of truth for the whole loop.
-_Avoid_: Application 双轨记录, 投递记录面板
-
-**状态生命周期 (Status Lifecycle)**
-A half-constrained transition policy: forward moves auto-fill timestamps and
-clear later-stage fields; backward corrections require explicit confirmation
-and clean stale fields; terminal states keep historical timestamps.
-_Avoid_: 自由改状态, 无约束状态
-
-**记录投递 (Record Application)**
-A one-click action that stamps today's applied_at and moves the Job to 已投递;
-it is idempotent and never downgrades a later stage.
-_Avoid_: 重复记录, 倒回状态
-
-**投递定稿快照 (Applied Draft Snapshot)**
-An immutable per-application copy of the Job's final_draft, match_score,
-master-resume reference, and applied_at, captured atomically when 记录投递
-transitions a Job into 已投递. The snapshot, not the mutable final_draft,
-is what a later 面试回溯 shows.
-Snapshots are append-only: re-recording the same Job appends a new
-`version_index` row instead of overwriting, and the drawer lists them newest
-first. Legacy applied Jobs without a snapshot fall back to the current
-final_draft with an explicit 早期投递版本 warning.
-UI canonical term: **投递快照**（快照抽屉 / 工作台入口统一叫法）。
-_Avoid_: 对齐快照, 记录快照, 投递版本快照, 当前定稿冒充投递版,
-快照可被覆盖, 同岗多轮覆盖
-
-**安排跟进 (Schedule Follow-up)**
-A quick capture of interview stage, next step, and due time that updates the
-Job and its active reminder in one step.
-_Avoid_: 详情弹窗手工多步
-
-**历史峰值漏斗 (Historical Peak Funnel)**
-Funnel metrics derived from the strongest historical evidence
-(offer_at > applied_at > status), so withdrawn jobs keep their past-stage
-credit.
-_Avoid_: 只看当前状态
-
-**待跟进提醒 (Follow-up Reminder)**
-A due-based reminder shown only for active stages (已投递/面试中); terminal
-states automatically stop reminders.
-_Avoid_: 终态仍提醒
-
-**直达投递 (Direct Application)**
-A 去投递 action that opens the Job's source_url so the user can submit the
-tailored resume; missing links route to a 补链接 flow.
-_Avoid_: 详情里找不到 JD 原文
-
-**JD Source**
-Anything that turns a job posting reference into JD text: an inline paste, a
-file, a crawled URL, or (future) an agent-based fetcher. Frontends treat all
-JD Sources as producing the same plain-text input to the pipeline.
-_Avoid_: fetcher, scraper
-
-**Site Handler**
-A site-specific extraction strategy for a known job board, such as LinkedIn or
-BOSS直聘. Unknown boards use generic extraction rather than failing.
-
-**双模摄入 (Dual-Mode Ingestion)**
-The client-side JD capture strategy: a Specific mode with a high-precision
-extractor for 实习僧 (shixiseng.com) job pages, plus a Universal mode that
-ingests any user-selected JD text from any career-site page together with
-document.title and the page URL. Both modes POST to the local-ingest endpoint.
-_Avoid_: 反爬对抗, 后端常驻无头浏览器
-
-**本地摄入端点 (Local Ingest Endpoint)**
-`POST /api/jobs/local-ingest`, a dedicated local-only job-creation endpoint
-that accepts structured page fields or raw selected JD text. It performs only
-deterministic parsing on the request path, marks new jobs
-`classification_pending=1`, and never overwrites an existing Job on duplicate.
-_Avoid_: 复用批量导入, 公网导入入口
-
-**岗位表同步 (Job Table Sync)**
-The server-side pull path for a user-maintained job table CSV: the `job_table`
-settings section stores a filesystem path (plus an optional JD folder), and a
-background loop re-reads it on the configured interval so only rows the library
-has never seen are added. Re-running an unchanged table is a no-op for both the
-library and the LLM bill, because the dedupe check runs before classification.
-Rows without an application URL use the stable `jobtable:` identity
-(company/title/location) so a rewritten JD body does not mint a duplicate.
-_Avoid_: 网络爬取岗位表, 客户端定时任务, 按文件名判重
-
-**Local Ingest Token**
-The secret carried in the `X-ResuAlign-Token` request header for the
-local-ingest endpoint. The server generates it on first start, the settings
-page can copy or regenerate it, and the userscript prompts for it once and
-re-prompts on 401.
-_Avoid_: 免鉴权 localhost 信任, 用户自填双端 token
-
-## Benchmark & Quality
-
-**Benchmark Case**
-A synthetic resume + JD pair with concrete expected tailoring directions and a
-provenance note. Cases are authored, PII-free, and stable for offline
-regression runs.
-_Avoid_: fixture, sample
-
-**Expected Direction**
-A concrete tailoring goal attached to a Benchmark Case, used by the regression
-harness to measure keyword coverage.
-
-**Case Tag**
-Optional metadata on a Benchmark Case describing role, domain, or language;
-reserved for future subset selection without changing the case schema.
-
-## Configuration
-
-**ResuAlignConfig**
-A dataclass holding all runtime configuration (provider, api_key, model, base_url, etc.). Can be constructed from:
-  1. Explicit kwargs (programmatic API / future Web layer)
-  2. \dotenv\ + env var fallback (CLI convenience)
-
-CLI-specific flags (like \--output-dir\) live in the CLI layer and are translated into \ResuAlignConfig\ before calling the engine.
-
-**Provider**
-The LLM service backend. Supported values: \deepseek\, \openrouter\, \ollama\. Mapped to base URLs internally.
-
-**Config Source**
-A layer in the priority stack: CLI argument > \.env\ file > environment variable. Higher layers override lower ones.
-
-## Module Boundaries (full vision)
-
-**esualign/engine.py\**
-Pipeline orchestrator. Imports stage modules, chains them. Frontend-agnostic. No argparse, no HTTP, no I/O.
-
-**esualign/cli.py\**
-CLI frontend. Parses arguments → builds config → calls \engine.run()\ → prints/dumps report.
-
-**esualign/api.py\** *(future)*
-FastAPI frontend. Builds config from request params → calls \engine.run()\ → returns JSON response.
-
-**esualign/parser.py\**
-File-format abstraction: PDF/DOCX/txt → plain text.
-
-**esualign/llm.py\**
-LLM interaction. Builds prompt, sends HTTP request, parses JSON response. Retries on failure.
-
-**esualign/models.py\**
-Data classes: \DiffItem\, \Analysis\, \Report\, \ResuAlignConfig\, plus future types: \JDProfile\, \GapReport\, \TailoredResume\, \EvalScore\.
-
-**esualign/extractor.py\** *(future)*
-Two-stage extraction: regex/NLP → LLM refinement.
-
-**esualign/crawler.py\** *(future)*
-JD crawling abstraction. Playwright/Selenium for career sites.
-
-**esualign/jd_profiler.py\** *(future)*
-JD → structured \JDProfile\. Prompt + JSON schema for must-have/nice-to-have, skills, scenarios.
-
-**esualign/gap_analyzer.py\** *(future)*
-Master Resume + JDProfile → \GapReport\. Keyword matching + LLM-based semantic gap detection.
-
-**esualign/tailor.py\** *(future)*
-Master Resume + GapReport → TailoredResume. Constraint-guided rewriting with provenance tracking.
-
-**esualign/evaluator.py\** *(future)*
-LLM-as-Judge: original vs tailored vs JD. Produces EvalScore + hallucination audit.
-
-## Key Quality Attributes
-
-- **Provenance**: every word in a tailored resume traces back to the Master Resume. No hallucination.
-- **Testability**: LLM calls mockable at the httpx transport layer; parsers testable with real fixture files.
-- **Frontend-agnostic engine**: \engine.run()\ accepts config + input, returns Report. No I/O inside engine.
-- **Token efficiency**: two-stage extraction on all long-text paths.
-- **Simplicity**: Single-responsibility modules, no framework, minimal runtime dependencies.
-- **Observability**: Warnings on stderr; progress markers for long operations.
-
-## Workbench Modules (2026-08-02)
+## 工作台
 
 **Job Library**
-The core entity of the personal workbench. A persisted, tenant-scoped store of
-job postings with raw JD text, source, location, salary range, classification
-tags, and application status. All other workbench modules read from it.
-_Avoid_: job feed, scraped cache
+租户隔离的岗位持久库：原始 JD、来源、地点、薪资、分类标签、投递状态。
+其他工作台模块都从这里读。
 
 **Job Classification**
-The multi-dimensional tagging of a Job Library record: job function (backend,
-frontend, algorithm, data, client, ops, testing, product, design, operations),
-seniority (intern, campus, junior, mid, senior, expert), and free-form
-technology/domain tags. Produced by the LLM and editable by the user.
-_Avoid_: job category, job type
-
-**Master Resume Diagnosis**
-An async no-JD pipeline run against one Master Resume, producing a 0-100
-score, skills, issues, and suggestions. The resume record keeps the latest
-diagnosis job id so archive refreshes restore the most recent result.
-诊断结果会被 Single-Job Workspace 复用（诊断缓存复用）：同一主简历在工作台
-rerun 时跳过 diagnose 阶段的 LLM 调用。
-_Avoid_: analyze-only page, report history
-
-**Final Draft**
-A job-specific persisted copy of an accepted tailored resume. It survives
-refresh and re-opening of the workspace, overwrites as a new version, and can
-be explicitly saved as a new Master Resume without mutating the original.
-_Avoid_: automatic master resume overwrite, throwaway draft
+岗位的多维标签：职能（backend/frontend/algorithm/data/client/ops/testing/
+product/design/operations）、资历（intern/campus/junior/mid/senior/expert）、
+自由技术/领域标签。LLM 产出，用户可编辑。
 
 **Classification Pending**
-A durable library-job flag set when the classification LLM fails. The job is
-still saved, shows an amber badge, and can be reclassified later without
-blocking ingestion or batch import.
-_Avoid_: failed row skip, silent unknown classification
+分类 LLM 失败时落库的持久标志。岗位仍保存、显示琥珀徽章、可稍后重分类，
+不阻塞摄入或批量导入。
+_Avoid_: 失败行跳过、静默 unknown 分类
 
 **Vocabulary Sync**
-Job function, seniority, and status options rendered by the library filters
-and edit modal come from `/api/settings`; the frontend caches the list per
-page load and falls back to built-ins when the settings API is unavailable.
-_Avoid_: duplicated hard-coded dropdowns, per-filter settings requests
-
-**Application Status**
-A lightweight per-job lifecycle marker: not applied, applied, interviewing,
-offered, or declined. The Single-Job Workspace is the one-stop entry for
-status updates and the tailored draft.
-_Avoid_: pipeline stage, funnel state
-
-**Interview Stage**
-The interview-process phase marker on a Job (first round, second round, HR
-round, offer talk). Orthogonal to Application Status: status is the funnel
-bucket, interview stage is the follow-up anchor inside "interviewing".
-_Avoid_: interview phase, round number
-
-**Follow-up**
-A Job's structured follow-up information: a free-text next action, an
-optional due datetime, and an Interview Stage. Drives the due reminders.
-_Avoid_: next step (ambiguous with Batch Decision), reminder entry
-
-**Batch Decision**
-The per-job conclusion shown in the batch alignment matrix (apply, consider,
-skip). Distinct from Follow-up despite sharing the label "下一步" in the UI.
-_Avoid_: next step (ambiguous with Follow-up)
+岗位库筛选器与编辑弹窗的职能/资历/状态选项来自 `/api/settings`；前端按页缓存，
+设置 API 不可用时回落内置值。
+_Avoid_: 硬编码下拉、每筛选一次请求一次设置
 
 **Single-Job Workspace**
-The per-job working page combining JD analysis, status, and generation of a
-tailored resume draft from the Master Resume version.
-_Avoid_: job detail page, application form
+单岗位工作页：JD 分析 + 状态 + 从主简历版本生成对齐草稿。
+
+**Final Draft**
+某个岗位已采纳对齐稿的持久副本；刷新与重开不丢，另存为主简历不改原稿。
+_Avoid_: 自动覆盖主简历、一次性草稿
 
 **Rewrite Granularity**
-The prompt-level rewrite intensity for the tailor stage: `fine` (微调) keeps
-structure and wording, `medium` (重构, default) rewrites within the existing
-structure, and `coarse` (重塑) permits full restructure.
+改写强度：`fine`（微调，保结构措辞）、`medium`（重构，默认，保结构内改）、
+`coarse`（重塑，允许整体重组）。
 
-## Agent 化（指挥台 / Agent Orchestration, 2026-09-14）
+**Master Resume Diagnosis**
+针对一份主简历的异步无 JD 流水线：0–100 分 + 技能 + 问题 + 建议；结果被
+单岗位工作台复用（诊断缓存复用，rerun 跳过 diagnose 的 LLM 调用）。
+
+**Application Status**
+逐岗位的轻量生命周期标记：未投递 / 已投递 / 面试中 / Offer / 放弃。
+_Avoid_: 流水线阶段、漏斗状态
+
+**Interview Stage**
+岗位的面试轮次标记（一面/二面/HR/offer 沟通）。与 Application Status 正交：
+状态是漏斗桶，面试轮次是「面试中」内部的跟进锚点。
+
+**Follow-up**
+岗位的结构化跟进信息：自由文本下一步 + 可选到期时间 + 面试轮次；驱动到期提醒。
+_Avoid_: 下一步（与 Batch Decision 混淆）、提醒条目
+
+**Batch Decision**
+批量对比矩阵里的逐岗结论（投/考虑/跳过）。UI 里与 Follow-up 共用「下一步」标签，
+但是两件事。
+
+**采纳率 (Adoption Ratio)**
+近 7 天窗口内，保存定稿时被标 accepted 的 diff 数 / 定稿时 diff 总数
+（`alignment_metrics` 按 tenant+日聚合）。零分母如实显示「—」，不伪装成 100%。
+2026-09-10 起不再作驾驶舱 KPI 主数字（低服从率在核心位构成负向引导），
+降级为卡内明细「采纳 Y/Z 条建议」。
+_Avoid_: 拿 runs 当分母；把单岗历史状态当窗口采纳率
+
+**已优化条目 (Optimized Entries)**
+窗口内被采纳并进入定稿的 diff 总数，驾驶舱 KPI 主数字口径：单调只增，
+强调「工具帮你改了多少」。与 Aha 指标同源但口径更宽。
+_Avoid_: 与采纳率混用（一个量、一个率）
+
+**无建议（badge）**
+零可用产出对齐的终端语义，按证据分型（ADR-0041 决定 5 / #111）：新增
+`usable_diffs` 计数（noop 过滤与拦截后的有效 diff 数）。**有缺口 ∧ usable=0 →
+`failed` + reason `no_output`**（可重跑）；**无缺口 ∧ usable=0 → 保 `succeeded`**，
+徽章「无缺口 · 无需改写」，不得渲染为「已对齐」。驾驶舱「完成对齐」分子只数
+`usable_diffs≥1`，「100% 完成率」从制度上不可能出现。
+_Avoid_: 拿「跑完没报错」当「产出了价值」；把「无缺口」当可信结论
+（小模型摆烂与真无缺口同形，文案必须带换模型重跑引导）
+
+**节点预检 (LLM pre-flight probe)**
+对齐排队前对实际服务节点做的 5s 最小连通 + 鉴权探测。确定性 HTTP 失败
+（401/402/403）对所有节点硬拦截为 422 + 引导；本地节点（Ollama / localhost）
+的网络错误/超时同样硬拦截；远程节点的网络错误/超时保持非阻塞，由
+`last_alignment_error` 延迟透出。
+
+**单岗对齐 / 批量对齐 / 批量对比矩阵**
+单岗 = 看板卡片按 `alignment_status` 显示的按钮，直接 POST
+`/api/jobs/{id}/workbench`（默认 medium + 最近主简历）。批量 = 看板
+「批量对齐」，走 `/api/batch-align`（`selector="pending"` 覆盖 idle/failed/卡死
+queued），结果进「批量对比矩阵」。两者共用同一排队与并发上限（每租户同时最多 1 个）。
+
+**简单模式 / 专家模式**
+设置页双视角。简单模式只保留连接 AI 所需最小配置（服务商/模型/API Key/测试连接）；
+专家模式暴露节点管理、成本护栏、自动化规则与词表。无节点时默认简单模式。
+_Avoid_: 用「高级设置」折叠代替真双模式
+
+**投递结果归因 (Application Result)**
+对已投递定稿的结局标注：过筛通过 / 简历挂筛 / 暂无回音 / 其他。可选字段，
+不改变投递状态机；是验证「对齐是否有效」的原始数据。
+_Avoid_: 当作第六种投递状态
+
+## 摄入
+
+**JD Source**
+一切把岗位引用变成 JD 文本的来源：粘贴、文件、油猴摄入。前端一律产出同一份
+纯文本进流水线。
+
+**Site Handler**
+已知招聘站点的站点级抽取策略；未知站点走通用抽取而非失败。
+
+**双模摄入 (Dual-Mode Ingestion)**
+客户端 JD 采集策略：实习僧高精度 Specific 模式 + 任意职业站点划词的 Universal
+模式（带 document.title 与页面 URL）。两模式都 POST 到 local-ingest。
+_Avoid_: 反爬对抗、后端常驻无头浏览器
+
+**本地摄入端点 (Local Ingest Endpoint)**
+`POST /api/jobs/local-ingest`，本地专用建岗端点。请求路径只做确定性解析，
+新岗位标 `classification_pending=1`，重复岗位绝不覆盖已有 Job。
+
+**Local Ingest Token**
+local-ingest 的 `X-ResuAlign-Token` 头密钥。服务首次启动生成，设置页可复制/重置，
+油猴插件提示一次、401 时再提示。
+_Avoid_: 免鉴权信任 localhost、用户自填双端 token
+
+**岗位表同步 (Job Table Sync)**
+用户维护的岗位表 CSV 的服务端拉取路径：`job_table` 设置存文件路径（+ 可选 JD
+目录），后台循环按间隔重读，只加库中从未见过的行。重读未变表对库与 LLM 账单
+都是 no-op（去重检查先于分类）。无投递链接的行用稳定 `jobtable:` 身份
+（公司/标题/地点），改写 JD 正文不会造重复。
+_Avoid_: 网络爬取岗位表、按文件名判重
+
+## 投递闭环
+
+**投递闭环 (Delivery Loop)**
+求职主线：岗位库 → 工作台对齐 → 记录投递 → 安排跟进 → 终态收口。Job 是全链
+唯一事实源。
+_Avoid_: Application 双轨记录、投递记录面板
+
+**状态生命周期 (Status Lifecycle)**
+半约束状态策略：前进自动填时间戳并清后续字段；回退需显式确认并清陈旧字段；
+终态保留历史时间戳。
+_Avoid_: 自由改状态
+
+**记录投递 (Record Application)**
+一键动作：盖当天 applied_at 并把 Job 移到「已投递」；幂等，绝不回退到更早阶段。
+
+**投递定稿快照 (Applied Draft Snapshot)**
+记录投递时原子捕获的不可变副本（final_draft + match_score + 主简历引用 +
+applied_at）。append-only：重录追加新 `version_index` 行而非覆盖。面试回溯看快照，
+不看可变定稿；旧记录无快照时回落当前 final_draft 并给「早期投递版本」警示。
+UI canonical 叫法：**投递快照**。
+_Avoid_: 对齐快照、当前定稿冒充投递版、快照可被覆盖
+
+**安排跟进 (Schedule Follow-up)**
+一次捕获面试轮次 + 下一步 + 到期时间，同步更新 Job 与其活动提醒。
+
+**历史峰值漏斗 (Historical Peak Funnel)**
+按最强历史证据（offer_at > applied_at > status）推导的漏斗，撤回的岗位保留
+过去的阶段计入。
+
+**待跟进提醒 (Follow-up Reminder)**
+只对活动阶段（已投递/面试中）显示的到期提醒；终态自动停提醒。
+
+**直达投递 (Direct Application)**
+打开 Job 的 source_url 让用户提交对齐稿；缺链接走补链接流程。
+
+## 平台与数据
+
+**Analysis Job**
+Web/API 层拥有的异步对齐运行：queued → running → succeeded/failed，最终持 Report。
+持久在 SQLite、按租户隔离；重启中断的 queued/running 任务落到明确 failed 态。
+_Avoid_: request、task
+
+**User**
+持邮箱与哈希密码、拥有一个租户工作区的账号；鉴权用不透明 bearer token +
+哈希会话记录。
+
+**Tenant**
+岗位、主简历、投递的作用域边界。MVP 里每个 user 是一个 tenant；跨租户读
+表现为资源不存在。
+
+**Master Resume Version**
+主简历的不可变快照。更新追加新版本；回滚把当前版本指回去但不改写历史。
+
+**Application** *(legacy)*
+已休眠的逐租户记录，曾钉住主简历版本与分析任务。投递闭环不再经它追踪，
+Job 是唯一事实源（ADR-0027）。
+
+**Stage Progress**
+每个流水线阶段前发出的通知（阶段名 + 人类可读消息）。引擎保持 I/O-free，
+把进度交给回调而非打印。
+
+## 基准与配置
+
+**Benchmark Case**
+合成简历 + JD 对，带具体期望改写方向与 provenance 注记；无 PII、可离线回归。
+
+**Expected Direction**
+挂在 Benchmark Case 上的具体改写目标，供回归 harness 量关键词覆盖。
+
+**Case Tag**
+Benchmark Case 上的可选元数据（角色/领域/语言），留给未来的子集选择，不改 case schema。
+
+**ResuAlignConfig**
+持全部运行时配置的 dataclass（provider/api_key/model/base_url 等）。来源：
+① 显式 kwargs（编程 API / Web 层）；② `.env` + 环境变量回落（CLI 便利）。
+CLI 专属 flag（如 `--output-dir`）留在 CLI 层，调用引擎前翻译进 config。
+
+## Agent 化与探针
 
 **指挥台 (Command Deck)**
-产品内的 agent 操作员入口：一句自然语言指令驱动既有流程，与工作台并列、同数据同队列——是给产品加席位，不是改造工作台。它的定义特征只有「单入口 + 自然语言路由」两件事；**执行期是否由模型逐步决定下一步（决策循环）不属于它的定义**（ADR-0040：先做厚预设流，循环只在实测到决策点处获准）。
-_Avoid_: 聊天机器人, 第二条对齐路径（2026-08 试点正死于「无真实入口的并行路径」）；把「要不要上指挥台」偷换成「要不要上循环」（两者独立获准，2026-09-14 裁决）
+产品内的 agent 操作员入口：一句自然语言驱动既有流程，与工作台并列、同数据同队列。
+定义特征只有「单入口 + 自然语言路由」；**执行期是否由模型逐步决定下一步不属于
+它的定义**（ADR-0040）。
+_Avoid_: 聊天机器人；把「要不要上指挥台」偷换成「要不要上循环」
 
 **预设流 (Macro)**
-由服务端预先定好的参数与顺序、一次调用即可跑完的流程编排；执行期不需要对中间结果做判断。四个招牌场景（挑高分 / 归因 / 批量对齐 / 周复盘）都属这一型。
-_Avoid_: 把预设流叫成 agent 编排；为它付决策循环的成本与风险
+服务端预先定好参数与顺序、一次调用跑完的编排；执行期不需判断中间结果。
+四个招牌场景（挑高分/归因/批量对齐/周复盘）都属这一型。与**决策循环**相对。
 
 **决策点 (Decision Point)**
-执行过程中下一步动作取决于运行时观察、且该观察无法预先枚举成调用参数的位置；是 agent 循环与普通 API 调用的分界。审计判据：某步若在 30 次重放里能被一条确定性规则复现同一选择，它就不是决策点。
-_Avoid_: 把「选哪份简历」「阈值取多少」这类服务端可确定性算出的取值当决策点
-
-**三线门槛 (Three Gates)**
-Phase A 开工前的三道灯（ADR-0040，accepted）：能力线 = Phase 0 过线（只证明当前模型能不能做）；地基线 = 对齐成功率回到可接受线（可接受线由 #110 诊断产出，不许先拍）+ 零 diff 假成功被 CI 锁死（#111）；需求线 = 合格例 ≥3（见下条）。三线全亮才开工，Phase 0 过线只点亮其中一条。地基线两票与 Phase 0/harness **并行**，不排队。
-_Avoid_: 用 Phase 0 过线当三线总和；把「未上线所以验不了」当成需求线的 false 理由；把「可接受线」留成开口术语等最忙那天现场解释
-
-**合格例 (Qualifying Case)**
-需求线的计数单位，三条全满足才算一例：同一份简历 ≥3 轮「改→评→改」 ∧ ≥1 轮有 diff 采纳 ∧ ≥2 轮的触发原因是上一轮评测结论。第三条是因果链条款——把决策点的判据（可被确定性规则复现即非决策点）反过来用在需求上：没有因果链的三轮手点不证明需要循环。狗食数据（租户 `local`）计入。
-_Avoid_: 拿「同一简历跑了三次」凑计数（缺采纳与因果链，会伪造循环需求）
+下一步动作取决于运行时观察、且该观察无法预先枚举成调用参数的位置。审计判据：
+某步若在 30 次重放里能被一条确定性规则复现同一选择，它就不是决策点。
 
 **决策循环 (Explicit Loop)**
-执行期由模型逐步决定下一个工具调用的编排形态，与**预设流**相对。Phase A 的实现顺序是先做厚预设流 + 单入口路由，循环按实测决策点再决定（ADR-0037 模板臂的产品化写法）。
-_Avoid_: 把「agent 项目」默认等于「有循环」；为演示效果给不可枚举假设为真
+执行期由模型逐步决定下一个工具调用的编排形态。实现顺序是先做厚预设流 + 单入口
+路由，循环按实测决策点再决定。
+_Avoid_: 把「agent 项目」默认等于「有循环」
+
+**三线门槛 (Three Gates)**
+Phase A 开工前三道灯（ADR-0040）：能力线 = Phase 0 过线；地基线 = 对齐成功率
+回到可接受线 + 零 diff 假成功被 CI 锁死；需求线 = 合格例 ≥3。三线全亮才开工。
+
+**合格例 (Qualifying Case)**
+需求线计数单位，三条全满足才算：同一简历 ≥3 轮「改→评→改」 ∧ ≥1 轮有 diff
+采纳 ∧ ≥2 轮的触发原因是上一轮评测结论。第三条是因果链条款。狗食数据计入。
+_Avoid_: 拿「同一简历跑三次」凑数（缺采纳与因果链）
 
 **授权档位 (Approval Tier)**
-agent 可用工具的三档授权：读档自由调用；写档只能经既有入口排队（受租户门、成本闸、看门狗约束）；审批档（采纳 diff、定稿、覆盖主简历、导出、删除）只能提议，人确认后才生效。
-_Avoid_: agent 直接定稿, 跳过审批档, 无上限的「管理员工具」
+agent 可用工具三档：读档自由；写档只能经既有入口排队；审批档（采纳 diff、
+定稿、覆盖主简历、导出、删除）只能提议，人确认后生效。
 
 **轨迹评测 (Trajectory Eval)**
-评 agent 一次会话的完整步骤序列而非只看终态：任务成功率、工具调用正确率、步数与成本上限。放 `benchmarks/agent/`，接 CI。
-_Avoid_: 只看终态（终态可能是编出来的调用凑巧走到的）
+评 agent 一次会话的完整步骤序列而非只看终态：任务成功率、工具调用正确率、
+步数与成本上限。放 `benchmarks/agent/`，接 CI。核心指标是**无编造率**
+（会话中不含无出处内容的比例，对抗用例下必须 100%）。
 
-**无编造率 (No-Fabrication Rate)**
-轨迹评测的核心指标：会话中不含无出处内容的比例；「不捏造事实」铁律在 agent 维度的延伸，对抗用例下必须 100%。
-_Avoid_: 用 Eval Score 高当无编造的证据
-
-**轨迹报价 (Trajectory Quote)**
-含写档步骤的 agent 指令在执行前向用户出示的两行预演卡：决策调用行（agent 桶余量，硬顶只罩这行）＋ 引擎调用行（与按钮路径共享的每日池余量，撞顶即既有的排队拒绝）。数字一律算术派生，不许模型口算。读档轨迹不设报价门；报价是事前知情，审批档是事后生效，两道门互不替代。
-_Avoid_: 只在「大轨迹」才弹报价（Q3 裁决否决）；把引擎行报成 agent 桶的死刑（它是别人家账本的行情）
-
-**agent 预算卡 (Agent Budget Card)**
-agent 循环决策调用的专属额度账本：轨迹起点原子预留、步界结算、退还未消费；agent 派生的引擎调用不在账上——走按钮路径同一共享池。帽值以「招牌演示不撞帽」标定（口径与红线见 ADR-0039）。
-_Avoid_: 把引擎调用计入 agent 桶（按钮花谁的池子，agent 按的就花谁的池子）；「撞顶次日自动续跑」（零自动语义，续跑=新指令+重新报价）
+**轨迹报价 / agent 预算卡 (Trajectory Quote / Budget Card)**
+含写档步骤的 agent 指令执行前出示两行预演卡：决策调用行（agent 桶余量）+
+引擎调用行（与按钮路径共享的每日池）；数字算术派生，不许模型口算。agent 桶是
+循环决策调用的专属账本（起点预留、步界结算、退还），agent 派生的引擎调用不在
+账上。报价是事前知情，审批档是事后生效，两道门互不替代。
 
 **门禁摘要 (Gate Report)**
 skill 验证器每次运行输出的一行机器可读汇总：`N diffs / K blocked
-(missing/fabricated/noop) / sha256`。探针判据的唯一取证形式——非作者首跑
-报告必须附此行才算数（贴得出即真跑过，见 ADR-0041 决定 4）。
+(missing/fabricated/noop) / sha256`。探针判据的唯一取证形式——非作者首跑报告
+必须附此行才算数。
 _Avoid_: 口头「我用过了」当首跑；agent 转述或重打摘要（必须原样粘贴脚本输出）
 
 **合格例取证 (Qualifying Evidence)**
-验证器落盘的 append-only JSONL 运行日志（时间戳、简历哈希、轮次、触发
-原因、采纳计数），用于证明 ADR-0040 (a) 合格例的因果链：第 n+1 轮的
-trigger 必须指向第 n 轮复评结论。狗食数据计入（2026-09-14 裁决）。
-_注_：轮次连续性由验证器自己判定并写入 `chain{prev_round,cites_prev}`
-（2026-09-15 R5），不再靠 agent 自觉声明；`resume_sha256` 跨轮不变即
-「同一份文本重放」，不算迭代证据。
-_Avoid_: 手填轮次凑数（无 JSONL 佐证不算）；无因果链的三轮手点
+验证器落盘的 append-only JSONL 运行日志，证明因果链：第 n+1 轮 trigger 必须指向
+第 n 轮复评结论。轮次连续性由验证器自己判定并写入
+`chain{prev_round,cites_prev}`；`resume_sha256` 跨轮不变即「同一文本重放」，
+不算迭代证据。
 
 **skill 探针 (Skill Probe)**
-掉头期主线：独立公开仓库（默认命名 `truetailor`）= prompt skill +
-单文件确定性验证器（stdlib 零依赖），在 app 之外验证「逐条可溯源改写」
-的需求。判据、时间盒与终态剧本见 ADR-0041 决定 4/9/10。
-_注_：仓库已于 2026-09-15 公开（`shing26/truetailor`，MIT），故
-`gate.py` 与黄金 fixtures 的**唯一事实源在上游**；主仓持 vendor 副本，
-由 `tests/fixtures/gate/VENDOR.json` 哈希清单 + `test_skill_vendor_lock.py`
+掉头期主线：独立公开仓库（`truetailor`）= prompt skill + 单文件确定性验证器
+（stdlib 零依赖），在 app 之外验证「逐条可溯源改写」的需求。仓库已公开（MIT），
+故 `gate.py` 与黄金 fixtures 的**唯一事实源在上游**；主仓持 vendor 副本，由
+`tests/fixtures/gate/VENDOR.json` 哈希清单 + `tests/platform/test_skill_vendor_lock.py`
 锁定，改规则须先改上游再同步。
-_Avoid_: 把探针当产品第一步（它是需求探针，过与死各有剧本）；证伪后
-另起第三渠道（决定 10 禁止）
 
 **冻结令 (Freeze Order)**
-探针期内 app 一切新功能冻结（agent 化 Phase A/B、商业化 PRD、扩展期二、
-托管 demo），仅保留地基修复 #110/#111 与探针包两类工作。解冻条件唯一：
-探针判据「过」（ADR-0041 决定 1/9）。
-_注_：ADR-0042 决定 6e 明确自用线推进期间冻结令继续有效；「让自用闭环
-好用」的改动须逐项引用该条走例外流程。
-_Avoid_: 把体验债修复包装成地基工作绕开冻结；探针观察窗内做落地页或 demo
+探针期内 app 一切新功能冻结（agent 化 Phase A/B、商业化 PRD、扩展期二、托管
+demo），只留地基修复 #110/#111 与探针包两类工作。解冻条件唯一：探针判据「过」。
+ADR-0042 决定 6e 明确自用线推进期间冻结令继续有效。
 
 **探针线 / 自用线 (Probe Line / Dogfood Line)**
-掉头期判据的两条**独立**线（ADR-0042 决定 3），各自取证、各自判定，
-不许互相顶替。探针线 = ADR-0041 决定 4 原文（非作者首跑 ≥5 例附门禁摘要行，
-或 1 例外部完整合格链 = 过；≥100★ 或社区二创 = 强信号；4 周后 <2 例 = 证伪），
-测「陌生人要不要它」；自用线 = ADR-0040 需求线 (a) 原文（合格例 ≥3），
-测「作者自己在真实投递中会不会反复用它」，取证走合格例取证 JSONL，
-输入必须是真实投递过的岗位 JD。
-_Avoid_: 用自用线成果去替探针线达标（形态判定仍以探针线为准）；
-把自用线当成「反正没人用就先自用」的兜底
+掉头期判据的两条**独立**线（ADR-0042 决定 3），各自取证、各自判定，不许互相
+顶替。探针线 = 非作者首跑 ≥5 例附门禁摘要行，或 1 例外部完整合格链 = 过；
+≥100★ 或社区二创 = 强信号；4 周后 <2 例 = 证伪。自用线 = 合格例 ≥3，取证走
+JSONL，输入必须是真实投递过的岗位 JD。
 
 **分发未执行 (dist_not_executed)**
-ADR-0042 决定 2 新增的判据状态：四渠道 outreach 未在 2026-09-23 24:00 前
-全部发出时，判据登记为此态——时钟不启动、判据保持 PENDING、观察窗不开启。
-它的作用是把「没发出去」与「发了没人要」在制度上分开，**它不是证伪**；
-处置是「先执行分发，再谈判据」。
-_Avoid_: 把分发未执行读成探针证伪（会让主线按合同误降级）；
-用「反正要重锚」为由拖延分发而不登记
+ADR-0042 决定 2 的判据状态：四渠道 outreach 未在 2026-09-23 24:00 前全部发出时
+登记为此态——时钟不启动、判据保持 PENDING、观察窗不开启。它把「没发出去」与
+「发了没人要」在制度上分开，**不是证伪**；处置 = 先执行分发。
+_Avoid_: 把分发未执行读成探针证伪；以「反正要重锚」为由拖延分发而不登记

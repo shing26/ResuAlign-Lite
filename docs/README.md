@@ -11,6 +11,8 @@
 | --- | --- |
 | `adr/` | 决策记录。**只增不改**；编号不复用（0029 已删除，见 ADR-0036 编号说明） |
 | `agents/` | agent 工作方法：issue tracker / triage labels / domain docs / QA agent |
+| `STATUS.md` | 交付状态：达标项（带口径）/ 未达标红线 / 冻结策略与触发条件 |
+| `EVIDENCE.md` | 证据台账：每个数字一行（读数 · 口径 · 复现命令 · 判据 · 达标否） |
 | `user-guide.md` | 用户手册 |
 | `operations.md`、`runbook-incidents.md`、`backup-restore.md`、`deployment-security.md` | 运维与安全 |
 | `resualign-collector-install.md` | 油猴摄入器安装说明（指向仓库根目录的 `resualign-collector.user.js`） |
@@ -36,6 +38,9 @@
 
 | 产出 | 位置 |
 | --- | --- |
+| 交付状态（达标 / 红线 / 冻结策略） | `docs/STATUS.md`（长期维护，平铺层） |
+| 证据台账（数字 + 口径 + 复现命令） | `docs/EVIDENCE.md`（长期维护，平铺层） |
+| 改版记录 | 仓库根 `CHANGELOG.md` |
 | ADR | `docs/adr/NNNN-slug.md`（下一个号 = 现有最大号 + 1；跳过空缺号不复用） |
 | QA / 走查报告 | `docs/reports/qa-dogfood-report-YYYY-MM-DD.md`（约定见 `docs/agents/qa-dogfooder.md`） |
 | 一次性评审、调研、裁决报告 | `docs/reports/<slug>-YYYY-MM-DD.md` |
