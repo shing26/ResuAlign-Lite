@@ -1,6 +1,6 @@
 {
   "version": "2.1.0",
-  "description": "Incremental API additions over the immutable contracts/openapi-v1.json golden. tests/test_contract.py checks the additive superset, and contracts/openapi-current.json snapshots the resulting OpenAPI document.",
+  "description": "Incremental API additions over the immutable contracts/openapi-v1.json golden. tests/contracts/test_contract.py checks the additive superset, and contracts/openapi-current.json snapshots the resulting OpenAPI document.",
   "paths": [
     "/api/automation/rules",
     "/api/automation/rules/{rule_id}",

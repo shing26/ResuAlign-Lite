@@ -50,7 +50,7 @@ Status: 现在批**已施工并验证**；挂起批为决策完备施工单，�
   `_stream_deltas` 记录请求体、在 `stream_chat_json` 记录**累积输出**
   （失败时的部分输出同样保留为证据）。
 - 写失败只 warning，不影响调用。
-- 测试：`tests/test_llm_trace.py`（8 条：默认关、全量落盘、脱敏、
+- 测试：`tests/observability/test_llm_trace.py`（8 条：默认关、全量落盘、脱敏、
   空正文不落、轮转参数、端到端 chat_json、禁用时不触碰正文、
   **超时/连不上仍留下请求体**）。
 - 计数口径：棘轮的 `api_module._` 只统计**代码站点**，注释里的提及不计
@@ -69,7 +69,7 @@ Status: 现在批**已施工并验证**；挂起批为决策完备施工单，�
 - 实测基线（修复后）：**违规 9 项 / 循环 56 项 / 引用站点 332 处
   （127 个组合）/ 模块 73**。
 - CI：Stage 1 增加 `python -m resualign.tools.modgraph --check`。
-- 测试：`tests/test_modgraph_layers.py`（11 条，含「基线必须与当前树一致」）。
+- 测试：`tests/platform/test_modgraph_layers.py`（11 条，含「基线必须与当前树一致」）。
 
 ### 2.3 契约层（LLM 失败码）
 
@@ -83,7 +83,7 @@ Status: 现在批**已施工并验证**；挂起批为决策完备施工单，�
 - **明确不做**：HTTP 错误体契约（ticket #100）不动；`jobs.py` 的
   `code == "other"` 文本回退分支仍在（属 R4 独立题目）。
 - 模块加入 modgraph 层表的**最内层** `contracts/`，纳入「不得向外依赖」集合。
-- 测试：`tests/test_contract_errors.py`（8 条）。
+- 测试：`tests/contracts/test_contract_errors.py`（8 条）。
 
 ## 三、挂起批施工单（解冻后按序执行）
 
@@ -146,7 +146,7 @@ Status: 现在批**已施工并验证**；挂起批为决策完备施工单，�
 - `python -m resualign.tools.modgraph --check` 无新增；`--update` 后
   违规数 < 9。
 - `api_module._` 站点集合为空。
-- `python -m pytest tests/ -q` 全绿；`tests/test_error_contract.py` 形状不变。
+- `python -m pytest tests/ -q` 全绿；`tests/api/test_error_contract.py` 形状不变。
 
 **回滚粒度**：单个 services 文件。任一文件迁不动就停在该提交，不回滚已迁部分。
 
@@ -163,8 +163,8 @@ Status: 现在批**已施工并验证**；挂起批为决策完备施工单，�
   `app/services/alignment_writer.py`。
 - 注意：必须保留 ADR-0042 相关边界（job 表 `request_id` 恢复、watchdog
   条件 UPDATE、tenant gate 语义）。
-- 验收：单函数 < 100 行；`tests/test_alignment_persistence.py`、
-  `tests/test_phase_e.py` 全绿。
+- 验收：单函数 < 100 行；`tests/api/test_alignment_persistence.py`、
+  `tests/api/test_phase_e.py` 全绿。
 - 回滚粒度：一个 commit。
 
 ### 3.3 R7 —— 领域目录分包
@@ -228,8 +228,8 @@ Status: 现在批**已施工并验证**；挂起批为决策完备施工单，�
     为空（嗅探分支消失）。
   - 构造「无 code 的旧式异常」，断言落到兜底文案，**不会**被误判成
     「检查 API Key」—— 这正是 R4 当初要消灭的误归因。
-  - `tests/test_r4_aie_guardrails.py`、`tests/test_llm_timeout.py`、
-    `tests/test_alignment_persistence.py` 全绿。
+  - `tests/api/test_r4_aie_guardrails.py`、`tests/api/test_llm_timeout.py`、
+    `tests/api/test_alignment_persistence.py` 全绿。
 - 排序：排在 §3.1（R1/R2）**之后** —— 同一个 `jobs.py` 会被 R1 大改，
   先删回退只会制造冲突。
 - 回滚粒度：一个 commit。
@@ -248,8 +248,8 @@ Status: 现在批**已施工并验证**；挂起批为决策完备施工单，�
 # 现在批（每次改动都跑）
 python -m resualign.tools.modgraph --check      # 分层棘轮（需 PYTHONPATH=src）
 python -m resualign.tools.modgraph --update     # 仅当违规/引用减少时收紧基线
-python -m pytest tests/test_llm_trace.py tests/test_modgraph_layers.py \
-    tests/test_contract_errors.py -q
+python -m pytest tests/observability/test_llm_trace.py tests/platform/test_modgraph_layers.py \
+    tests/contracts/test_contract_errors.py -q
 python -m pytest tests/ -q                       # 全量后端
 node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs
 python -m pytest tests/e2e -q --e2e              # 独立端口 + 临时数据目录
