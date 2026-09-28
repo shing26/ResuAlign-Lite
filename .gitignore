@@ -31,14 +31,8 @@ uv.lock
 # Local visual scratch previews
 /test.html
 
-# Scratch artifacts: only the legacy phase-16/18 smoke scripts are kept in-tree
-.scratch/*
-!.scratch/phase-16/
-!.scratch/phase-18/
-.scratch/phase-16/*
-!.scratch/phase-16/*.py
-.scratch/phase-18/*
-!.scratch/phase-18/*.py
+# Scratch artifacts: local-only, never committed
+.scratch/
 
 # Generated reports
 resualign-report-*.json
