@@ -26,9 +26,17 @@ CLI 和 Web 共用同一套流水线；所有数据落在本地 SQLite，不依�
   版本历史、导出 Markdown；**网申档案**——LLM 抽取姓名/教育/经历等
   原子字段，供回填扩展使用，可手动编辑，简历变更后自动标记过期。
 - **岗位库**：万能输入（Ctrl+K 粘贴 JD / 链接）、油猴插件一键摄入
-  （local-ingest）、自动分类与薪资提取；解析失败可降级为粘贴 JD 并保留
-  来源；看板五列跟踪投递状态（未投递 → 已投递 → 面试中 → Offer → 放弃），
-  卡片带截止日期提醒与投递结果归因。
+  （local-ingest：任意招聘页面识别到 JD 就弹悬浮窗，也可直接划词）、
+  自动分类与薪资提取；解析失败可降级为粘贴 JD 并保留来源；看板五列跟踪
+  投递状态（未投递 → 已投递 → 面试中 → Offer → 放弃），卡片带截止日期
+  提醒与投递结果归因。
+- **岗位表自动同步**：把 WorkBuddy 每日追加的那张 CSV 路径填进设置页，
+  后台按间隔重读、只补没导入过的行；**去重判定在分类之前完成**，重复行
+  0 次 LLM 调用。同一官网的多个岗位按 URL 查询串/fragment 区分，
+  不会被折叠成一行（ADR-0055 / ADR-0057）。
+- **一键预分析**：看板按钮把库里没分析过的岗位批量跑 JD 画像 + 差距，
+  已分析的自动跳过；导入对话框可勾选「导入后自动预分析」，也可对单岗位
+  点「AI 预分析」。
 - **工作台**：单岗位对齐调优。对照编辑（逐条 Diff）与 A4 纸预览双视图；
   Live Sheet 定稿实时预览；建议卡带 provenance 徽标与置信度，支持
   采纳/跳过/单条润色/手工编辑；保存定稿、刷新恢复、另存为主简历；
@@ -42,8 +50,12 @@ CLI 和 Web 共用同一套流水线；所有数据落在本地 SQLite，不依�
   在任意网申页面逐字段点击填充——对齐的成果直接填进网申表单，
   数据全程本地零上传。
 - **设置**：LLM 多节点管理（主节点 + 备用节点、连通性测试与健康徽标）、
-  按角色超时与成本护栏（每日调用上限，达限返回 429）、分类词表自定义，
-  保存即生效。
+  岗位表自动同步、自动化规则、本地摄入 Token；专家模式还暴露按角色的
+  模型分工。Bento 概览里的超时/并发是**后端真值**
+  （`GET /api/settings/status` 回传），不是 UI 旋钮——要调走环境变量
+  （`RESUALIGN_ROLE_TIMEOUT_<ROLE>`、`RESUALIGN_WORKER_CONCURRENCY`）。
+  成本护栏是**后端执行路径**（每日调用上限，达限返回 429，
+  同任务连续失败 3 次熔断），按 ADR-0056 不设设置页开关。
 - **主题**：默认浅色（Slate + Indigo），支持明暗切换；移动端完整适配
   （底部导航、触控尺寸、抽屉交互）。
 
@@ -159,9 +171,11 @@ RESUALIGN_HOST=127.0.0.1
 RESUALIGN_PORT=8000
 ```
 
-优先级：CLI 参数 > `.env` > 环境变量。支持 `deepseek`、`openrouter`、
-`ollama`。`RESUALIGN_PERSONAL_MODE=0` 时每个 API 请求都需要
-`Authorization: Bearer <token>`。
+优先级：CLI 参数 > `.env` > 环境变量。内置 `deepseek`、`openrouter`、
+`ollama` 的默认端点；其余 OpenAI 兼容服务商（NVIDIA NIM、硅基流动、智谱、
+百炼、火山、Groq 等）在设置页填 **Base URL** 即可——后端按主机识别服务商，
+`POST /api/llm/models` 拉该端点的模型列表供选择，不必手敲模型名（ADR-0051）。
+`RESUALIGN_PERSONAL_MODE=0` 时每个 API 请求都需要 `Authorization: Bearer <token>`。
 
 ## 数据备份与重置
 
@@ -189,6 +203,10 @@ powershell -File scripts\backup.ps1
 - `POST /api/auth/*`、`GET /api/auth/me`：账号与会话。
 - `POST /api/workbench/session/init`：万能输入建会话（粘贴 JD / 链接）。
 - `POST /api/jobs/local-ingest`：油猴插件本地摄入岗位。
+- `GET /api/jobs/job-table`、`POST /api/jobs/job-table/sync`：岗位表同步状态
+  与手动同步（只补库中没见过的行，重复行不烧 LLM）。
+- `POST /api/jobs/preanalyze-pending`（+ `GET .../{batch_id}` 查进度）：
+  批量预分析库里未分析的岗位；`POST /api/jobs/{id}/preanalyze` 单岗位预分析。
 - `GET /api/jobs/{id}`、`POST /api/analyze`：岗位详情与异步分析任务。
 - `POST /api/master-resumes`、`GET /api/master-resumes/{id}`：主简历 CRUD
   与版本；`/profile`：结构化档案（抽取/查看/编辑）。
@@ -202,6 +220,7 @@ powershell -File scripts\backup.ps1
 - `POST /api/quick-eval`：粘贴 JD 纯规则快速评估（零 LLM）。
 - `GET/PUT /api/settings`、`/api/llm/nodes`：设置与 LLM 节点管理
   （含 `test-all` 连通性探测）。
+- `POST /api/llm/models`：按 Base URL 识别服务商并返回模型 id 列表（只读）。
 
 完整契约见 `contracts/openapi-current.json`（或运行时 `/docs`）。
 
@@ -229,11 +248,10 @@ WCAG AA、路由矩阵、硬门禁建议卡渲染契约）与 `css-structure.tes
 （花括号平衡、关键布局选择器 v3 定义存活、简历网格行高约束）；
 `tests/extension/` 覆盖回填扩展的纯函数核心（档案平铺、字段匹配、
 受控组件赋值、空框跳转）。
-当前基线：**1179 个 pytest（7 skipped，89.18% 覆盖率）+ 553 个前端/扩展
-node 测试 + 7 个 E2E**（2026-09-25，`codex/product-dogfood-fixes` 合并
-`main@7b17607` 后实测，含 B9 line-ending guard + B6/B11 benchmark 契约
-测试）；CI JUnit/coverage artifact 是持续事实源，本行是带日期与命令的
-历史快照。
+当前基线：**1179 个 pytest（7 skipped，89.17% 覆盖率）+ 553 个前端/扩展
+node 测试 + 7 个 E2E**（2026-09-29，`main@e37f816` 后实测；pytest 与
+覆盖率取串行全量，node 取 `--test` 汇总行）；CI JUnit/coverage artifact
+是持续事实源，本行是带日期与命令的历史快照。
 
 ## CI
 
@@ -256,8 +274,9 @@ node 测试 + 7 个 E2E**（2026-09-25，`codex/product-dogfood-fixes` 合并
 - 证据台账：[docs/EVIDENCE.md](docs/EVIDENCE.md)（每个数字一行：口径 + 复现命令）
 - 改版记录：[CHANGELOG.md](CHANGELOG.md)
 - 用户手册：[docs/user-guide.md](docs/user-guide.md)
-- 架构决策：[docs/adr/](docs/adr/)（ADR-0026 v3 shell、ADR-0027 投递
-  生命周期单一事实源、ADR-0028 本地摄入与投递快照等）
+- 架构决策：[docs/adr/](docs/adr/)（编号 0001–0058，0029 有意缺号；如
+  ADR-0026 v3 shell、ADR-0027 投递生命周期单一事实源、ADR-0041/0042
+  探针主线与双线判据、ADR-0054 评分实证、ADR-0055 岗位表同步）
 - 领域词汇表：[CONTEXT.md](CONTEXT.md)
 - 部署安全：[docs/deployment-security.md](docs/deployment-security.md)
 - 备份恢复：[docs/backup-restore.md](docs/backup-restore.md) ·
