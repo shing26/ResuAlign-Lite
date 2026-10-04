@@ -293,6 +293,13 @@ class Runner:
                     const s = getComputedStyle(el);
                     if (s.display === 'none' || s.visibility === 'hidden') return;
                     if (el.closest('[hidden]')) return;
+                    /* 未展开的 <details> 内容：Chrome 会给 ::details-content
+                     * 加 content-visibility，子节点却仍报告陈旧的布局盒
+                     * （实测导出菜单关闭时 142x28、right=463，展开后
+                     * right=351 完全可达）。不排除就会把收起的菜单报成
+                     * 横向溢出。summary 本身要留着。 */
+                    const closedDetails = el.closest('details:not([open])');
+                    if (closedDetails && !el.closest('summary')) return;
                     if (insideScrollable(el)) return;
                     const r = el.getBoundingClientRect();
                     if (r.width > 0 && (r.right > vw + 2 || r.left < -2)) {
