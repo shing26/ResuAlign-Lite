@@ -130,11 +130,17 @@ function snapshotImportForm(form) {
   return { open: !form.hidden, values };
 }
 
-function restoreImportForm(snapshot, statusSelector, statusText, errors) {
+function restoreImportForm(snapshot, statusSelector, statusText, errors, collapse) {
   if (!snapshot) return;
   const form = document.querySelector('[data-form="job-import"]');
   if (!form) return;
-  if (snapshot.open) form.hidden = false;
+  /* collapse = 任务已完成、产物在别处。粘贴 CSV 的产物就是看板上的岗位，
+   * 继续把一个填满视口的大表单留在屏幕上，等于让用户导入完盯着自己刚贴的
+   * 那段 CSV，看板被顶到折叠线以下。此时状态文案也不再写回表单 —— 它已经
+   * hidden，而 toast 里有同一句摘要，两处都留着会让「完成：新建 N」在 DOM
+   * 里匹配到隐藏节点。岗位表同步不传 collapse：它的产物就是表单里的未入库
+   * 明细，收起等于把结果藏起来。 */
+  form.hidden = collapse ? true : !snapshot.open;
   Object.entries(snapshot.values).forEach(([name, value]) => {
     const node = form.querySelector(`[name="${name}"]`);
     if (!node) return;
@@ -142,7 +148,7 @@ function restoreImportForm(snapshot, statusSelector, statusText, errors) {
     else node.value = value;
   });
   const status = form.querySelector(statusSelector);
-  if (status && statusText) status.textContent = statusText;
+  if (status && statusText) status.textContent = collapse ? "" : statusText;
   const detail = form.querySelector(
     statusSelector === "[data-import-status]"
       ? "[data-import-detail]"
@@ -3751,6 +3757,7 @@ async function submitImport(data, form) {
           "[data-import-status]",
           `完成：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}`,
           status.errors,
+          true,
         );
       }
     } catch (error) {

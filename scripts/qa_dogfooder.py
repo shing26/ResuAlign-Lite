@@ -1547,7 +1547,6 @@ class Runner:
             page.wait_for_selector(
                 '[data-form="job-import"]:not([hidden])', timeout=10000
             )
-            form = page.locator('[data-form="job-import"]')
 
             # Empty path: the button must complain instead of doing nothing.
             page.fill('[name="job_table_path"]', "")
