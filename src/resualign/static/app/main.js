@@ -107,6 +107,50 @@ import {
 } from "./format.js";
 import { icon } from "./icons.js";
 import {
+  classifySkipMessages,
+  renderSkipDetail,
+} from "./skip-detail.js";
+
+/* render() wipes #app-router-view and then rebuilds it across an await, so the
+ * import form (and the job-table section inside it) is a *new* node by the time
+ * it settles. Any status line, result detail, or half-filled path written
+ * before that point is silently discarded — which is why the "同步完成：新建 N"
+ * line never actually stayed on screen, and why the CSV path the user just
+ * typed vanished the moment a sync finished. Snapshot the form, await the
+ * render, then put it all back. */
+function snapshotImportForm(form) {
+  if (!form) return null;
+  const values = {};
+  form.querySelectorAll("input[name], textarea[name], select[name]")
+    .forEach((node) => {
+      if (node.type === "file") return;
+      if (node.type === "checkbox") values[node.name] = !!node.checked;
+      else values[node.name] = node.value;
+    });
+  return { open: !form.hidden, values };
+}
+
+function restoreImportForm(snapshot, statusSelector, statusText, errors) {
+  if (!snapshot) return;
+  const form = document.querySelector('[data-form="job-import"]');
+  if (!form) return;
+  if (snapshot.open) form.hidden = false;
+  Object.entries(snapshot.values).forEach(([name, value]) => {
+    const node = form.querySelector(`[name="${name}"]`);
+    if (!node) return;
+    if (node.type === "checkbox") node.checked = value;
+    else node.value = value;
+  });
+  const status = form.querySelector(statusSelector);
+  if (status && statusText) status.textContent = statusText;
+  const detail = form.querySelector(
+    statusSelector === "[data-import-status]"
+      ? "[data-import-detail]"
+      : "[data-job-table-detail]",
+  );
+  renderSkipDetail(detail, errors);
+}
+import {
   buildAutomationRulePayload,
   buildLlmNodePayload,
   evalDefaultFromForm,
@@ -417,6 +461,7 @@ const JOB_IMPORT_FORM_HTML = `
       <div class="row"><button class="btn btn-primary" type="submit">开始导入</button>
         <button class="btn btn-ghost" type="button" data-action="cancel-import">取消</button>
         <span class="small muted" data-import-status></span></div>
+      <div data-import-detail></div>
       <h3>岗位表自动同步</h3>
       <div class="field wide"><label>岗位表 CSV 路径（WorkBuddy 每日追加的那张表）</label>
         <input type="text" name="job_table_path" placeholder="C:\\Users\\...\\job-radar\\岗位总表.csv"></div>
@@ -439,6 +484,7 @@ const JOB_IMPORT_FORM_HTML = `
         </select></div>
       <div class="row"><button class="btn btn-secondary" type="button" data-action="sync-job-table">同步岗位表</button>
         <span class="small muted" data-job-table-status></span></div>
+      <div data-job-table-detail></div>
     </form>`;
 
 async function openJobDetail(job) {
@@ -1375,6 +1421,10 @@ const actions = {
         button.disabled = false;
         const detail = (start.errors && start.errors[0]) || "没有可导入的行";
         if (statusNode) statusNode.textContent = detail;
+        renderSkipDetail(
+          document.querySelector("[data-job-table-detail]"),
+          start.errors,
+        );
         toast(detail, "info");
         return;
       }
@@ -1385,21 +1435,38 @@ const actions = {
           if (statusNode) {
             statusNode.textContent = `同步中：新建 ${status.created}，跳过 ${status.skipped}`;
           }
+          if (status.errors && status.errors.length) {
+            renderSkipDetail(
+              document.querySelector("[data-job-table-detail]"),
+              status.errors,
+            );
+          }
           if (!status.queued) {
             window.clearInterval(timer);
             button.disabled = false;
-            if (statusNode) {
-              statusNode.textContent = `同步完成：新建 ${status.created}，跳过 ${status.skipped}`;
-            }
+            const skippedDetail = classifySkipMessages(status.errors);
             toast(
-              `岗位表同步完成：新建 ${status.created}，跳过 ${status.skipped}`,
+              `岗位表同步完成：新建 ${status.created}，跳过 ${status.skipped}` +
+                (skippedDetail.notable.length
+                  ? `，${skippedDetail.notable.length} 条未入库（见下方明细）`
+                  : ""),
               status.created ? "success" : "info",
             );
-            render();
+            const snapshot = snapshotImportForm(form);
+            await render();
+            restoreImportForm(
+              snapshot,
+              "[data-job-table-status]",
+              `同步完成：新建 ${status.created}，跳过 ${status.skipped}`,
+              status.errors,
+            );
           }
         } catch (error) {
           window.clearInterval(timer);
           button.disabled = false;
+          // 进度节点可能已随 render() 脱离文档，写进去用户看不见；
+          // 不落日志的话这类失败会彻底静默。
+          console.error("岗位表同步进度回调失败:", error);
           if (statusNode) statusNode.textContent = `同步失败：${error.message}`;
         }
       }, 800);
@@ -3657,11 +3724,30 @@ async function submitImport(data, form) {
       const analyzed = status.analyzed || 0;
       const analyzeSuffix = preanalyze ? `，预分析 ${analyzed}` : "";
       statusNode.textContent = `处理中：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}`;
+      if (status.errors && status.errors.length) {
+        renderSkipDetail(
+          document.querySelector("[data-import-detail]"),
+          status.errors,
+        );
+      }
       if (!status.queued) {
         window.clearInterval(timer);
-        statusNode.textContent = `完成：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}`;
-        toast(`导入完成：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}`, status.created ? "success" : "error");
-        render();
+        const skippedDetail = classifySkipMessages(status.errors);
+        toast(
+          `导入完成：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}` +
+            (skippedDetail.notable.length
+              ? `，${skippedDetail.notable.length} 条未入库（见下方明细）`
+              : ""),
+          status.created ? "success" : "error",
+        );
+        const snapshot = snapshotImportForm(form);
+        await render();
+        restoreImportForm(
+          snapshot,
+          "[data-import-status]",
+          `完成：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}`,
+          status.errors,
+        );
       }
     } catch (error) {
       window.clearInterval(timer);

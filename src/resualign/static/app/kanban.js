@@ -165,13 +165,22 @@ export async function renderKanban(app) {
     });
   }
   bindBoardDrag(app);
-  canvasRenderHooks.forEach((hook) => {
-    try {
-      hook(app);
-    } catch {
-      /* a failing hook must not break the board render */
-    }
-  });
+  /* Hooks are async (the job-table form mount awaits /api/master-resumes
+   * before appending), so firing them without awaiting made renderKanban
+   * resolve *before* the import/create forms existed in the DOM — and a
+   * synchronous try/catch could never see their rejections. Await them so a
+   * caller that does `await render()` can rely on the finished view, and log
+   * failures instead of dropping them on the floor. */
+  await Promise.all(
+    canvasRenderHooks.map((hook) =>
+      Promise.resolve()
+        .then(() => hook(app))
+        .catch((error) => {
+          /* a failing hook must not break the board render */
+          console.error("canvas render hook failed:", error);
+        }),
+    ),
+  );
 }
 
 function prefersCoarsePointer() {
