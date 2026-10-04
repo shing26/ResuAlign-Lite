@@ -379,7 +379,6 @@ class Runner:
                 ("jobs", "#/jobs"),
                 ("resume", "#/resume"),
                 ("settings", "#/settings"),
-                ("today", "#/today"),
                 ("workspace-empty", "#/workspace"),
                 ("unknown-route", "#/does-not-exist"),
             ]
@@ -1018,13 +1017,17 @@ class Runner:
             context.close()
 
     def check_today_view(self, browser) -> None:
-        """MVP-08: #/today renders reminders (or a clean empty state)."""
+        """#152: #/today redirects to the dashboard and corrects the URL."""
         context = browser.new_context(
             viewport={"width": 1440, "height": 900}
         )
         page = self.new_page(context)
         try:
-            self.goto(page, "#/today")
+            # 不能用 self.goto：它在等 hash 变成 #/today，而修好之后
+            # （#152）这个 hash 会被 replaceState 改写成 #/dashboard。
+            self.goto(page, "#/today", wait=False)
+            page.wait_for_timeout(1500)
+            self.wait_view(page)
             text = page.locator("#app-router-view").inner_text()
             self.check_console(page, "today-view")
             # v3 移除了今日待办。修好之后（#152）#/today 应当显式重定向到
@@ -1839,7 +1842,6 @@ class Runner:
                 ("jobs", "#/jobs"),
                 ("resume", "#/resume"),
                 ("settings", "#/settings"),
-                ("today", "#/today"),
                 ("workspace", "#/workspace"),
             ]:
                 try:

@@ -492,6 +492,7 @@ def test_preanalyze_batch_can_be_canceled_midway():
     of every iteration, so at most one extra job runs past the click.
     """
     import threading
+
     import resualign.api as api_module
 
     with patch("resualign.api._classify_job", return_value={}):
