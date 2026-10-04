@@ -11798,7 +11798,6 @@ select,
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-}
 
 /* ------------------------------------------------------------------ */
 /* #153: 移动端主导航一屏放下                                        */
@@ -11810,14 +11809,17 @@ select,
  *
  * 收成纯文字标签而不是加滚动提示：标签本身无歧义（驾驶舱/投递复盘/
  * 工作台/岗位库/简历中心/系统设置），一屏放得下，导航从「需要发现」
- * 变回「一眼扫完」。放在文件末尾是因为 6000/6308 行有同特异度的
- * 图标尺寸定义，靠前会被它们盖掉。 */
+ * 变回「一眼扫完」。
+ *
+ * 与被覆写的 .tabs--rail button（5903–6364 那个 components 块）同层、
+ * 位置更靠后，所以靠层序取胜而不是靠特异度硬碰 —— ADR-0043 决定 4
+ * 要求响应式覆写与被覆写规则同层，不能靠「写在更后面」硬赢。 */
 @media (max-width: 640px) {
-  .tabs--rail button .rail-icon {
+  .app-rail .tabs--rail button.nav-btn .rail-icon {
     display: none;
   }
 
-  .tabs--rail button {
+  .app-rail .tabs--rail button.nav-btn {
     gap: 0;
     padding: var(--space-2) var(--space-1);
     /* 6280 行的 min-height:36px 盖掉了 3253 行想给的 44px（同特异度、
@@ -11831,7 +11833,8 @@ select,
  * 下限，再缩字号得不偿失，所以只把横向内边距收到 0 —— 触摸目标高度
  * 仍是 44px。 */
 @media (max-width: 360px) {
-  .tabs--rail button {
+  .app-rail .tabs--rail button.nav-btn {
     padding: var(--space-2) 0;
   }
+}
 }
