@@ -1065,6 +1065,10 @@ async function exportFinalDraft(format, options = {}) {
   toast(`已导出 ${body.filename || "定稿"}`, "success");
 }
 
+/* 进行中的批量预分析批次（#150）。非 null 时「一键预分析」按钮变成
+ * 停止入口 —— 120 个岗位按实测 ~3.5s/岗位要跑 7 分钟，不能只有干等。 */
+let activePreanalyze = null;
+
 const actions = {
   reload: () => render(),
   /* v2.0: 新建主简历走模态框（主视图无内联 textarea）。 */
@@ -1487,6 +1491,28 @@ const actions = {
     }
   },
   "preanalyze-pending": async (button) => {
+    /* 正在跑的时候，同一个按钮就是「停止」。走模块级状态而不是给按钮
+     * 单独挂监听器：data-action 是 document 上冒泡分发的，按钮自己的
+     * 监听器会先触发、再冒泡到 document 又排一个新批次。 */
+    if (activePreanalyze) {
+      if (activePreanalyze.canceling) return;
+      activePreanalyze.canceling = true;
+      button.disabled = true;
+      button.textContent = "正在停止…";
+      try {
+        await api(
+          `/api/jobs/preanalyze-pending/${activePreanalyze.batchId}/cancel`,
+          { method: "POST" },
+        );
+      } catch (error) {
+        /* 停止失败不该中断轮询：批次仍会自己跑完，最终态照常汇报 */
+        activePreanalyze.canceling = false;
+        button.disabled = false;
+        button.textContent = activePreanalyze.label;
+        toast(error.message, "error");
+      }
+      return;
+    }
     const label = button.textContent;
     button.disabled = true;
     try {
@@ -1496,19 +1522,39 @@ const actions = {
         toast("没有待预分析的岗位", "success");
         return;
       }
+      /* 预分析是每岗位两次串行 LLM 调用（实测 ~3.5s/岗位），120 个岗位
+       * 约 7 分钟。按钮置灰等于让用户干等，所以改成进度按钮 + 「停止」：
+       * 已分析的结果保留，剩下的不再排队。 */
+      activePreanalyze = { batchId: start.batch_id, canceling: false, label };
+      button.disabled = false;
+      button.classList.add("btn-danger");
       button.textContent = `预分析中 0/${start.total}`;
+      button.title = "点击中止本次预分析";
+      const finish = () => {
+        activePreanalyze = null;
+        button.classList.remove("btn-danger");
+        button.title = "";
+        button.textContent = label;
+        button.disabled = false;
+      };
       const timer = window.setInterval(async () => {
         try {
           const status = await api(
             `/api/jobs/preanalyze-pending/${start.batch_id}`,
           );
-          button.textContent = `预分析中 ${status.analyzed}/${status.total}`;
+          if (activePreanalyze && !activePreanalyze.canceling) {
+            button.textContent = `预分析中 ${status.analyzed}/${status.total}`;
+          }
           if (!status.queued) {
             window.clearInterval(timer);
-            button.textContent = label;
-            button.disabled = false;
+            finish();
             const failed = (status.errors || []).length;
-            if (status.stopped && failed) {
+            if (status.canceled) {
+              toast(
+                `已停止：已分析 ${status.analyzed}，剩余 ${status.total - status.analyzed - status.skipped} 个未处理`,
+                "info",
+              );
+            } else if (status.stopped && failed) {
               /* 定义性阻断（欠费/鉴权）会让整批在首行停下：把后端给的
                * 可执行原因直接透出，而不是只报「失败 1」。 */
               toast(status.errors[0], "error");
@@ -1523,8 +1569,7 @@ const actions = {
           }
         } catch (error) {
           window.clearInterval(timer);
-          button.textContent = label;
-          button.disabled = false;
+          finish();
           toast(error.message, "error");
         }
       }, 1500);

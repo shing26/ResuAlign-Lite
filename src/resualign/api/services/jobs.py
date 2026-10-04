@@ -1055,6 +1055,11 @@ def _run_preanalyze_batch(batch_id: str) -> None:
     _llm_tenant_token = set_llm_tenant(batch['user_id'])
     try:
         for job_id in batch['job_ids']:
+            # 用户中止：已分析的结果保留，剩下的不再排队。检查放在每个岗位
+            # 的开头，所以取消最多多跑一个岗位的两次 LLM 调用。
+            if batch['stop'].is_set():
+                batch['canceled'] = True
+                break
             job = context._jobs.get_job(batch['user_id'], job_id)
             if job is None or not job_needs_preanalyze(job):
                 batch['skipped'] += 1
