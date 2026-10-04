@@ -616,10 +616,34 @@ class Runner:
                 wait_until="domcontentloaded",
             )
             self.wait_view(page)
+            # split-align 挂在 optimizer 画布里，画布本身是异步就位的。
+            # wait_view 只看「有文本且没有骨架屏」，会在画布挂上之前就返回，
+            # 接着的 resume_select 等待必然超时 —— 那是时序，不是缺陷。
+            # 与 tests/e2e/test_workbench_flow.py 用同一个选择器。
+            try:
+                page.wait_for_selector(
+                    "[data-surface-mode='optimizer']", timeout=15000
+                )
+            except PlaywrightTimeoutError:
+                record(
+                    "P2",
+                    "功能缺陷",
+                    "工作台未进入对齐画布",
+                    "[data-surface-mode='optimizer'] 15s 内未出现",
+                    "岗位工作台应渲染对齐画布",
+                    ["打开岗位工作台"],
+                    clue="renderOptimizerCanvas 渲染条件",
+                )
+                return
             resume_select = page.locator(
                 "[data-form='split-align'] [name='master_resume_id']"
             )
             try:
+                # v3 工作台把对齐表单收在「对齐设置」标签页后面，默认停在
+                # 对照编辑。表单一直在 DOM 里，只是 hidden —— 直接等可见性
+                # 会误报成「缺少主简历选择器」。
+                if not resume_select.is_visible():
+                    page.locator("[data-wb-tab-v3='controls']").first.click()
                 resume_select.wait_for(timeout=15000)
                 resumes = api_call(self.base_url, "GET", "/api/master-resumes")
                 if not resumes:
@@ -637,15 +661,17 @@ class Runner:
                     "[data-form='split-align'] [name='master_resume_id']",
                     resumes[0]["resume_id"],
                 )
-            except PlaywrightTimeoutError:
+            except PlaywrightTimeoutError as exc:
+                seen = page.evaluate("() => [...document.querySelectorAll('[data-form]')].map(f => f.dataset.form).join(',')")
                 record(
                     "P2",
                     "功能缺陷",
                     "工作台缺少主简历选择器",
-                    "工作台未渲染 split-align 表单",
+                    "工作台未渲染 split-align 表单，见 findings.json evidence",
                     "应能选择主简历并发起对齐",
                     ["打开岗位工作台"],
                     clue="检查 split-canvas 渲染条件",
+                    evidence=f"forms=[{seen}] exc={str(exc)[:300]}",
                 )
                 return
 
@@ -1005,11 +1031,12 @@ class Runner:
                 record(
                     "P2",
                     "功能缺陷",
-                    "今日待办视图未渲染",
-                    f"view text={text[:80]!r}",
-                    "#/today 应显示今日待办视图",
+                    "#/today 是死路由：落到驾驶舱，URL 与页面不一致",
+                    f"hash 已是 #/today，视图文本却是 {text[:60]!r}",
+                    "要么实现今日待办，要么把 today 从 ROUTE_NAMES 摘掉并显式"
+                    "重定向，别让 URL 停在一个不存在的页面上",
                     ["访问 #/today"],
-                    clue="main.js today 路由 / todayViewHtml",
+                    clue="main.js handleRoute 无 case 'today'，走 default 渲染驾驶舱",
                 )
         finally:
             context.close()
@@ -1258,6 +1285,22 @@ class Runner:
                     continue
                 box = button.bounding_box()
                 hit = None
+                offscreen = False
+                if box:
+                    # .tabs--rail 是 overflow-x:auto 的横向滚动容器，6 个 tab
+                    # 在 390px 下放不下，后两个初始停在视口外。elementFromPoint
+                    # 对视口外坐标返回 null，直接拿它判「不可点击」会把一个
+                    # 滚得到、点得动的导航误报成 P1。先滚进视口再判定。
+                    nav_scrolls = page.evaluate(
+                        "() => { const n = document.querySelector('.tabs--rail');"
+                        " return !!n && n.scrollWidth > n.clientWidth; }"
+                    )
+                    center_x = box["x"] + box["width"] / 2
+                    if nav_scrolls and center_x > page.viewport_size["width"]:
+                        offscreen = True
+                        button.scroll_into_view_if_needed()
+                        page.wait_for_timeout(300)
+                        box = button.bounding_box()
                 if box:
                     hit = page.evaluate(
                         """(pt) => {
@@ -1274,6 +1317,16 @@ class Runner:
                             "x": box["x"] + box["width"] / 2,
                             "y": box["y"] + box["height"] / 2,
                         },
+                    )
+                if offscreen:
+                    record(
+                        "P3",
+                        "视觉适配",
+                        f"移动端导航 {route} 初始在首屏外且无滚动提示",
+                        f"390px 下 .tabs--rail 需横向滚动，{route} 初始不可见",
+                        "要么给出可滚动/折叠的视觉提示，要么压进一屏",
+                        ["390x844 访问 #/dashboard"],
+                        clue=".tabs--rail overflow-x:auto，无渐隐或箭头提示",
                     )
                 if not box or not hit or hit["route"] != route:
                     record(
@@ -1697,8 +1750,17 @@ class Runner:
             page.wait_for_selector(
                 '[data-form="job-import"]:not([hidden])', timeout=10000
             )
-            page.fill('[name="job_table_path"]', str(table))
-            page.fill('[name="job_table_jd_dir"]', str(jd_dir))
+            # 必须用一张**没被同步过**的新表：上面已经用同一张表同步了两轮
+            # （幂等检查），所有行都成了已知重复，第三轮 errors 为空，
+            # 明细自然是空的 —— 那是检查自己的顺序依赖，不是产品不渲染。
+            ui_table, ui_jd_dir = self._write_job_table(
+                [
+                    ("商汤科技", "UI 检查岗位 - 后端", "上海", portal, "ui-be.md"),
+                    ("商汤科技", "UI 检查缺正文岗位", "上海", portal, None),
+                ]
+            )
+            page.fill('[name="job_table_path"]', str(ui_table))
+            page.fill('[name="job_table_jd_dir"]', str(ui_jd_dir))
             page.click('[data-action="sync-job-table"]')
             page.wait_for_function(
                 "() => { const s = document.querySelector('[data-job-table-status]');"
@@ -1707,7 +1769,10 @@ class Runner:
             )
             detail = page.locator("[data-job-table-detail]")
             text = detail.inner_text() if detail.count() else ""
-            if "缺正文的岗位" not in text:
+            # 断言后端契约短语（job_table.queue_job_rows 的
+            # "<岗位名>: 缺少 JD 正文（…）"），而不是 fixture 里的岗位标题
+            # —— 后者一改标题这条检查就假失败。
+            if "缺少 JD 正文" not in text:
                 record(
                     "P1",
                     "交互反馈",
