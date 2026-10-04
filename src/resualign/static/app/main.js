@@ -1377,6 +1377,10 @@ const actions = {
   },
   "show-import": async () => {
     const form = $('[data-form="job-import"]');
+    if (!form) {
+      toast("导入表单尚未就绪，请稍后重试", "error");
+      return;
+    }
     form.hidden = false;
     $('[data-form="job-create"]').hidden = true;
     await fillJobTableForm(form);
@@ -3815,6 +3819,18 @@ setCanvasRenderHook(async (app) => {
 /* ------------------------------------------------------------------ */
 
 setCanvasRenderHook(async (app) => {
+  /* 新建/导入表单不依赖任何请求，必须同步挂载。放在
+   * `await api("/api/master-resumes")` 之后会让「批量导入」点击早于表单
+   * 存在：$('[data-form="job-import"]') 拿到 null，show-import 抛错，
+   * 表单随后以 hidden 挂载 —— 用户看到的是按钮点了没反应（#149 走查）。 */
+  const formsMount = app.querySelector("[data-jobs-forms-mount]");
+  if (formsMount && !formsMount.querySelector('[data-form="job-create"]')) {
+    const createForm = document.createElement("div");
+    createForm.innerHTML = JOB_CREATE_FORM_HTML.trim();
+    const importForm = document.createElement("div");
+    importForm.innerHTML = JOB_IMPORT_FORM_HTML.trim();
+    formsMount.append(createForm.firstChild, importForm.firstChild);
+  }
   const mount = app.querySelector("[data-jobs-batch-mount]");
   if (!mount || app.querySelector("[data-batch-wrap]")) return;
   let resumes = state.batchResumes;
@@ -3843,15 +3859,6 @@ setCanvasRenderHook(async (app) => {
   wrap.setAttribute("data-batch-wrap", "");
   wrap.innerHTML = batchPanelHtml(state.jobs || [], resumes || []);
   mount.append(fab, wrap);
-
-  const formsMount = app.querySelector("[data-jobs-forms-mount]");
-  if (formsMount && !formsMount.querySelector('[data-form="job-create"]')) {
-    const createForm = document.createElement("div");
-    createForm.innerHTML = JOB_CREATE_FORM_HTML.trim();
-    const importForm = document.createElement("div");
-    importForm.innerHTML = JOB_IMPORT_FORM_HTML.trim();
-    formsMount.append(createForm.firstChild, importForm.firstChild);
-  }
 });
 
 async function boot() {
