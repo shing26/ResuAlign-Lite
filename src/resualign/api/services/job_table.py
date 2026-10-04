@@ -18,8 +18,10 @@ import hashlib
 import io
 import logging
 import os
+import re
 import threading
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 from typing import Any
@@ -56,6 +58,39 @@ class JobTableError(Exception):
     """The job table is not configured, not readable, or rejected by policy."""
 
 
+# WorkBuddy's 投递入口 column is free prose written by a human, not a machine
+# field: it routinely trails a "（官方 Moka，已由第三方聚合页更正）" note, glues a
+# second aggregator link onto the first one, or is a bare domain with a
+# "；公众号「…」" suffix. Reading the whole cell as one URL stored 36 of 126
+# real rows as an unopenable string and swallowed the second link, so the
+# candidate scan below stops at CJK / full-width punctuation and keeps the
+# first genuinely usable URL. See #147.
+_CJK_RE = re.compile(
+    "[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]"
+)
+_URL_CANDIDATE_RE = re.compile(
+    r"https?://[^\s\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]+"
+)
+_TRAILING_PUNCTUATION = ".,;:!?)）】」、"
+
+
+def _truncate_at_cjk(value: str) -> str:
+    """Cut a candidate at the first CJK/full-width character."""
+    match = _CJK_RE.search(value)
+    return value[: match.start()] if match else value
+
+
+def _is_usable_url(candidate: str) -> bool:
+    """True when a candidate has a real dotted host and no leftover prose."""
+    if not candidate or _CJK_RE.search(candidate):
+        return False
+    try:
+        parts = urllib.parse.urlsplit(candidate)
+    except ValueError:
+        return False
+    return bool(parts.scheme and parts.netloc and "." in parts.netloc)
+
+
 def _header_lookup(fieldnames: list[str]) -> dict[str, str]:
     """Map canonical fields to the CSV's actual header names."""
     normalized = {
@@ -79,14 +114,33 @@ def _parse_salary(text: str | None) -> tuple[int | None, int | None]:
 
 
 def _normalize_url(raw: str | None) -> str:
-    """Return a usable http(s) URL, or '' when the cell is not one."""
-    value = (raw or "").strip()
+    """Return a usable http(s) URL from a free-prose cell, or ''.
+
+    The cell may carry a trailing note, a second aggregator link, or a bare
+    domain plus a WeChat-official-account hint. Take the first candidate that
+    parses as a real URL instead of trusting the whole string, so
+    ``source_type='url'`` only ever holds something a browser can open.
+    """
+    value = (raw or "").strip().strip('"').strip("'").strip()
     if not value:
         return ""
-    if value.startswith(("http://", "https://")):
-        return value
-    if "." in value and " " not in value:
-        return "https://" + value
+    for match in _URL_CANDIDATE_RE.finditer(value):
+        candidate = _truncate_at_cjk(match.group(0)).rstrip(_TRAILING_PUNCTUATION)
+        if _is_usable_url(candidate):
+            return candidate
+    # No scheme anywhere: the cell may still be a bare domain such as
+    # "campus.sf-express.com；公众号「…」". Truncate at the prose, then require
+    # a dot so a plain Chinese phrase never becomes a hostname.
+    head = _truncate_at_cjk(value).strip().rstrip(_TRAILING_PUNCTUATION)
+    if (
+        head
+        and "." in head
+        and not any(char.isspace() for char in head)
+        and not head.startswith((".", "-"))
+    ):
+        candidate = "https://" + head
+        if _is_usable_url(candidate):
+            return candidate
     return ""
 
 
@@ -247,17 +301,68 @@ def normalize_job_table_row(
     return payload
 
 
+def _demote_shared_portal_urls(
+    rows: list[dict[str, Any]],
+) -> int:
+    """Re-key rows whose application URL is a shared employer landing page.
+
+    WorkBuddy's ``投递入口`` cell frequently records the employer's careers
+    *landing* page (``join.qq.com``, ``app.mokahr.com/campus-recruitment/…``)
+    instead of a per-posting URL, so several genuinely distinct postings
+    normalize to one URL. Keying those rows on the URL made the import worker
+    reject every posting after the first as ``Duplicate job already exists`` —
+    6 of 126 real rows, silently, with no way for the user to recover them.
+
+    A URL shared by rows carrying *different* company/title/location identities
+    cannot identify a single posting, so those rows fall back to the ADR-0055
+    identity key. ``source_url`` is deliberately preserved so the row still
+    links out to the employer page. Rows that share a URL *and* an identity
+    are genuine duplicates and keep URL dedupe.
+
+    Returns how many rows were re-keyed.
+    """
+    by_url: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        url = row.get("jd_url")
+        if url and row.get("source_type") == "url":
+            by_url.setdefault(url, []).append(row)
+    demoted = 0
+    for group in by_url.values():
+        identities = {
+            _job_identity_key(
+                row.get("company"), row.get("title"), row.get("location")
+            )
+            for row in group
+        }
+        if len(group) < 2 or len(identities) < 2:
+            continue
+        for row in group:
+            row["dedupe_key"] = _job_table_dedupe_key(
+                company=row.get("company") or "",
+                title=row.get("title") or "",
+                location=row.get("location") or "",
+            )
+            # The JD body came from the CSV, not from crawling this URL, so the
+            # row is a paste-source row that merely carries a link.
+            row["source_type"] = "paste"
+            demoted += 1
+    return demoted
+
+
 def read_job_table_rows(
     table_path: Path,
     *,
     jd_dir: Path | None = None,
     stats: dict[str, int] | None = None,
+    missing_titles: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Read the job table and return import payloads for usable rows.
 
     ``stats`` (when given) is filled with the raw row counts so callers can
     tell the user why a 100-row table produced fewer imports: WorkBuddy adds a
     row before the JD markdown exists, and those rows carry no JD body yet.
+    ``missing_titles`` (when given) collects those rows' titles so the sync
+    result can name them instead of only counting them (#151).
     """
     try:
         text = table_path.read_text(encoding="utf-8-sig", errors="replace")
@@ -282,6 +387,12 @@ def read_job_table_rows(
         )
         if payload is not None:
             rows.append(payload)
+        elif missing_titles is not None:
+            label = _text(raw.get(lookup["title"])) if "title" in lookup else ""
+            if not label and "jd_file" in lookup:
+                label = Path(_text(raw.get(lookup["jd_file"]))).name
+            missing_titles.append(label or f"第 {total} 行")
+    _demote_shared_portal_urls(rows)
     if stats is not None:
         stats["total_rows"] = total
         stats["importable_rows"] = len(rows)
@@ -293,6 +404,7 @@ def read_job_table(
     config: dict[str, Any],
     *,
     stats: dict[str, int] | None = None,
+    missing_titles: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Resolve the configured paths and return the importable rows."""
     table_path = resolve_job_table_path(config.get("path"))
@@ -303,7 +415,12 @@ def read_job_table(
         if not candidate.is_absolute():
             candidate = table_path.parent / candidate
         jd_dir = candidate
-    return read_job_table_rows(table_path, jd_dir=jd_dir, stats=stats)
+    return read_job_table_rows(
+        table_path,
+        jd_dir=jd_dir,
+        stats=stats,
+        missing_titles=missing_titles,
+    )
 
 
 def job_table_config(user: dict[str, Any]) -> dict[str, Any]:
@@ -317,15 +434,22 @@ def queue_job_rows(
     rows: list[dict[str, Any]],
     *,
     preanalyze: bool,
+    missing_jd_titles: list[str] | None = None,
 ) -> dict[str, Any]:
     """Hand rows to the shared import worker, mirroring POST /api/jobs/import."""
     import_id = uuid.uuid4().hex
+    # Rows WorkBuddy has logged but not yet written a JD body for are reported
+    # as skipped detail rather than silently folded into one counter (#151).
+    seeded_errors = [
+        f"{title}: 缺少 JD 正文（WorkBuddy 补齐后会自动导入）"
+        for title in (missing_jd_titles or [])
+    ]
     context._import_batches[import_id] = {
         "user_id": user["user_id"],
         "rows": rows,
         "created": 0,
         "skipped": 0,
-        "errors": [],
+        "errors": seeded_errors,
         "done": False,
         "preanalyze": bool(preanalyze),
         "analyzed": 0,
@@ -341,7 +465,7 @@ def queue_job_rows(
         "total": len(rows),
         "created": 0,
         "skipped": 0,
-        "errors": [],
+        "errors": seeded_errors,
     }
 
 
@@ -384,8 +508,11 @@ def sync_job_table(user: dict[str, Any]) -> dict[str, Any]:
     """
     config = job_table_config(user)
     stats: dict[str, int] = {}
+    missing_titles: list[str] = []
     try:
-        rows = read_job_table(config, stats=stats)
+        rows = read_job_table(
+            config, stats=stats, missing_titles=missing_titles
+        )
     except JobTableError as exc:
         _record_sync_result(user["user_id"], status="error", detail=str(exc))
         raise
@@ -398,15 +525,22 @@ def sync_job_table(user: dict[str, Any]) -> dict[str, Any]:
             if already_present
             else f"岗位表没有可导入的行{suffix}"
         )
+        detail_errors = [detail] + [
+            f"{title}: 缺少 JD 正文（WorkBuddy 补齐后会自动导入）"
+            for title in missing_titles
+        ]
         _record_sync_result(user["user_id"], status="empty", detail=detail)
         return {"queued": False, "total": 0, "created": 0, "skipped": 0,
-                "already_present": already_present, "errors": [detail]}
+                "already_present": already_present, "errors": detail_errors}
     if len(rows) > context._MAX_IMPORT_ROWS:
         detail = f"岗位表超过 {context._MAX_IMPORT_ROWS} 行上限"
         _record_sync_result(user["user_id"], status="error", detail=detail)
         raise JobTableError(detail)
     queued = queue_job_rows(
-        user, rows, preanalyze=bool(config.get("preanalyze"))
+        user,
+        rows,
+        preanalyze=bool(config.get("preanalyze")),
+        missing_jd_titles=missing_titles,
     )
     queued["already_present"] = already_present
     _record_sync_result(

@@ -13,6 +13,7 @@ from resualign.api.services import job_table as job_table_service
 from resualign.api.services.job_table import (
     JobTableError,
     _job_table_dedupe_key,
+    _normalize_url,
     _sync_due,
     read_job_table_rows,
 )
@@ -373,3 +374,220 @@ def test_sync_once_only_runs_due_tenants(tmp_path):
         job_table_service, "sync_job_table", side_effect=AssertionError
     ):
         assert job_table_service.sync_once() == 0
+
+
+# --- #147: 投递入口 is free prose, not a URL field --------------------------
+
+
+@pytest.mark.parametrize(
+    "cell, expected",
+    [
+        # A trailing editorial note must not become part of the stored URL.
+        (
+            "https://app.mokahr.com/su/aiaJb （官方 Moka，已由第三方聚合页更正）",
+            "https://app.mokahr.com/su/aiaJb",
+        ),
+        # A bare domain glued to a WeChat hint keeps just the domain.
+        (
+            "campus.sf-express.com；公众号「顺丰校园招聘」",
+            "https://campus.sf-express.com",
+        ),
+        # Two real links in one cell: keep the first, do not swallow the pair.
+        (
+            "https://jobs.bytedance.com/campus （搜「后端开发实习生 飞书」）；"
+            "BOSS 直聘同岗 https://m.zhipin.com/job_detail/1265630.html",
+            "https://jobs.bytedance.com/campus",
+        ),
+        # Trailing sentence punctuation is not part of the path.
+        ("  https://example.com/a。  ", "https://example.com/a"),
+        # Real per-posting URLs keep working in both spellings.
+        (
+            "m.liepin.com/lptjob/85019761",
+            "https://m.liepin.com/lptjob/85019761",
+        ),
+        (
+            "https://m.liepin.com/lptjob/85019761",
+            "https://m.liepin.com/lptjob/85019761",
+        ),
+        # A page *name* is not a URL.
+        ("五邑大学就业信息网岗位页", ""),
+        # Prose that merely contains a dot must not become a hostname.
+        ("some text example.com", ""),
+        ("", ""),
+    ],
+)
+def test_normalize_url_extracts_the_first_usable_link(cell, expected):
+    assert _normalize_url(cell) == expected
+
+
+def test_normalize_url_never_returns_cjk_or_prose(tmp_path):
+    """No stored jd_url may carry the human note that followed it."""
+    jd_dir = tmp_path / "JD库"
+    jd_dir.mkdir(parents=True, exist_ok=True)
+    (jd_dir / "1-acme.md").write_text(
+        "Java 实习生，要求 Spring Boot。", encoding="utf-8"
+    )
+    (jd_dir / "2-beta.md").write_text(
+        "前端工程师，要求 React。", encoding="utf-8"
+    )
+    table = tmp_path / "岗位总表.csv"
+    table.write_text(
+        "公司,岗位,地点,投递入口,JD文件\n"
+        "Acme,Java 实习生,深圳,"
+        "https://app.mokahr.com/su/aiaJb （官方 Moka，已由第三方聚合页更正）,"
+        "JD库/1-acme.md\n"
+        "Beta,前端工程师,上海,"
+        "campus.sf-express.com；公众号「顺丰校园招聘」,JD库/2-beta.md\n",
+        encoding="utf-8-sig",
+    )
+    rows = read_job_table_rows(table, jd_dir=jd_dir)
+    assert [row["jd_url"] for row in rows] == [
+        "https://app.mokahr.com/su/aiaJb",
+        "https://campus.sf-express.com",
+    ]
+
+
+# --- #145: a shared employer landing page is not a posting identity ---------
+
+
+def _portal_csv(tmp_path: Path, rows: str) -> Path:
+    """Write a table whose rows all point at one employer landing page."""
+    (tmp_path / "JD库").mkdir(parents=True, exist_ok=True)
+    table = tmp_path / "岗位总表.csv"
+    table.write_text(
+        "公司,岗位,地点,投递入口,JD文件\n" + rows, encoding="utf-8-sig"
+    )
+    return table
+
+
+_PORTAL_URL = "https://we.dji.com/zh-cn/campus/position?project=intern"
+
+
+def _write_portal_jd_files(tmp_path: Path) -> Path:
+    jd_dir = tmp_path / "JD库"
+    jd_dir.mkdir(parents=True, exist_ok=True)
+    (jd_dir / "dji-be.md").write_text(
+        "AI 实习生 - 后端开发，要求 Java。", encoding="utf-8"
+    )
+    (jd_dir / "dji-fe.md").write_text(
+        "AI 实习生 - 前端开发，要求 React。", encoding="utf-8"
+    )
+    return jd_dir
+
+
+def _portal_table(tmp_path: Path) -> Path:
+    _write_portal_jd_files(tmp_path)
+    return _portal_csv(
+        tmp_path,
+        f"大疆创新,AI 实习生 - 后端开发,深圳,{_PORTAL_URL},JD库/dji-be.md\n"
+        f"大疆创新,AI 实习生 - 前端开发,深圳,{_PORTAL_URL},JD库/dji-fe.md\n",
+    )
+
+
+def test_sync_keeps_distinct_postings_that_share_a_portal_url(tmp_path):
+    """Two DJI roles behind one careers page must both reach the library.
+
+    Before #145 the second row normalized to the same URL as the first and the
+    import worker dropped it as "Duplicate job already exists".
+    """
+    table = _portal_table(tmp_path)
+    jd_dir = tmp_path / "JD库"
+    rows = read_job_table_rows(table, jd_dir=jd_dir)
+    # The URL is kept for the outbound link, but identity drives dedupe.
+    assert [row["jd_url"] for row in rows] == [_PORTAL_URL, _PORTAL_URL]
+    assert {row["dedupe_key"] for row in rows} == {
+        _job_table_dedupe_key(
+            company=row["company"], title=row["title"], location=row["location"]
+        )
+        for row in rows
+    }
+    assert all(row["source_type"] == "paste" for row in rows)
+
+    _set_job_table(table, jd_dir=jd_dir)
+    with patch("resualign.api._classify_job", side_effect=_classify):
+        start = client.post("/api/jobs/job-table/sync").json()
+        status = _wait_import(start["import_id"])
+    assert status["created"] == 2
+    assert status["errors"] == []
+    assert len(api_module._jobs.list_jobs("local")) == 2
+
+
+def test_sync_still_dedupes_a_repeated_single_posting_url(tmp_path):
+    """The URL branch must survive for URLs that really identify one posting."""
+    jd_dir = tmp_path / "JD库"
+    jd_dir.mkdir(parents=True, exist_ok=True)
+    (jd_dir / "liepin.md").write_text(
+        "后端工程师，要求 Java。", encoding="utf-8"
+    )
+    table = _portal_csv(
+        tmp_path,
+        "某公司,后端工程师,深圳,https://m.liepin.com/lptjob/85019761,"
+        "JD库/liepin.md\n"
+        "某公司,后端工程师,深圳,https://m.liepin.com/lptjob/85019761,"
+        "JD库/liepin.md\n",
+    )
+    rows = read_job_table_rows(table, jd_dir=jd_dir)
+    assert rows[0]["source_type"] == "url"
+
+    _set_job_table(table, jd_dir=jd_dir)
+    with patch("resualign.api._classify_job", side_effect=_classify):
+        start = client.post("/api/jobs/job-table/sync").json()
+        status = _wait_import(start["import_id"])
+    assert status["created"] == 1
+    assert status["skipped"] == 1
+
+
+def test_sync_does_not_re_add_a_portal_row_imported_before_the_fix(tmp_path):
+    """Upgrading must not duplicate a landing-page row already in the library."""
+    table = _portal_table(tmp_path)
+    _set_job_table(table, jd_dir=tmp_path / "JD库")
+    # Pre-fix state: the first row landed under a "url:" dedupe key.
+    api_module._jobs.create_job(
+        tenant_id="local",
+        title="AI 实习生 - 后端开发",
+        jd_text="AI 实习生 - 后端开发，要求 Java。",
+        company="大疆创新",
+        location="深圳",
+        source_type="url",
+        source_url=_PORTAL_URL,
+        dedupe_key="url:" + _PORTAL_URL,
+    )
+    with patch("resualign.api._classify_job", side_effect=_classify):
+        start = client.post("/api/jobs/job-table/sync").json()
+        status = _wait_import(start["import_id"])
+    # The stored row is recognized by identity; the sibling that the old URL
+    # key dropped is imported for the first time.
+    assert status["created"] == 1
+    assert status["skipped"] == 0
+    titles = {job["title"] for job in api_module._jobs.list_jobs("local")}
+    assert titles == {"AI 实习生 - 后端开发", "AI 实习生 - 前端开发"}
+
+
+# --- #151: rows without a JD body are named, not just counted --------------
+
+
+def test_sync_names_rows_that_are_waiting_for_a_jd_body(tmp_path):
+    table = _workbuddy_csv(tmp_path)
+    with table.open("a", encoding="utf-8") as handle:
+        handle.write("Gamma,数分实习生,广州,,JD库/pending.md\n")
+    stats: dict[str, int] = {}
+    missing: list[str] = []
+    rows = read_job_table_rows(
+        table,
+        jd_dir=tmp_path / "JD库",
+        stats=stats,
+        missing_titles=missing,
+    )
+    assert stats["missing_jd"] == 1
+    assert missing == ["数分实习生"]
+    assert len(rows) == 2
+
+    _set_job_table(table, jd_dir=tmp_path / "JD库")
+    with patch("resualign.api._classify_job", side_effect=_classify):
+        start = client.post("/api/jobs/job-table/sync").json()
+        status = _wait_import(start["import_id"])
+    assert status["created"] == 2
+    assert any("数分实习生" in message for message in status["errors"])
+    assert any(
+        "WorkBuddy 补齐后会自动导入" in message for message in status["errors"]
+    )
