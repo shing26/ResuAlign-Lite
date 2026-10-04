@@ -1027,16 +1027,18 @@ class Runner:
             self.goto(page, "#/today")
             text = page.locator("#app-router-view").inner_text()
             self.check_console(page, "today-view")
-            if "今日待办" not in text:
+            # v3 移除了今日待办。修好之后（#152）#/today 应当显式重定向到
+            # 驾驶舱并把 URL 一起纠正，而不是停在 #/today 却显示驾驶舱。
+            landed = page.evaluate("location.hash")
+            if landed != "#/dashboard" or "今日待办" in text:
                 record(
                     "P2",
                     "功能缺陷",
                     "#/today 是死路由：落到驾驶舱，URL 与页面不一致",
-                    f"hash 已是 #/today，视图文本却是 {text[:60]!r}",
-                    "要么实现今日待办，要么把 today 从 ROUTE_NAMES 摘掉并显式"
-                    "重定向，别让 URL 停在一个不存在的页面上",
+                    f"重定向后 hash={landed!r}，视图含今日待办={'今日待办' in text}",
+                    "#/today 应重定向到 #/dashboard 并同步纠正 URL",
                     ["访问 #/today"],
-                    clue="main.js handleRoute 无 case 'today'，走 default 渲染驾驶舱",
+                    clue="main.js handleRoute 的 case 'today' / format.js ROUTE_NAMES",
                 )
         finally:
             context.close()

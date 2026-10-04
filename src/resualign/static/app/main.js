@@ -307,6 +307,13 @@ async function handleRoute(app) {
     case "settings":
       await renderSettingsView(app);
       break;
+    case "today":
+      /* v3 移除了今日待办，但这个 hash 仍可能来自书签、旧文档或分享。
+       * 显式重定向并把 URL 一起纠正 —— 停在 #/today 却显示驾驶舱，
+       * 比直接跳走更容易让人以为自己在另一个页面（#152）。 */
+      window.history.replaceState(null, "", "#/dashboard");
+      await renderDashboard(app);
+      break;
     default:
       await renderDashboard(app);
       break;
