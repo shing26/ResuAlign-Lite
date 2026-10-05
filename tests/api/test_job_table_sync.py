@@ -501,7 +501,11 @@ def test_sync_keeps_distinct_postings_that_share_a_portal_url(tmp_path):
         )
         for row in rows
     }
-    assert all(row["source_type"] == "paste" for row in rows)
+    # source_type 是会落库的 provenance，不许被当成去重标记改写：ADR-0057
+    # 决定 2 的修复路径靠 `WHERE source_type='url'` 挑行，改成 "paste" 会让
+    # 这些行永久看不见。去重由 dedupe_key 承担，shared_portal_url 只是提示。
+    assert all(row["source_type"] == "url" for row in rows)
+    assert all(row["shared_portal_url"] is True for row in rows)
 
     _set_job_table(table, jd_dir=jd_dir)
     with patch("resualign.api._classify_job", side_effect=_classify):

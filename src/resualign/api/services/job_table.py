@@ -343,8 +343,16 @@ def _demote_shared_portal_urls(
                 location=row.get("location") or "",
             )
             # The JD body came from the CSV, not from crawling this URL, so the
-            # row is a paste-source row that merely carries a link.
-            row["source_type"] = "paste"
+            # link is an employer portal page, not a per-posting link.
+            #
+            # Deliberately NOT flipping source_type to "paste": that column is
+            # persisted provenance, and ADR-0057 决定 2's repair path selects on
+            # `WHERE source_type='url' AND source_url IS NOT NULL`
+            # (storage/__init__.py:793). Repurposing it as a dedupe marker made
+            # these rows permanently invisible to that repair. The demotion is
+            # carried by `dedupe_key`, which _drop_known_rows prefers anyway
+            # (job_table.py:578); this flag is only the human-readable hint.
+            row["shared_portal_url"] = True
             demoted += 1
     return demoted
 
