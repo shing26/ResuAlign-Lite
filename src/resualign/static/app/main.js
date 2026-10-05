@@ -107,6 +107,56 @@ import {
 } from "./format.js";
 import { icon } from "./icons.js";
 import {
+  classifySkipMessages,
+  renderSkipDetail,
+} from "./skip-detail.js";
+
+/* render() wipes #app-router-view and then rebuilds it across an await, so the
+ * import form (and the job-table section inside it) is a *new* node by the time
+ * it settles. Any status line, result detail, or half-filled path written
+ * before that point is silently discarded — which is why the "同步完成：新建 N"
+ * line never actually stayed on screen, and why the CSV path the user just
+ * typed vanished the moment a sync finished. Snapshot the form, await the
+ * render, then put it all back. */
+function snapshotImportForm(form) {
+  if (!form) return null;
+  const values = {};
+  form.querySelectorAll("input[name], textarea[name], select[name]")
+    .forEach((node) => {
+      if (node.type === "file") return;
+      if (node.type === "checkbox") values[node.name] = !!node.checked;
+      else values[node.name] = node.value;
+    });
+  return { open: !form.hidden, values };
+}
+
+function restoreImportForm(snapshot, statusSelector, statusText, errors, collapse) {
+  if (!snapshot) return;
+  const form = document.querySelector('[data-form="job-import"]');
+  if (!form) return;
+  /* collapse = 任务已完成、产物在别处。粘贴 CSV 的产物就是看板上的岗位，
+   * 继续把一个填满视口的大表单留在屏幕上，等于让用户导入完盯着自己刚贴的
+   * 那段 CSV，看板被顶到折叠线以下。此时状态文案也不再写回表单 —— 它已经
+   * hidden，而 toast 里有同一句摘要，两处都留着会让「完成：新建 N」在 DOM
+   * 里匹配到隐藏节点。岗位表同步不传 collapse：它的产物就是表单里的未入库
+   * 明细，收起等于把结果藏起来。 */
+  form.hidden = collapse ? true : !snapshot.open;
+  Object.entries(snapshot.values).forEach(([name, value]) => {
+    const node = form.querySelector(`[name="${name}"]`);
+    if (!node) return;
+    if (node.type === "checkbox") node.checked = value;
+    else node.value = value;
+  });
+  const status = form.querySelector(statusSelector);
+  if (status && statusText) status.textContent = collapse ? "" : statusText;
+  const detail = form.querySelector(
+    statusSelector === "[data-import-status]"
+      ? "[data-import-detail]"
+      : "[data-job-table-detail]",
+  );
+  renderSkipDetail(detail, errors);
+}
+import {
   buildAutomationRulePayload,
   buildLlmNodePayload,
   evalDefaultFromForm,
@@ -257,6 +307,13 @@ async function handleRoute(app) {
     case "settings":
       await renderSettingsView(app);
       break;
+    case "today":
+      /* v3 移除了今日待办，但这个 hash 仍可能来自书签、旧文档或分享。
+       * 显式重定向并把 URL 一起纠正 —— 停在 #/today 却显示驾驶舱，
+       * 比直接跳走更容易让人以为自己在另一个页面（#152）。 */
+      window.history.replaceState(null, "", "#/dashboard");
+      await renderDashboard(app);
+      break;
     default:
       await renderDashboard(app);
       break;
@@ -278,6 +335,9 @@ async function render() {
   syncHeaderJobSelect();
   try {
     await handleRoute(app);
+    /* 视图重建会换掉预分析按钮节点；批次还在跑就把它重新画成进度态，
+     * 否则新按钮顶着「一键预分析」的样子、点下去却是取消。 */
+    paintPreanalyzeButton();
   } catch (error) {
     console.error("render error:", error && error.message, "route:", state.route && state.route.name);
     if (isApiKeyUnconfigured(error)) {
@@ -417,6 +477,7 @@ const JOB_IMPORT_FORM_HTML = `
       <div class="row"><button class="btn btn-primary" type="submit">开始导入</button>
         <button class="btn btn-ghost" type="button" data-action="cancel-import">取消</button>
         <span class="small muted" data-import-status></span></div>
+      <div data-import-detail></div>
       <h3>岗位表自动同步</h3>
       <div class="field wide"><label>岗位表 CSV 路径（WorkBuddy 每日追加的那张表）</label>
         <input type="text" name="job_table_path" placeholder="C:\\Users\\...\\job-radar\\岗位总表.csv"></div>
@@ -439,6 +500,7 @@ const JOB_IMPORT_FORM_HTML = `
         </select></div>
       <div class="row"><button class="btn btn-secondary" type="button" data-action="sync-job-table">同步岗位表</button>
         <span class="small muted" data-job-table-status></span></div>
+      <div data-job-table-detail></div>
     </form>`;
 
 async function openJobDetail(job) {
@@ -1013,6 +1075,44 @@ async function exportFinalDraft(format, options = {}) {
   toast(`已导出 ${body.filename || "定稿"}`, "success");
 }
 
+/* 进行中的批量预分析批次（#150）。非 null 时「一键预分析」按钮变成
+ * 停止入口 —— 120 个岗位按实测 ~3.5s/岗位要跑 7 分钟，不能只有干等。
+ *
+ * 状态放模块级、而不是挂在按钮上：data-action 是 document 上冒泡分发的，
+ * 按钮自己挂监听器会先触发、再冒泡到 document 又排一个新批次。
+ * 反过来也绝不能持有按钮引用 —— render()/导航会换掉这个节点，持有旧
+ * 引用会让新按钮顶着「一键预分析」的样子却执行取消。所以每次画都重新
+ * 按选择器取当前真正在文档里的那个。 */
+let activePreanalyze = null;
+
+const PREANALYZE_SELECTOR = '[data-action="preanalyze-pending"]';
+
+function paintPreanalyzeButton() {
+  const button = document.querySelector(PREANALYZE_SELECTOR);
+  if (!button || !activePreanalyze) return;
+  button.title = "点击中止本次预分析";
+  button.classList.add("btn-danger");
+  if (activePreanalyze.canceling) {
+    button.disabled = true;
+    button.textContent = "正在停止…";
+    return;
+  }
+  button.disabled = false;
+  button.textContent =
+    `预分析中 ${activePreanalyze.analyzed}/${activePreanalyze.total}`;
+}
+
+function resetPreanalyzeButton() {
+  const label = activePreanalyze ? activePreanalyze.label : null;
+  activePreanalyze = null;
+  const button = document.querySelector(PREANALYZE_SELECTOR);
+  if (!button) return;
+  button.classList.remove("btn-danger");
+  button.title = "";
+  button.disabled = false;
+  if (label) button.textContent = label;
+}
+
 const actions = {
   reload: () => render(),
   /* v2.0: 新建主简历走模态框（主视图无内联 textarea）。 */
@@ -1331,6 +1431,10 @@ const actions = {
   },
   "show-import": async () => {
     const form = $('[data-form="job-import"]');
+    if (!form) {
+      toast("导入表单尚未就绪，请稍后重试", "error");
+      return;
+    }
     form.hidden = false;
     $('[data-form="job-create"]').hidden = true;
     await fillJobTableForm(form);
@@ -1375,6 +1479,10 @@ const actions = {
         button.disabled = false;
         const detail = (start.errors && start.errors[0]) || "没有可导入的行";
         if (statusNode) statusNode.textContent = detail;
+        renderSkipDetail(
+          document.querySelector("[data-job-table-detail]"),
+          start.errors,
+        );
         toast(detail, "info");
         return;
       }
@@ -1385,21 +1493,38 @@ const actions = {
           if (statusNode) {
             statusNode.textContent = `同步中：新建 ${status.created}，跳过 ${status.skipped}`;
           }
+          if (status.errors && status.errors.length) {
+            renderSkipDetail(
+              document.querySelector("[data-job-table-detail]"),
+              status.errors,
+            );
+          }
           if (!status.queued) {
             window.clearInterval(timer);
             button.disabled = false;
-            if (statusNode) {
-              statusNode.textContent = `同步完成：新建 ${status.created}，跳过 ${status.skipped}`;
-            }
+            const skippedDetail = classifySkipMessages(status.errors);
             toast(
-              `岗位表同步完成：新建 ${status.created}，跳过 ${status.skipped}`,
+              `岗位表同步完成：新建 ${status.created}，跳过 ${status.skipped}` +
+                (skippedDetail.notable.length
+                  ? `，${skippedDetail.notable.length} 条未入库（见下方明细）`
+                  : ""),
               status.created ? "success" : "info",
             );
-            render();
+            const snapshot = snapshotImportForm(form);
+            await render();
+            restoreImportForm(
+              snapshot,
+              "[data-job-table-status]",
+              `同步完成：新建 ${status.created}，跳过 ${status.skipped}`,
+              status.errors,
+            );
           }
         } catch (error) {
           window.clearInterval(timer);
           button.disabled = false;
+          // 进度节点可能已随 render() 脱离文档，写进去用户看不见；
+          // 不落日志的话这类失败会彻底静默。
+          console.error("岗位表同步进度回调失败:", error);
           if (statusNode) statusNode.textContent = `同步失败：${error.message}`;
         }
       }, 800);
@@ -1410,6 +1535,27 @@ const actions = {
     }
   },
   "preanalyze-pending": async (button) => {
+    /* 正在跑的时候，同一个按钮就是「停止」。 */
+    if (activePreanalyze) {
+      if (activePreanalyze.canceling) return;
+      activePreanalyze.canceling = true;
+      paintPreanalyzeButton();
+      try {
+        await api(
+          `/api/jobs/preanalyze-pending/${activePreanalyze.batchId}/cancel`,
+          { method: "POST" },
+        );
+      } catch (error) {
+        /* 停止失败不该中断轮询：批次仍会自己跑完，最终态照常汇报 */
+        activePreanalyze.canceling = false;
+        /* 批次可能已经自己跑完（409）。这时必须把状态清掉，否则按钮会
+         * 永远停在「停止」语义上，再点就是死路。 */
+        if (error.status === 409) resetPreanalyzeButton();
+        else paintPreanalyzeButton();
+        toast(error.message, "error");
+      }
+      return;
+    }
     const label = button.textContent;
     button.disabled = true;
     try {
@@ -1419,19 +1565,36 @@ const actions = {
         toast("没有待预分析的岗位", "success");
         return;
       }
-      button.textContent = `预分析中 0/${start.total}`;
+      /* 预分析是每岗位两次串行 LLM 调用（实测 ~3.5s/岗位），120 个岗位
+       * 约 7 分钟。按钮置灰等于让用户干等，所以改成进度按钮 + 「停止」：
+       * 已分析的结果保留，剩下的不再排队。 */
+      activePreanalyze = {
+        batchId: start.batch_id,
+        canceling: false,
+        label,
+        total: start.total,
+        analyzed: 0,
+      };
+      paintPreanalyzeButton();
       const timer = window.setInterval(async () => {
         try {
           const status = await api(
             `/api/jobs/preanalyze-pending/${start.batch_id}`,
           );
-          button.textContent = `预分析中 ${status.analyzed}/${status.total}`;
+          if (activePreanalyze) {
+            activePreanalyze.analyzed = status.analyzed;
+            if (!activePreanalyze.canceling) paintPreanalyzeButton();
+          }
           if (!status.queued) {
             window.clearInterval(timer);
-            button.textContent = label;
-            button.disabled = false;
+            resetPreanalyzeButton();
             const failed = (status.errors || []).length;
-            if (status.stopped && failed) {
+            if (status.canceled) {
+              toast(
+                `已停止：已分析 ${status.analyzed}，剩余 ${status.total - status.analyzed - status.skipped} 个未处理`,
+                "info",
+              );
+            } else if (status.stopped && failed) {
               /* 定义性阻断（欠费/鉴权）会让整批在首行停下：把后端给的
                * 可执行原因直接透出，而不是只报「失败 1」。 */
               toast(status.errors[0], "error");
@@ -1446,8 +1609,7 @@ const actions = {
           }
         } catch (error) {
           window.clearInterval(timer);
-          button.textContent = label;
-          button.disabled = false;
+          resetPreanalyzeButton();
           toast(error.message, "error");
         }
       }, 1500);
@@ -3657,11 +3819,31 @@ async function submitImport(data, form) {
       const analyzed = status.analyzed || 0;
       const analyzeSuffix = preanalyze ? `，预分析 ${analyzed}` : "";
       statusNode.textContent = `处理中：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}`;
+      if (status.errors && status.errors.length) {
+        renderSkipDetail(
+          document.querySelector("[data-import-detail]"),
+          status.errors,
+        );
+      }
       if (!status.queued) {
         window.clearInterval(timer);
-        statusNode.textContent = `完成：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}`;
-        toast(`导入完成：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}`, status.created ? "success" : "error");
-        render();
+        const skippedDetail = classifySkipMessages(status.errors);
+        toast(
+          `导入完成：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}` +
+            (skippedDetail.notable.length
+              ? `，${skippedDetail.notable.length} 条未入库（见下方明细）`
+              : ""),
+          status.created ? "success" : "error",
+        );
+        const snapshot = snapshotImportForm(form);
+        await render();
+        restoreImportForm(
+          snapshot,
+          "[data-import-status]",
+          `完成：新建 ${status.created}，跳过 ${status.skipped}${analyzeSuffix}`,
+          status.errors,
+          true,
+        );
       }
     } catch (error) {
       window.clearInterval(timer);
@@ -3729,6 +3911,18 @@ setCanvasRenderHook(async (app) => {
 /* ------------------------------------------------------------------ */
 
 setCanvasRenderHook(async (app) => {
+  /* 新建/导入表单不依赖任何请求，必须同步挂载。放在
+   * `await api("/api/master-resumes")` 之后会让「批量导入」点击早于表单
+   * 存在：$('[data-form="job-import"]') 拿到 null，show-import 抛错，
+   * 表单随后以 hidden 挂载 —— 用户看到的是按钮点了没反应（#149 走查）。 */
+  const formsMount = app.querySelector("[data-jobs-forms-mount]");
+  if (formsMount && !formsMount.querySelector('[data-form="job-create"]')) {
+    const createForm = document.createElement("div");
+    createForm.innerHTML = JOB_CREATE_FORM_HTML.trim();
+    const importForm = document.createElement("div");
+    importForm.innerHTML = JOB_IMPORT_FORM_HTML.trim();
+    formsMount.append(createForm.firstChild, importForm.firstChild);
+  }
   const mount = app.querySelector("[data-jobs-batch-mount]");
   if (!mount || app.querySelector("[data-batch-wrap]")) return;
   let resumes = state.batchResumes;
@@ -3757,15 +3951,6 @@ setCanvasRenderHook(async (app) => {
   wrap.setAttribute("data-batch-wrap", "");
   wrap.innerHTML = batchPanelHtml(state.jobs || [], resumes || []);
   mount.append(fab, wrap);
-
-  const formsMount = app.querySelector("[data-jobs-forms-mount]");
-  if (formsMount && !formsMount.querySelector('[data-form="job-create"]')) {
-    const createForm = document.createElement("div");
-    createForm.innerHTML = JOB_CREATE_FORM_HTML.trim();
-    const importForm = document.createElement("div");
-    importForm.innerHTML = JOB_IMPORT_FORM_HTML.trim();
-    formsMount.append(createForm.firstChild, importForm.firstChild);
-  }
 });
 
 async function boot() {

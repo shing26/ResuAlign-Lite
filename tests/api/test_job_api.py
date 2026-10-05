@@ -484,6 +484,99 @@ def test_preanalyze_reports_quota_block_instead_of_500():
     assert done["errors"]
 
 
+def test_preanalyze_batch_can_be_canceled_midway():
+    """#150: a long sweep must be stoppable, and analyzed work is kept.
+
+    120 pending jobs at the measured ~3.5s each is ~7 minutes with no way
+    out. Cancelling sets a threading.Event that the sweep checks at the top
+    of every iteration, so at most one extra job runs past the click.
+    """
+    import threading
+
+    import resualign.api as api_module
+
+    with patch("resualign.api._classify_job", return_value={}):
+        for index in range(5):
+            client.post(
+                "/api/jobs",
+                json={
+                    "title": f"Cancel {index}",
+                    # 正文必须各不相同：岗位身份键不含标题，正文相同会被去重
+                    # 成 409，批次就凑不满 5 个了。
+                    "jd_text": f"Python backend, 第 {index} 号岗位。",
+                },
+            )
+
+    started = threading.Event()
+
+    def slow_preanalyze(user, job_id):
+        # Slow enough that the cancel lands mid-sweep rather than after it.
+        time.sleep(0.08)
+        started.set()
+        # 真的落库，否则「已分析结果保留」这条验收标准等于没测。
+        api_module._jobs.update_job(
+            user["user_id"],
+            job_id,
+            classification_pending=0,
+            jd_profile={"must_have_skills": ["Python"]},
+        )
+        return {"jd_profile": {"must_have_skills": ["Python"]}}
+
+    with patch(
+        "resualign.api.services.jobs.preanalyze_job",
+        side_effect=slow_preanalyze,
+    ):
+        start = client.post("/api/jobs/preanalyze-pending").json()
+        assert start["queued"] is True
+        assert start["total"] == 5
+        assert started.wait(timeout=5.0), "sweep never started"
+        canceled = client.post(
+            f"/api/jobs/preanalyze-pending/{start['batch_id']}/cancel"
+        )
+        assert canceled.status_code == 200
+        assert canceled.json()["canceling"] is True
+        done = _wait_preanalyze(start["batch_id"])
+
+    assert done["canceled"] is True
+    assert done["analyzed"] < 5, "cancel must stop the sweep early"
+    assert done["analyzed"] >= 1, "work done before the cancel is kept"
+    assert done["stopped"] is False, "user cancel is not a quota stop"
+    analyzed_titles = [
+        job["title"]
+        for job in client.get("/api/jobs").json()
+        if job.get("jd_profile")
+    ]
+    assert analyzed_titles, "analyzed results must survive the cancel"
+
+    # The leftovers stay pending, so a later sweep picks them up.
+    assert client.post("/api/jobs/preanalyze-pending").json()["total"] == (
+        5 - done["analyzed"]
+    )
+
+
+def test_preanalyze_batch_cancel_rejects_unknown_and_finished():
+    """Cancel is 404 for someone else's batch, 409 once it already ended."""
+    with patch("resualign.api._classify_job", return_value={}):
+        client.post(
+            "/api/jobs", json={"title": "Cancel 404", "jd_text": "Python."}
+        )
+    assert client.post(
+        "/api/jobs/preanalyze-pending/does-not-exist/cancel"
+    ).status_code == 404
+
+    with patch(
+        "resualign.api.services.jobs.preanalyze_job",
+        return_value={"jd_profile": {"skills": ["Python"]}},
+    ):
+        start = client.post("/api/jobs/preanalyze-pending").json()
+        done = _wait_preanalyze(start["batch_id"])
+    assert done["queued"] is False
+    late = client.post(
+        f"/api/jobs/preanalyze-pending/{start['batch_id']}/cancel"
+    )
+    assert late.status_code == 409
+
+
 def test_job_import_marks_done_on_unexpected_error():
     with patch(
         "resualign.api._create_job_from_source",

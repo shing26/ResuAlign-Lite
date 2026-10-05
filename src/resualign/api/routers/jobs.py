@@ -172,6 +172,7 @@ def preanalyze_pending_jobs(
             'analyzed': 0,
             'skipped': 0,
             'errors': [],
+            'canceled': False,
         }
     batch_id = uuid.uuid4().hex
     context._preanalyze_batches[batch_id] = {
@@ -182,6 +183,8 @@ def preanalyze_pending_jobs(
         'errors': [],
         'done': False,
         'stopped': False,
+        'canceled': False,
+        'stop': threading.Event(),
     }
     threading.Thread(
         target=context._run_preanalyze_batch,
@@ -214,7 +217,25 @@ def preanalyze_pending_status(
         'skipped': batch['skipped'],
         'errors': batch['errors'],
         'stopped': batch.get('stopped', False),
+        'canceled': batch.get('canceled', False),
     }
+
+
+@router.post('/api/jobs/preanalyze-pending/{batch_id}/cancel')
+def cancel_preanalyze_batch(
+    batch_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Stop a running bulk preanalysis sweep; analyzed results are kept."""
+    batch = context._preanalyze_batches.get(batch_id)
+    if batch is None or batch['user_id'] != user['user_id']:
+        raise HTTPException(status_code=404, detail='Preanalyze batch not found')
+    if batch['done']:
+        raise HTTPException(
+            status_code=409, detail='Preanalyze batch already finished'
+        )
+    batch['stop'].set()
+    return {'batch_id': batch_id, 'canceling': True}
 
 
 @router.get('/api/jobs/job-table')
