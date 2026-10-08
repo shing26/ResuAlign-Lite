@@ -274,7 +274,9 @@ def test_update_node_can_switch_active_via_is_active_field():
         n["node_id"]: n
         for n in client.get("/api/llm/nodes", headers=headers).json()
     }
-    assert nodes[a["node_id"]]["is_active"] is False
+    # P0: multi-active — both nodes stay active
+    assert nodes[a["node_id"]]["is_active"] is True
+    assert nodes[b["node_id"]]["is_active"] is True
 
 
 def test_unknown_node_returns_404():
@@ -326,7 +328,8 @@ def test_activate_second_node_deactivates_first():
         n["node_id"]: n
         for n in client.get("/api/llm/nodes", headers=headers).json()
     }
-    assert nodes[a["node_id"]]["is_active"] is False
+    # P0: multi-active — both stay active
+    assert nodes[a["node_id"]]["is_active"] is True
     assert nodes[b["node_id"]]["is_active"] is True
 
 
@@ -346,6 +349,21 @@ def test_delete_active_node_promotes_oldest_remaining():
     assert len(nodes) == 1
     assert nodes[0]["node_id"] == a["node_id"]
     assert nodes[0]["is_active"] is True
+
+
+def test_multi_active_nodes_all_usable():
+    """P0: multiple active nodes are all usable for failover."""
+    headers = _auth_headers()
+    a = client.post(
+        "/api/llm/nodes", json=_node_payload(name="A"), headers=headers
+    ).json()
+    b = client.post(
+        "/api/llm/nodes", json=_node_payload(name="B"), headers=headers
+    ).json()
+    client.post(f"/api/llm/nodes/{b['node_id']}/activate", headers=headers)
+    nodes = client.get("/api/llm/nodes", headers=headers).json()
+    active = [n for n in nodes if n["is_active"]]
+    assert len(active) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -515,9 +533,11 @@ def test_build_config_hot_reloads_after_activating_another_node():
         with patch("resualign.config.EnvSettings") as mock_env:
             _mock_env(mock_env)
             config = api_module.build_config()
-        assert config.provider == "openrouter"
-        assert config.model == "model-b"
-        assert config.api_key == fake_api_key("kb")
+        # P0: multi-active — build_config picks first usable (local first)
+        # n2 (openrouter, no base_url) is not local, so n1 is still selected
+        assert config.provider == "deepseek"
+        assert config.model == "model-a"
+        assert config.api_key == fake_api_key("ka")
 
 
 def test_build_config_falls_back_to_legacy_llm_when_nodes_empty():

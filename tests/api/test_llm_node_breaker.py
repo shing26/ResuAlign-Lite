@@ -5,7 +5,7 @@ Semantics under test (grilling table):
   rate_limit/parse/schema/empty (transient or output-quality);
 - counted probe statuses: timeout/network_error/missing_key/http_401/402/403
   /http_5xx; NOT counted: http_429 and other 4xx;
-- threshold 3 -> persistent auto_disable; selection paths filter it while
+ - threshold 5 -> persistent auto_disable; selection paths filter it while
   ADMIN paths (get_active_node / list / activate / delete-promotion) stay
   unfiltered; success (call or manual test) or explicit activation recovers.
 """
@@ -46,7 +46,7 @@ def _node(store, tenant="t", **kw):
     )
 
 
-def _trip(store, tenant, node_id, *, via="call", times=3):
+def _trip(store, tenant, node_id, *, via="call", times=5):
     for _ in range(times):
         if via == "call":
             store.record_call_failure(tenant, node_id, "timeout")
@@ -110,7 +110,7 @@ class TestTripFilterAndRecovery:
         _trip(store, "t", n["node_id"])
         row = store.get_node("t", n["node_id"])
         assert row["auto_disabled"] is True
-        assert row["consecutive_failures"] == 3
+        assert row["consecutive_failures"] == 5
         # Call-chain selection filters...
         assert store.get_usable_node("t") is None
         assert store.resolve_node_for_role("t", "editor") is None
@@ -162,7 +162,7 @@ class TestTripFilterAndRecovery:
         recovered = [m for m in msgs if '"llm_node.recovered"' in m]
         assert len(disabled) == 1, "auto_disabled must log exactly per transition"
         assert len(recovered) == 1
-        assert '"threshold": 3' in disabled[0]
+        assert '"threshold": 5' in disabled[0]
 
 
 class TestRoleBindingBoundary:
@@ -351,4 +351,4 @@ class TestNodeListApi:
         )
         after = client.get("/api/llm/nodes", headers=headers).json()[0]
         assert after["auto_disabled"] is True
-        assert after["consecutive_failures"] == 3
+        assert after["consecutive_failures"] == 5

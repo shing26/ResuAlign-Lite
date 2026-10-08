@@ -137,12 +137,29 @@ def usable_active_node(node_store: Any, tenant_id: str) -> dict | None:
     the engine role-mode decision, the pre-flight probe and the config
     resolution callback. Duck-typed for node-store fakes in tests: stores
     without breaker support keep ``get_active_node`` semantics.
+
+    P0: multi-active failover — returns first usable node (local first).
+    Callers that need failover should use ``usable_active_nodes`` instead.
     """
     usable = getattr(node_store, "get_usable_node", None)
     if callable(usable):
         return usable(tenant_id)
     active = getattr(node_store, "get_active_node", None)
     return active(tenant_id) if callable(active) else None
+
+
+def usable_active_nodes(node_store: Any, tenant_id: str) -> list[dict]:
+    """All usable nodes for failover (P0 multi-active).
+
+    Returns nodes sorted by priority: local first, then remote. Empty list
+    when no node is usable. Duck-typed for node-store fakes.
+    """
+    usable = getattr(node_store, "get_usable_nodes", None)
+    if callable(usable):
+        return usable(tenant_id)
+    # Fallback for stores without multi-node support
+    single = usable_active_node(node_store, tenant_id)
+    return [single] if single else []
 
 
 def _report_call_outcome(

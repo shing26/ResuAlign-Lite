@@ -15,6 +15,7 @@ which ``store_base`` already keys by class name.
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from typing import Any
@@ -47,9 +48,8 @@ CREATE TABLE IF NOT EXISTS llm_nodes (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_nodes_tenant
     ON llm_nodes(tenant_id);
--- At most one active node per tenant, enforced at the DB level.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_nodes_one_active
-    ON llm_nodes(tenant_id) WHERE is_active = 1;
+-- P0: multiple active nodes per tenant allowed (multi-active failover).
+-- No UNIQUE constraint on is_active; selection logic handles priority.
 """
 
 _NODE_FIELDS = (
@@ -109,9 +109,7 @@ class LLMNodeStore(_SqliteStore):
             "api_key TEXT, model TEXT, is_active INTEGER NOT NULL DEFAULT 0, "
             "created_at REAL NOT NULL, updated_at REAL NOT NULL); "
             "CREATE INDEX IF NOT EXISTS idx_llm_nodes_tenant "
-            "ON llm_nodes(tenant_id); "
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_nodes_one_active "
-            "ON llm_nodes(tenant_id) WHERE is_active = 1;",
+            "ON llm_nodes(tenant_id);",
         ),
         (
             2,
@@ -152,7 +150,11 @@ class LLMNodeStore(_SqliteStore):
     # Breaker (ticket #103)
     # ------------------------------------------------------------------
 
-    BREAKER_THRESHOLD = 3
+    # P1: breaker threshold is configurable via env var (default 5).
+    # A single node failing 3 times was too aggressive for transient
+    # network jitter; 5 gives more tolerance while still protecting
+    # against sustained outages.
+    BREAKER_THRESHOLD = int(os.environ.get("RESUALIGN_BREAKER_THRESHOLD", "5"))
     # LLMResponseError codes that say the node itself is not serving.
     # rate_limit (429) is transient; parse/schema/empty are model-output
     # quality issues, not node availability — none of them count.
@@ -360,7 +362,9 @@ class LLMNodeStore(_SqliteStore):
                     return node
             else:
                 self.delete_role_binding(tenant_id, role)
-        return self.get_usable_node(tenant_id)
+        # P0: multi-active failover — return first usable node (local first)
+        nodes = self.get_usable_nodes(tenant_id)
+        return nodes[0] if nodes else None
 
     def clear_role_bindings(self, tenant_id: str) -> None:
         with self._lock:
@@ -439,6 +443,27 @@ class LLMNodeStore(_SqliteStore):
                 ).fetchone()
         return self._row_to_dict(row) if row is not None else None
 
+    def get_usable_nodes(self, tenant_id: str) -> list[dict[str, Any]]:
+        """All active, non-disabled nodes for failover (P0 multi-active).
+
+        Returns nodes sorted by priority: local (ollama/localhost) first,
+        then remote. Empty list when no node is usable.
+        """
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    f"SELECT {','.join(_NODE_FIELDS)} FROM llm_nodes "
+                    "WHERE tenant_id = ? AND is_active = 1 "
+                    "AND auto_disabled = 0 "
+                    "ORDER BY created_at ASC, node_id ASC",
+                    (tenant_id,),
+                ).fetchall()
+        nodes = [self._row_to_dict(row) for row in rows]
+        # Local nodes first (lower latency), then remote
+        nodes.sort(key=lambda n: (not self._is_local_node(n), n.get("created_at", 0)))
+        return nodes
+
     def record_node_health(
         self,
         tenant_id: str,
@@ -504,9 +529,9 @@ class LLMNodeStore(_SqliteStore):
     ) -> dict[str, Any]:
         """Insert a node and return it.
 
-        The first node of a tenant becomes active automatically; an explicit
-        ``is_active=True`` activates the new node and deactivates every other
-        node of the tenant (one active node per tenant). ``disable_thinking``
+        P0: the first node of a tenant becomes active automatically. An
+        explicit ``is_active=True`` activates the new node WITHOUT
+        deactivating others (multi-active for failover). ``disable_thinking``
         opts the node out of reasoning-model output (see ResuAlignConfig).
         """
         self._validate_node(
@@ -528,12 +553,6 @@ class LLMNodeStore(_SqliteStore):
                     (tenant_id,),
                 ).fetchone()["c"]
                 activate = existing == 0 or is_active is True
-                if activate:
-                    conn.execute(
-                        "UPDATE llm_nodes SET is_active = 0 "
-                        "WHERE tenant_id = ? AND is_active = 1",
-                        (tenant_id,),
-                    )
                 conn.execute(
                     "INSERT INTO llm_nodes (node_id, tenant_id, name, "
                     "provider, base_url, api_key, model, is_active, "
@@ -562,9 +581,9 @@ class LLMNodeStore(_SqliteStore):
     ) -> dict[str, Any] | None:
         """Partially update a node; return None when the node is missing.
 
-        ``is_active=True`` switches the tenant's active node (all others are
-        deactivated first); ``is_active=False`` simply marks the node
-        inactive. Omitted keys keep their stored value.
+        P0: ``is_active=True`` activates this node without deactivating
+        others (multi-active for failover). ``is_active=False`` simply
+        marks the node inactive. Omitted keys keep their stored value.
         """
         node = self.get_node(tenant_id, node_id)
         if node is None:
@@ -583,12 +602,6 @@ class LLMNodeStore(_SqliteStore):
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
-                if merged["is_active"] is True:
-                    conn.execute(
-                        "UPDATE llm_nodes SET is_active = 0 "
-                        "WHERE tenant_id = ? AND is_active = 1",
-                        (tenant_id,),
-                    )
                 conn.execute(
                     "UPDATE llm_nodes SET name = ?, provider = ?, "
                     "base_url = ?, api_key = ?, model = ?, is_active = ?, "
@@ -612,9 +625,9 @@ class LLMNodeStore(_SqliteStore):
     def delete_node(self, tenant_id: str, node_id: str) -> bool:
         """Delete a node; return False when it does not exist.
 
-        Deleting the active node promotes the oldest remaining node to
-        active (creation order), keeping the tenant with exactly one active
-        node whenever any node remains.
+        P0: deleting an active node promotes the oldest remaining node to
+        active (creation order) whenever any node remains. Other active
+        nodes stay active (multi-active).
         """
         with self._lock:
             self._ensure_initialized()
@@ -648,7 +661,12 @@ class LLMNodeStore(_SqliteStore):
     def activate_node(
         self, tenant_id: str, node_id: str
     ) -> dict[str, Any] | None:
-        """Activate one node and deactivate every other node of the tenant."""
+        """Activate one node; other active nodes stay active (P0 multi-active).
+
+        P0: multiple nodes may be active simultaneously for failover.
+        Activating a node clears its breaker state (user asserts it should
+        serve). Other active nodes are NOT deactivated.
+        """
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
@@ -660,11 +678,6 @@ class LLMNodeStore(_SqliteStore):
                 if row is None:
                     return None
                 now = time.time()
-                conn.execute(
-                    "UPDATE llm_nodes SET is_active = 0, updated_at = ? "
-                    "WHERE tenant_id = ? AND is_active = 1",
-                    (now, tenant_id),
-                )
                 # Ticket #103: explicitly activating a node is the user
                 # asserting it should serve — clear breaker state.
                 conn.execute(
