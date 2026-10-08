@@ -845,3 +845,55 @@ def test_build_config_disable_thinking_from_active_node():
         # 全链冒烟：配置进客户端后应发出 thinking disabled extra
         client = OpenAIClient(config)
         assert client.request_direct_output is True
+
+
+def test_p2_role_tier_node_preference():
+    """P2: 多节点无绑定时，轻量角色优先本地节点，质量敏感角色优先远程节点。"""
+    with _personal_mode():
+        # 创建本地节点（ollama）和远程节点（deepseek）
+        tenant = "t-p2"
+        local = api_module._llm_nodes.create_node(
+            tenant,
+            name="Ollama Local",
+            provider="ollama",
+            base_url="http://localhost:11434",
+            api_key="",
+            model="qwen2.5:7b",
+            is_active=True,
+        )
+        remote = api_module._llm_nodes.create_node(
+            tenant,
+            name="DeepSeek Remote",
+            provider="deepseek",
+            base_url="https://api.deepseek.com",
+            api_key=fake_api_key("ds"),
+            model="deepseek-chat",
+            is_active=True,
+        )
+        # 轻量角色（profiler）应优先本地节点
+        node = api_module._llm_nodes.resolve_node_for_role(tenant, "profiler")
+        assert node is not None
+        assert node["node_id"] == local["node_id"]
+        # 质量敏感角色（editor）应优先远程节点
+        node = api_module._llm_nodes.resolve_node_for_role(tenant, "editor")
+        assert node is not None
+        assert node["node_id"] == remote["node_id"]
+        # 单节点时直接返回（无论角色）
+        api_module._llm_nodes.delete_node(tenant, remote["node_id"])
+        node = api_module._llm_nodes.resolve_node_for_role(tenant, "editor")
+        assert node is not None
+        assert node["node_id"] == local["node_id"]
+        # 角色绑定优先级最高
+        api_module._llm_nodes.create_node(
+            tenant,
+            name="DeepSeek Remote 2",
+            provider="deepseek",
+            base_url="https://api.deepseek.com",
+            api_key=fake_api_key("ds2"),
+            model="deepseek-chat",
+            is_active=True,
+        )
+        api_module._llm_nodes.set_role_binding(tenant, "editor", local["node_id"])
+        node = api_module._llm_nodes.resolve_node_for_role(tenant, "editor")
+        assert node is not None
+        assert node["node_id"] == local["node_id"]

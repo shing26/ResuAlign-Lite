@@ -84,6 +84,13 @@ _EDITABLE_FIELDS = (
 _ALLOWED_PROVIDERS = ALLOWED_PROVIDERS
 
 _LLM_ROLES = ("diagnose", "profiler", "gap_analyzer", "editor", "evaluator")
+
+# P2: role-tier node preference. Lightweight roles prefer local nodes
+# (lower latency, cheaper); quality-sensitive roles prefer remote nodes
+# (stronger models). Only applies when multiple nodes are available and
+# no explicit role binding exists.
+_LIGHTWEIGHT_ROLES = frozenset({"diagnose", "profiler", "gap_analyzer"})
+_QUALITY_SENSITIVE_ROLES = frozenset({"editor", "evaluator"})
 _LLM_ROLE_ASSIGNMENTS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS llm_role_assignments (
     tenant_id TEXT NOT NULL,
@@ -362,9 +369,20 @@ class LLMNodeStore(_SqliteStore):
                     return node
             else:
                 self.delete_role_binding(tenant_id, role)
-        # P0: multi-active failover — return first usable node (local first)
         nodes = self.get_usable_nodes(tenant_id)
-        return nodes[0] if nodes else None
+        if not nodes:
+            return None
+        if len(nodes) == 1:
+            return nodes[0]
+        # P2: role-tier node preference when multiple nodes are available.
+        # Lightweight roles prefer local nodes (lower latency); quality-sensitive
+        # roles prefer remote nodes (stronger models). Falls back to the
+        # opposite tier when only one tier is available.
+        if role in _QUALITY_SENSITIVE_ROLES:
+            remote = [n for n in nodes if not self._is_local_node(n)]
+            return remote[0] if remote else nodes[0]
+        # Lightweight roles and unclassified roles: local-first (default)
+        return nodes[0]
 
     def clear_role_bindings(self, tenant_id: str) -> None:
         with self._lock:
