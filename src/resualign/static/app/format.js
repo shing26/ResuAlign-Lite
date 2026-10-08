@@ -1045,6 +1045,7 @@ export function boardCard(job, statuses = null) {
         <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
         ${match != null ? `<span class="match-badge ${matchTone(match)}" data-match-total title="${matchTitle}">${match}</span>` : `<span class="match-badge match-badge--empty" title="${matchTitle}">待分析</span>`}
         <button type="button" class="board-card__title" data-action="open-optimizer" data-id="${job.job_id}">${esc(job.title)}</button>
+        <button type="button" class="board-card__reveal-toggle" data-action="toggle-card-reveal" data-id="${esc(job.job_id)}" aria-expanded="false" aria-label="展开详情" title="展开详情">${icon("chevron-down", 16)}</button>
         ${boardMoreMenu(job)}
       </div>
       <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
@@ -1110,6 +1111,13 @@ export function batchPanelHtml(jobs, resumes) {
     .join("");
   return `
     <form data-form="batch-align" data-batch-panel>
+      <div class="panel-head">
+        <div>
+          <h2>批量对齐</h2>
+          <p>选主简历与 2-5 个岗位一次排队；结果留在本面板，可随时返回岗位库</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="close-batch-panel" data-batch-close>返回岗位库</button>
+      </div>
       <div class="form-grid">
         <div class="field"><label>主简历</label><select name="master_resume_id" required>
           <option value="">${resumes.length ? "选择简历..." : "先到简历中心创建主简历"}</option>${resumeOptions}</select></div>

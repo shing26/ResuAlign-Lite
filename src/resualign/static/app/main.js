@@ -1570,7 +1570,29 @@ const actions = {
   "toggle-batch-panel": (button) => {
     const wrap = button.parentElement && button.parentElement.querySelector("[data-batch-wrap]");
     const panel = wrap || document.querySelector("[data-batch-wrap]");
-    if (panel) panel.hidden = !panel.hidden;
+    if (!panel) return;
+    if (panel.hidden) openBatchPanel();
+    else panel.hidden = true;
+  },
+  /* 岗位卡详情改为显式展开：hover 展开会让卡片高度变化，把同列下方所有卡片
+   * 整体下推（实测 187px），鼠标在卡片间移动时目标在指针下跳动，多选复选框
+   * 频繁点不中（点击落到卡片本体）。高度不再随 hover 变化后，指针目标稳定。 */
+  "toggle-card-reveal": (button) => {
+    const card = button.closest(".board-card");
+    if (!card) return;
+    const next = card.getAttribute("data-revealed") !== "true";
+    card.setAttribute("data-revealed", next ? "true" : "false");
+    button.setAttribute("aria-expanded", next ? "true" : "false");
+    button.setAttribute("aria-label", next ? "收起详情" : "展开详情");
+    button.setAttribute("title", next ? "收起详情" : "展开详情");
+  },
+  /* 面板内的显式返回入口。toggle 按钮在 FAB 上，而 FAB 只在「已选 >0」时
+   * 显示（updateBatchSelection）—— 用户取消勾选或批次跑完后 FAB 消失，
+   * 面板就再也关不掉了（实测：面板仍可见、FAB 已 hidden）。关闭入口必须
+   * 挂在面板自身，不依赖选择状态。 */
+  "close-batch-panel": () => {
+    const panel = document.querySelector("[data-batch-wrap]");
+    if (panel) panel.hidden = true;
   },
   "delete-job": (button) => {
     /* #U9: replace window.confirm with the in-app modal. The confirm
@@ -2383,8 +2405,7 @@ const actions = {
       return;
     }
     renderBatchResults(state.batchAlign);
-    const panel = $("[data-batch-wrap]");
-    if (panel) panel.hidden = false;
+    openBatchPanel();
     toast("已恢复最近一次批次结果", "success");
   },
   /* 一键分析全部待处理岗位（idle/failed/卡死的 queued），后端 selector=pending 选岗。
@@ -2406,8 +2427,7 @@ const actions = {
       }),
     });
     state.batchAlign = result;
-    const panel = $("[data-batch-wrap]");
-    if (panel) panel.hidden = false;
+    openBatchPanel();
     const cancel = $("[data-batch-cancel]");
     if (cancel) cancel.hidden = false;
     renderBatchResults(result);
@@ -2822,6 +2842,27 @@ function updateBatchSelection() {
   if (label) label.textContent = `已选 ${count}`;
   const fab = $("[data-batch-fab]");
   if (fab) fab.hidden = count === 0;
+}
+
+/* 看板勾选是用户看得见的「选择」（FAB 上的「已选 N」），但表单真正读取的是
+ * 面板自己的 `data-batch-check`。两套状态不同步时，勾了 2 个岗位、FAB 写着
+ * 「已选 2」、点「开始批量对齐」却报「请选择 2-5 个岗位」。打开面板时把看板
+ * 选择镜像进列表；看板没勾选时不动列表，避免抹掉用户在面板里的选择。 */
+function syncBatchPanelFromBoard() {
+  const selected = new Set(
+    $$("[data-board-check]:checked").map((input) => input.value),
+  );
+  if (selected.size === 0) return;
+  $$("[data-batch-check]").forEach((input) => {
+    input.checked = selected.has(input.value);
+  });
+}
+
+function openBatchPanel() {
+  const panel = $("[data-batch-wrap]");
+  if (!panel) return;
+  syncBatchPanelFromBoard();
+  panel.hidden = false;
 }
 
 document.addEventListener("change", (event) => {

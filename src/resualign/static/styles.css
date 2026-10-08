@@ -3464,7 +3464,21 @@ select {
 .board-check {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  /* WCAG 2.2 SC 2.5.8 要求指针目标 ≥24px。原生复选框只有约 13px，
+     而它是「批量对比 / 批量对齐」的唯一入口 —— 视觉尺寸保持不变，
+     只把可点击区域撑到 24px。 */
+  min-width: 24px;
+  min-height: 24px;
   margin-top: 1px;
+}
+
+/* 触摸设备没有 hover 纠错机会，热区再放宽一档。 */
+@media (hover: none) {
+  .board-check {
+    min-width: 32px;
+    min-height: 32px;
+  }
 }
 
 .board-status-select {
@@ -3598,7 +3612,7 @@ select {
 }
 
 /* T6 batch alignment */
-.batch-panel .batch-job-list {
+.batch-panel-wrap .batch-job-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-2) var(--space-3);
@@ -3642,7 +3656,7 @@ select {
 }
 
 @media (max-width: 640px) {
-  .batch-panel .batch-job-list {
+  .batch-panel-wrap .batch-job-list {
     grid-template-columns: 1fr;
   }
 }
@@ -5849,7 +5863,7 @@ select option {
 .command-bar__trigger:hover { background: color-mix(in srgb, var(--shadow-ink) 50%, transparent); border-color: var(--line-strong); }
 
 /* Card & button radius pass for the Apple feel */
-.card, .panel, .panel-card, .board-card, .diff-card, .dashboard-kpi, .llm-node-card, .rule-item, .batch-panel{
+.card, .panel, .panel-card, .board-card, .diff-card, .dashboard-kpi, .llm-node-card, .rule-item, .batch-panel-wrap{
   border-radius: var(--radius-xl);
 }
 
@@ -7824,8 +7838,9 @@ html {
   border-top: 1px solid var(--line-faint);
 }
 
-.board-card:hover .board-card__reveal,
-.board-card:focus-within .board-card__reveal,
+/* 展开只由显式动作驱动（.board-card__reveal-toggle → data-revealed）。
+   hover / focus-within 展开会让卡片高度变化，把同列下方卡片整体下推，
+   鼠标在卡片间移动时目标在指针下跳动，多选复选框频繁点不中。 */
 .board-card[data-revealed="true"] .board-card__reveal {
   display: flex;
 }
@@ -9102,6 +9117,31 @@ details > summary::-webkit-details-marker,
 
 .board-card__top .board-card__title {
   min-width: 0;
+}
+
+.board-card__reveal-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.board-card__reveal-toggle:hover,
+.board-card[data-revealed="true"] .board-card__reveal-toggle {
+  border-color: var(--line);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.board-card[data-revealed="true"] .board-card__reveal-toggle svg {
+  transform: rotate(180deg);
 }
 
 .board-card__primary {

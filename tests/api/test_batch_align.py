@@ -222,6 +222,41 @@ def test_batch_align_accepts_five_jobs():
     assert r.json()["total"] == 5
 
 
+def test_create_response_is_superset_of_status_response():
+    """创建响应必须含 summary/rows（#F1 根因钉死）。
+
+    前端拿到创建响应会立刻渲染一次（轮询落地之前），也会把它存进
+    `state.batchAlign` 供「查看最近一次批次」/导出复用。若创建响应缺
+    `summary`，`renderBatchResults` 会在 `batch.summary.completed` 抛
+    TypeError，把 `startBatchPolling` 一起带走 —— 后端已排队、前端却
+    永不轮询（静默失败）。这里锁死两个形状的包含关系。
+    """
+    resume = _create_resume()
+    job_ids = _create_library_jobs(2)
+    with patch(
+        "resualign.api._queue_job", side_effect=lambda *a, **k: "analysis-x"
+    ), patch("resualign.api.build_config", return_value=_config()):
+        created = client.post(
+            "/api/batch-align",
+            json=_queue_payloads(job_ids, resume["resume_id"]),
+            headers=_auth_headers(),
+        ).json()
+    status = client.get(
+        f"/api/batch-align/{created['batch_id']}", headers=_auth_headers()
+    ).json()
+
+    missing = set(status) - set(created)
+    assert not missing, (
+        f"创建响应缺少状态接口的字段 {sorted(missing)}；"
+        "前端会直接渲染创建响应，缺字段会抛 TypeError 并跳过轮询"
+    )
+    assert created["summary"]["total"] == 2
+    assert len(created["rows"]) == 2
+    # 排队计数保留（前端 toast 读它）
+    assert created["total"] == 2
+    assert created["queued"] == 2
+
+
 def _queue_batch(job_ids, resume_id, **overrides):
     queued = []
 

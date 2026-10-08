@@ -64,7 +64,7 @@ test("boardCard renders four match dimensions with labels and values", () => {
   assert.equal(dims[3].textContent.includes("经验"), true);
 });
 
-test("boardCard keeps analysis details in hover reveal and action controls always visible", () => {
+test("boardCard keeps analysis details in an explicit reveal and action controls always visible", () => {
   const body = bodyFrom(boardCard(DETAIL_JOB));
   const reveal = body.querySelector(".board-card__reveal");
   assert.ok(reveal, "card renders a reveal layer");
@@ -91,9 +91,17 @@ test("boardCard keeps analysis details in hover reveal and action controls alway
     join(appDir, "..", "styles.css"),
     "utf8",
   );
+  /* 详情区由显式动作展开（卡头 chevron → data-revealed）。hover 展开会让卡片
+   * 高度变化，把同列下方卡片整体下推，多选复选框在指针移动中点不中
+   * （2026-10-08 走查 F2）。 */
   assert.match(
     styles,
-    /\.board-card:hover \.board-card__reveal,[\s\S]*display:\s*flex/,
+    /\.board-card\[data-revealed="true"\] \.board-card__reveal[\s\S]*display:\s*flex/,
+  );
+  assert.doesNotMatch(
+    styles,
+    /\.board-card:hover \.board-card__reveal/,
+    "hover 展开会把同列下方卡片整体下推，指针目标在移动中跳动",
   );
   assert.match(styles, /@media \(hover: none\)[\s\S]*\.board-card__reveal/);
 });

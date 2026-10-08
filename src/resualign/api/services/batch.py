@@ -214,7 +214,19 @@ def queue_batch_align(
     threading.Thread(
         target=_monitor_batch, args=(batch_id, tenant_id), daemon=True
     ).start()
-    return {'batch_id': batch_id, 'total': len(rows), 'queued': len(rows)}
+    # Return a superset of the GET /api/batch-align/{id} shape, plus the queue
+    # counts the UI toasts. The create response is rendered immediately (before
+    # the first poll lands) and is also stored in `state.batchAlign`, so a
+    # divergent create shape used to throw
+    # "Cannot read properties of undefined (reading 'completed')" inside
+    # renderBatchResults and silently kill the polling loop.
+    snapshot = get_batch_align(batch_id, tenant_id) or {}
+    return {
+        **snapshot,
+        'batch_id': batch_id,
+        'total': len(rows),
+        'queued': len(rows),
+    }
 
 
 def get_batch_align(
