@@ -24,6 +24,10 @@ Phase A–E + CSS 架构重构 B0–B7），每批改动挂一篇或多篇 ADR�
 
 ### Added
 
+- 角色级真实延迟校准工具 [`benchmarks/role_latency_benchmark.py`](benchmarks/role_latency_benchmark.py)：
+  读取配置节点后复制到临时 store，按角色输出 p50/p95/p99、当前 timeout
+  和余量；120B 实测记录见
+  [`docs/reports/role-timeout-calibration-2026-10-09.md`](docs/reports/role-timeout-calibration-2026-10-09.md)。
 - 交付契约五要素补全：[`CHANGELOG.md`](CHANGELOG.md)、[`docs/STATUS.md`](docs/STATUS.md)、
   [`docs/EVIDENCE.md`](docs/EVIDENCE.md)。依据：`项目交付结构复盘_2026-09-20`
   指出的「入口层缺失」——五要素里只有「改版记录」是全局性空洞。
@@ -32,6 +36,9 @@ Phase A–E + CSS 架构重构 B0–B7），每批改动挂一篇或多篇 ADR�
 
 ### Changed
 
+- LLM 节点调优：多 active 节点现在真正按优先级 failover，旧库迁移 6 会删除
+  legacy one-active 唯一索引；P3 预分析的 classification/profile 并行已有
+  并发契约测试；熔断默认阈值恢复为已登记的 3 次。
 - `tests/` 按层分包：根目录 103 个 `test_*.py` 移入
   `api/ engine/ storage/ domain/ model/ observability/ contracts/ platform/`，
   与 `src/resualign/` 的模块分层一一对应（PR #141）。

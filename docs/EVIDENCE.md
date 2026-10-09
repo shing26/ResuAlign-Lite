@@ -34,6 +34,17 @@
 | 恢复耗时 p50 = 625 ms | Windows 交叉验证（非门禁） | 同上 | 成功探测后 `auto_disabled=0` | ✅ |
 | 阈值 = 3 次 | `llm_nodes` 迁移 5 | `PYTHONPATH=src python -m pytest tests/engine/test_llm_node_breaker.py -q` | 语义契约 | ✅ |
 
+## 角色级超时校准（P4）
+
+装置：`benchmarks/role_latency_benchmark.py` 读取配置节点后复制到临时
+`LLMNodeStore`，走真实 `role_router` 测量每角色 p50/p95/p99；不修改正式
+breaker 状态，不进入 CI 门禁。
+
+| 读数 | 口径 | 复现命令 | 判据 | 达标否 |
+| --- | --- | --- | --- | --- |
+| 120B p95：diagnose 5.888 s / profiler 2.656 s / gap 4.104 s / editor 3.987 s / evaluator 2.632 s | `nvidia/nemotron-3-super-120b-a12b`，每角色 5 次，`d2f43fa` | `PYTHONPATH=src python benchmarks\role_latency_benchmark.py --samples 5 --json-out role-latency.json` | 5/5 成功且 p95 < 当前 timeout | ✅ |
+| 当前 timeout 保留：45/75/60/90/60 s | 120B 快，但本地 `qwen2.5:7b` 历史 p95=61.7 s；短输入是下界 | 同上 + `docs/reports/role-timeout-calibration-2026-10-09.md` | 不为单一快节点下调慢模型预算 | 记录值（决策） |
+
 ## 性能与容量（B6）
 
 装置：`benchmarks/capacity_benchmark.py` 独立 uvicorn 子进程 + 临时
