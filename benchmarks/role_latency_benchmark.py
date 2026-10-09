@@ -105,6 +105,27 @@ def _git_sha() -> str:
         return ""
 
 
+def _safe_command(argv: list[str] | None = None) -> str:
+    """Render the command without leaking an explicit API key."""
+    parts = list(sys.argv if argv is None else argv)
+    redacted: list[str] = []
+    hide_next = False
+    for part in parts:
+        if hide_next:
+            redacted.append("***")
+            hide_next = False
+            continue
+        if part == "--api-key":
+            redacted.append(part)
+            hide_next = True
+            continue
+        if part.startswith("--api-key="):
+            redacted.append("--api-key=***")
+            continue
+        redacted.append(part)
+    return " ".join(redacted)
+
+
 def _percentile(sorted_values: list[float], quantile: float) -> float:
     if not sorted_values:
         return 0.0
@@ -257,7 +278,7 @@ def run_benchmark(
         "git_sha": _git_sha(),
         "platform": platform.platform(),
         "python": sys.version.split()[0],
-        "command": " ".join(sys.argv),
+        "command": _safe_command(),
         "tenant": tenant,
         "samples_requested": samples,
         "roles": roles,

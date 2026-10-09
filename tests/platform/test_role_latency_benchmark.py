@@ -56,3 +56,24 @@ def test_role_latency_benchmark_reports_failures():
     assert payload["verdict"]["passed"] is False
     assert len(payload["verdict"]["failures"]) == 2
     assert "upstream down" in payload["verdict"]["failures"][0]
+
+
+def test_role_latency_benchmark_redacts_api_key_from_command():
+    module = _module()
+    rendered = module._safe_command(
+        [
+            "role_latency_benchmark.py",
+            "--api-key",
+            "secret-value",
+            "--samples",
+            "5",
+        ]
+    )
+    assert "secret-value" not in rendered
+    assert "--api-key ***" in rendered
+
+    rendered_equals = module._safe_command(
+        ["role_latency_benchmark.py", "--api-key=secret-value"]
+    )
+    assert "secret-value" not in rendered_equals
+    assert "--api-key=***" in rendered_equals
