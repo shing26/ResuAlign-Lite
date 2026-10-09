@@ -9,6 +9,7 @@ import threading
 import time
 import urllib.parse
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from typing import Any
 
@@ -848,19 +849,8 @@ def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
             detail=probe_message
             or '模型服务鉴权失败或余额不足，请检查「系统设置 → 模型节点」。',
         )
-    with llm_tenant_context(user['user_id']):
-        try:
-            classification = context._classify_job(
-                jd_text, job_functions, seniorities, tenant=user['user_id']
-            )
-        except context.LLMResponseError as exc:
-            unavailable = _preanalyze_unavailable_from_llm(exc)
-            if unavailable is not None:
-                raise unavailable from exc
-            logger.warning(
-                'Preanalyze classification failed for %s: %s', job_id, exc
-            )
-            classification = {}
+    # P3: parallelize classification and profile (no dependency between them)
+    # gap depends on profile, so it stays serial after profile completes.
     resume = None
     if job.get('workbench_resume_id'):
         resume = context._resumes.get_master_resume(
@@ -874,59 +864,94 @@ def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
     profile_dict = None
     gap_dict = None
     try:
-        with llm_tenant_context(user['user_id']):
-            with context.OpenAIClient(config, timeout=60.0) as client:
-                if resume_text.strip():
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            # Submit classification task
+            def _classify_task():
+                with llm_tenant_context(user['user_id']):
                     try:
-                        profile, _ = call_with_role(
-                            'profiler', context.profile_jd,
-                            context._llm_nodes, user['user_id'],
-                            fn_kwargs={
-                                'jd_text': jd_text,
-                                'cache': context._cache,
-                                'tenant': user['user_id'],
-                            },
+                        return context._classify_job(
+                            jd_text, job_functions, seniorities, tenant=user['user_id']
                         )
-                    except Exception:
-                        profile = context.profile_jd(
-                            client, jd_text,
-                            cache=context._cache, tenant=user['user_id'],
+                    except context.LLMResponseError as exc:
+                        unavailable = _preanalyze_unavailable_from_llm(exc)
+                        if unavailable is not None:
+                            raise unavailable from exc
+                        logger.warning(
+                            'Preanalyze classification failed for %s: %s', job_id, exc
                         )
-                    profile_dict = context.jd_profile_to_dict(profile)
+                        return {}
+            
+            # Submit profile task
+            def _profile_task():
+                with llm_tenant_context(user['user_id']):
+                    with context.OpenAIClient(config, timeout=60.0) as client:
+                        if resume_text.strip():
+                            try:
+                                profile, _ = call_with_role(
+                                    'profiler', context.profile_jd,
+                                    context._llm_nodes, user['user_id'],
+                                    fn_kwargs={
+                                        'jd_text': jd_text,
+                                        'cache': context._cache,
+                                        'tenant': user['user_id'],
+                                    },
+                                )
+                            except Exception:
+                                profile = context.profile_jd(
+                                    client, jd_text,
+                                    cache=context._cache, tenant=user['user_id'],
+                                )
+                            return context.jd_profile_to_dict(profile)
+                        else:
+                            try:
+                                profile, _ = call_with_role(
+                                    'profiler', context.profile_jd,
+                                    context._llm_nodes, user['user_id'],
+                                    fn_kwargs={
+                                        'jd_text': jd_text,
+                                        'cache': context._cache,
+                                        'tenant': user['user_id'],
+                                    },
+                                )
+                            except Exception:
+                                profile = context.proactive_jd_profile(
+                                    client, jd_text,
+                                    cache=context._cache, tenant=user['user_id'],
+                                )
+                            return context.jd_profile_to_dict(profile)
+            
+            classification_future = executor.submit(_classify_task)
+            profile_future = executor.submit(_profile_task)
+            
+            # Wait for both to complete
+            classification = classification_future.result()
+            profile_dict = profile_future.result()
+        
+        # Now handle gap analysis (depends on profile_dict)
+        if profile_dict:
+            with llm_tenant_context(user['user_id']):
+                with context.OpenAIClient(config, timeout=60.0) as client:
                     _profile_str = json.dumps(
                         profile_dict, ensure_ascii=False
                     )
-                    try:
-                        gap, _ = call_with_role(
-                            'gap_analyzer', context.analyze_gaps,
-                            context._llm_nodes, user['user_id'],
-                            fn_kwargs={
-                                'resume_text': resume_text,
-                                'jd_profile_text': _profile_str,
-                            },
-                        )
-                    except Exception:
-                        gap = context.analyze_gaps(
-                            client, resume_text, _profile_str
-                        )
-                    gap_dict = asdict(gap)
-                else:
-                    try:
-                        profile, _ = call_with_role(
-                            'profiler', context.profile_jd,
-                            context._llm_nodes, user['user_id'],
-                            fn_kwargs={
-                                'jd_text': jd_text,
-                                'cache': context._cache,
-                                'tenant': user['user_id'],
-                            },
-                        )
-                    except Exception:
-                        profile = context.proactive_jd_profile(
-                            client, jd_text,
-                            cache=context._cache, tenant=user['user_id'],
-                        )
-                    profile_dict = context.jd_profile_to_dict(profile)
+                    if resume_text.strip():
+                        try:
+                            gap, _ = call_with_role(
+                                'gap_analyzer', context.analyze_gaps,
+                                context._llm_nodes, user['user_id'],
+                                fn_kwargs={
+                                    'resume_text': resume_text,
+                                    'jd_profile_text': _profile_str,
+                                },
+                            )
+                        except Exception:
+                            gap = context.analyze_gaps(
+                                client, resume_text, _profile_str
+                            )
+                        gap_dict = asdict(gap)
+                    else:
+                        # No resume, no gap analysis
+                        pass
     except context.LLMResponseError as exc:
         unavailable = _preanalyze_unavailable_from_llm(exc)
         if unavailable is not None:

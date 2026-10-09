@@ -282,9 +282,9 @@ def test_preanalyze_endpoint_idempotent_and_persists():
             "tech_tags": ["Python"],
         },
     ), patch(
-        "resualign.api.profile_jd", side_effect=fake_profile_jd
+        "resualign.app.context.context.profile_jd", side_effect=fake_profile_jd
     ), patch(
-        "resualign.api.analyze_gaps", side_effect=fake_analyze_gaps
+        "resualign.app.context.context.analyze_gaps", side_effect=fake_analyze_gaps
     ):
         first = client.post(
             f"/api/jobs/{job['job_id']}/preanalyze",
