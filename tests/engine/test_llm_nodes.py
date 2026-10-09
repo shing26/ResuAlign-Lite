@@ -354,7 +354,7 @@ def test_delete_active_node_promotes_oldest_remaining():
 def test_multi_active_nodes_all_usable():
     """P0: multiple active nodes are all usable for failover."""
     headers = _auth_headers()
-    a = client.post(
+    client.post(
         "/api/llm/nodes", json=_node_payload(name="A"), headers=headers
     ).json()
     b = client.post(
@@ -364,6 +364,34 @@ def test_multi_active_nodes_all_usable():
     nodes = client.get("/api/llm/nodes", headers=headers).json()
     active = [n for n in nodes if n["is_active"]]
     assert len(active) == 2
+
+
+def test_get_usable_node_matches_priority_order():
+    """P2: single-node lookup follows the same local-first order as failover."""
+    with _personal_mode():
+        tenant = "t-priority"
+        remote = api_module._llm_nodes.create_node(
+            tenant,
+            name="Remote",
+            provider="deepseek",
+            base_url="https://api.deepseek.com",
+            api_key=fake_api_key("remote"),
+            model="deepseek-chat",
+            is_active=True,
+        )
+        local = api_module._llm_nodes.create_node(
+            tenant,
+            name="Local",
+            provider="ollama",
+            base_url="http://localhost:11434",
+            api_key="",
+            model="qwen2.5:7b",
+            is_active=True,
+        )
+        first = api_module._llm_nodes.get_usable_node(tenant)
+        assert first is not None
+        assert first["node_id"] == local["node_id"]
+        assert first["node_id"] != remote["node_id"]
 
 
 # ---------------------------------------------------------------------------

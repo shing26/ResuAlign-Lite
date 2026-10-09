@@ -1,10 +1,10 @@
 """Multi-node LLM configuration: CRUD, activation, and connectivity probes.
 
-Sprint 5: tenants can register several LLM provider nodes and activate one
-at a time; ``build_config()`` hot-reloads the active node without a restart
-(see ``settings._stored_llm_snapshot``). A tenant with no nodes is seeded
-once from .env / env vars on the first ``GET /api/llm/nodes``; after that
-the SQLite ``llm_nodes`` table is authoritative.
+Sprint 5: tenants can register several LLM provider nodes and keep multiple
+active for failover; ``build_config()`` hot-reloads the first usable node
+without a restart (see ``settings._stored_llm_snapshot``). A tenant with no
+nodes is seeded once from .env / env vars on the first ``GET /api/llm/nodes``;
+after that the SQLite ``llm_nodes`` table is authoritative.
 """
 
 from __future__ import annotations

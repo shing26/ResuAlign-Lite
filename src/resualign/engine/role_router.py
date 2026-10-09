@@ -162,6 +162,36 @@ def usable_active_nodes(node_store: Any, tenant_id: str) -> list[dict]:
     return [single] if single else []
 
 
+def _fallback_candidates(
+    node_store: Any,
+    tenant_id: str,
+    primary_node: dict | None,
+    default_config: Any = None,
+) -> list[tuple[dict | None, Any]]:
+    """Return fallback candidates after the primary attempt.
+
+    An explicit ``default_config`` is the only fallback when supplied.
+    Otherwise every usable node except the primary is tried in priority
+    order, so a failed primary is never immediately re-aimed at itself.
+    """
+    if default_config is not None:
+        return [(None, default_config)]
+
+    primary_id = (primary_node or {}).get("node_id")
+    seen: set[str] = {primary_id} if primary_id else set()
+    candidates: list[tuple[dict | None, Any]] = []
+    for node in usable_active_nodes(node_store, tenant_id):
+        if node is primary_node:
+            continue
+        node_id = node.get("node_id")
+        if node_id and node_id in seen:
+            continue
+        if node_id:
+            seen.add(node_id)
+        candidates.append((node, None))
+    return candidates
+
+
 def _report_call_outcome(
     node_store: Any,
     tenant_id: str,
@@ -230,8 +260,9 @@ def call_with_role(
     """Call a pipeline function with the role-appropriate LLM client.
 
     The function receives ``client`` as the first positional argument plus
-    any ``fn_kwargs``.  On ``LLMResponseError`` (after the client's internal
-    retries), it falls back to the default node once.
+    any ``fn_kwargs``. On ``LLMResponseError`` (after the client's internal
+    retries), it falls back through the remaining usable nodes in priority
+    order. An explicit ``default_config`` is the only fallback in that case.
 
     Returns ``(result, meta)`` where ``meta`` carries:
     - ``role``: the role name
@@ -277,7 +308,7 @@ def call_with_role(
                 success=False, code=getattr(exc, "code", "other"),
             )
             logger.warning(
-                "Role %s primary node failed: %s; falling back to default",
+                "Role %s primary node failed: %s; trying fallback nodes",
                 role, exc,
             )
             meta["error"] = str(exc)[:200]
@@ -287,7 +318,7 @@ def call_with_role(
                 node_store, tenant_id, primary_node, success=False, code="other"
             )
             logger.warning(
-                "Role %s primary node unexpected error: %s; falling back to default",
+                "Role %s primary node unexpected error: %s; trying fallback nodes",
                 role, exc,
             )
             meta["error"] = str(exc)[:200]
@@ -295,50 +326,63 @@ def call_with_role(
         finally:
             client.close()
 
-    # ---- Fallback to default node ----
-    fallback_node: dict | None = None
-    if default_config is not None:
-        fallback_config = default_config
-    else:
-        # Ticket #103: breaker-filtered selection (never re-aim at a node
-        # the sweep just gave up on).
-        fallback_node = usable_active_node(node_store, tenant_id)
-        if fallback_node is None:
-            meta["error"] = "No default node available for fallback"
-            raise LLMResponseError(
-                meta["error"], code=LlmFailureCode.HTTP
-            )
-        from ..models import ResuAlignConfig
-        fallback_config = ResuAlignConfig(
-            provider=fallback_node.get("provider", ""),
-            model=fallback_node.get("model", ""),
-            api_key=fallback_node.get("api_key", ""),
-            base_url=fallback_node.get("base_url", ""),
-            disable_thinking=bool(fallback_node.get("disable_thinking", False)),
-        )
-        meta["fallback_node_name"] = fallback_node.get("name", "")
-
-    client = OpenAIClient(
-        fallback_config,
-        timeout=_role_timeout(role),
-        max_tokens=_role_max_tokens(role),
-        token_cap=_role_token_cap(role),
-        deadline=_role_deadline(role),
-        retry_transport=role in _RETRY_ON_TRANSPORT_ROLES,
+    # ---- Fallback through the remaining usable nodes ----
+    candidates = _fallback_candidates(
+        node_store, tenant_id, primary_node, default_config
     )
-    try:
-        result = fn(client, **fn_kwargs)
-        _report_call_outcome(node_store, tenant_id, fallback_node, success=True)
-        return result, meta
-    except Exception as exc:
-        _report_call_outcome(
-            node_store, tenant_id, fallback_node,
-            success=False, code=getattr(exc, "code", "other"),
+    if not candidates:
+        meta["error"] = "No default node available for fallback"
+        raise LLMResponseError(meta["error"], code=LlmFailureCode.HTTP)
+
+    last_exc: Exception | None = None
+    for index, (fallback_node, explicit_config) in enumerate(candidates):
+        if primary_node is not None and index == 0:
+            meta["fallback_used"] = True
+        elif primary_node is None and index > 0:
+            meta["fallback_used"] = True
+
+        if fallback_node is not None:
+            from ..models import ResuAlignConfig
+            fallback_config = ResuAlignConfig(
+                provider=fallback_node.get("provider", ""),
+                model=fallback_node.get("model", ""),
+                api_key=fallback_node.get("api_key", ""),
+                base_url=fallback_node.get("base_url", ""),
+                disable_thinking=bool(
+                    fallback_node.get("disable_thinking", False)
+                ),
+            )
+            meta["fallback_node_name"] = fallback_node.get("name", "")
+        else:
+            fallback_config = explicit_config
+
+        client = OpenAIClient(
+            fallback_config,
+            timeout=_role_timeout(role),
+            max_tokens=_role_max_tokens(role),
+            token_cap=_role_token_cap(role),
+            deadline=_role_deadline(role),
+            retry_transport=role in _RETRY_ON_TRANSPORT_ROLES,
         )
-        meta["error"] = str(exc)[:200]
-        raise
-    finally:
-        client.close()
+        try:
+            result = fn(client, **fn_kwargs)
+            _report_call_outcome(
+                node_store, tenant_id, fallback_node, success=True
+            )
+            return result, meta
+        except Exception as exc:
+            _report_call_outcome(
+                node_store, tenant_id, fallback_node,
+                success=False, code=getattr(exc, "code", "other"),
+            )
+            meta["error"] = str(exc)[:200]
+            last_exc = exc
+        finally:
+            client.close()
+
+    if last_exc is not None:
+        raise last_exc
+    raise LLMResponseError(meta["error"] or "No fallback node succeeded")
 
 
 def call_with_role_streaming(
@@ -355,7 +399,8 @@ def call_with_role_streaming(
     Resolves the role node, builds an ``OpenAIClient``, and calls
     ``stream_or_fallback_fn`` (which should accept ``client`` as its first
     argument plus any ``fn_kwargs``). On ``StreamConnectionError`` or
-    ``LLMResponseError`` it falls back to the default node once.
+    ``LLMResponseError`` it falls back through the remaining usable nodes
+    in priority order.
 
     Returns ``(result, meta)`` where ``meta`` mirrors ``call_with_role``:
     ``role``, ``node_name``, ``model``, ``fallback_used``,
@@ -394,7 +439,7 @@ def call_with_role_streaming(
                 success=False, code=getattr(exc, "code", "other"),
             )
             logger.warning(
-                "Role %s primary stream failed: %s; falling back to default",
+                "Role %s primary stream failed: %s; trying fallback nodes",
                 role, exc,
             )
             meta["error"] = str(exc)[:200]
@@ -402,37 +447,49 @@ def call_with_role_streaming(
         finally:
             client.close()
 
-    # ---- Fallback to default node ----
-    fallback_node = usable_active_node(node_store, tenant_id)
-    if fallback_node is None:
+    # ---- Fallback through the remaining usable nodes ----
+    candidates = _fallback_candidates(node_store, tenant_id, primary_node)
+    if not candidates:
         meta["error"] = "No default node available for fallback"
-        raise LLMResponseError(
-            meta["error"], code=LlmFailureCode.HTTP
-        )
-    from ..models import ResuAlignConfig
-    fallback_config = ResuAlignConfig(
-        provider=fallback_node.get("provider", ""),
-        model=fallback_node.get("model", ""),
-        api_key=fallback_node.get("api_key", ""),
-        base_url=fallback_node.get("base_url", ""),
-        disable_thinking=bool(fallback_node.get("disable_thinking", False)),
-    )
-    meta["fallback_node_name"] = fallback_node.get("name", "")
+        raise LLMResponseError(meta["error"], code=LlmFailureCode.HTTP)
 
-    client = OpenAIClient(fallback_config, timeout=_role_timeout(role))
-    try:
-        result = stream_or_fallback_fn(client, **fn_kwargs)
-        _report_call_outcome(node_store, tenant_id, fallback_node, success=True)
-        return result, meta
-    except Exception as exc:
-        _report_call_outcome(
-            node_store, tenant_id, fallback_node,
-            success=False, code=getattr(exc, "code", "other"),
+    last_exc: Exception | None = None
+    for index, (fallback_node, _) in enumerate(candidates):
+        if primary_node is not None and index == 0:
+            meta["fallback_used"] = True
+        elif primary_node is None and index > 0:
+            meta["fallback_used"] = True
+
+        from ..models import ResuAlignConfig
+        fallback_config = ResuAlignConfig(
+            provider=fallback_node.get("provider", ""),
+            model=fallback_node.get("model", ""),
+            api_key=fallback_node.get("api_key", ""),
+            base_url=fallback_node.get("base_url", ""),
+            disable_thinking=bool(fallback_node.get("disable_thinking", False)),
         )
-        meta["error"] = str(exc)[:200]
-        raise
-    finally:
-        client.close()
+        meta["fallback_node_name"] = fallback_node.get("name", "")
+
+        client = OpenAIClient(fallback_config, timeout=_role_timeout(role))
+        try:
+            result = stream_or_fallback_fn(client, **fn_kwargs)
+            _report_call_outcome(
+                node_store, tenant_id, fallback_node, success=True
+            )
+            return result, meta
+        except Exception as exc:
+            _report_call_outcome(
+                node_store, tenant_id, fallback_node,
+                success=False, code=getattr(exc, "code", "other"),
+            )
+            meta["error"] = str(exc)[:200]
+            last_exc = exc
+        finally:
+            client.close()
+
+    if last_exc is not None:
+        raise last_exc
+    raise LLMResponseError(meta["error"] or "No fallback node succeeded")
 
 
 def is_parallel_safe(

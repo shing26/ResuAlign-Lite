@@ -5,7 +5,7 @@ Semantics under test (grilling table):
   rate_limit/parse/schema/empty (transient or output-quality);
 - counted probe statuses: timeout/network_error/missing_key/http_401/402/403
   /http_5xx; NOT counted: http_429 and other 4xx;
- - threshold 5 -> persistent auto_disable; selection paths filter it while
+- threshold 3 -> persistent auto_disable; selection paths filter it while
   ADMIN paths (get_active_node / list / activate / delete-promotion) stay
   unfiltered; success (call or manual test) or explicit activation recovers.
 """
@@ -46,7 +46,7 @@ def _node(store, tenant="t", **kw):
     )
 
 
-def _trip(store, tenant, node_id, *, via="call", times=5):
+def _trip(store, tenant, node_id, *, via="call", times=3):
     for _ in range(times):
         if via == "call":
             store.record_call_failure(tenant, node_id, "timeout")
@@ -110,7 +110,7 @@ class TestTripFilterAndRecovery:
         _trip(store, "t", n["node_id"])
         row = store.get_node("t", n["node_id"])
         assert row["auto_disabled"] is True
-        assert row["consecutive_failures"] == 5
+        assert row["consecutive_failures"] == 3
         # Call-chain selection filters...
         assert store.get_usable_node("t") is None
         assert store.resolve_node_for_role("t", "editor") is None
@@ -162,7 +162,7 @@ class TestTripFilterAndRecovery:
         recovered = [m for m in msgs if '"llm_node.recovered"' in m]
         assert len(disabled) == 1, "auto_disabled must log exactly per transition"
         assert len(recovered) == 1
-        assert '"threshold": 5' in disabled[0]
+        assert '"threshold": 3' in disabled[0]
 
 
 class TestRoleBindingBoundary:
@@ -187,13 +187,48 @@ class TestRoleRouterWiring:
 
         return fn
 
-    def test_counted_primary_and_fallback_failures_tally(self, tmp_path):
+    def test_single_node_failure_is_not_retried(self, tmp_path):
         store = _store(tmp_path)
         n = _node(store)
         with pytest.raises(LLMResponseError):
             call_with_role("editor", self._boom("timeout"), store, "t")
-        # primary fail + fallback fail (same sole node) both counted
-        assert store.get_node("t", n["node_id"])["consecutive_failures"] == 2
+        # A single usable node must not be immediately re-aimed at itself.
+        assert store.get_node("t", n["node_id"])["consecutive_failures"] == 1
+
+    def test_failover_uses_next_usable_node(self, tmp_path):
+        store = _store(tmp_path)
+        primary = store.create_node(
+            "t",
+            name="primary",
+            provider="deepseek",
+            model="primary-model",
+            base_url="https://api.deepseek.com",
+            api_key=fake_api_key("primary"),
+            is_active=True,
+        )
+        store.create_node(
+            "t",
+            name="backup",
+            provider="deepseek",
+            model="backup-model",
+            base_url="https://api.deepseek.com",
+            api_key=fake_api_key("backup"),
+            is_active=True,
+        )
+        assert store.set_role_binding("t", "editor", primary["node_id"])
+        seen: list[str] = []
+
+        def fn(client, **kw):
+            seen.append(client.model)
+            if client.model == "primary-model":
+                raise LLMResponseError("primary down", code="timeout")
+            return "ok"
+
+        result, meta = call_with_role("editor", fn, store, "t")
+        assert result == "ok"
+        assert seen == ["primary-model", "backup-model"]
+        assert meta["fallback_used"] is True
+        assert meta["fallback_node_name"] == "backup"
 
     def test_uncounted_code_tallies_zero(self, tmp_path):
         store = _store(tmp_path)
@@ -235,7 +270,7 @@ class TestRoleRouterWiring:
 
         with pytest.raises(Exception):
             call_with_role_streaming("editor", stall, store, "t")
-        assert store.get_node("t", n["node_id"])["consecutive_failures"] == 2
+        assert store.get_node("t", n["node_id"])["consecutive_failures"] == 1
 
     def test_fake_store_without_breaker_still_works(self):
         """role_router must stay duck-typed for legacy node-store doubles."""
@@ -301,6 +336,81 @@ class TestMigrationFive:
         assert store.get_usable_node("t") is None
 
 
+class TestMigrationSix:
+    """Existing databases drop the legacy one-active unique index."""
+
+    _OLD = """
+    CREATE TABLE llm_nodes (
+        node_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        base_url TEXT,
+        api_key TEXT,
+        model TEXT,
+        is_active INTEGER NOT NULL DEFAULT 0,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        last_test_status TEXT,
+        last_test_latency_ms REAL,
+        last_test_at REAL,
+        disable_thinking INTEGER NOT NULL DEFAULT 0,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        auto_disabled INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX idx_llm_nodes_tenant ON llm_nodes(tenant_id);
+    CREATE UNIQUE INDEX idx_llm_nodes_one_active
+        ON llm_nodes(tenant_id) WHERE is_active = 1;
+    CREATE TABLE schema_migrations (
+        store TEXT NOT NULL DEFAULT '',
+        version INTEGER NOT NULL,
+        applied_at REAL NOT NULL,
+        PRIMARY KEY (store, version)
+    );
+    INSERT INTO schema_migrations (store, version, applied_at)
+    VALUES ('LLMNodeStore', 1, 1.0),
+           ('LLMNodeStore', 2, 1.0),
+           ('LLMNodeStore', 3, 1.0),
+           ('LLMNodeStore', 4, 1.0),
+           ('LLMNodeStore', 5, 1.0);
+    """
+
+    def test_legacy_one_active_index_is_dropped(self, tmp_path):
+        db = tmp_path / "legacy-multi-active.db"
+        conn = sqlite3.connect(db)
+        conn.executescript(self._OLD)
+        conn.commit()
+        conn.close()
+
+        store = LLMNodeStore(db_path=db)
+        first = store.create_node(
+            "t",
+            name="first",
+            provider="deepseek",
+            model="first-model",
+            base_url="https://api.deepseek.com",
+            api_key=fake_api_key("first"),
+            is_active=True,
+        )
+        second = store.create_node(
+            "t",
+            name="second",
+            provider="deepseek",
+            model="second-model",
+            base_url="https://api.deepseek.com",
+            api_key=fake_api_key("second"),
+            is_active=True,
+        )
+        assert first["is_active"] is True
+        assert second["is_active"] is True
+        with store._connect() as conn:
+            indexes = {
+                row["name"]
+                for row in conn.execute("PRAGMA index_list(llm_nodes)")
+            }
+        assert "idx_llm_nodes_one_active" not in indexes
+
+
 @pytest.fixture()
 def api_node_store(tmp_path):
     saved = {
@@ -351,4 +461,4 @@ class TestNodeListApi:
         )
         after = client.get("/api/llm/nodes", headers=headers).json()[0]
         assert after["auto_disabled"] is True
-        assert after["consecutive_failures"] == 5
+        assert after["consecutive_failures"] == 3

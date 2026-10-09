@@ -1,8 +1,8 @@
 """Tenant-scoped LLM provider node store (multi-node configuration).
 
 Each tenant can register several LLM nodes (provider / base_url / api_key /
-model combinations) and keep exactly one active at a time. ``build_config()``
-reads the active node on every call via the registered stored-provider
+model combinations) and keep more than one active for failover. ``build_config()``
+reads the first usable node on every call via the registered stored-provider
 callback, so activating a different node hot-reloads the pipeline config
 without a restart. When a tenant has no nodes, the legacy single-node ``llm``
 settings field (user_settings) remains the fallback.
@@ -151,17 +151,24 @@ class LLMNodeStore(_SqliteStore):
             "ALTER TABLE llm_nodes ADD COLUMN "
             "auto_disabled INTEGER NOT NULL DEFAULT 0;",
         ),
+        # 6: P0 multi-active failover — databases that already applied
+        # migration 1 still carry the old one-active unique index. Fresh
+        # databases no longer create it, but applied migrations are skipped,
+        # so the index must be dropped explicitly here.
+        (
+            6,
+            "DROP INDEX IF EXISTS idx_llm_nodes_one_active;",
+        ),
     )
 
     # ------------------------------------------------------------------
     # Breaker (ticket #103)
     # ------------------------------------------------------------------
 
-    # P1: breaker threshold is configurable via env var (default 5).
-    # A single node failing 3 times was too aggressive for transient
-    # network jitter; 5 gives more tolerance while still protecting
-    # against sustained outages.
-    BREAKER_THRESHOLD = int(os.environ.get("RESUALIGN_BREAKER_THRESHOLD", "5"))
+    # Ticket #103: the documented default is 3 counted failures. Keep it
+    # configurable for operators, but do not silently weaken the contract
+    # that the degradation benchmark and production invariants pin.
+    BREAKER_THRESHOLD = int(os.environ.get("RESUALIGN_BREAKER_THRESHOLD", "3"))
     # LLMResponseError codes that say the node itself is not serving.
     # rate_limit (429) is transient; parse/schema/empty are model-output
     # quality issues, not node availability — none of them count.
@@ -432,7 +439,7 @@ class LLMNodeStore(_SqliteStore):
         return self._row_to_dict(row) if row is not None else None
 
     def get_active_node(self, tenant_id: str) -> dict[str, Any] | None:
-        """Return the tenant's single active node, or None."""
+        """Return one active node for admin/display paths, or None."""
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
@@ -449,17 +456,13 @@ class LLMNodeStore(_SqliteStore):
         Excludes auto-disabled nodes. Admin paths (list / activate /
         delete-promotion / settings display) must keep using
         ``get_active_node`` — the breaker filters serving, not truth.
+
+        Returns the same priority order as ``get_usable_nodes`` so the
+        process-wide config and role routing never disagree about which
+        node is first.
         """
-        with self._lock:
-            self._ensure_initialized()
-            with self._connect() as conn:
-                row = conn.execute(
-                    f"SELECT {','.join(_NODE_FIELDS)} FROM llm_nodes "
-                    "WHERE tenant_id = ? AND is_active = 1 "
-                    "AND auto_disabled = 0 LIMIT 1",
-                    (tenant_id,),
-                ).fetchone()
-        return self._row_to_dict(row) if row is not None else None
+        nodes = self.get_usable_nodes(tenant_id)
+        return nodes[0] if nodes else None
 
     def get_usable_nodes(self, tenant_id: str) -> list[dict[str, Any]]:
         """All active, non-disabled nodes for failover (P0 multi-active).
