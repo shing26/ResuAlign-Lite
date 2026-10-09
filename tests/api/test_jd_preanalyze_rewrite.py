@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from unittest.mock import patch
 
@@ -311,6 +312,74 @@ def test_preanalyze_endpoint_idempotent_and_persists():
     assert persisted["match_score"] == 94.8
     assert persisted["match_score_detail"]["total"] == 94.8
     assert persisted["match_reason"].startswith("基于规则评分：")
+
+
+def test_preanalyze_classification_and_profile_run_concurrently():
+    """P3: classification and profile overlap instead of adding wall clock."""
+    job = _create_job()
+    resume = _create_resume()
+    api_module._jobs.update_job(
+        _auth_user_id(),
+        job["job_id"],
+        workbench_resume_id=resume["resume_id"],
+    )
+    barrier = threading.Barrier(2, timeout=5)
+
+    def fake_classify(*args, **kwargs):
+        barrier.wait()
+        return {
+            "job_function": "后端",
+            "seniority": "中级",
+            "tech_tags": ["Python"],
+        }
+
+    def fake_profile(client, jd_text, **kwargs):
+        barrier.wait()
+        return JDProfile(
+            must_have_skills=["Python"],
+            business_scenarios=["low latency"],
+        )
+
+    def fake_gap(client, resume_text, jd_profile_text, **kwargs):
+        return GapReport(
+            missing_keywords=["Redis"],
+            strength_matches=["Python"],
+        )
+
+    def fake_call_with_role(
+        role,
+        fn,
+        node_store,
+        tenant_id,
+        *,
+        fn_kwargs=None,
+        default_config=None,
+    ):
+        return fn(object(), **(fn_kwargs or {})), {}
+
+    with patch(
+        "resualign.app.context.context.build_config",
+        return_value=_config(),
+    ), patch(
+        "resualign.api.services.jobs.call_with_role",
+        side_effect=fake_call_with_role,
+    ), patch(
+        "resualign.app.context.context._classify_job",
+        side_effect=fake_classify,
+    ), patch(
+        "resualign.app.context.context.profile_jd",
+        side_effect=fake_profile,
+    ), patch(
+        "resualign.app.context.context.analyze_gaps",
+        side_effect=fake_gap,
+    ):
+        response = client.post(
+            f"/api/jobs/{job['job_id']}/preanalyze",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
 
 
 def test_preanalyze_no_resume_profiles_only():
