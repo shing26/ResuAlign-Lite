@@ -80,3 +80,19 @@ local Windows runs print `ADVISORY` instead of failing (ADR-0054). Set
 `RESUALIGN_BENCHMARK_STRICT=1` to force gating locally.
 
 Generated JSON belongs in CI artifacts or a temporary directory, not in git.
+
+## Role-latency calibration (P4)
+
+`role_latency_benchmark.py` measures real per-role round trips against a
+configured LLM node. It copies the selected node into a throwaway store, so
+calibration failures never change the production breaker state.
+
+```powershell
+$env:PYTHONPATH='src'
+python benchmarks\role_latency_benchmark.py --samples 5 --json-out role-latency.json
+```
+
+The JSON reports p50/p95/p99, the current role timeout, and the remaining
+headroom for `diagnose`, `profiler`, `gap_analyzer`, `editor`, and
+`evaluator`. This harness needs a real model and is evidence tooling, not a
+CI gate.
