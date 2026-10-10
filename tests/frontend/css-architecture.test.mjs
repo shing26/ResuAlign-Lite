@@ -135,7 +135,6 @@ const DECLARED_ZERO_REF_API = new Set(
 --toast-w
 --track-caps
 --warn-line
---z-drawer
   `.trim().split(/\s+/),
 );
 

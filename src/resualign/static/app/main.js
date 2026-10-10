@@ -1572,7 +1572,10 @@ const actions = {
     const panel = wrap || document.querySelector("[data-batch-wrap]");
     if (!panel) return;
     if (panel.hidden) openBatchPanel();
-    else panel.hidden = true;
+    else {
+      panel.hidden = true;
+      updateBatchSelection();
+    }
   },
   /* 岗位卡详情改为显式展开：hover 展开会让卡片高度变化，把同列下方所有卡片
    * 整体下推（实测 187px），鼠标在卡片间移动时目标在指针下跳动，多选复选框
@@ -1593,6 +1596,8 @@ const actions = {
   "close-batch-panel": () => {
     const panel = document.querySelector("[data-batch-wrap]");
     if (panel) panel.hidden = true;
+    /* 关闭后按当前选择恢复 FAB；否则取消勾选过的话它再也不出现。 */
+    updateBatchSelection();
   },
   "delete-job": (button) => {
     /* #U9: replace window.confirm with the in-app modal. The confirm
@@ -2841,7 +2846,11 @@ function updateBatchSelection() {
   const label = $("[data-board-selected-count]");
   if (label) label.textContent = `已选 ${count}`;
   const fab = $("[data-batch-fab]");
-  if (fab) fab.hidden = count === 0;
+  /* 面板打开时 FAB 会叠在面板底部（实测重叠 9898px²），且它的作用已被
+     面板本身接管：面板可见就收起 FAB，关闭时按选择数恢复。 */
+  const panel = $("[data-batch-wrap]");
+  const panelOpen = Boolean(panel && !panel.hidden);
+  if (fab) fab.hidden = count === 0 || panelOpen;
 }
 
 /* 看板勾选是用户看得见的「选择」（FAB 上的「已选 N」），但表单真正读取的是
@@ -2863,6 +2872,8 @@ function openBatchPanel() {
   if (!panel) return;
   syncBatchPanelFromBoard();
   panel.hidden = false;
+  const fab = $("[data-batch-fab]");
+  if (fab) fab.hidden = true;
 }
 
 document.addEventListener("change", (event) => {

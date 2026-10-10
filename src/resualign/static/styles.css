@@ -7648,6 +7648,8 @@ html {
 }
 
 .jobs-view {
+  /* 批量对齐面板是覆盖本视图的接管式浮层，需要本视图作为定位参照。 */
+  position: relative;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -9173,6 +9175,42 @@ details > summary::-webkit-details-marker,
   color: var(--text-secondary);
   font-size: var(--text-xs);
   white-space: nowrap;
+}
+
+/* 批量对齐面板是岗位库的接管式浮层，不是工具栏里的内联 flex 项。
+   作为 .jobs-view 的 flex 子项时它会被压缩（实测 609px 面板被塞进 309px
+   工具栏，与看板重叠约 32 万 px²，并盖住「开始批量对齐」）。改为覆盖
+   岗位库内容区并自行滚动，FAB 在浮层之下不再叠压。 */
+.board-toolbar[data-jobs-batch-mount] {
+  display: block;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+
+.batch-panel-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-drawer);
+  margin: 0;
+  padding: var(--space-5) var(--space-5) var(--space-6);
+  overflow: auto;
+}
+
+.batch-panel-wrap[hidden] {
+  display: none;
+}
+
+/* 窄屏下岗位库整页滚动（见下方 max-width:900px 的 .jobs-view 规则），
+   接管式浮层失去可锚定的视口：回到普通流，由页面滚动承载，避免面板
+   被压进 0 高度容器里。 */
+@media (max-width: 900px) {
+  .batch-panel-wrap {
+    position: static;
+    padding: var(--space-4);
+    overflow: visible;
+  }
 }
 
 .diagnosis-panel.diagnosis-banner {

@@ -50,7 +50,7 @@ test("所有展开面板的路径都走 openBatchPanel，不再各自 hidden=fal
     0,
     "仍有绕过 openBatchPanel 的直接展开，会漏掉选择同步",
   );
-  const toggle = MAIN.match(/"toggle-batch-panel"[\s\S]{0,320}?\n  \},/);
+  const toggle = MAIN.match(/"toggle-batch-panel"[\s\S]{0,520}?\n  \},/);
   assert.ok(toggle, "缺少 toggle-batch-panel");
   assert.match(toggle[0], /openBatchPanel\(\)/, "toggle 打开时应走 openBatchPanel");
 });

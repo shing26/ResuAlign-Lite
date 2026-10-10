@@ -73,3 +73,59 @@ test("面板作用域选择器不是死类（.batch-job-list 的高度约束真�
     );
   }
 });
+
+/* 回归（2026-10-09 实测）：面板作为 .jobs-view 的 flex 子项会被压缩
+ * （609px 面板塞进 309px 工具栏，与看板重叠约 32 万 px²，盖住「开始批量
+ * 对齐」）。修复后它必须是覆盖岗位库内容区的接管式浮层：绝对定位 +
+ * 高层级 + 自身滚动，且窄屏回落到普通流。FAB 打开面板时必须收起，
+ * 否则固定在底部会叠在面板上（实测重叠 9898px²）。 */
+test("批量面板是接管式浮层而非可被压缩的内联 flex 项", () => {
+  /* 必须锚定行首：文件里还有 `.card, .panel, … .batch-panel-wrap{ … }`
+     这种分组规则，未锚定会先命中它。 */
+  const block = STYLES.match(/^\.batch-panel-wrap\s*\{[^}]*\}/m);
+  assert.ok(block, "styles.css 缺少 .batch-panel-wrap 规则");
+  assert.match(block[0], /position:\s*absolute/);
+  assert.match(block[0], /inset:\s*0/);
+  assert.match(block[0], /overflow:\s*auto/);
+  assert.match(
+    block[0],
+    /z-index:\s*var\(--z-drawer\)/,
+    "浮层要盖过 z-dropdown 的 FAB，用 --z-drawer",
+  );
+
+  assert.match(
+    STYLES,
+    /@media \(max-width: 900px\)\s*\{[\s\S]*?\.batch-panel-wrap\s*\{[\s\S]*?position:\s*static/,
+    "窄屏岗位库整页滚动，面板必须回落到普通流",
+  );
+
+  assert.match(
+    STYLES,
+    /^\.jobs-view\s*\{[^}]*position:\s*relative/m,
+    ".jobs-view 必须作为浮层的定位参照",
+  );
+});
+
+test("打开批量面板时收起 FAB，关闭后按选择数恢复", () => {
+  const openFn = MAIN.match(/function openBatchPanel\(\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(openFn, "未找到 openBatchPanel");
+  assert.match(
+    openFn[0],
+    /\[data-batch-fab\][\s\S]*?hidden\s*=\s*true/,
+    "openBatchPanel 必须收起 FAB",
+  );
+
+  const updateFn = MAIN.match(/function updateBatchSelection\(\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(updateFn, "未找到 updateBatchSelection");
+  assert.match(
+    updateFn[0],
+    /panelOpen/,
+    "updateBatchSelection 必须感知面板是否打开，避免勾选时又把 FAB 弹回来",
+  );
+
+  assert.match(
+    MAIN,
+    /"close-batch-panel"\s*:\s*\(\)\s*=>\s*\{[\s\S]*?updateBatchSelection\(\)/,
+    "close-batch-panel 关闭后要恢复 FAB",
+  );
+});
