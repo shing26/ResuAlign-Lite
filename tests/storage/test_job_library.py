@@ -623,6 +623,123 @@ class TestSourceUrlNormalization:
         assert job_library._normalize_source_url("") == ""
         assert job_library._normalize_source_url(None) == ""
 
+    def test_percent_encoding_and_unicode_equivalence(self):
+        normalize = job_library._normalize_source_url
+        # Raw unicode and its percent-encoded form are the same posting.
+        assert (
+            normalize("https://campus.example.com/招聘/Java")
+            == normalize("https://campus.example.com/%E6%8B%9B%E8%81%98/Java")
+        )
+        # Stray whitespace from copy-paste does not fork the key.
+        assert (
+            normalize(" https://x.com/a \n b ")
+            == normalize("https://x.com/a b")
+        )
+        # NFC-divergent unicode (precomposed vs combining) collapses to one key.
+        assert normalize("https://x.com/caf\u00e9") == normalize(
+            "https://x.com/cafe\u0301"
+        )
+        # Default ports are dropped.
+        assert normalize("https://x.com:443/a") == normalize("https://x.com/a")
+        assert normalize("http://x.com:80/a") == normalize("http://x.com/a")
+        # Identity-bearing query params survive alongside tracking noise.
+        assert (
+            normalize("https://x.com/detail?postId=99&utm_source=mail")
+            == "https://x.com/detail?postid=99"
+        )
+
+
+class TestDedupeCandidates:
+    """Cross-channel duplicate checks test every candidate, not one key."""
+
+    def test_candidates_cover_url_text_and_guarded_identity(self):
+        cands = job_library._dedupe_candidates(
+            "https://x.com/jobs/1",
+            "Some JD body",
+            company="Acme",
+            title="Engineer",
+            location="Shanghai",
+        )
+        assert cands[0] == "url:https://x.com/jobs/1"
+        assert cands[1].startswith("text:")
+        assert cands[2].startswith("identity:")
+
+    def test_identity_candidate_requires_company_and_title(self):
+        cands = job_library._dedupe_candidates(
+            "", "Bare paste without metadata", company=None, title=None
+        )
+        assert all(not c.startswith("identity:") for c in cands)
+        cands = job_library._dedupe_candidates(
+            "", "Bare paste", company="Acme", title=None
+        )
+        assert all(not c.startswith("identity:") for c in cands)
+
+    def test_find_duplicate_matches_across_channels(self, db_path):
+        store = _store(db_path)
+        url_row = store.create_job(
+            tenant_id="t",
+            title="Engineer",
+            jd_text="Python backend engineer. Salary 20-30K.",
+            company="Acme",
+            location="Shanghai",
+            source_type="url",
+            source_url="https://x.com/jobs/1",
+        )
+        # A pasted copy of the same posting (no URL, same identity) hits.
+        assert (
+            store.find_duplicate(
+                "t",
+                source_url=None,
+                text="Python backend engineer. Salary 20-30K.",
+                company="Acme",
+                title="Engineer",
+                location="Shanghai",
+            )["job_id"]
+            == url_row["job_id"]
+        )
+        # A URL variant under a different stored key hits by normalized URL.
+        assert (
+            store.find_duplicate(
+                "t",
+                source_url="https://x.com/jobs/1?utm_source=mail",
+                text="Different body entirely",
+            )["job_id"]
+            == url_row["job_id"]
+        )
+        # A genuinely different posting is not a duplicate.
+        assert (
+            store.find_duplicate(
+                "t",
+                source_url=None,
+                text="Frontend engineer. React. 25-40K.",
+                company="Acme",
+                title="Frontend Engineer",
+                location="Shanghai",
+            )
+            is None
+        )
+
+    def test_create_job_rejects_cross_channel_duplicate(self, db_path):
+        store = _store(db_path)
+        store.create_job(
+            tenant_id="t",
+            title="Engineer",
+            jd_text="Python backend engineer. Salary 20-30K.",
+            company="Acme",
+            location="Shanghai",
+            source_type="url",
+            source_url="https://x.com/jobs/1",
+        )
+        with pytest.raises(UserStoreError, match="Duplicate job"):
+            store.create_job(
+                tenant_id="t",
+                title="Engineer (pasted)",
+                jd_text="Python backend engineer. Salary 20-30K.",
+                company="Acme",
+                location="Shanghai",
+                source_type="paste",
+            )
+
 
 class TestSalaryTextParsing:
     def test_requires_a_magnitude_unit(self):

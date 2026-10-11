@@ -426,6 +426,38 @@ def _create_library_job_without_llm(
     )
 
 
+def find_library_job_duplicate(
+    user: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Resolve the library row a paste payload would duplicate, if any.
+
+    Mirrors the field derivation of ``_create_library_job_without_llm`` so a
+    rejected paste can still find the existing row that rejected it (the
+    store's duplicate check tests URL, text, and identity candidates).
+    """
+    jd_text = (payload.get("jd_text") or "").strip()
+    if not jd_text:
+        return None
+    title = (payload.get("title") or "").strip() or context._derive_title(jd_text)
+    company = (payload.get("company") or "").strip() or None
+    location = (payload.get("location") or "").strip() or None
+    if not company or not location:
+        extracted_company, extracted_location = (
+            context._extract_company_location(jd_text)
+        )
+        company = company or extracted_company
+        location = location or extracted_location
+    jd_url = (payload.get("jd_url") or "").strip()
+    return context._jobs.find_duplicate(
+        user["user_id"],
+        source_url=(payload.get("source_url") or (jd_url or None)),
+        text=jd_text,
+        company=company,
+        title=title,
+        location=location,
+    )
+
+
 def _library_dedupe_key(jd_text: str) -> str:
     """Mirror the text dedupe key used by JobLibraryStore.create_job."""
     import hashlib as _hashlib

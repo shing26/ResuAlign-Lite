@@ -548,9 +548,18 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
     # deterministic, while _classify_job costs a real LLM round-trip. Re-importing
     # an unchanged batch is a no-op for the library, so it must also be a no-op
     # for the LLM bill (2026-09-22: 47 duplicate rows burned 47 calls).
-    if context._jobs.find_by_dedupe_key(user['user_id'], dedupe_key) is not None:
-        raise context.UserStoreError('Duplicate job already exists')
     fields = _deterministic_job_fields(payload)
+    duplicate = context._jobs.find_duplicate(
+        user['user_id'],
+        source_url=source_url,
+        text=jd_text,
+        company=fields['company'],
+        title=fields['title'],
+        location=fields['location'],
+        extra_key=payload.get('dedupe_key'),
+    )
+    if duplicate is not None:
+        raise context.UserStoreError('Duplicate job already exists')
     title = fields['title']
     company = fields['company']
     location = fields['location']
@@ -597,8 +606,16 @@ def _local_ingest_job(
             if normalized_url
             else _text_dedupe_key(jd_text)
         )
-    existing = context._jobs.find_by_dedupe_key(
-        user['user_id'], dedupe_key
+    # Cross-channel duplicate check: the stored key follows the site rule
+    # above, but a posting captured once by URL and once pasted must still
+    # resolve to its first row, so every dedupe candidate is tested.
+    existing = context._jobs.find_duplicate(
+        user['user_id'],
+        source_url=job_page_url,
+        text=jd_text,
+        company=fields['company'],
+        title=fields['title'],
+        location=fields['location'],
     )
     if existing is not None:
         return {

@@ -8,6 +8,7 @@ import re
 import sqlite3
 import statistics
 import time
+import unicodedata
 import urllib.parse
 import uuid
 from datetime import datetime
@@ -489,10 +490,16 @@ def _normalize_source_url(url: str) -> str:
     posting shared with different tags still dedupes to one row. Stripping
     the query/fragment outright collapsed every posting on a site into a
     single key (2026-09-24 regression).
+
+    Copy-pasted URLs arrive with stray whitespace, NFC-divergent unicode,
+    and mixed percent-encoding (``%E4%B8%AD`` vs a raw 中); all three are
+    normalized so the same posting shared through different channels still
+    dedupes to one row. Default ports are dropped.
     """
     value = (url or "").strip()
     if not value:
         return ""
+    value = unicodedata.normalize("NFC", re.sub(r"\s+", "", value))
     try:
         parts = urllib.parse.urlsplit(value)
     except ValueError:
@@ -501,17 +508,37 @@ def _normalize_source_url(url: str) -> str:
     if "?" in fragment:
         frag_path, _, frag_query = fragment.partition("?")
         cleaned = _normalize_query(frag_query)
-        fragment = f"{frag_path}?{cleaned}" if cleaned else frag_path
+        fragment = f"{_normalize_percent_encoding(frag_path)}?{cleaned}" if cleaned else _normalize_percent_encoding(frag_path)
     rebuilt = urllib.parse.urlunsplit(
         (
             parts.scheme.lower(),
-            parts.netloc.lower(),
-            parts.path.rstrip("/"),
+            _normalize_netloc(parts.netloc),
+            _normalize_percent_encoding(parts.path).rstrip("/"),
             _normalize_query(parts.query),
             fragment,
         )
     )
     return rebuilt.lower()
+
+
+def _normalize_percent_encoding(text: str) -> str:
+    """Decode then re-encode one URL component with a single convention."""
+    if not text:
+        return ""
+    return urllib.parse.quote(
+        urllib.parse.unquote(text),
+        safe="/-._~!$&'()*+,;=:@",
+    )
+
+
+def _normalize_netloc(netloc: str) -> str:
+    """Lowercase the host and drop the scheme's default port."""
+    lowered = (netloc or "").lower()
+    if lowered.endswith(":80"):
+        lowered = lowered[: -len(":80")]
+    if lowered.endswith(":443"):
+        lowered = lowered[: -len(":443")]
+    return lowered
 
 
 _SALARY_UNIT_FACTORS = {"k": 1000, "千": 1000, "万": 10000}
@@ -585,6 +612,32 @@ def _dedupe_key_for(
     if normalized_url:
         return "url:" + normalized_url
     return _text_dedupe_key(text)
+
+
+def _dedupe_candidates(
+    source_url: str | None,
+    text: str | None,
+    company: str | None = None,
+    title: str | None = None,
+    location: str | None = None,
+) -> list[str]:
+    """Every key that can identify this posting, strongest first.
+
+    The same posting captured twice through different channels (a URL row
+    and a pasted row) must not create two library rows, so duplicate checks
+    test all candidates, not just the primary key. Identity joins the set
+    only when company and title are both present: bare pastes share an
+    empty identity and would collapse unrelated rows into one cluster.
+    """
+    candidates: list[str] = []
+    normalized_url = _normalize_source_url(source_url or "")
+    if normalized_url:
+        candidates.append("url:" + normalized_url)
+    if (text or "").strip():
+        candidates.append(_text_dedupe_key(text))
+    if (company or "").strip() and (title or "").strip():
+        candidates.append("identity:" + _job_identity_key(company, title, location))
+    return candidates
 
 
 def _job_identity_key(
@@ -887,6 +940,23 @@ class JobLibraryStore(_SqliteStore):
             dedupe_key = _dedupe_key_for(source_type, source_url, text)
         else:
             dedupe_key = dedupe_key.strip()
+        # A posting captured twice through different channels (URL row plus
+        # pasted row, or a rewritten JD body under the same identity) must
+        # resolve to its first row, so every dedupe candidate is tested
+        # before the insert; the UNIQUE index below stays the last guard.
+        if (
+            self.find_duplicate(
+                tenant_id,
+                source_url=source_url,
+                text=text,
+                company=company,
+                title=title,
+                location=location,
+                extra_key=dedupe_key,
+            )
+            is not None
+        ):
+            raise UserStoreError("Duplicate job already exists")
         job_id = uuid.uuid4().hex
         now = time.time()
         tags = self._normalize_tags(tech_tags)
@@ -996,6 +1066,62 @@ class JobLibraryStore(_SqliteStore):
                     (tenant_id, dedupe_key),
                 ).fetchone()
                 return self._row_to_library_job(row) if row else None
+
+    def find_duplicate(
+        self,
+        tenant_id: str,
+        *,
+        source_url: str | None,
+        text: str | None,
+        company: str | None = None,
+        title: str | None = None,
+        location: str | None = None,
+        extra_key: str | None = None,
+    ) -> Optional[dict[str, Any]]:
+        """Return the oldest job matching any dedupe candidate, else None.
+
+        One scan tests the normalized-URL, JD-text, and guarded identity
+        candidates together, so a posting captured twice through different
+        channels still resolves to its first row. Row counts are personal
+        scale (hundreds to low thousands); the scan mirrors the existing
+        ``list_job_identity_keys`` / ``find_job_by_application_source``
+        full-scan precedent.
+        The text candidate hashes each stored body on the fly, so a row
+        stored under a URL key still catches an identical pasted body.
+        """
+        url_key = "url:" + _normalize_source_url(source_url or "")
+        text_key = (
+            _text_dedupe_key(text) if (text or "").strip() else ""
+        )
+        identity = (
+            _job_identity_key(company, title, location)
+            if (company or "").strip() and (title or "").strip()
+            else None
+        )
+        if not (url_key != "url:" or text_key or identity or extra_key):
+            return None
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM library_jobs WHERE tenant_id = ? "
+                    "ORDER BY created_at ASC",
+                    (tenant_id,),
+                ).fetchall()
+        for row in rows:
+            if row["dedupe_key"] in (url_key, text_key, extra_key):
+                return self._row_to_library_job(row)
+            if url_key != "url:" and row["source_url"] and (
+                _normalize_source_url(row["source_url"]) == url_key[4:]
+            ):
+                return self._row_to_library_job(row)
+            if text_key and _text_dedupe_key(row["jd_text"] or "") == text_key:
+                return self._row_to_library_job(row)
+            if identity and _job_identity_key(
+                row["company"], row["title"], row["location"]
+            ) == identity:
+                return self._row_to_library_job(row)
+        return None
 
     def list_job_identity_keys(self, tenant_id: str) -> set[str]:
         """Return normalized company/title/location keys for the tenant.

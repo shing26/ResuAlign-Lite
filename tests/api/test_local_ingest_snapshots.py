@@ -274,7 +274,9 @@ def test_local_ingest_universal_dedupe_by_text_hash():
     assert body["status"] == "duplicate"
     assert body["job_id"] == first["job_id"]
 
-    # The same text through the specific site is deduped by URL, not text.
+    # The same posting through a specific site with a different URL still
+    # resolves to its first row: the duplicate check tests every candidate
+    # (URL, text, guarded identity), not just the site-specific primary key.
     specific = _ingest(
         {
             "title": "Python Intern",
@@ -285,7 +287,9 @@ def test_local_ingest_universal_dedupe_by_text_hash():
         token=token,
     )
     assert specific.status_code == 200
-    assert specific.json()["status"] == "created"
+    body = specific.json()
+    assert body["status"] == "duplicate"
+    assert body["job_id"] == first["job_id"]
 
 
 def test_apply_freezes_snapshot_and_reapply_appends_without_downgrade():

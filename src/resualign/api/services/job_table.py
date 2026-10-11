@@ -26,10 +26,8 @@ from typing import Any
 
 from ...app.context import context
 from ...job_library import (
-    _dedupe_key_for,
     _job_identity_key,
     _parse_salary_text,
-    _text_dedupe_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -428,38 +426,32 @@ def _drop_known_rows(
 ) -> tuple[list[dict[str, Any]], int]:
     """Split off rows the library already owns.
 
-    Rows without an application URL carry the ADR-0055 stable identity, but
-    rows imported before that ADR are keyed by their JD text hash. Checking
-    the key, the legacy text hash, and the normalized company/title/location
-    identity keeps the first post-upgrade sync from re-adding existing non-URL
-    rows just because their identity scheme changed — including rows whose JD
-    body WorkBuddy rewrote in the meantime (that is why the identity check
-    exists at all).
+    A row is known when the library already holds a job matching any of its
+    dedupe candidates: the normalized URL, the JD text hash (the ADR-0055
+    stable identity rides along as the explicit key), or the normalized
+    company/title/location identity. Testing the same candidate set the
+    store's create_job enforces keeps the precheck honest — including rows
+    whose JD body WorkBuddy rewrote after they were first imported.
     """
     store = context._jobs
-    identities = store.list_job_identity_keys(tenant_id)
     fresh: list[dict[str, Any]] = []
     already = 0
     for row in rows:
-        stable_key = row.get("dedupe_key")
-        key = stable_key or _dedupe_key_for(
-            row.get("source_type"),
-            row.get("source_url"),
-            str(row.get("jd_text") or ""),
+        jd_text = str(row.get("jd_text") or "")
+        # One source of truth: the same candidate set the store's create_job
+        # enforces (URL, text, guarded identity, explicit stable key).
+        known = (
+            store.find_duplicate(
+                tenant_id,
+                source_url=row.get("source_url"),
+                text=jd_text,
+                company=row.get("company"),
+                title=row.get("title"),
+                location=row.get("location"),
+                extra_key=row.get("dedupe_key"),
+            )
+            is not None
         )
-        known = store.find_by_dedupe_key(tenant_id, key) is not None
-        if not known and stable_key:
-            legacy_key = _text_dedupe_key(str(row.get("jd_text") or ""))
-            known = store.find_by_dedupe_key(tenant_id, legacy_key) is not None
-            if not known:
-                known = (
-                    _job_identity_key(
-                        row.get("company"),
-                        row.get("title"),
-                        row.get("location"),
-                    )
-                    in identities
-                )
         if known:
             already += 1
         else:

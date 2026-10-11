@@ -83,9 +83,11 @@ def init_workbench_session(
             )
         except context.UserStoreError as exc:
             if "Duplicate job" in str(exc):
-                existing = context._jobs.find_by_dedupe_key(
-                    user["user_id"],
-                    context._workbench_service._library_dedupe_key(raw_jd),
+                existing = (
+                    context._workbench_service.find_library_job_duplicate(
+                        user,
+                        {"jd_text": raw_jd, "source_type": "paste"},
+                    )
                 )
                 if existing is not None:
                     session = context._session_store.find_by_job(
