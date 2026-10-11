@@ -16,9 +16,8 @@
 
 - [x] 批量对齐修复（`5c7a39b`）：后端 alignment_status 置 queued + 前端面板接管式浮层 + 缓存版本 v60。
 - [x] 模块 1 · 去重链：多候选查重落地（见下）。
-- [ ] 模块 1 · 错误处理链：部分失败恢复已存在（逐行 try/except + skipped/errors），
-      待补：仅重试临时错误（timeout/http/rate_limit）、固定 3 次 + 指数退避（1s/2s/4s）、
-      仅失败行的立即重试入口。
+- [x] 模块 1 · 错误处理链：仅重试临时错误 + 固定 3 次退避（1s/2s/4s）+ 仅失败行，
+      两条预分析链路共用同一 helper（见下）。
 - [ ] 模块 1 收尾后：74 行现存冗余是否合并（需用户确认，破坏性数据操作）。
 - [ ] 模块 2-9：按旅程顺序推进。
 
@@ -41,6 +40,23 @@
 验证：`.scratch/simulate_dedupe_candidates.py` 回放真实库 40/40 泄漏簇全收敛、零误并
 （30 个跨身份文本命中逐对确认为同岗元数据漂移，正文逐字节相同）；全量后端 1195 passed / 7 skipped；
 ruff clean。
+
+### 模块 1 · 错误处理链执行记录（2026-10-11）
+
+部分失败恢复原本就存在（逐行 try/except + skipped/errors），缺的是「哪些错误值得重试」。
+本轮补上，并顺手消掉重复：
+
+- 新增 `_preanalyze_row_with_retry`（`_TRANSIENT_LLM_FAILURE_CODES` = timeout/http/rate_limit，
+  `_IMPORT_RETRY_DELAYS` = 1s/2s/4s）：只重试瞬时错误，确定性错误（auth/quota/parse/schema/empty）
+  一次都不重试；仅失败行原地重试；`PreanalyzeUnavailable` 仍然上抛以停掉整轮扫描（Phase A1 契约不变）。
+- **两条链路共用**：导入自动预分析（`_preanalyze_imported_job`）与一键预分析
+  （`_run_preanalyze_batch`）。后者此前是独立逐行循环且完全没有重试——用户报的
+  「一键预分析失效」在这里被真实修掉，不只是改了文案。
+- 失败文案带 `（重试 N 次后仍失败）`，用户能分清「节点抖了一下」和「节点真的不行」。
+- 测试：`tests/api/test_import_retry_policy.py` 8/8（原来 5 条锁导入链，新增 3 条锁一键链：
+  重试后计数、耗尽后的文案与计数、不可用即停）。
+
+验证：相关套件 66 passed；ruff clean。
 
 ## 已锁定决策
 

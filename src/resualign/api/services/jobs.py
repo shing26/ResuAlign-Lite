@@ -11,7 +11,7 @@ import urllib.parse
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Callable
 
 from ...alignment_lifecycle import transition_alignment
 from ...app.context import context
@@ -655,16 +655,33 @@ def _preanalyze_imported_job(
 
     A failing LLM must never fail the import: rows stay in the library as
     classification-pending and the reason is recorded on the batch.
+
+    Transient failures are retried by ``_preanalyze_row_with_retry``;
+    definitive failures still stop the whole sweep (Phase A1 probe
+    contract).
     """
     label = job.get('title') or 'Untitled'
     try:
-        result = preanalyze_job(user, job['job_id'])
+        result, failure, attempts = _preanalyze_row_with_retry(
+            user,
+            job['job_id'],
+            on_retry=lambda attempt, delay, exc: logger.info(
+                'Preanalyze transient failure for %s (%s), retrying in %.0fs'
+                ' (attempt %d)',
+                label,
+                exc,
+                delay,
+                attempt,
+            ),
+        )
     except PreanalyzeUnavailable as exc:
         batch['preanalyze'] = False
         batch.setdefault('analyze_errors', []).append(f'预分析已停止：{exc}')
         return
-    except Exception as exc:
-        batch.setdefault('analyze_errors', []).append(f'{label}: {exc}')
+    if failure is not None:
+        batch.setdefault('analyze_errors', []).append(
+            f'{label}: {failure}{_retry_suffix(attempts)}'
+        )
         return
     if result is None:
         return
@@ -731,6 +748,60 @@ class PreanalyzeUnavailable(Exception):
 _DEFINITIVE_LLM_FAILURE_CODES = frozenset(
     {LlmFailureCode.AUTH.value, LlmFailureCode.QUOTA.value}
 )
+
+
+# Locked import-retry policy (grilling module 1, error-handling chain): only
+# transient failures are retried - a slow node or a rate-limited provider
+# usually clears on its own, while auth/quota/parse/schema/empty failures
+# are deterministic and retrying only multiplies the wait. Three retries with
+# fixed 1s/2s/4s backoff, per failed row, inline.
+_TRANSIENT_LLM_FAILURE_CODES = frozenset(
+    {
+        LlmFailureCode.TIMEOUT.value,
+        LlmFailureCode.HTTP.value,
+        LlmFailureCode.RATE_LIMIT.value,
+    }
+)
+_IMPORT_RETRY_DELAYS = (1.0, 2.0, 4.0)
+
+
+def _retry_suffix(attempts: int) -> str:
+    """Return the 'retried N times' note appended to a per-row error."""
+    return f'（重试 {attempts - 1} 次后仍失败）' if attempts > 1 else ''
+
+
+def _preanalyze_row_with_retry(
+    user: dict[str, Any],
+    job_id: str,
+    delays: list[float] | None = None,
+    on_retry: Callable[[int, float, BaseException], None] | None = None,
+) -> tuple[dict[str, Any] | None, BaseException | None, int]:
+    """Run one row of preanalysis, retrying only transient failures.
+
+    Shared by every preanalysis sweep (import auto-preanalyze and the
+    one-click "preanalyze all" batch) so both chains obey the same policy.
+
+    Returns ``(result, None, attempts)`` when the model answered - ``result``
+    itself may be None, which callers treat as "no profile produced" - and
+    ``(None, exc, attempts)`` when the row failed for good. ``PreanalyzeUnavailable``
+    is re-raised: it means the whole sweep must stop, not that one row lost.
+    """
+    delays = list(_IMPORT_RETRY_DELAYS if delays is None else delays)
+    attempts = 1
+    while True:
+        try:
+            return preanalyze_job(user, job_id), None, attempts
+        except PreanalyzeUnavailable:
+            raise
+        except Exception as exc:
+            if delays and getattr(exc, 'code', '') in _TRANSIENT_LLM_FAILURE_CODES:
+                delay = delays.pop(0)
+                attempts += 1
+                if on_retry is not None:
+                    on_retry(attempts, delay, exc)
+                time.sleep(delay)
+                continue
+            return None, exc, attempts
 
 
 def _preanalyze_unavailable_from_llm(
@@ -1102,21 +1173,23 @@ def _run_preanalyze_batch(batch_id: str) -> None:
                 batch['skipped'] += 1
                 continue
             try:
-                result = preanalyze_job(user, job_id)
+                result, failure, attempts = _preanalyze_row_with_retry(
+                    user, job_id
+                )
             except PreanalyzeUnavailable as exc:
                 batch['stopped'] = True
                 batch['errors'].append(f'预分析已停止：{exc}')
                 break
-            except Exception as exc:
+            label = job.get('title') or 'Untitled'
+            if failure is not None:
                 batch['errors'].append(
-                    f"{job.get('title') or 'Untitled'}: {exc}"
+                    f'{label}: {failure}{_retry_suffix(attempts)}'
                 )
-                continue
-            if result and result.get('jd_profile'):
+            elif result and result.get('jd_profile'):
                 batch['analyzed'] += 1
             else:
                 batch['errors'].append(
-                    f"{job.get('title') or 'Untitled'}: 预分析未产出画像"
+                    f'{label}: 预分析未产出画像'
                 )
     except Exception as exc:
         logger.exception('Preanalyze batch %s failed', batch_id)
