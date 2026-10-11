@@ -162,3 +162,22 @@ def test_batch_stops_on_unavailable_without_retry():
     assert sleep.call_count == 0
     assert batch["stopped"] is True
     assert "预分析已停止" in batch["errors"][0]
+
+
+def test_batch_records_gap_stage_error_but_keeps_row_analyzed():
+    """A degraded gap stage is not a clean success: the profile landed, the
+    gap did not, and the reason has to reach the batch report."""
+
+    def side_effect(user, job_id):
+        return {
+            "jd_profile": {"must_have_skills": ["Python"]},
+            "gap_report": None,
+            "error": "缺口分析未完成（rate_limit），JD 画像已生成，可单独重试缺口分析",
+        }
+
+    batch, sleep = _run_batch(side_effect)
+    assert sleep.call_count == 0
+    assert batch["analyzed"] == 1
+    assert len(batch["errors"]) == 1
+    assert "缺口分析未完成" in batch["errors"][0]
+    assert "Engineer" in batch["errors"][0]

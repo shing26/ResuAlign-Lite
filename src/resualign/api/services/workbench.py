@@ -18,6 +18,7 @@ from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
 from resualign.llm_usage import reset_llm_tenant, set_llm_tenant
 
 from ...app.context import context
+from .jobs import _gap_stage_error_text, _run_gap_stage
 
 logger = logging.getLogger(__name__)
 SESSION_TTL_SECONDS = 30 * 60
@@ -644,6 +645,7 @@ def _run_session_pipeline(session_id: str) -> None:
         profile_dict: Optional[dict[str, Any]] = None
         gap_dict: Optional[dict[str, Any]] = None
         gap_score: Optional[float] = None
+        gap_error_text: Optional[str] = None
         with context.OpenAIClient(config, timeout=90.0) as client:
             if resume_text.strip():
                 # Role-based: JD profiler + gap analyst
@@ -668,27 +670,20 @@ def _run_session_pipeline(session_id: str) -> None:
                         tenant=tenant_id,
                     )
                     profile_dict = context.jd_profile_to_dict(profile)
-                import json as _json
-                _profile_str = _json.dumps(profile_dict, ensure_ascii=False)
-                try:
-                    gap, meta_gap = call_with_role(
-                        "gap_analyzer", context.analyze_gaps,
-                        context._llm_nodes, tenant_id,
-                        fn_kwargs={
-                            "resume_text": resume_text,
-                            "jd_profile_text": _profile_str,
-                        },
-                    )
-                    gap_dict = asdict(gap)
-                except Exception:
-                    gap = context.analyze_gaps(
-                        client,
-                        resume_text,
-                        _profile_str,
-                    )
-                    gap_dict = asdict(gap)
-                gap_status = "ready"
-                gap_score = _gap_score(gap)
+                # The gap stage must not take the profile down with it: a
+                # failed gap leaves the session ready with the profile and a
+                # retryable gap error, instead of failing the whole session.
+                gap_report, gap_error = _run_gap_stage(
+                    client, resume_text, profile_dict, tenant_id
+                )
+                gap_dict = (
+                    asdict(gap_report) if gap_report is not None else None
+                )
+                gap_error_text = (
+                    _gap_stage_error_text(gap_error) if gap_error else None
+                )
+                gap_status = "ready" if gap_dict else "blocked"
+                gap_score = _gap_score(gap_report)
             else:
                 try:
                     profile, meta_profile = call_with_role(
@@ -739,7 +734,7 @@ def _run_session_pipeline(session_id: str) -> None:
                     "score": gap_score,
                     "gap_report": gap_dict,
                     "cache_hit": cache_hit,
-                    "error": None,
+                    "error": gap_error_text,
                 },
             },
         )

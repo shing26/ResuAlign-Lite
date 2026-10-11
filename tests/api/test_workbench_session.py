@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
+from resualign.contracts.errors import LlmFailureCode
+from resualign.engine.llm import LLMResponseError
 from resualign.jobs import JobRegistry
 from resualign.models import GapReport, JDProfile, ResuAlignConfig
 from resualign.settings_store import SettingsStore
@@ -451,3 +453,62 @@ def test_session_pipeline_jd_only_sets_blocked_gap():
     assert final["gap"]["status"] == "blocked"
     assert final["gap"]["gap_report"] is None
     assert final["gap"]["score"] is None
+
+
+def test_session_pipeline_gap_failure_keeps_profile_and_session_ready():
+    """A gap failure must not take the JD profile down with it.
+
+    The session used to flip to ``failed`` with ``jd.profile = None``, which
+    threw away a profile that had already been produced and left the user
+    with nothing to show for the run.
+    """
+    resume = _create_resume()
+    profile = JDProfile(
+        must_have_skills=["Python"],
+        nice_to_have_skills=["Redis"],
+        business_scenarios=["backend"],
+    )
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api._classify_job",
+        return_value={
+            "job_function": "后端",
+            "seniority": "中级",
+            "tech_tags": ["Python"],
+        },
+    ), patch("resualign.api.profile_jd", return_value=profile), patch(
+        "resualign.api.analyze_gaps",
+        side_effect=LLMResponseError("node busy", LlmFailureCode.TIMEOUT),
+    ):
+        state = client.post(
+            "/api/workbench/session/init",
+            json={
+                "raw_jd": "Backend engineer with Redis caching.",
+                "master_resume_id": resume["resume_id"],
+            },
+            headers=_auth_headers(),
+        ).json()
+
+        session_id = state["session_id"]
+        deadline = time.time() + 10
+        final = state
+        while time.time() < deadline:
+            final = client.get(
+                f"/api/workbench/session/{session_id}",
+                headers=_auth_headers(),
+            ).json()
+            if final["jd"].get("profile") is not None or final["status"] in (
+                "failed",
+            ):
+                break
+            time.sleep(0.05)
+    assert final["status"] == "ready"
+    assert final["jd"]["status"] == "ready"
+    assert final["jd"]["profile"]["must_have_skills"] == ["Python"]
+    assert final["gap"]["gap_report"] is None
+    assert "timeout" in (final["gap"].get("error") or "")
+
+    stored = api_module._jobs.get_job(
+        final["job"]["tenant_id"], final["job"]["job_id"]
+    )
+    assert (stored.get("jd_profile") or {}).get("must_have_skills") == ["Python"]
+    assert stored.get("gap_report") is None

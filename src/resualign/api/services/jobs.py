@@ -687,6 +687,12 @@ def _preanalyze_imported_job(
         return
     if result.get('jd_profile'):
         batch['analyzed'] = batch.get('analyzed', 0) + 1
+        if result.get('error'):
+            # The profile is in, only the gap stage failed - keep the row
+            # usable but say so instead of counting it as a clean success.
+            batch.setdefault('analyze_errors', []).append(
+                f"{label}: {result['error']}"
+            )
     else:
         batch.setdefault('analyze_errors', []).append(f'{label}: 预分析未产出画像')
 
@@ -804,6 +810,55 @@ def _preanalyze_row_with_retry(
             return None, exc, attempts
 
 
+def _run_gap_stage(
+    client: Any,
+    resume_text: str,
+    profile_dict: dict[str, Any],
+    user_id: str,
+) -> tuple[Any | None, str]:
+    """Run the gap stage without letting it take the JD profile down with it.
+
+    Returns ``(gap_report, failure_code)``: a report plus an empty code on
+    success, or ``None`` plus the stable ``LlmFailureCode`` value when the
+    stage could not produce one. The gap stage used to raise, which threw
+    away the profile that had already been produced and paid for, and it
+    re-raises today on auth/quota through ``PreanalyzeUnavailable`` - here
+    the caller decides what a failure means: the sweep chain stops on
+    auth/quota (Phase A1 contract), the workbench session keeps the profile
+    and marks the stage retryable.
+    """
+    profile_str = json.dumps(profile_dict, ensure_ascii=False)
+    code = ''
+    try:
+        gap, _ = call_with_role(
+            'gap_analyzer', context.analyze_gaps,
+            context._llm_nodes, user_id,
+            fn_kwargs={
+                'resume_text': resume_text,
+                'jd_profile_text': profile_str,
+            },
+        )
+        return gap, ''
+    except Exception as role_exc:
+        code = getattr(role_exc, 'code', '') or LlmFailureCode.OTHER.value
+        logger.info(
+            'Gap role call failed for %s (%s), trying the single client',
+            user_id,
+            code,
+        )
+    try:
+        return context.analyze_gaps(client, resume_text, profile_str), ''
+    except Exception as fallback_exc:
+        code = getattr(fallback_exc, 'code', '') or code
+        logger.warning('Gap stage failed for %s: %s', user_id, fallback_exc)
+        return None, code
+
+
+def _gap_stage_error_text(code: str) -> str:
+    """User-facing copy for a gap stage that did not produce a report."""
+    return f'缺口分析未完成（{code}），JD 画像已生成，可单独重试缺口分析'
+
+
 def _preanalyze_unavailable_from_llm(
     exc: BaseException,
 ) -> PreanalyzeUnavailable | None:
@@ -815,7 +870,18 @@ def _preanalyze_unavailable_from_llm(
     failure code (``quota`` for 402, ``auth`` for 401/403) is the stable
     contract, so branch on it instead of the message text.
     """
-    if getattr(exc, 'code', '') not in _DEFINITIVE_LLM_FAILURE_CODES:
+    return _preanalyze_unavailable_for_code(getattr(exc, 'code', '') or '')
+
+
+def _preanalyze_unavailable_for_code(
+    code: str,
+) -> PreanalyzeUnavailable | None:
+    """Map a definitive auth/quota failure code to an actionable error.
+
+    Same copy as ``_preanalyze_unavailable_from_llm``, callable from a stage
+    that already reduced an exception down to its code (the gap stage).
+    """
+    if code not in _DEFINITIVE_LLM_FAILURE_CODES:
         return None
     return PreanalyzeUnavailable(
         '模型服务不可用（鉴权失败或余额不足）',
@@ -895,7 +961,23 @@ def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
         'seniority': job.get('seniority'),
         'tech_tags': job.get('tech_tags') or [],
     }
-    if job.get('jd_profile') and not job.get('classification_pending'):
+    resume = None
+    if job.get('workbench_resume_id'):
+        resume = context._resumes.get_master_resume(
+            user['user_id'], job['workbench_resume_id']
+        )
+    resume_text = resume['content'] if resume else ''
+    resume_id = resume['resume_id'] if resume else None
+
+    # Stage-independence guard: a stored profile alone is not "done". A gap
+    # stage that failed earlier leaves the profile in place with no gap
+    # report, and the old guard short-circuited on the profile alone, so the
+    # row could never be retried into having a gap.
+    profile_ready = (
+        bool(job.get('jd_profile')) and not job.get('classification_pending')
+    )
+    gap_ready = (not resume_text.strip()) or bool(job.get('gap_report'))
+    if profile_ready and gap_ready:
         return {
             'job_id': job_id,
             'status': 'ready',
@@ -909,6 +991,7 @@ def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
             'match_stale': _match_stale(user['user_id'], job),
             'classification': classification,
             'cache_hit': True,
+            'error': None,
         }
     job_functions, seniorities = context._settings_vocabulary(user['user_id'])
     try:
@@ -939,18 +1022,15 @@ def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
         )
     # P3: parallelize classification and profile (no dependency between them)
     # gap depends on profile, so it stays serial after profile completes.
-    resume = None
-    if job.get('workbench_resume_id'):
-        resume = context._resumes.get_master_resume(
-            user['user_id'], job['workbench_resume_id']
-        )
-    resume_text = resume['content'] if resume else ''
-    resume_id = resume['resume_id'] if resume else None
     cache_hit = _preanalyze_cache_hit(
         user['user_id'], config, resume_text, jd_text
     )
-    profile_dict = None
+    # A profile that is already stored is never re-run: the retry this guard
+    # exists for is a gap-only retry, and re-running the profile would spend
+    # wall clock and quota on a stage that already succeeded.
+    profile_dict = job.get('jd_profile') if profile_ready else None
     gap_dict = None
+    gap_error = ''
     try:
         with ThreadPoolExecutor(max_workers=2) as executor:
             # Submit classification task
@@ -1008,38 +1088,29 @@ def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
                                 )
                             return context.jd_profile_to_dict(profile)
             
-            classification_future = executor.submit(_classify_task)
-            profile_future = executor.submit(_profile_task)
-            
-            # Wait for both to complete
-            classification = classification_future.result()
-            profile_dict = profile_future.result()
-        
-        # Now handle gap analysis (depends on profile_dict)
-        if profile_dict:
+            if not profile_ready:
+                classification_future = executor.submit(_classify_task)
+                profile_future = executor.submit(_profile_task)
+
+                # Wait for both to complete
+                classification = classification_future.result()
+                profile_dict = profile_future.result()
+        # Gap stage: independent of the profile, so a gap that fails leaves
+        # the profile intact and only marks the stage for a retry instead of
+        # throwing away work that already succeeded.
+        if profile_dict and resume_text.strip():
             with llm_tenant_context(user['user_id']):
                 with context.OpenAIClient(config, timeout=60.0) as client:
-                    _profile_str = json.dumps(
-                        profile_dict, ensure_ascii=False
+                    gap_report, gap_error = _run_gap_stage(
+                        client, resume_text, profile_dict, user['user_id']
                     )
-                    if resume_text.strip():
-                        try:
-                            gap, _ = call_with_role(
-                                'gap_analyzer', context.analyze_gaps,
-                                context._llm_nodes, user['user_id'],
-                                fn_kwargs={
-                                    'resume_text': resume_text,
-                                    'jd_profile_text': _profile_str,
-                                },
-                            )
-                        except Exception:
-                            gap = context.analyze_gaps(
-                                client, resume_text, _profile_str
-                            )
-                        gap_dict = asdict(gap)
-                    else:
-                        # No resume, no gap analysis
-                        pass
+                    if gap_error in _DEFINITIVE_LLM_FAILURE_CODES:
+                        unavailable = _preanalyze_unavailable_for_code(gap_error)
+                        if unavailable is not None:
+                            raise unavailable
+                    gap_dict = (
+                        asdict(gap_report) if gap_report is not None else None
+                    )
     except context.LLMResponseError as exc:
         unavailable = _preanalyze_unavailable_from_llm(exc)
         if unavailable is not None:
@@ -1117,6 +1188,7 @@ def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
         'match_stale': False,
         'classification': classification,
         'cache_hit': cache_hit,
+        'error': _gap_stage_error_text(gap_error) if gap_error else None,
     }
 
 
@@ -1187,6 +1259,10 @@ def _run_preanalyze_batch(batch_id: str) -> None:
                 )
             elif result and result.get('jd_profile'):
                 batch['analyzed'] += 1
+                if result.get('error'):
+                    # Profile in, gap stage failed - the row is usable but the
+                    # reason belongs on the batch, not swallowed.
+                    batch['errors'].append(f"{label}: {result['error']}")
             else:
                 batch['errors'].append(
                     f'{label}: 预分析未产出画像'

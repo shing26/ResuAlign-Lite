@@ -18,6 +18,8 @@
 - [x] 模块 1 · 去重链：多候选查重落地（见下）。
 - [x] 模块 1 · 错误处理链：仅重试临时错误 + 固定 3 次退避（1s/2s/4s）+ 仅失败行，
       两条预分析链路共用同一 helper（见下）。
+- [x] 模块 2 · 部分落地（stage 独立性 + gap 降级 + gap 重试解锁，见下）；
+      剩余：SSE `job.error` 结构化码透出与前端文案表、按 stage 的重试按钮。
 - [ ] 模块 1 收尾后：74 行现存冗余是否合并（需用户确认，破坏性数据操作）。
 - [ ] 模块 2-9：按旅程顺序推进。
 
@@ -40,6 +42,33 @@
 验证：`.scratch/simulate_dedupe_candidates.py` 回放真实库 40/40 泄漏簇全收敛、零误并
 （30 个跨身份文本命中逐对确认为同岗元数据漂移，正文逐字节相同）；全量后端 1195 passed / 7 skipped；
 ruff clean。
+
+### 模块 2 · 单岗工作台执行记录（2026-10-11，部分落地）
+
+先修两个把用户卡死的真实缺陷：
+
+1. **gap 失败连坐画像**。`preanalyze_job` 与 `_run_session_pipeline` 的 gap 阶段一旦失败就
+   上抛，外层直接 `status = failed` + `jd.profile = None`——已经产出并花过额度的 JD 画像
+   被整份丢掉。现在 gap 阶段降级：画像照常落库，失败码记在
+   `JobPreanalyzeResponse.error`（该字段原本就存在却没人写）与 `session.gap.error`。
+   Phase A1 契约不变：`auth`/`quota` 仍然上抛成 `PreanalyzeUnavailable` 停掉整轮扫描。
+2. **`jd_profile is not None` 早退守卫把 gap 重试入口整个堵死**。画像在、分类已定、
+   gap 缺失的行会被这个守卫判成「已完成」直接返回，于是永远补不上 gap。
+   现在守卫按 stage 判定：画像∧分类∧（无简历∨已有 gap）才短路；只缺 gap 时落下去，
+   **不再重跑分类和画像**（省额度），只补 gap 这一跳。
+
+实现：`_run_gap_stage`（role 调用 → 单客户端兜底 → 降级返回 `(report, code)`），
+导入链 / 一键预分析链 / 工作台会话链三条路径共用；`_gap_stage_error_text` 出人话文案。
+`_preanalyze_unavailable_from_llm` 重构成可按错误码复用的 `_preanalyze_unavailable_for_code`。
+
+测试：新增 5 条（gap 降级保留画像并带码；gap-only 重试确实重跑且不短路；
+auth/quota 仍然 503 停扫描；一键链记录降级错误但计入 analyzed；
+会话链 gap 失败后 session 仍 ready、画像已落库）。全量后端 **1207 passed / 7 skipped**，
+前端 543 passed，ruff + modgraph 干净。
+
+**未完成（下一轮）**：SSE `job.error` 透出 `code`（`LlmFailureCode`）+ 前端按码查文案表；
+按 stage 的重试按钮（profile 已存则不重跑，只补失败那一跳）。这两项要动前端与 SSE 契约，
+单独一个提交。
 
 ### 模块 1 · 错误处理链执行记录（2026-10-11）
 
