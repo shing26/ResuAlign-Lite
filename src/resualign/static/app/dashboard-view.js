@@ -191,6 +191,10 @@ export async function renderDashboard(container) {
     quickBadgeLabel = "上次失败 · 重新运行";
     quickBtnClass = "btn btn-danger-solid btn-sm";
     quickBtnLabel = "重新运行";
+    /* Module 5: show failure_detail (with code) when available. */
+    if (quick.failure_detail) {
+      quickBadgeLabel = `上次失败 · ${quick.failure_detail.split(":")[0] || "未知原因"}`;
+    }
   } else if (qStatus === "succeeded") {
     quickBadgeClass = "badge badge-green";
     quickBadgeLabel = "已对齐";

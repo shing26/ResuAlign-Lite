@@ -448,6 +448,10 @@ class DashboardQuickContinue(BaseModel):
     title: str
     company: str | None = None
     alignment_status: str = "idle"
+    # Module 5: failure detail for quick_continue card. Distinguishes
+    # never-run / failed-with-code / in-flight. Drives the reason badge
+    # on the dashboard card (frozen ticket #48).
+    failure_detail: str | None = None
     updated_at: float | None = None
 
 

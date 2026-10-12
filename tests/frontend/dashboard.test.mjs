@@ -252,3 +252,20 @@ test("dashboard-view quickHref guards null quick (空库 dashboard 报错回归)
   );
   assert.match(src, /qBusy \|\| !quick\s*\n\s*\? ""/, "quickHref must check !quick");
 });
+
+/* ------------------------------------------------------------------ */
+/* Module 5: quick_continue failure_detail                           */
+/* ------------------------------------------------------------------ */
+
+test("dashboard-view surfaces failure_detail on failed quick_continue", () => {
+  const src = readFileSync(
+    new URL("../../src/resualign/static/app/dashboard-view.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(src, /failure_detail/, "dashboard-view references failure_detail");
+  assert.match(
+    src,
+    /quick\.failure_detail/,
+    "dashboard-view reads quick.failure_detail",
+  );
+});

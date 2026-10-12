@@ -1424,7 +1424,7 @@ class JobLibraryStore(_SqliteStore):
             with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT job_id, title, company, status, jd_profile_json, "
-                    "alignment_status, applied_at, offer_at, "
+                    "alignment_status, last_alignment_error, applied_at, offer_at, "
                     "next_step_due_at, updated_at "
                     "FROM library_jobs WHERE tenant_id = ? "
                     "ORDER BY updated_at DESC",
@@ -1443,6 +1443,7 @@ class JobLibraryStore(_SqliteStore):
                     else None
                 ),
                 "alignment_status": row["alignment_status"] or "idle",
+                "last_alignment_error": row["last_alignment_error"] or None,
                 "applied_at": row["applied_at"] or None,
                 "offer_at": row["offer_at"] or None,
                 "next_step_due_at": row["next_step_due_at"] or None,

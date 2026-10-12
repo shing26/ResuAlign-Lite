@@ -4024,6 +4024,17 @@
             "title": "Alignment Status",
             "default": "idle"
           },
+          "failure_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Detail"
+          },
           "updated_at": {
             "anyOf": [
               {

@@ -292,6 +292,55 @@ def test_dashboard_quick_continue_picks_most_recent_unfinished():
     assert isinstance(quick["updated_at"], (int, float))
 
 
+def test_dashboard_quick_continue_failed_includes_failure_detail():
+    """Module 5: quick_continue carries failure_detail for failed jobs."""
+    tenant = _tenant_id()
+    failed = _create_job(
+        tenant,
+        title="Failed",
+        jd_text="Failed role text.",
+        company="Acme",
+        alignment_status="failed",
+    )
+    api_module._jobs.update_job(
+        tenant, failed["job_id"],
+        last_alignment_error="no_output: model returned empty",
+    )
+    idle = _create_job(
+        tenant,
+        title="Idle",
+        jd_text="Idle role text.",
+        company="Beta",
+        alignment_status="idle",
+    )
+    base = time.time()
+    _set_updated_at(failed["job_id"], base + 1000.0)
+    _set_updated_at(idle["job_id"], base)
+
+    body = client.get("/api/dashboard", headers=_auth_headers()).json()
+    quick = body["quick_continue"]
+    assert quick["job_id"] == failed["job_id"]
+    assert quick["alignment_status"] == "failed"
+    assert quick["failure_detail"] == "no_output: model returned empty"
+
+
+def test_dashboard_quick_continue_idle_has_no_failure_detail():
+    """Module 5: idle jobs have failure_detail=None."""
+    tenant = _tenant_id()
+    idle = _create_job(
+        tenant,
+        title="Idle",
+        jd_text="Idle role text.",
+        alignment_status="idle",
+    )
+
+    body = client.get("/api/dashboard", headers=_auth_headers()).json()
+    quick = body["quick_continue"]
+    assert quick["job_id"] == idle["job_id"]
+    assert quick["alignment_status"] == "idle"
+    assert quick["failure_detail"] is None
+
+
 def test_dashboard_quick_continue_falls_back_to_latest_when_all_succeeded():
     tenant = _tenant_id()
     older = _create_job(

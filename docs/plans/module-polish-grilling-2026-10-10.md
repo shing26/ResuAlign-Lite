@@ -135,12 +135,21 @@ gap 报告缺失时渲染失败通知 + 重试按钮。进度管线三 stage 独
 
 测试：新增 11 条（存储层 6 条覆盖三态/内容变更/prompt version/model 不匹配；前端 6 条覆盖 `diagnosisStatusHtml` / `diagnosisStatusText`）；更新 1 条现有测试（`test_master_resume_edit_and_rollback_preserve_diagnosis_with_staleness`）。全量后端 **1238 passed / 7 skipped**，前端 559 passed，ruff + modgraph 干净。
 
-### 模块 5 · 驾驶舱——稳定性：统计口径
+### 模块 5 · 驾驶舱——稳定性：统计口径（2026-10-13 完成）
 
 - funnel peak 逻辑显式锚定新状态机不变量（时间戳只增不减）并加测试锁。
 - 修两处腐烂口径：① 完成率分子取自 `limit=500` 截断列表、分母是全量 `kpi.jobs`，破 500 后必然偏低；② 当前简历只看 `latest_diagnosis` 存在、不判新鲜度。
 - 完成率改服务端全量聚合（`/api/dashboard` 增加全量口径字段），`limit=500` 只喂列表 UI。
 - `quick_continue` 失败感知：区分从未跑过 / 跑挂了（带码）/ 在跑，卡片带码表驱动原因徽标，点击仍单入口跳工作台（不在驾驶舱开第二个重试按钮）；顺手兑现冻结票 #48 的 `failure_detail`。
+
+实现：
+
+- `_job_funnel_stage` 文档锚定模块 3 不变量（时间戳只增不减，终态时间戳保留）。
+- `list_dashboard_jobs` 返回 `last_alignment_error` 字段。
+- `DashboardQuickContinue` 新增 `failure_detail` 字段；dashboard 路由在 `alignment_status == "failed"` 时填充。
+- 前端 `dashboard-view.js`：失败时徽章显示 `failure_detail` 的机器码前缀（带码原因徽标）。
+
+测试：新增 3 条（API 层 2 条覆盖 failed 带 failure_detail / idle 无 failure_detail；前端 1 条源码级别测试检查 dashboard-view 引用 failure_detail）。全量后端 **1234 passed / 7 skipped**，前端 560 passed，ruff + modgraph 干净。
 
 ### 模块 6 · 投递复盘——稳定性：日期归一化与比较口径
 
