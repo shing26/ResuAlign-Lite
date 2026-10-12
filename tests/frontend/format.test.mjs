@@ -8,13 +8,16 @@ import {
   cmpLineHtml,
   collectAcceptedOptimizeItems,
   esc,
+  failureActionText,
   formatDate,
   formatElapsed,
   formatSalary,
+  gapNoticeHtml,
   inlineDiff,
   isBackwardJobStatus,
   isJdUrl,
   isJunkJd,
+  LLM_FAILURE_COPY,
   jobApplyLinkHtml,
   jobCompleteness,
   jobCompletenessBadge,
@@ -26,6 +29,8 @@ import {
   jobTerminalConfirmFormHtml,
   jobTimelineFormHtml,
   lineDiff,
+  llmFailureNotice,
+  llmFailureSummary,
   matchBadgeInfo,
   matchTone,
   normalizeVocabulary,
@@ -1064,4 +1069,74 @@ test("optimizeActionsHtml enables apply once accepted and disables accept-all wi
   );
   assert.match(allFailed, /data-action="optimize-accept-all"[^>]*disabled/);
   assert.match(allFailed, /data-action="optimize-apply-accepted"[^>]*disabled/);
+});
+
+/* ------------------------------------------------------------------ */
+/* LLM failure code copy (module 2 SSE contract)                      */
+/* ------------------------------------------------------------------ */
+
+test("llmFailureNotice returns the copy entry for a known code", () => {
+  const notice = llmFailureNotice("auth");
+  assert.equal(notice.code, "auth");
+  assert.equal(notice.label, LLM_FAILURE_COPY.auth.label);
+  assert.equal(notice.action, LLM_FAILURE_COPY.auth.action);
+});
+
+test("llmFailureNotice falls back to generic copy for unknown or missing codes", () => {
+  const unknown = llmFailureNotice("nonexistent_code");
+  assert.equal(unknown.code, null);
+  assert.equal(unknown.label, "分析失败");
+  assert.equal(unknown.action, "请重试");
+
+  const custom = llmFailureNotice(null, "自定义错误");
+  assert.equal(custom.label, "自定义错误");
+
+  const empty = llmFailureNotice("");
+  assert.equal(empty.label, "分析失败");
+});
+
+test("failureActionText returns the action for a known code", () => {
+  assert.equal(failureActionText("quota"), LLM_FAILURE_COPY.quota.action);
+  assert.equal(failureActionText("timeout"), LLM_FAILURE_COPY.timeout.action);
+});
+
+test("failureActionText falls back to the provided text or 请重试", () => {
+  assert.equal(failureActionText("unknown", "稍后重试"), "稍后重试");
+  assert.equal(failureActionText(null), "请重试");
+  assert.equal(failureActionText(""), "请重试");
+});
+
+test("llmFailureSummary combines label and action for known codes", () => {
+  const summary = llmFailureSummary("rate_limit");
+  assert.equal(summary, `${LLM_FAILURE_COPY.rate_limit.label}（${LLM_FAILURE_COPY.rate_limit.action}）`);
+});
+
+test("llmFailureSummary falls back to the label only for unknown codes", () => {
+  assert.equal(llmFailureSummary("unknown", "后端错误"), "后端错误");
+  assert.equal(llmFailureSummary(null), "分析失败");
+});
+
+test("gapNoticeHtml returns null when gap has a report (analysis succeeded)", () => {
+  assert.equal(gapNoticeHtml({ gap_report: "some report", error: null }), null);
+  assert.equal(gapNoticeHtml({ gap_report: "report", error: "failed" }), null);
+});
+
+test("gapNoticeHtml returns null when gap has no error", () => {
+  assert.equal(gapNoticeHtml({ gap_report: null, error: null }), null);
+  assert.equal(gapNoticeHtml({}), null);
+  assert.equal(gapNoticeHtml(null), null);
+});
+
+test("gapNoticeHtml renders the failure notice with retry button", () => {
+  const html = gapNoticeHtml({ gap_report: null, error: "timeout", code: "timeout" });
+  assert.match(html, /class="gap-notice"/);
+  assert.match(html, /data-gap-notice/);
+  assert.match(html, new RegExp(LLM_FAILURE_COPY.timeout.label));
+  assert.match(html, /data-action="retry-gap-stage"/);
+});
+
+test("gapNoticeHtml uses fallback text when code is unknown", () => {
+  const html = gapNoticeHtml({ gap_report: null, error: "连接超时", code: "unknown" });
+  assert.match(html, /连接超时/);
+  assert.match(html, /gap-notice__code"><\/span>/);
 });

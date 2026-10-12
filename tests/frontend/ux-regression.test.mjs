@@ -287,8 +287,13 @@ test("#81: 失败终态——三阶段清单不再停在 pending", () => {
   // workbenchLiveProgress 提供 is-failed 终态 + 「任务失败：原因」消息
   assert.match(fmtSrc, /alignmentFailed/);
   assert.match(fmtSrc, /is-failed/);
-  assert.match(fmtSrc, /任务失败：\$\{failureNote\}/);
+  /* 模块 2（2026-10-11）：对齐失败用结构化码出文案，JD / gap 阶段各自判失败。 */
+  assert.match(fmtSrc, /任务失败：\$\{alignmentNote\}/);
+  assert.match(fmtSrc, /llmFailureSummary\(alignment\.code/);
   assert.match(fmtSrc, /未完成：/);
+  /* gap 降级不能把已经成功的 JD 画像一起染红。 */
+  assert.match(fmtSrc, /profileFailed = jd\.status === "failed" && !jd\.profile/);
+  assert.match(fmtSrc, /gapFailed = Boolean\(gap\.error\) && !gap\.gap_report/);
   assert.match(STYLES, /\.workbench-live-progress__step\.is-failed/);
   // 排队被预检拦截（422）时落失败终态：split-align 提交捕获错误并标记
   const mainSrc = read("main.js");

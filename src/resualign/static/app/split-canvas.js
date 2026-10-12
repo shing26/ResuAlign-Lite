@@ -21,6 +21,8 @@ import {
   formatElapsed,
   highlightSkillGapHtml,
   jdProfileSummary,
+  llmFailureNotice,
+  gapNoticeHtml,
   jobApplyLinkHtml,
   jobCompletenessBadge,
   renderGap,
@@ -332,6 +334,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
             </section>
             <section class="pane-section workbench-gap">
               <h3>技能缺口</h3>
+              ${gapNoticeHtml(gap) || ""}
               ${pendingSkillFocus ? (highlightSkillGapHtml(gap.gap_report || gap, pendingSkillFocus) || "") : (renderGap(gap.gap_report || gap) || "")}
             </section>
             <details class="raw-jd" data-raw-jd>
@@ -1057,28 +1060,40 @@ function handleEvent(eventName, data) {
         ...(activeSession.jd || {}),
         status: "queued",
         error: null,
+        code: null,
       };
       activeSession.gap = {
         ...(activeSession.gap || {}),
         status: "queued",
         error: null,
+        code: null,
       };
+      /* 新一轮开始：上一轮的失败态作废，否则错误横幅会挂在一次成功的运行上。 */
+      activeSession.status = "running";
+      activeSession.error = null;
+      activeSession.errorCode = null;
+      activeSession.errorAction = null;
+      activeSession.errorStage = null;
     }
   } else if (eventName === "job.gap_ready") {
     if (data.job_id) {
       activeSession.job = { ...(activeSession.job || {}), job_id: data.job_id };
     }
+    /* gap 降级也意味着画像已经拿到：JD 侧无论如何都是 ready，顺手清掉上一轮
+     * 遗留的错，别让两张面板同时报错（连坐显示）。 */
     activeSession.jd = {
       profile: data.jd_profile || null,
       status: "ready",
       error: null,
+      code: null,
     };
     activeSession.gap = {
       status: data.status === "blocked" ? "blocked" : "ready",
       score: data.gap_report ? null : null,
       gap_report: data.gap_report || null,
       cache_hit: Boolean(data.cache_hit),
-      error: null,
+      error: data.error || null,
+      code: data.code || null,
     };
     if (data.gap_report) {
       const missing = (data.gap_report.missing_keywords || []).length;
@@ -1087,6 +1102,18 @@ function handleEvent(eventName, data) {
   } else if (eventName === "job.error") {
     activeSession.status = "failed";
     activeSession.error = data.error;
+    activeSession.errorCode = data.code || null;
+    activeSession.errorStage = data.stage || null;
+    const notice = llmFailureNotice(
+      data.code,
+      data.error || "分析失败，请重试",
+    );
+    activeSession.errorAction = notice.action;
+    /* 有码就用「标签 + 行动」，没码退回后端人话；都要不着才用兜底。 */
+    toast(
+      data.code ? `${notice.label}：${notice.action}` : notice.label,
+      "error",
+    );
   } else if (eventName === "job.result") {
     if (data.job_id) {
       activeSession.job = { ...(activeSession.job || {}), job_id: data.job_id };

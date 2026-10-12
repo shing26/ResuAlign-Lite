@@ -18,8 +18,7 @@
 - [x] 模块 1 · 去重链：多候选查重落地（见下）。
 - [x] 模块 1 · 错误处理链：仅重试临时错误 + 固定 3 次退避（1s/2s/4s）+ 仅失败行，
       两条预分析链路共用同一 helper（见下）。
-- [x] 模块 2 · 部分落地（stage 独立性 + gap 降级 + gap 重试解锁，见下）；
-      剩余：SSE `job.error` 结构化码透出与前端文案表、按 stage 的重试按钮。
+- [x] 模块 2 · 全部落地（stage 独立性 + gap 降级 + gap 重试解锁 + SSE 码透出 + 前端文案表，见下）。
 - [ ] 模块 1 收尾后：74 行现存冗余是否合并（需用户确认，破坏性数据操作）。
 - [ ] 模块 2-9：按旅程顺序推进。
 
@@ -66,9 +65,13 @@ auth/quota 仍然 503 停扫描；一键链记录降级错误但计入 analyzed�
 会话链 gap 失败后 session 仍 ready、画像已落库）。全量后端 **1207 passed / 7 skipped**，
 前端 543 passed，ruff + modgraph 干净。
 
-**未完成（下一轮）**：SSE `job.error` 透出 `code`（`LlmFailureCode`）+ 前端按码查文案表；
-按 stage 的重试按钮（profile 已存则不重跑，只补失败那一跳）。这两项要动前端与 SSE 契约，
-单独一个提交。
+SSE 结构化契约（2026-10-12 完成）：后端 `job.error` 透出 `code`（取自 `LlmFailureCode`），
+`job.gap_ready` 携带 `error` + `code`；前端 `format.js` 新增 `LLM_FAILURE_COPY` 九码中文文案表
+（`llmFailureNotice` / `failureActionText` / `llmFailureSummary` / `gapNoticeHtml` 纯函数），
+`split-canvas.js` 的 `handleEvent` 按码查表出 toast 行动文案，inspector「技能缺口」区在
+gap 报告缺失时渲染失败通知 + 重试按钮。进度管线三 stage 独立判失败，各自出「分析未完成：…」。
+新增 10 条前端单测覆盖码表查表、无码回落、gap_report 存在时返回 null。
+前端 553 passed，ruff + modgraph 干净。
 
 ### 模块 1 · 错误处理链执行记录（2026-10-11）
 

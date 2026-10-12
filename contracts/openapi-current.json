@@ -3374,7 +3374,7 @@
     "/api/workbench/session/{session_id}/analyze": {
       "post": {
         "summary": "Analyze Workbench Session",
-        "description": "Run JD profiling/gap analysis for a library-job workstation session.\n\nThe first call queues the pipeline; subsequent calls return the current\nstate without spawning another worker.",
+        "description": "Run JD profiling/gap analysis for a library-job workstation session.\n\nThe first call queues the pipeline; subsequent calls return the current\nstate without spawning another worker. A session is only \"done\" when the\nprofile is in *and* the gap stage is settled, so a gap that failed stays\nre-runnable (``session_gap_stage_pending``).",
         "operationId": "analyze_workbench_session_api_workbench_session__session_id__analyze_post",
         "parameters": [
           {

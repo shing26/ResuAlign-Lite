@@ -435,6 +435,87 @@ export const CONFIDENCE_LABELS = {
   low: "低置信",
 };
 
+/* 模块 2（2026-10-11）：SSE `job.error` / `job.gap_ready` 透出稳定的
+ * LlmFailureCode（后端 contracts/errors.py），前端按码查文案，不再用正则从
+ * 英文报错里刮人话。取值与后端枚举一一对应，新增码必须两边同时补。 */
+export const LLM_FAILURE_COPY = {
+  auth: {
+    label: "模型节点鉴权失败",
+    action: "请到「系统设置 → 模型节点」检查 API Key",
+  },
+  quota: {
+    label: "模型额度不足",
+    action: "请到「系统设置 → 模型节点」充值或切换节点",
+  },
+  rate_limit: {
+    label: "模型请求被限流",
+    action: "限流通常几秒内恢复，可直接重试",
+  },
+  timeout: {
+    label: "模型响应超时",
+    action: "当前节点较慢，可重试或切换到更快的节点",
+  },
+  http: {
+    label: "模型服务连接异常",
+    action: "请检查网络与节点地址后重试",
+  },
+  parse: {
+    label: "模型返回无法解析",
+    action: "可重试；反复出现请更换节点",
+  },
+  schema: {
+    label: "模型返回结构不符",
+    action: "可重试；反复出现请更换节点",
+  },
+  empty: {
+    label: "模型返回为空",
+    action: "可重试；反复出现请更换节点",
+  },
+  other: {
+    label: "模型调用失败",
+    action: "可重试或到「系统设置 → 模型节点」切换节点",
+  },
+};
+
+export function llmFailureNotice(code, fallback = "") {
+  const entry = LLM_FAILURE_COPY[String(code || "")];
+  if (!entry) {
+    return { label: fallback || "分析失败", action: "请重试", code: null };
+  }
+  return { ...entry, code: String(code) };
+}
+
+/* 失败态的行动文案：有码查表，无码退回后端给的人话。 */
+export function failureActionText(code, fallback = "") {
+  const entry = LLM_FAILURE_COPY[String(code || "")];
+  if (entry) return entry.action;
+  return fallback || "请重试";
+}
+
+/* 单行失败摘要：有码时是「标签（行动）」，无码退回后端人话。进度管线的每个
+ * step 用它在「未完成：」后面接一句能直接照做的话。 */
+export function llmFailureSummary(code, fallback = "") {
+  const notice = llmFailureNotice(code, fallback);
+  if (!notice.code) return notice.label;
+  return `${notice.label}（${notice.action}）`;
+}
+
+/* 模块 2（2026-10-11）：gap 阶段降级后的展示位。原先这里直接渲染
+ * ``renderGap(gap.gap_report || gap)``，而无报告时 ``renderGap`` 返回 null——
+ * 画像已经拿到、缺口分析失败的情况下整个「技能缺口」区块是空的：用户看不到
+ * 原因，也没有重试入口。现在把失败原因和一次重试摆到明面上。
+ * 保持纯函数（只吃 gap 对象），便于 node:test 直接单测文案与码表。 */
+export function gapNoticeHtml(gap) {
+  if (!gap || !gap.error || gap.gap_report) return null;
+  const notice = llmFailureNotice(gap.code, gap.error || "差距分析未完成");
+  return `
+    <div class="gap-notice" data-gap-notice role="status">
+      <div class="gap-notice__head"><strong>${esc(notice.label)}</strong><span class="gap-notice__code">${esc(notice.code || "")}</span></div>
+      <div class="small muted">${esc(notice.action)}</div>
+      <button type="button" class="btn btn-outline btn-sm" data-action="retry-gap-stage">重试差距分析</button>
+    </div>`;
+}
+
 export const CONFIDENCE_BADGE_CLASS = {
   high: "badge-green",
   medium: "badge-amber",
@@ -524,18 +605,32 @@ export function workbenchProgressPipelineHtml(session) {
 
   const alignmentRunning = ["queued", "running"].includes(alignment.status);
   /* B4（2026-09-06 走查 #81）：失败必须有终态——「未开始/未完成：原因」，
-   * 不能停在 pending 样式让用户无法判断该等还是该去设置。 */
+   * 不能停在 pending 样式让用户无法判断该等还是该去设置。
+   * 模块 2（2026-10-11）：jd / gap / 对齐三个 stage 各自独立判失败，不再让
+   * 对齐的失败把已经成功的 JD 画像一起染红（连坐显示）。 */
   const alignmentFailed = alignment.status === "failed";
-  const failureNote = alignmentFailed
-    ? alignment.error || "任务失败，请重试"
+  const profileFailed = jd.status === "failed" && !jd.profile;
+  const gapFailed = Boolean(gap.error) && !gap.gap_report;
+  const alignmentNote = alignmentFailed
+    ? llmFailureSummary(alignment.code, alignment.error || "任务失败，请重试")
+    : "";
+  const jdNote = profileFailed
+    ? llmFailureSummary(jd.code, jd.error || "JD 画像提取失败")
+    : "";
+  const gapNote = gapFailed
+    ? llmFailureSummary(gap.code, gap.error || "差距分析未完成")
     : "";
   const liveMessage = alignmentRunning
     ? alignment.message || ""
     : alignment.status === "succeeded"
       ? "简历对齐已完成"
       : alignmentFailed
-        ? `任务失败：${failureNote}`
-        : "";
+        ? `任务失败：${alignmentNote}`
+        : jdNote
+          ? `分析未完成：${jdNote}`
+          : gapNote
+            ? `分析未完成：${gapNote}`
+            : "";
 
   const steps = [
     {
@@ -547,7 +642,8 @@ export function workbenchProgressPipelineHtml(session) {
           : "",
       done: jd.status === "ready" && Boolean(jd.profile),
       active: ["queued", "running"].includes(jd.status),
-      failed: alignmentFailed && !(jd.status === "ready" && Boolean(jd.profile)),
+      failed: profileFailed,
+      note: jdNote,
       idle: !alignmentRunning && !alignmentFailed && !jd.profile,
     },
     {
@@ -558,7 +654,8 @@ export function workbenchProgressPipelineHtml(session) {
         : "",
       done: ["ready", "blocked"].includes(gap.status),
       active: gap.status === "queued" || gap.status === "running",
-      failed: alignmentFailed && !["ready", "blocked"].includes(gap.status),
+      failed: gapFailed,
+      note: gapNote,
       idle:
         !alignmentRunning &&
         !alignmentFailed &&
@@ -571,6 +668,7 @@ export function workbenchProgressPipelineHtml(session) {
       done: alignment.status === "succeeded",
       active: ["queued", "running"].includes(alignment.status),
       failed: alignmentFailed,
+      note: alignmentNote,
       idle: !alignmentRunning && !alignmentFailed && !diffs.length,
     },
   ];
@@ -585,7 +683,7 @@ export function workbenchProgressPipelineHtml(session) {
           <span class="workbench-live-progress__dot" aria-hidden="true">${step.done ? ICON_PROGRESS_CHECK : step.failed ? ICON_PROGRESS_X : step.active ? ICON_PROGRESS_ACTIVE : ICON_PROGRESS_IDLE}</span>
           <div class="workbench-live-progress__copy">
             <span class="workbench-live-progress__label">${esc(step.label)}</span>
-            ${step.detail ? `<span class="workbench-live-progress__detail">${esc(step.detail)}</span>` : step.failed ? `<span class="workbench-live-progress__detail">未完成：${esc(failureNote)}</span>` : step.idle ? `<span class="workbench-live-progress__detail">未开始</span>` : ""}
+            ${step.detail ? `<span class="workbench-live-progress__detail">${esc(step.detail)}</span>` : step.failed ? `<span class="workbench-live-progress__detail">未完成：${esc(step.note || "请重试")}</span>` : step.idle ? `<span class="workbench-live-progress__detail">未开始</span>` : ""}
           </div>
         </div>`,
         )

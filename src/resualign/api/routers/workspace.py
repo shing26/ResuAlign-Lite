@@ -253,14 +253,16 @@ def analyze_workbench_session(
     """Run JD profiling/gap analysis for a library-job workstation session.
 
     The first call queues the pipeline; subsequent calls return the current
-    state without spawning another worker.
+    state without spawning another worker. A session is only "done" when the
+    profile is in *and* the gap stage is settled, so a gap that failed stays
+    re-runnable (``session_gap_stage_pending``).
     """
     context._enforce_rate_limit(request, context._analyze_rate_limiter)
     session = _session_or_404(session_id, user)
     jd = session.get("jd") or {}
-    if jd.get("profile") is not None:
-        return context._workbench_service.public_state(session)
     if jd.get("status") in ("queued", "running"):
+        return context._workbench_service.public_state(session)
+    if not context._workbench_service.session_gap_stage_pending(session):
         return context._workbench_service.public_state(session)
     job = session.get("job") or {}
     if not (job.get("jd_text") or "").strip():
@@ -271,13 +273,19 @@ def analyze_workbench_session(
     context._session_store.update(
         session_id,
         {
-            "jd": {"profile": None, "status": "queued", "error": None},
+            "jd": {
+                "profile": jd.get("profile"),
+                "status": "queued",
+                "error": None,
+                "code": None,
+            },
             "gap": {
                 "status": "queued",
                 "score": None,
                 "gap_report": None,
                 "cache_hit": False,
                 "error": None,
+                "code": None,
             },
         },
     )

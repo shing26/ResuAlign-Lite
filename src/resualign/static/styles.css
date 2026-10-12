@@ -10684,6 +10684,28 @@ select,
 }
 }
 
+/* 模块 2（2026-10-11）：gap 阶段失败通知 —— 画像已有、缺口分析降级时
+   摆出原因 + 重试按钮，避免「技能缺口」区块整片空白。 */
+.gap-notice {
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-radius: var(--radius-md, 8px);
+  padding: var(--space-3);
+  margin: var(--space-2) 0;
+}
+.gap-notice__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.gap-notice__code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: var(--text-xs);
+  opacity: 0.85;
+}
+
 @layer components {
 /* ================================================================
    R5 前端收尾（expert-team-20260825）
