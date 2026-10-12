@@ -291,3 +291,141 @@ def test_bulk_status_endpoint_validates_tenant_ownership():
         f"/api/jobs/{theirs['job_id']}", headers=_other_headers()
     ).json()
     assert untouched["status"] == "draft"
+
+
+def test_patch_status_rejects_backward_transition():
+    """Module 3: backward status transitions are rejected with 422."""
+    job = _create_job()
+    job_id = job["job_id"]
+    # Move to interview first.
+    client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "interview"},
+        headers=_auth_headers(),
+    )
+    # Attempt to move back to applied → 422.
+    r = client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "applied"},
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 422
+    assert "Illegal status transition" in r.json()["detail"]
+    # Status unchanged.
+    body = client.get(
+        f"/api/jobs/{job_id}", headers=_auth_headers()
+    ).json()
+    assert body["status"] == "interview"
+
+
+def test_patch_status_rejects_backward_to_draft():
+    """Module 3: offer → draft is rejected even with explicit target."""
+    job = _create_job()
+    job_id = job["job_id"]
+    client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "offer"},
+        headers=_auth_headers(),
+    )
+    r = client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "draft"},
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 422
+    body = client.get(
+        f"/api/jobs/{job_id}", headers=_auth_headers()
+    ).json()
+    assert body["status"] == "offer"
+
+
+def test_patch_status_revive_allows_terminal_to_nonterminal():
+    """Module 3: revive=True allows offer → applied, preserving offer_at."""
+    job = _create_job()
+    job_id = job["job_id"]
+    # Move to offer with a timestamp.
+    client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "offer", "offer_at": "2026-08-10"},
+        headers=_auth_headers(),
+    )
+    # Revive back to applied.
+    r = client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "applied", "revive": True},
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "applied"
+    # Terminal timestamp preserved (semantic: "曾经到过 offer").
+    assert body["offer_at"] == "2026-08-10"
+
+
+def test_patch_status_revive_rejects_non_terminal_backward():
+    """Module 3: revive=True only unlocks terminal → non-terminal."""
+    job = _create_job()
+    job_id = job["job_id"]
+    client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "interview"},
+        headers=_auth_headers(),
+    )
+    # interview → applied is backward but not terminal → still rejected.
+    r = client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "applied", "revive": True},
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 422
+    body = client.get(
+        f"/api/jobs/{job_id}", headers=_auth_headers()
+    ).json()
+    assert body["status"] == "interview"
+
+
+def test_patch_status_revive_from_withdrawn():
+    """Module 3: withdrawn → interview via revive, preserving rejected_at."""
+    job = _create_job()
+    job_id = job["job_id"]
+    client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "withdrawn", "rejected_at": "2026-08-12"},
+        headers=_auth_headers(),
+    )
+    r = client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "interview", "revive": True},
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "interview"
+    assert body["rejected_at"] == "2026-08-12"
+
+
+def test_patch_status_forward_transitions_still_work():
+    """Module 3: forward/skip transitions are unaffected by the new guard."""
+    job = _create_job()
+    job_id = job["job_id"]
+    # Skip: draft → interview.
+    r = client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "interview"},
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 200
+    # Forward: interview → offer.
+    r = client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "offer"},
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 200
+    # Forward: offer → withdrawn.
+    r = client.patch(
+        f"/api/jobs/{job_id}",
+        json={"status": "withdrawn"},
+        headers=_auth_headers(),
+    )
+    assert r.status_code == 200

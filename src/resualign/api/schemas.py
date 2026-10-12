@@ -95,6 +95,10 @@ class JobUpdateRequest(BaseModel):
     application_result: str | None = None
     # 岗位截止日期（YYYY-MM-DD）；空串按 clear-on-empty 清除。
     deadline: str | None = None
+    # 显式「重新打开」动作：允许从终态（offer/withdrawn）回退到非终态，
+    # 终态时间戳保留（语义变为「曾经到过」）。默认 False = 普通流转，
+    # 任何回退 422 拒绝。
+    revive: bool = False
 
 class JobImportRequest(BaseModel):
     jobs: list[dict[str, Any]] | None = None

@@ -26,11 +26,16 @@ from .models import (
     _effective_choices,
 )
 from .status_lifecycle import (
+    StatusTransitionError,
     _status_filter_values,
     _validate_status,
+    allowed_transition_targets,
+    can_transition_status,
     canonical_status,
+    is_terminal_status,
     status_label,
     status_lifecycle_fields,
+    validate_status_transition,
 )
 
 __all__ = [
@@ -45,6 +50,11 @@ __all__ = [
     "canonical_status",
     "status_label",
     "status_lifecycle_fields",
+    "validate_status_transition",
+    "can_transition_status",
+    "is_terminal_status",
+    "allowed_transition_targets",
+    "StatusTransitionError",
 ]
 
 # 投递结果归因枚举：记录"这份定稿投出去的结局"，用于验证对齐质量
@@ -266,6 +276,8 @@ def _resolve_job_update_lifecycle(
     tenant_id: str,
     job_id: str,
     fields: dict[str, Any],
+    *,
+    revive: bool = False,
 ) -> tuple[bool, str | None, bool]:
     """Resolve status transitions and return ``(append_only, applied_at, found)``."""
     status = fields.get("status")
@@ -274,8 +286,15 @@ def _resolve_job_update_lifecycle(
     current = store.get_job(tenant_id, job_id)
     if current is None:
         return False, None, False
+    # Validate the transition (forward/skip always OK; backward only via revive).
+    validate_status_transition(
+        current.get("status"),
+        status,
+        revive=revive,
+    )
     if (
-        canonical_status(status) == "applied"
+        not revive
+        and canonical_status(status) == "applied"
         and canonical_status(current["status"]) != "draft"
     ):
         return (
@@ -297,6 +316,11 @@ def _resolve_job_update_lifecycle(
             "interview_stage": fields.get("interview_stage"),
         },
     )
+    # On revive, preserve terminal timestamps (offer_at / rejected_at) so the
+    # history stays intact; only clear forward-looking follow-up fields.
+    if revive and is_terminal_status(current.get("status")):
+        lifecycle.pop("offer_at", None)
+        lifecycle.pop("rejected_at", None)
     for field, value in lifecycle.items():
         if field in fields:
             fields[field] = value
@@ -1480,6 +1504,7 @@ class JobLibraryStore(_SqliteStore):
         last_alignment_error: str | None = None,
         application_result: str | None = None,
         deadline: str | None = None,
+        revive: bool = False,
     ) -> Optional[dict[str, Any]]:
         """Update editable fields. None-valued fields are left unchanged.
 
@@ -1488,12 +1513,16 @@ class JobLibraryStore(_SqliteStore):
         ``interview_stage``) follow the clear-on-empty contract: an empty
         string clears the stored value to NULL (U10), while None leaves it
         untouched.
+
+        ``revive`` enables the explicit "重新打开" action: moving from a
+        terminal status (offer/withdrawn) back to a non-terminal one while
+        preserving terminal timestamps.
         """
         updates = _collect_job_update_fields(locals())
         _validate_job_update(updates)
         append_only_snapshot, snapshot_applied_at, lifecycle_found = (
             _resolve_job_update_lifecycle(
-                self, tenant_id, job_id, updates
+                self, tenant_id, job_id, updates, revive=revive
             )
         )
         if not lifecycle_found:

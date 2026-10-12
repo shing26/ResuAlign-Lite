@@ -16,10 +16,15 @@ reminders ignore terminal states.
 - Job is the single source of truth for the delivery loop. The frontend
   Applications panel is removed; backend application routes and storage stay
   dormant until a separate cleanup ticket removes them.
-- Status changes follow a half-constrained lifecycle: forward transitions
-  auto-fill the matching timestamp and clear later-stage fields; backward
-  corrections require explicit confirmation and clean stale fields; terminal
-  states keep applied/offer history while clearing follow-up fields.
+- Status changes follow a strict single-direction funnel (module 3):
+  `draft → applied → interview → offer/withdrawn`, with stage-skipping
+  allowed. Forward transitions auto-fill the matching timestamp and clear
+  later-stage fields. Any backward move is rejected with 422 (the old
+  "backward corrections require explicit confirmation" path is removed).
+  The explicit "重新打开" action (`revive=True`) moves from a terminal
+  status back to a non-terminal one while preserving terminal timestamps
+  (semantic: "曾经到过"); forward-looking follow-up fields are cleared.
+  Terminal states keep applied/offer history while clearing follow-up fields.
 - Funnel metrics use the historical peak (`offer_at` > `applied_at` > status),
   so withdrawn jobs keep their past-stage credit. Follow-up reminders fire only
   for active stages and stop automatically at terminal states.

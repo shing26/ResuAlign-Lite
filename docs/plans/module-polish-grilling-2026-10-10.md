@@ -104,11 +104,21 @@ gap 报告缺失时渲染失败通知 + 重试按钮。进度管线三 stage 独
 - 重试：按 stage 独立重试——profile 已在（已持久化）不重跑，只补失败/缺失的那一跳；换简历只让 gap 失效；重试按钮落在对应 stage 失败位。修复现状：`jd.profile is not None` 早退守卫会把 gap 失败的重试入口整个堵死。
 - 契约：结构化机器码透出（SSE `job.error` 带 `code`，取值 `LlmFailureCode`），前端按码查文案表；对齐阶段既有「正则刮文案反推」逻辑不动（有锁行为，另案）。
 
-### 模块 3 · 投递闭环——稳定性：状态流转合法性与时间线完整性
+### 模块 3 · 投递闭环——稳定性：状态流转合法性与时间线完整性（2026-10-12 完成）
 
 - 流转集：单向漏斗（`draft → applied → interview → offer/withdrawn`，允许跳级，导入中途岗位常见）；任何回退 422 拒绝，文案带当前状态与合法目标；语义复刻 `transition_alignment` 的「Illegal transition + 显式恢复动作」。
 - 复活：「重新打开」入口显式改回指定非终态；终态时间戳原样保留、语义变为「曾经到过」；前瞻字段清空；单次原子 `update_job` 连时间戳字段一起写；零新表。
 - 已知连带收益：看板 bulk-status / PATCH / 导入三入口共用 `update_job` 收口点；ADR-0027 时间戳语义需补充「回退不清零」限定。
+
+实现：
+
+- `status_lifecycle.py` 新增 `DELIVERY_TRANSITIONS` 矩阵 + `validate_status_transition` / `can_transition_status` / `is_terminal_status` / `allowed_transition_targets` / `StatusTransitionError`（继承 `UserStoreError`，router 的 `except` 直接捕获成 422）。
+- `update_job` 新增 `revive: bool = False` 参数；`_resolve_job_update_lifecycle` 在状态变更时调用 `validate_status_transition`，`revive=True` 时保留终态时间戳（`offer_at` / `rejected_at` 不清空）。
+- `JobUpdateRequest` 新增 `revive: bool = False` 字段；PATCH 端点透传。
+- 自转移（幂等重写，如 `merge_applications_into_jobs` 重复应用同一状态）始终允许。
+- ADR-0027 Decision 第二条更新：回退从「显式确认 + 清理」改为「422 拒绝 + `revive=True` 显式复活」。
+
+测试：新增 12 条（存储层 12 条覆盖矩阵/自转移/复活/非法回退；API 层 6 条覆盖 422 拒绝/复活保留时间戳/正向流转不受影响）；更新 2 条现有测试（`test_reapplying_applied_from_interview_is_rejected` 从 append-only 改为 422；`test_allowed_transition_targets` 匹配自转移）。全量后端 **1227 passed / 7 skipped**，前端 553 passed，ruff + modgraph 干净。
 
 ### 模块 4 · 简历中心——稳定性：诊断与内容变更的失效语义
 

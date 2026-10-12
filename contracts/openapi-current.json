@@ -5003,6 +5003,11 @@
               }
             ],
             "title": "Deadline"
+          },
+          "revive": {
+            "type": "boolean",
+            "title": "Revive",
+            "default": false
           }
         },
         "type": "object",

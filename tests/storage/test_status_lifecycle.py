@@ -1,7 +1,16 @@
-"""Delivery-loop status lifecycle rules (ADR-0027 / issue #21)."""
+"""Delivery-loop status lifecycle rules (ADR-0027 / issue #21 / module 3)."""
 
 from __future__ import annotations
 
+import pytest
+
+from resualign.job_library import (
+    StatusTransitionError,
+    allowed_transition_targets,
+    can_transition_status,
+    is_terminal_status,
+    validate_status_transition,
+)
 from resualign.job_library import status_lifecycle_fields
 
 TODAY = "2026-08-14"
@@ -173,3 +182,113 @@ def test_backward_to_draft_clears_all_stage_fields():
     assert fields["next_step"] == ""
     assert fields["next_step_due_at"] == ""
     assert fields["interview_stage"] == ""
+
+
+# ------------------------------------------------------------------ #
+# Delivery status transition matrix (module 3)                       #
+# ------------------------------------------------------------------ #
+
+def test_forward_transitions_are_allowed():
+    assert can_transition_status("draft", "applied")
+    assert can_transition_status("draft", "interview")
+    assert can_transition_status("draft", "offer")
+    assert can_transition_status("draft", "withdrawn")
+    assert can_transition_status("applied", "interview")
+    assert can_transition_status("applied", "offer")
+    assert can_transition_status("applied", "withdrawn")
+    assert can_transition_status("interview", "offer")
+    assert can_transition_status("interview", "withdrawn")
+    assert can_transition_status("offer", "withdrawn")
+
+
+def test_skip_transitions_are_allowed():
+    # Skipping stages is valid (e.g. imported jobs that jump to interview).
+    assert can_transition_status("draft", "interview")
+    assert can_transition_status("draft", "offer")
+    assert can_transition_status("applied", "offer")
+
+
+def test_backward_transitions_are_rejected():
+    assert not can_transition_status("applied", "draft")
+    assert not can_transition_status("interview", "applied")
+    assert not can_transition_status("interview", "draft")
+    assert not can_transition_status("offer", "interview")
+    assert not can_transition_status("offer", "applied")
+    assert not can_transition_status("offer", "draft")
+    assert not can_transition_status("withdrawn", "offer")
+    assert not can_transition_status("withdrawn", "interview")
+    assert not can_transition_status("withdrawn", "applied")
+    assert not can_transition_status("withdrawn", "draft")
+
+
+def test_self_transitions_are_allowed():
+    # Self-transitions are idempotent re-writes (e.g. merge_applications_into_jobs
+    # re-applies the same status); they are always allowed.
+    assert can_transition_status("draft", "draft")
+    assert can_transition_status("applied", "applied")
+    assert can_transition_status("interview", "interview")
+    assert can_transition_status("offer", "offer")
+    assert can_transition_status("withdrawn", "withdrawn")
+
+
+def test_terminal_statuses():
+    assert not is_terminal_status("draft")
+    assert not is_terminal_status("applied")
+    assert not is_terminal_status("interview")
+    assert is_terminal_status("offer")
+    assert is_terminal_status("withdrawn")
+
+def test_allowed_transition_targets():
+    assert allowed_transition_targets("draft") == [
+        "applied",
+        "draft",
+        "interview",
+        "offer",
+        "withdrawn",
+    ]
+    assert allowed_transition_targets("applied") == [
+        "applied",
+        "interview",
+        "offer",
+        "withdrawn",
+    ]
+    assert allowed_transition_targets("interview") == [
+        "interview",
+        "offer",
+        "withdrawn",
+    ]
+    assert allowed_transition_targets("offer") == [
+        "offer",
+        "withdrawn",
+    ]
+
+
+def test_validate_status_transition_raises_on_backward():
+    with pytest.raises(StatusTransitionError, match="Illegal status transition"):
+        validate_status_transition("offer", "applied")
+    with pytest.raises(StatusTransitionError, match="Illegal status transition"):
+        validate_status_transition("withdrawn", "draft")
+
+
+def test_validate_status_transition_allows_forward():
+    # Should not raise.
+    validate_status_transition("draft", "applied")
+    validate_status_transition("applied", "interview")
+    validate_status_transition("interview", "offer")
+    validate_status_transition("offer", "withdrawn")
+
+
+def test_validate_status_transition_allows_revive():
+    # Revive: terminal → non-terminal is allowed when revive=True.
+    validate_status_transition("offer", "applied", revive=True)
+    validate_status_transition("withdrawn", "interview", revive=True)
+    validate_status_transition("withdrawn", "draft", revive=True)
+
+
+def test_validate_status_transition_revive_still_rejects_non_terminal_backward():
+    # revive=True only unlocks terminal → non-terminal; other backward moves
+    # are still rejected.
+    with pytest.raises(StatusTransitionError):
+        validate_status_transition("interview", "applied", revive=True)
+    with pytest.raises(StatusTransitionError):
+        validate_status_transition("applied", "draft", revive=True)
