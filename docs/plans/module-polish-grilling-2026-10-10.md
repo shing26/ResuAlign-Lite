@@ -120,10 +120,20 @@ gap 报告缺失时渲染失败通知 + 重试按钮。进度管线三 stage 独
 
 测试：新增 12 条（存储层 12 条覆盖矩阵/自转移/复活/非法回退；API 层 6 条覆盖 422 拒绝/复活保留时间戳/正向流转不受影响）；更新 2 条现有测试（`test_reapplying_applied_from_interview_is_rejected` 从 append-only 改为 422；`test_allowed_transition_targets` 匹配自转移）。全量后端 **1227 passed / 7 skipped**，前端 553 passed，ruff + modgraph 干净。
 
-### 模块 4 · 简历中心——稳定性：诊断与内容变更的失效语义
+### 模块 4 · 简历中心——稳定性：诊断与内容变更的失效语义（2026-10-12 完成）
 
 - 诊断改用画像那套「保留 + source-hash 判失效」：内容变更不清数据（修掉 `update_master_resume`/`rollback_master_resume` 双双 NULL 诊断字段的现状），UI 三态：有效 / 已过期附原因 / 从未诊断；回滚到匹配内容时诊断恢复显示。
 - 判定口径双键：内容 hash + 诊断提示词版本（快照已内嵌 `DIAG_PROMPT_VERSION`）；`profile_model` 收敛到同一判定函数。
+
+实现：
+
+- `update_master_resume` / `rollback_master_resume` 不再清空诊断字段（`latest_diagnosis_job_id` / `latest_diagnosis_json` / `latest_diagnosis_source_hash` 保留）。
+- 新增 `_diagnosis_for_row`：返回 `{"status": "valid" | "stale" | "missing", "data": diagnosis, "model": model, "reason": reason}`，判定口径双键（内容 hash + `DIAG_PROMPT_VERSION` + model）。
+- `get_master_resume` 新增 `diagnosis_status` 字段。
+- `_cached_diagnosis` 改用 `diagnosis_status` + 双键判定。
+- 前端 `format.js` 新增 `diagnosisStatusHtml` / `diagnosisStatusText`；`resume-center.js` 三态展示（有效 / 已过期附原因 / 从未诊断）。
+
+测试：新增 11 条（存储层 6 条覆盖三态/内容变更/prompt version/model 不匹配；前端 6 条覆盖 `diagnosisStatusHtml` / `diagnosisStatusText`）；更新 1 条现有测试（`test_master_resume_edit_and_rollback_preserve_diagnosis_with_staleness`）。全量后端 **1238 passed / 7 skipped**，前端 559 passed，ruff + modgraph 干净。
 
 ### 模块 5 · 驾驶舱——稳定性：统计口径
 

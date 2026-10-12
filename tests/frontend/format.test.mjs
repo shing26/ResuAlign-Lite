@@ -4,6 +4,8 @@ import {
   applyAcceptedDiffsToDraft,
   applyDiffToDraft,
   buildDiagnosisMarkdownFrom,
+  diagnosisStatusHtml,
+  diagnosisStatusText,
   canonicalJobStatus,
   cmpLineHtml,
   collectAcceptedOptimizeItems,
@@ -1139,4 +1141,60 @@ test("gapNoticeHtml uses fallback text when code is unknown", () => {
   const html = gapNoticeHtml({ gap_report: null, error: "连接超时", code: "unknown" });
   assert.match(html, /连接超时/);
   assert.match(html, /gap-notice__code"><\/span>/);
+});
+
+/* ------------------------------------------------------------------ */
+/* Diagnosis status (module 4)                                        */
+/* ------------------------------------------------------------------ */
+
+test("diagnosisStatusText returns score for valid diagnosis", () => {
+  const text = diagnosisStatusText(
+    { status: "valid", reason: null },
+    { score: 88, skills: [], issues: [] }
+  );
+  assert.equal(text, "88 分");
+});
+
+test("diagnosisStatusText returns expired label for stale diagnosis", () => {
+  const text = diagnosisStatusText(
+    { status: "stale", reason: "简历内容已变更" },
+    { score: 88, skills: [], issues: [] }
+  );
+  assert.equal(text, "88 分 · 已过期");
+});
+
+test("diagnosisStatusText returns 尚未诊断 for missing diagnosis", () => {
+  const text = diagnosisStatusText(
+    { status: "missing", reason: null },
+    null
+  );
+  assert.equal(text, "尚未诊断");
+});
+
+test("diagnosisStatusHtml renders valid score", () => {
+  const html = diagnosisStatusHtml(
+    { status: "valid", reason: null },
+    { score: 90, skills: [], issues: [] }
+  );
+  assert.match(html, /diagnosis-status--valid/);
+  assert.match(html, /90 分/);
+});
+
+test("diagnosisStatusHtml renders stale score with reason", () => {
+  const html = diagnosisStatusHtml(
+    { status: "stale", reason: "简历内容已变更" },
+    { score: 85, skills: [], issues: [] }
+  );
+  assert.match(html, /diagnosis-status--stale/);
+  assert.match(html, /85 分 · 已过期/);
+  assert.match(html, /简历内容已变更/);
+});
+
+test("diagnosisStatusHtml renders missing state", () => {
+  const html = diagnosisStatusHtml(
+    { status: "missing", reason: null },
+    null
+  );
+  assert.match(html, /diagnosis-status--missing/);
+  assert.match(html, /尚未诊断/);
 });

@@ -516,6 +516,33 @@ export function gapNoticeHtml(gap) {
     </div>`;
 }
 
+/* Module 4 (2026-10-12): diagnosis staleness three-state display.
+ * ``diagnosis_status`` comes from the backend (``_diagnosis_for_row``):
+ * ``valid`` → show score; ``stale`` → show score + expiry reason;
+ * ``missing`` → show 尚未诊断. */
+export function diagnosisStatusHtml(diagnosisStatus, diagnosis) {
+  const status = (diagnosisStatus && diagnosisStatus.status) || "missing";
+  if (status === "valid" && diagnosis && Number.isFinite(Number(diagnosis.score))) {
+    return `<span class="diagnosis-status diagnosis-status--valid">${esc(diagnosis.score)} 分</span>`;
+  }
+  if (status === "stale" && diagnosis && Number.isFinite(Number(diagnosis.score))) {
+    const reason = (diagnosisStatus && diagnosisStatus.reason) || "诊断已过期";
+    return `<span class="diagnosis-status diagnosis-status--stale" title="${esc(reason)}">${esc(diagnosis.score)} 分 · 已过期</span>`;
+  }
+  return `<span class="diagnosis-status diagnosis-status--missing">尚未诊断</span>`;
+}
+
+export function diagnosisStatusText(diagnosisStatus, diagnosis) {
+  const status = (diagnosisStatus && diagnosisStatus.status) || "missing";
+  if (status === "valid" && diagnosis && Number.isFinite(Number(diagnosis.score))) {
+    return `${diagnosis.score} 分`;
+  }
+  if (status === "stale" && diagnosis && Number.isFinite(Number(diagnosis.score))) {
+    return `${diagnosis.score} 分 · 已过期`;
+  }
+  return "尚未诊断";
+}
+
 export const CONFIDENCE_BADGE_CLASS = {
   high: "badge-green",
   medium: "badge-amber",

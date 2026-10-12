@@ -10706,6 +10706,23 @@ select,
   opacity: 0.85;
 }
 
+/* Module 4 (2026-10-12): diagnosis staleness three-state display. */
+.diagnosis-status--valid {
+  color: var(--success, #16a34a);
+}
+.diagnosis-status--stale {
+  color: var(--warn, #d97706);
+}
+.diagnosis-status--missing {
+  color: var(--text-secondary, #4C5561);
+}
+.dot-muted {
+  background: var(--text-secondary, #4C5561);
+}
+.dot-warn {
+  background: var(--warn, #d97706);
+}
+
 @layer components {
 /* ================================================================
    R5 前端收尾（expert-team-20260825）

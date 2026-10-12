@@ -395,6 +395,9 @@ class MasterResumeStore(_SqliteStore):
                     "latest_diagnosis": self._latest_diagnosis_for_row(
                         row, current["content"] if current else ""
                     ),
+                    "diagnosis_status": self._diagnosis_for_row(
+                        row, current["content"] if current else ""
+                    ),
                     "profile": self._profile_for_row(
                         row, current["content"] if current else ""
                     ),
@@ -485,9 +488,7 @@ class MasterResumeStore(_SqliteStore):
                 )
                 conn.execute(
                     "UPDATE master_resumes SET current_version = ?, "
-                    "updated_at = ?, latest_diagnosis_job_id = NULL, "
-                    "latest_diagnosis_json = NULL, "
-                    "latest_diagnosis_source_hash = NULL "
+                    "updated_at = ? "
                     "WHERE resume_id = ? AND tenant_id = ?",
                     (next_version, now, resume_id, tenant_id),
                 )
@@ -509,9 +510,7 @@ class MasterResumeStore(_SqliteStore):
                 now = self._clock()
                 conn.execute(
                     "UPDATE master_resumes SET current_version = ?, "
-                    "updated_at = ?, latest_diagnosis_job_id = NULL, "
-                    "latest_diagnosis_json = NULL, "
-                    "latest_diagnosis_source_hash = NULL "
+                    "updated_at = ? "
                     "WHERE resume_id = ? AND tenant_id = ?",
                     (version, now, resume_id, tenant_id),
                 )
@@ -699,6 +698,68 @@ class MasterResumeStore(_SqliteStore):
         except json.JSONDecodeError:
             return None
         return diagnosis if isinstance(diagnosis, dict) else None
+
+    def _diagnosis_for_row(
+        self,
+        row: sqlite3.Row,
+        content: str,
+        *,
+        expected_model: str | None = None,
+        expected_prompt_version: str | None = None,
+    ) -> dict[str, Any]:
+        """Return the persisted diagnosis with staleness info (module 4).
+
+        Three states:
+        - ``valid``: content hash + prompt version match, diagnosis is usable.
+        - ``stale``: diagnosis exists but content or prompt version changed.
+        - ``missing``: no diagnosis has been run yet.
+
+        The dual-key check (content hash + DIAG_PROMPT_VERSION) mirrors the
+        profile staleness mechanism (``_profile_for_row``).
+        """
+        raw = (
+            row["latest_diagnosis_json"]
+            if "latest_diagnosis_json" in row.keys()
+            else None
+        )
+        source_hash = (
+            row["latest_diagnosis_source_hash"]
+            if "latest_diagnosis_source_hash" in row.keys()
+            else None
+        )
+        if not raw or not source_hash:
+            return {"status": "missing", "data": None, "model": None, "reason": None}
+        try:
+            diagnosis = json.loads(raw)
+        except json.JSONDecodeError:
+            return {"status": "missing", "data": None, "model": None, "reason": None}
+        if not isinstance(diagnosis, dict):
+            return {"status": "missing", "data": None, "model": None, "reason": None}
+        sha = hashlib.sha256((content or "").encode("utf-8")).hexdigest()
+        if source_hash != sha:
+            return {
+                "status": "stale",
+                "data": diagnosis,
+                "model": diagnosis.get("model"),
+                "reason": "简历内容已变更，诊断已过期",
+            }
+        if expected_prompt_version is not None:
+            diag_version = diagnosis.get("prompt_version") or ""
+            if diag_version and diag_version != expected_prompt_version:
+                return {
+                    "status": "stale",
+                    "data": diagnosis,
+                    "model": diagnosis.get("model"),
+                    "reason": "诊断提示词已更新，请重新诊断",
+                }
+        if expected_model is not None and diagnosis.get("model") != expected_model:
+            return {
+                "status": "stale",
+                "data": diagnosis,
+                "model": diagnosis.get("model"),
+                "reason": "模型已切换，请重新诊断",
+            }
+        return {"status": "valid", "data": diagnosis, "model": diagnosis.get("model"), "reason": None}
 
     def delete_master_resume(
         self, tenant_id: str, resume_id: str

@@ -14,6 +14,7 @@ import {
 } from "./events.js";
 import {
   atsHealthCardHtml,
+  diagnosisStatusText,
   esc,
   formatDate,
   renderMarkdown,
@@ -102,6 +103,7 @@ async function renderResumeDetailView(app, resumeId) {
       state.diagnosis.job_id === resume.latest_diagnosis_job_id
       ? diagnosisFromSnapshot(state.diagnosis)
       : null);
+  const diagnosisStatus = resume.diagnosis_status || { status: "missing" };
   state.resumeVersions = versions;
   state.resumeCurrentContent = resume.content || "";
 
@@ -114,7 +116,7 @@ async function renderResumeDetailView(app, resumeId) {
           <p>更新于 ${formatDate(resume.updated_at)} · 当前版本 v${resume.current_version} · 共 ${versions.length} 个版本</p>
         </div>
         <div class="resume-band-actions">
-          <span class="status-line" data-resume-band-status><span class="dot dot-success" aria-hidden="true"></span><span data-resume-band-status-text>最近诊断：${diagnosis && Number.isFinite(Number(diagnosis.score)) ? `${esc(diagnosis.score)} 分` : "尚未诊断"}</span></span>
+          <span class="status-line" data-resume-band-status><span class="dot ${diagnosisStatus.status === "valid" ? "dot-success" : diagnosisStatus.status === "stale" ? "dot-warn" : "dot-muted"}" aria-hidden="true"></span><span data-resume-band-status-text>最近诊断：${diagnosisStatusText(diagnosisStatus, diagnosis)}</span></span>
           <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">诊断简历</button>
           <button class="btn btn-secondary btn-sm" data-action="export-resume-md" data-id="${resume.resume_id}" title="导出简历正文 Markdown">导出简历 MD</button>
           <button class="btn btn-secondary btn-sm" data-action="export-diagnosis-md" data-id="${resume.resume_id}" hidden title="导出最近一次诊断报告 Markdown">导出诊断 MD</button>
@@ -126,7 +128,8 @@ async function renderResumeDetailView(app, resumeId) {
         <div class="diagnosis-banner__row">
           <div class="diagnosis-banner__copy">
             <span class="diagnosis-banner__label">简历诊断</span>
-            <span class="small muted" data-diagnosis-meta>尚未诊断</span>
+            <span class="small muted" data-diagnosis-meta>${diagnosisStatusText(diagnosisStatus, diagnosis)}</span>
+            ${diagnosisStatus.status === "stale" ? `<span class="small muted" data-diagnosis-reason>${esc(diagnosisStatus.reason || "诊断已过期")}</span>` : ""}
           </div>
           <div class="diagnosis-banner__actions">
             <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">重新诊断</button>

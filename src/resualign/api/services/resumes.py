@@ -46,6 +46,28 @@ def _cached_diagnosis(resume: dict[str, Any], config: Any, tenant_id: str) -> Op
         return None
     return {'score': diag.get('score', 0), 'skills': diag.get('skills') or [], 'issues': diag.get('issues') or []}
 
+    # Module 4: dual-key check (content hash + prompt version + model).
+    # Reuse the stored diagnosis only when all three match.
+    diagnosis_status = resume.get('diagnosis_status') or {}
+    if diagnosis_status.get('status') != 'valid':
+        return None
+    stored = diagnosis_status.get('data') or {}
+    if not stored:
+        return None
+    # Prompt version check: snapshot embeds DIAG_PROMPT_VERSION.
+    from ...engine.llm import DIAG_PROMPT_VERSION
+    diag_version = stored.get('prompt_version') or ''
+    if diag_version and diag_version != DIAG_PROMPT_VERSION:
+        return None
+    # Model check: profile_model converges to the same predicate.
+    if stored.get('model') and stored.get('model') != config.model:
+        return None
+    return {
+        'score': stored.get('score', 0),
+        'skills': stored.get('skills') or [],
+        'issues': stored.get('issues') or [],
+    }
+
 
 def backfill_diagnosis_snapshots() -> int:
     """Persist currently-valid registry diagnosis results into master resumes."""

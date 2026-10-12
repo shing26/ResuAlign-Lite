@@ -356,7 +356,9 @@ def test_master_resume_snapshot_survives_dangling_job_clear(db_path):
     assert cleared["latest_diagnosis"] == diagnosis
 
 
-def test_master_resume_edit_and_rollback_clear_diagnosis_snapshot(db_path):
+def test_master_resume_edit_and_rollback_preserve_diagnosis_with_staleness(db_path):
+    """Module 4: edit/rollback no longer NULL diagnosis fields; instead
+    _diagnosis_for_row judges staleness via content hash."""
     import hashlib
 
     store = MasterResumeStore(db_path=db_path)
@@ -380,14 +382,22 @@ def test_master_resume_edit_and_rollback_clear_diagnosis_snapshot(db_path):
     updated = store.update_master_resume(
         "tenant-1", created["resume_id"], "Python developer. FastAPI."
     )
-    assert updated["latest_diagnosis_job_id"] is None
-    assert updated["latest_diagnosis"] is None
+    # Diagnosis fields are preserved in the row; _latest_diagnosis_for_row
+    # returns None on content mismatch, but diagnosis_status keeps the data.
+    assert updated["latest_diagnosis_job_id"] == "job-1"
+    assert updated["latest_diagnosis"] is None  # content changed → None
+    assert updated["diagnosis_status"]["status"] == "stale"
+    assert "内容已变更" in updated["diagnosis_status"]["reason"]
+    assert updated["diagnosis_status"]["data"] is not None
+    assert updated["diagnosis_status"]["data"]["score"] == 88
 
     rolled = store.rollback_master_resume(
         "tenant-1", created["resume_id"], 1
     )
-    assert rolled["latest_diagnosis_job_id"] is None
-    assert rolled["latest_diagnosis"] is None
+    # Rollback to the original content: diagnosis becomes valid again.
+    assert rolled["latest_diagnosis_job_id"] == "job-1"
+    assert rolled["latest_diagnosis"] is not None
+    assert rolled["diagnosis_status"]["status"] == "valid"
 
 
 def test_application_creation_snapshots_resume_version(db_path):
@@ -500,3 +510,112 @@ def test_application_requires_existing_resume(db_path):
             title="Backend at Acme",
             master_resume_id="missing",
         )
+
+
+# ------------------------------------------------------------------ #
+# Module 4: diagnosis staleness (_diagnosis_for_row)                 #
+# ------------------------------------------------------------------ #
+
+def test_diagnosis_status_missing_when_no_diagnosis(db_path):
+    store = MasterResumeStore(db_path=db_path)
+    created = store.create_master_resume(
+        "tenant-1", "Master", "Python developer."
+    )
+    resume = store.get_master_resume("tenant-1", created["resume_id"])
+    assert resume["diagnosis_status"]["status"] == "missing"
+    assert resume["diagnosis_status"]["data"] is None
+
+
+def test_diagnosis_status_valid_when_content_matches(db_path):
+    import hashlib
+
+    store = MasterResumeStore(db_path=db_path)
+    created = store.create_master_resume(
+        "tenant-1", "Master", "Python developer."
+    )
+    diagnosis = {"score": 90, "skills": ["Python"], "issues": [], "model": "m1"}
+    source_hash = hashlib.sha256(b"Python developer.").hexdigest()
+    store.set_latest_diagnosis_snapshot(
+        "tenant-1", created["resume_id"], diagnosis, source_hash
+    )
+    resume = store.get_master_resume("tenant-1", created["resume_id"])
+    assert resume["diagnosis_status"]["status"] == "valid"
+    assert resume["diagnosis_status"]["data"]["score"] == 90
+
+
+def test_diagnosis_status_stale_when_content_changes(db_path):
+    import hashlib
+
+    store = MasterResumeStore(db_path=db_path)
+    created = store.create_master_resume(
+        "tenant-1", "Master", "Python developer."
+    )
+    diagnosis = {"score": 90, "skills": ["Python"], "issues": [], "model": "m1"}
+    source_hash = hashlib.sha256(b"Python developer.").hexdigest()
+    store.set_latest_diagnosis_snapshot(
+        "tenant-1", created["resume_id"], diagnosis, source_hash
+    )
+    # Edit content → diagnosis becomes stale.
+    updated = store.update_master_resume(
+        "tenant-1", created["resume_id"], "Python developer. FastAPI."
+    )
+    assert updated["diagnosis_status"]["status"] == "stale"
+    assert "内容已变更" in updated["diagnosis_status"]["reason"]
+    # Data is still preserved (not NULLed).
+    assert updated["diagnosis_status"]["data"]["score"] == 90
+
+
+def test_diagnosis_status_stale_when_prompt_version_mismatches(db_path):
+    import hashlib
+
+    store = MasterResumeStore(db_path=db_path)
+    created = store.create_master_resume(
+        "tenant-1", "Master", "Python developer."
+    )
+    diagnosis = {
+        "score": 90,
+        "skills": ["Python"],
+        "issues": [],
+        "model": "m1",
+        "prompt_version": "old-version",
+    }
+    source_hash = hashlib.sha256(b"Python developer.").hexdigest()
+    store.set_latest_diagnosis_snapshot(
+        "tenant-1", created["resume_id"], diagnosis, source_hash
+    )
+    resume = store.get_master_resume("tenant-1", created["resume_id"])
+    status = resume["diagnosis_status"]
+    # Without expected_prompt_version, content match → valid.
+    assert status["status"] == "valid"
+    # With a different expected version → stale.
+    stale = store._diagnosis_for_row(
+        {"latest_diagnosis_json": __import__("json").dumps(diagnosis),
+         "latest_diagnosis_source_hash": source_hash},
+        "Python developer.",
+        expected_prompt_version="new-version",
+    )
+    assert stale["status"] == "stale"
+    assert "提示词" in stale["reason"]
+
+
+def test_diagnosis_status_stale_when_model_mismatches(db_path):
+    import hashlib
+    import json as _json
+
+    store = MasterResumeStore(db_path=db_path)
+    created = store.create_master_resume(
+        "tenant-1", "Master", "Python developer."
+    )
+    diagnosis = {"score": 90, "skills": ["Python"], "issues": [], "model": "m1"}
+    source_hash = hashlib.sha256(b"Python developer.").hexdigest()
+    store.set_latest_diagnosis_snapshot(
+        "tenant-1", created["resume_id"], diagnosis, source_hash
+    )
+    stale = store._diagnosis_for_row(
+        {"latest_diagnosis_json": _json.dumps(diagnosis),
+         "latest_diagnosis_source_hash": source_hash},
+        "Python developer.",
+        expected_model="m2",
+    )
+    assert stale["status"] == "stale"
+    assert "模型" in stale["reason"]
