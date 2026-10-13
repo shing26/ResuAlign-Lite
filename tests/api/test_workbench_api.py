@@ -688,6 +688,36 @@ def test_cached_diagnosis_rejects_changed_content_or_model():
     )
 
 
+def test_cached_diagnosis_rejects_stale_prompt_version():
+    """Module 4: a diagnosis computed with an older prompt version is not
+    reused even when content hash and model match — the dual-key guard
+    (content hash + prompt version + model) must reject it."""
+    job = api_module._registry.create(
+        {"resume_text": "Python developer."}, _config(), tenant_id="tenant"
+    )
+    resume = {
+        "content": "Python developer.",
+        "latest_diagnosis_job_id": job.job_id,
+    }
+    api_module._registry.succeed(job.job_id, {
+        "score": 88,
+        "diagnosis": {
+            "score": 88,
+            "skills": ["Python"],
+            "issues": [],
+            "model": "test-model",
+            "prompt_version": "stale-prompt-version",
+        },
+        "diagnosis_source_hash": api_module._content_sha256(
+            resume["content"]
+        ),
+    })
+    assert (
+        api_module._cached_diagnosis(resume, _config(), tenant_id="tenant")
+        is None
+    )
+
+
 def test_cached_diagnosis_falls_back_to_master_resume_snapshot():
     resume = _create_resume(content="Python developer.")
     token = _auth_headers()["Authorization"].split(" ", 1)[1]

@@ -230,6 +230,58 @@ class TestRoleRouterWiring:
         assert meta["fallback_used"] is True
         assert meta["fallback_node_name"] == "backup"
 
+
+    def test_cooled_down_node_is_excluded_from_fallback(self, tmp_path):
+        """Module 8: a cooled-down node is never used as a fallback target —
+        the fallback chain skips it even when it is not the primary."""
+        from resualign.engine import role_router
+        role_router.clear_node_cooldown()
+        store = _store(tmp_path)
+        primary = store.create_node(
+            "t",
+            name="primary",
+            provider="deepseek",
+            model="primary-model",
+            base_url="https://api.deepseek.com",
+            api_key=fake_api_key("primary"),
+            is_active=True,
+        )
+        cooled = store.create_node(
+            "t",
+            name="cooled",
+            provider="deepseek",
+            model="cooled-model",
+            base_url="https://api.deepseek.com",
+            api_key=fake_api_key("cooled"),
+            is_active=True,
+        )
+        store.create_node(
+            "t",
+            name="healthy",
+            provider="deepseek",
+            model="healthy-model",
+            base_url="https://api.deepseek.com",
+            api_key=fake_api_key("healthy"),
+            is_active=True,
+        )
+        assert store.set_role_binding("t", "editor", primary["node_id"])
+        role_router._cool_down_node("t", cooled["node_id"])
+        seen: list[str] = []
+
+        def fn(client, **kw):
+            seen.append(client.model)
+            if client.model == "primary-model":
+                raise LLMResponseError("primary down", code="timeout")
+            return "ok"
+
+        result, meta = call_with_role("editor", fn, store, "t")
+        assert result == "ok"
+        # The cooled-down node is never called; the healthy fallback serves.
+        assert "cooled-model" not in seen
+        assert meta["fallback_node_name"] == "healthy"
+        role_router.clear_node_cooldown()
+
+
     def test_uncounted_code_tallies_zero(self, tmp_path):
         store = _store(tmp_path)
         n = _node(store)

@@ -184,13 +184,25 @@ def usable_active_node(node_store: Any, tenant_id: str) -> dict | None:
     Callers that need failover should use ``usable_active_nodes`` instead.
 
     Module 8: skip nodes in process-local cooldown (timeout/http failures).
+    A cooled-down node is skipped in favour of the next healthy usable
+    node, so a flapping first node does not make the whole tenant look
+    node-less while healthy nodes exist behind it.
     """
     usable = getattr(node_store, "get_usable_node", None)
-    if callable(usable):
-        node = usable(tenant_id)
-        if node and _is_node_cooled_down(tenant_id, node.get("node_id", "")):
-            return None
+    node = usable(tenant_id) if callable(usable) else None
+    if node and not _is_node_cooled_down(tenant_id, node.get("node_id", "")):
         return node
+    # The single-node answer is cooled down (or absent): fall back to the
+    # full list so the next healthy usable node is served instead of
+    # reporting "no node at all" while healthy nodes exist.
+    nodes = getattr(node_store, "get_usable_nodes", None)
+    if callable(nodes):
+        for candidate in nodes(tenant_id):
+            if candidate and not _is_node_cooled_down(
+                tenant_id, candidate.get("node_id", "")
+            ):
+                return candidate
+        return None
     active = getattr(node_store, "get_active_node", None)
     node = active(tenant_id) if callable(active) else None
     if node and _is_node_cooled_down(tenant_id, node.get("node_id", "")):
@@ -235,6 +247,9 @@ def _fallback_candidates(
             continue
         node_id = node.get("node_id")
         if node_id and node_id in seen:
+            continue
+        # Module 8: skip cooled-down nodes in the fallback chain too.
+        if node_id and _is_node_cooled_down(tenant_id, node_id):
             continue
         if node_id:
             seen.add(node_id)
