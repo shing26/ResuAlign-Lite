@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any
 
 from ..contracts.errors import LlmFailureCode
@@ -25,6 +26,47 @@ from .llm import LLMResponseError, OpenAIClient, StreamConnectionError
 from .llm_nodes import LLMNodeStore
 
 logger = logging.getLogger(__name__)
+
+# Module 8: process-local cooldown. After a node fails with timeout/http
+# (connection error, 5xx), skip it for 60s in the same process. auth/quota
+# (config problems) and parse/schema/empty (model output problems) do NOT
+# trigger cooldown; those need a node switch or a retry, not a skip.
+_NODE_COOLDOWN_SECONDS = 60.0
+_NODE_COOLDOWN: dict[tuple[str, str], float] = {}
+_COOLDOWN_CODES = frozenset({"timeout", "http"})
+
+
+def _node_cooldown_key(tenant_id: str, node_id: str) -> tuple[str, str]:
+    return (tenant_id, node_id)
+
+
+def _is_node_cooled_down(tenant_id: str, node_id: str) -> bool:
+    """Return True if the node is in cooldown (skip it)."""
+    key = _node_cooldown_key(tenant_id, node_id)
+    expires_at = _NODE_COOLDOWN.get(key)
+    if expires_at is None:
+        return False
+    if time.monotonic() >= expires_at:
+        # Cooldown expired; clean up.
+        _NODE_COOLDOWN.pop(key, None)
+        return False
+    return True
+
+
+def _cool_down_node(tenant_id: str, node_id: str) -> None:
+    """Put a node into cooldown for _NODE_COOLDOWN_SECONDS."""
+    key = _node_cooldown_key(tenant_id, node_id)
+    _NODE_COOLDOWN[key] = time.monotonic() + _NODE_COOLDOWN_SECONDS
+
+
+def _should_cool_down(code: str | None) -> bool:
+    """Return True if the failure code triggers cooldown."""
+    return code in _COOLDOWN_CODES
+
+
+def clear_node_cooldown() -> None:
+    """Clear all cooldowns (for tests)."""
+    _NODE_COOLDOWN.clear()
 
 # Per-role timeout defaults (seconds). Environment variables override:
 # ``RESUALIGN_ROLE_TIMEOUT_DIAGNOSE``, ``RESUALIGN_ROLE_TIMEOUT_PROFILER``, etc.
@@ -140,12 +182,20 @@ def usable_active_node(node_store: Any, tenant_id: str) -> dict | None:
 
     P0: multi-active failover — returns first usable node (local first).
     Callers that need failover should use ``usable_active_nodes`` instead.
+
+    Module 8: skip nodes in process-local cooldown (timeout/http failures).
     """
     usable = getattr(node_store, "get_usable_node", None)
     if callable(usable):
-        return usable(tenant_id)
+        node = usable(tenant_id)
+        if node and _is_node_cooled_down(tenant_id, node.get("node_id", "")):
+            return None
+        return node
     active = getattr(node_store, "get_active_node", None)
-    return active(tenant_id) if callable(active) else None
+    node = active(tenant_id) if callable(active) else None
+    if node and _is_node_cooled_down(tenant_id, node.get("node_id", "")):
+        return None
+    return node
 
 
 def usable_active_nodes(node_store: Any, tenant_id: str) -> list[dict]:
@@ -303,9 +353,13 @@ def call_with_role(
             _report_call_outcome(node_store, tenant_id, primary_node, success=True)
             return result, meta
         except LLMResponseError as exc:
+            # Module 8: cooldown on timeout/http failures.
+            code = getattr(exc, "code", "other")
+            if _should_cool_down(code) and primary_node:
+                _cool_down_node(tenant_id, primary_node.get("node_id", ""))
             _report_call_outcome(
                 node_store, tenant_id, primary_node,
-                success=False, code=getattr(exc, "code", "other"),
+                success=False, code=code,
             )
             logger.warning(
                 "Role %s primary node failed: %s; trying fallback nodes",
@@ -314,6 +368,9 @@ def call_with_role(
             meta["error"] = str(exc)[:200]
             meta["fallback_used"] = True
         except Exception as exc:
+            # Module 8: cooldown on unexpected errors (treated as http).
+            if primary_node:
+                _cool_down_node(tenant_id, primary_node.get("node_id", ""))
             _report_call_outcome(
                 node_store, tenant_id, primary_node, success=False, code="other"
             )
