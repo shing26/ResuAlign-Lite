@@ -960,12 +960,19 @@ def test_cooldown_does_not_trigger_on_parse_failure():
     assert not role_router._should_cool_down("empty")
 
 
-def test_cooldown_triggers_on_timeout_and_http():
-    """Module 8: timeout/http failures trigger cooldown."""
+def test_cooldown_triggers_on_timeout_only():
+    """Module 8: only timeout failures trigger cooldown (5xx/http do not)."""
     from resualign.engine import role_router
 
     assert role_router._should_cool_down("timeout")
-    assert role_router._should_cool_down("http")
+
+
+def test_cooldown_does_not_trigger_on_http_failure():
+    """Module 8: 5xx/http failures do NOT trigger cooldown — they are
+    instant responses, so the breaker tally must keep counting them."""
+    from resualign.engine import role_router
+
+    assert not role_router._should_cool_down("http")
 
 
 def test_cooldown_expires_after_duration():

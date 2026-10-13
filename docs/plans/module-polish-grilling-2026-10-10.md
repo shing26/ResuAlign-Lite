@@ -180,17 +180,27 @@ gap 报告缺失时渲染失败通知 + 重试按钮。进度管线三 stage 独
 
 ### 模块 8 · 指挥台（LLM 节点管理）——稳定性：首跳失败代价（2026-10-13 完成）
 
-- 调用链加进程内短期冷却：节点本次 `timeout`/`http`（连接失败、5xx）失败后 60s 内同进程跳过该节点；`auth`/`quota` 不触发（配置问题，换节点才对）；`parse`/`schema`/`empty` 不触发（模型产出问题）；固定 60s 单一旋钮。
+- 调用链加进程内短期冷却：节点本次 `timeout`（连接失败、流停滞）失败后 60s 内同进程跳过该节点；`http`（5xx，如 503）**不触发**（即时响应，熔断计数需正常累计）；`auth`/`quota` 不触发（配置问题，换节点才对）；`parse`/`schema`/`empty` 不触发（模型产出问题）；固定 60s 单一旋钮。
 - 持久熔断机器（#103：阈值 3、计数码、恢复路径）语义不变，冷却是其上的类缓存快失败层；`auto_disabled` 徽标与「测试连通性恢复」路径已存在，不动。
 - 已排除的候选：test-all 串行探测体验（次优先，后续做）；自动半打开（改 #103 语义，需 ADR-0042 6e 例外，本轮不做）。
 
+冷却与熔断交互契约（2026-10-14 grilling 决策）：
+
+- 冷却只对 `timeout` 触发，`http`（5xx）不触发。5xx 是即时响应，冷却的「快失败」价值有限；超时才是慢的，冷却有价值。
+- 主节点超时冷却时，`call_with_role` / `call_with_role_streaming` 跳过主尝试，直接走 fallback。
+- 熔断计数不延续：主节点被跳过时只记录真实失败，不虚拟计数。持续超时需 3 个 60s 窗口才 `auto_disabled`；偶尔超时不会误杀。
+- `fallback_used` 语义：主节点被冷却跳过（`primary_node=None`）时，第一个 fallback 也算 `fallback_used=True`（fallback 接管了调用）。
+- `usable_active_node` 在首个可用节点冷却时返回下一个健康节点（而非 None），避免 `use_roles` 门控被禁用导致 failover 失效。
+- degradation benchmark（503 故障注入）不受影响：503 不触发冷却，主节点被调用 3 次，熔断计数正常累计。
+
 实现：
 
-- `role_router` 新增进程内短期冷却：节点 `timeout`/`http` 失败后 60s 内同进程跳过；`auth`/`quota`/`parse`/`schema`/`empty` 不触发冷却。
-- `call_with_role`：失败时检查错误码，`timeout`/`http` 触发冷却。
-- `usable_active_node`：检查冷却列表，跳过冷却中的节点。
+- `role_router` 新增进程内短期冷却：节点 `timeout` 失败后 60s 内同进程跳过；`http`/`auth`/`quota`/`parse`/`schema`/`empty` 不触发冷却。
+- `call_with_role` / `call_with_role_streaming`：失败时检查错误码，`timeout` 触发冷却；主节点冷却时跳过主尝试，直接走 fallback。
+- `usable_active_node`：检查冷却列表，跳过冷却中的节点，返回下一个健康可用节点。
+- `_fallback_candidates`：排除冷却中的节点，避免被当 fallback 调用。
 
-测试：新增 6 条（冷却触发/不触发/过期/`usable_active_node` 跳过冷却节点）。全量后端 **1256 passed / 7 skipped**，前端 562 passed，ruff + modgraph 干净。
+测试：新增 6 条（冷却触发/不触发/过期/`usable_active_node` 跳过冷却节点）。全量后端 **1256 passed / 7 skipped**，前端 562 passed，ruff + modgraph 干净。2026-10-14 修订：冷却触发码收窄为 `timeout`，恢复主节点跳过，`fallback_used` 语义修正。
 
 ### 模块 9 · 采集（油猴摄入器）——稳定性：失败重推、不丢载荷
 

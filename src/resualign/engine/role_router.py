@@ -27,13 +27,15 @@ from .llm_nodes import LLMNodeStore
 
 logger = logging.getLogger(__name__)
 
-# Module 8: process-local cooldown. After a node fails with timeout/http
-# (connection error, 5xx), skip it for 60s in the same process. auth/quota
-# (config problems) and parse/schema/empty (model output problems) do NOT
-# trigger cooldown; those need a node switch or a retry, not a skip.
+# Module 8: process-local cooldown. After a node fails with timeout
+# (connection error, stalled stream), skip it for 60s in the same process.
+# 5xx/http (e.g. 503) do NOT trigger cooldown: they are instant responses,
+# so the breaker tally must keep counting them toward auto-disable.
+# auth/quota (config problems) and parse/schema/empty (model output
+# problems) do NOT trigger cooldown; those need a node switch or a retry.
 _NODE_COOLDOWN_SECONDS = 60.0
 _NODE_COOLDOWN: dict[tuple[str, str], float] = {}
-_COOLDOWN_CODES = frozenset({"timeout", "http"})
+_COOLDOWN_CODES = frozenset({"timeout"})
 
 
 def _node_cooldown_key(tenant_id: str, node_id: str) -> tuple[str, str]:
@@ -349,6 +351,13 @@ def call_with_role(
 
     # ---- Primary attempt with role node ----
     primary_node = node_store.resolve_node_for_role(tenant_id, role)
+    # Module 8: a cooled-down node must not be re-aimed as the primary —
+    # skip the first attempt entirely and go straight to the fallback
+    # nodes instead of paying a full timeout on a node that just failed.
+    if primary_node and _is_node_cooled_down(
+        tenant_id, primary_node.get("node_id", "")
+    ):
+        primary_node = None
     resolved = _config_from_node(primary_node)
     if resolved is not None:
         from ..models import ResuAlignConfig
@@ -368,7 +377,7 @@ def call_with_role(
             _report_call_outcome(node_store, tenant_id, primary_node, success=True)
             return result, meta
         except LLMResponseError as exc:
-            # Module 8: cooldown on timeout/http failures.
+            # Module 8: cooldown on timeout failures (5xx/http do not trigger).
             code = getattr(exc, "code", "other")
             if _should_cool_down(code) and primary_node:
                 _cool_down_node(tenant_id, primary_node.get("node_id", ""))
@@ -383,7 +392,9 @@ def call_with_role(
             meta["error"] = str(exc)[:200]
             meta["fallback_used"] = True
         except Exception as exc:
-            # Module 8: cooldown on unexpected errors (treated as http).
+            # Module 8: cooldown on unexpected errors (treated as timeout —
+            # connection failures and stalled transports are the cooldown's
+            # core scenario).
             if primary_node:
                 _cool_down_node(tenant_id, primary_node.get("node_id", ""))
             _report_call_outcome(
@@ -408,10 +419,9 @@ def call_with_role(
 
     last_exc: Exception | None = None
     for index, (fallback_node, explicit_config) in enumerate(candidates):
-        if primary_node is not None and index == 0:
-            meta["fallback_used"] = True
-        elif primary_node is None and index > 0:
-            meta["fallback_used"] = True
+        # Module 8: a cooled-down primary (primary_node=None) still counts
+        # as fallback — the fallback node took over the call.
+        meta["fallback_used"] = True
 
         if fallback_node is not None:
             from ..models import ResuAlignConfig
@@ -491,6 +501,11 @@ def call_with_role_streaming(
 
     # ---- Primary attempt with role node ----
     primary_node = node_store.resolve_node_for_role(tenant_id, role)
+    # Module 8: skip a cooled-down primary (same contract as call_with_role).
+    if primary_node and _is_node_cooled_down(
+        tenant_id, primary_node.get("node_id", "")
+    ):
+        primary_node = None
     resolved = _config_from_node(primary_node)
     if resolved is not None:
         from ..models import ResuAlignConfig
@@ -506,9 +521,18 @@ def call_with_role_streaming(
             # A stalled stream is a transport-class failure; stream errors
             # without a structured code count as "other" (breaker-set
             # semantics, ticket #103).
+            # Module 8: cooldown on transport-class failures — a stalled
+            # stream counts as timeout, LLMResponseError carries its code.
+            code = getattr(exc, "code", "") or (
+                LlmFailureCode.TIMEOUT.value
+                if isinstance(exc, StreamConnectionError)
+                else ""
+            )
+            if _should_cool_down(code) and primary_node:
+                _cool_down_node(tenant_id, primary_node.get("node_id", ""))
             _report_call_outcome(
                 node_store, tenant_id, primary_node,
-                success=False, code=getattr(exc, "code", "other"),
+                success=False, code=code or "other",
             )
             logger.warning(
                 "Role %s primary stream failed: %s; trying fallback nodes",
@@ -527,10 +551,9 @@ def call_with_role_streaming(
 
     last_exc: Exception | None = None
     for index, (fallback_node, _) in enumerate(candidates):
-        if primary_node is not None and index == 0:
-            meta["fallback_used"] = True
-        elif primary_node is None and index > 0:
-            meta["fallback_used"] = True
+        # Module 8: a cooled-down primary (primary_node=None) still counts
+        # as fallback — the fallback node took over the call.
+        meta["fallback_used"] = True
 
         from ..models import ResuAlignConfig
         fallback_config = ResuAlignConfig(

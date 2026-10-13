@@ -282,6 +282,48 @@ class TestRoleRouterWiring:
         role_router.clear_node_cooldown()
 
 
+    def test_cooled_down_primary_is_skipped_for_fallback(self, tmp_path):
+        """Module 8: a cooled-down primary node is skipped entirely — the
+        call goes straight to the fallback without paying a full timeout
+        on the node that just failed. fallback_used is True (the fallback
+        took over)."""
+        from resualign.engine import role_router
+        role_router.clear_node_cooldown()
+        store = _store(tmp_path)
+        primary = store.create_node(
+            "t",
+            name="primary",
+            provider="deepseek",
+            model="primary-model",
+            base_url="https://api.deepseek.com",
+            api_key=fake_api_key("primary"),
+            is_active=True,
+        )
+        store.create_node(
+            "t",
+            name="backup",
+            provider="deepseek",
+            model="backup-model",
+            base_url="https://api.deepseek.com",
+            api_key=fake_api_key("backup"),
+            is_active=True,
+        )
+        assert store.set_role_binding("t", "editor", primary["node_id"])
+        role_router._cool_down_node("t", primary["node_id"])
+        seen: list[str] = []
+
+        def fn(client, **kw):
+            seen.append(client.model)
+            return "ok"
+
+        result, meta = call_with_role("editor", fn, store, "t")
+        assert result == "ok"
+        # The cooled-down primary is never called; the fallback serves directly.
+        assert seen == ["backup-model"]
+        assert meta["fallback_used"] is True
+        role_router.clear_node_cooldown()
+
+
     def test_uncounted_code_tallies_zero(self, tmp_path):
         store = _store(tmp_path)
         n = _node(store)
