@@ -10723,6 +10723,21 @@ select,
   background: var(--warn, #d97706);
 }
 
+/* Module 7 (2026-10-13): settings status degradation error bar. */
+.settings-bento__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-radius: var(--radius-md, 8px);
+  font-size: var(--text-sm);
+}
+
 @layer components {
 /* ================================================================
    R5 前端收尾（expert-team-20260825）

@@ -3448,6 +3448,7 @@ export function settingsBentoHtml(activeNode, latency, runtime) {
   const provider = node && String(node.provider || "").trim() ? String(node.provider) : "";
   const activeLabel = provider ? `${provider} · ${model}` : model;
   const info = runtime && typeof runtime === "object" ? runtime : {};
+  const degraded = info._degraded === true;
   const concurrency = Number(info.worker_concurrency);
   const concurrencyText =
     Number.isFinite(concurrency) && concurrency > 0
@@ -3459,6 +3460,7 @@ export function settingsBentoHtml(activeNode, latency, runtime) {
   const latencyText = hasLatency ? `${Math.round(latencyNum)} ms` : "—";
   return `
     <section class="settings-bento metric-strip settings-status" data-settings-bento aria-label="系统概览">
+      ${degraded ? `<div class="settings-bento__error" data-settings-degraded role="alert">系统状态加载失败，节点列表仍可正常使用。<button type="button" class="btn btn-outline btn-sm" data-action="retry-settings-status">重试</button></div>` : ""}
       <div class="settings-bento__card metric-cell settings-bento__card--model" data-bento-model>
         <span class="settings-bento__label">活跃模型 ID</span>
         <strong class="settings-bento__value">${esc(activeLabel)}</strong>

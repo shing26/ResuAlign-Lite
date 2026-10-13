@@ -569,14 +569,17 @@ function writeSettingsMode(mode) {
 
 async function renderSettingsView(app) {
   const [settings, status, nodes, rules, roleBindings] = await Promise.all([
-    api("/api/settings"),
-    api("/api/settings/status"),
+    api("/api/settings").catch(() => null),
+    api("/api/settings/status").catch(() => null),
     api("/api/llm/nodes").catch(() => []),
     api("/api/automation/rules").catch(() => []),
     api("/api/settings/role-bindings").catch(() => null),
   ]);
-  state.settings = settings;
-  state.settingsStatus = status;
+  /* Module 7: partition degradation. If /api/settings/status fails, the
+   * main body still renders (node list derives status); the bento shows
+   * an error bar with retry. */
+  state.settings = settings || {};
+  state.settingsStatus = status || { _degraded: true };
   state.llmNodes = Array.isArray(nodes) ? nodes : [];
   state.automationRules = Array.isArray(rules) ? rules : [];
   state.roleBindings =

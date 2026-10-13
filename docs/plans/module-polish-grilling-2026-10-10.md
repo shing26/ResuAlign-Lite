@@ -165,10 +165,18 @@ gap 报告缺失时渲染失败通知 + 重试按钮。进度管线三 stage 独
 
 测试：新增 16 条（存储层 10 条覆盖归一化/校验/编辑路径 422；review 6 条覆盖 `_parse_date` 防御性校验；import 1 条覆盖导入路径归一化）。全量后端 **1249 passed / 7 skipped**，前端 560 passed，ruff + modgraph 干净。
 
-### 模块 7 · 设置——稳定性：首屏加载的失败降级与空态
+### 模块 7 · 设置——稳定性：首屏加载的失败降级与空态（2026-10-13 完成）
 
 - 降级方式：分区降级——`/api/settings/status` 失败时主体照常渲染（节点列表兜底推导状态），坏分区显示错误条 + 重试；settings/status 两个无 catch 的关键端点补齐降级路径。
 - 附带默认（实现细节，无需再问）：无节点默认简单模式 + 内联引导表单；专家模式显式选择即生效（E2E 死锁教训已有注释）；「恢复默认设置」只恢复词表与默认设置、不动节点与摄入 Token，按常规确认框处理。
+
+实现：
+
+- `renderSettingsView`：`/api/settings` 和 `/api/settings/status` 添加 `.catch()`，失败时返回 `null` / `{_degraded: true}`，主体照常渲染。
+- `settingsBentoHtml`：当 `runtime._degraded` 为 true 时，显示错误条 + 重试按钮（`data-action="retry-settings-status"`）。
+- CSS：新增 `.settings-bento__error` 错误条样式。
+
+测试：新增 2 条前端测试（降级时显示错误条 + 重试；非降级时不显示）。全量后端 **1250 passed / 7 skipped**，前端 562 passed，ruff + modgraph 干净。
 
 ### 模块 8 · 指挥台（LLM 节点管理）——稳定性：首跳失败代价
 

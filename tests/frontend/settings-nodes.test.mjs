@@ -667,3 +667,26 @@ test("settings page no longer ships the decorative Guardrails panel", () => {
   /* 真开关仍在（settings-eval-default 表单） */
   assert.match(mainJs, /data-form="settings-eval-default"/);
 });
+
+
+/* ------------------------------------------------------------------ */
+/* Module 7: settings status degradation                              */
+/* ------------------------------------------------------------------ */
+
+test("settingsBentoHtml shows error bar with retry when degraded", () => {
+  const body = bodyFrom(settingsBentoHtml(null, null, { _degraded: true }));
+  const errorBar = body.querySelector("[data-settings-degraded]");
+  assert.ok(errorBar, "error bar rendered when degraded");
+  assert.match(errorBar.textContent, /加载失败/);
+  const retryBtn = errorBar.querySelector('[data-action="retry-settings-status"]');
+  assert.ok(retryBtn, "retry button rendered");
+  assert.equal(retryBtn.textContent, "重试");
+  // Four cards still render (main body unaffected).
+  const cards = [...body.querySelectorAll(".settings-bento__card")];
+  assert.equal(cards.length, 4);
+});
+
+test("settingsBentoHtml hides error bar when not degraded", () => {
+  const body = bodyFrom(settingsBentoHtml(null, null, { worker_concurrency: 2 }));
+  assert.equal(body.querySelector("[data-settings-degraded]"), null);
+});
