@@ -151,10 +151,19 @@ gap 报告缺失时渲染失败通知 + 重试按钮。进度管线三 stage 独
 
 测试：新增 3 条（API 层 2 条覆盖 failed 带 failure_detail / idle 无 failure_detail；前端 1 条源码级别测试检查 dashboard-view 引用 failure_detail）。全量后端 **1234 passed / 7 skipped**，前端 560 passed，ruff + modgraph 干净。
 
-### 模块 6 · 投递复盘——稳定性：日期归一化与比较口径
+### 模块 6 · 投递复盘——稳定性：日期归一化与比较口径（2026-10-13 完成）
 
 - 写入端只收 `YYYY-MM-DD`（导入的非补零格式归一或拒绝），读取端 `_parse_date` 加防御性校验；现状是字典序比字符串，一个坏格式静默错分类。
 - 非法日期双轨处置**（第 38 题按推荐默认落地，用户未否决，可翻案）**：导入路径字段级丢弃 + 导入报告列出；直接编辑路径 422 拒绝并提示合法格式。
+
+实现：
+
+- `_parse_date`（review router）：加防御性校验，只接受 `YYYY-MM-DD` 格式；非法格式返回 `None` 而不是静默截断。
+- 新增共享 `normalize_import_date` / `validate_edit_date`（`job_library`）：非补零格式归一为 `YYYY-MM-DD`，非法格式返回错误。
+- `_validate_job_update`：直接编辑路径（PATCH）对日期字段调用 `validate_edit_date`，非法日期 422 拒绝。
+- `_run_import`：导入路径对日期字段调用 `normalize_import_date`，非法字段丢弃并记录到导入报告。
+
+测试：新增 16 条（存储层 10 条覆盖归一化/校验/编辑路径 422；review 6 条覆盖 `_parse_date` 防御性校验；import 1 条覆盖导入路径归一化）。全量后端 **1249 passed / 7 skipped**，前端 560 passed，ruff + modgraph 干净。
 
 ### 模块 7 · 设置——稳定性：首屏加载的失败降级与空态
 

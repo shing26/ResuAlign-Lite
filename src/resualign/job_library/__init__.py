@@ -55,6 +55,8 @@ __all__ = [
     "is_terminal_status",
     "allowed_transition_targets",
     "StatusTransitionError",
+    "normalize_import_date",
+    "validate_edit_date",
 ]
 
 # 投递结果归因枚举：记录"这份定稿投出去的结局"，用于验证对齐质量
@@ -195,6 +197,73 @@ _JOB_UPDATE_JSON_FIELDS = (
     )),
 )
 
+_DATE_FIELDS = (
+    "posting_date",
+    "applied_at",
+    "offer_at",
+    "rejected_at",
+    "deadline",
+)
+
+
+def normalize_import_date(value: Any) -> tuple[str | None, str | None]:
+    """Normalize an imported date to YYYY-MM-DD.
+
+    Returns ``(normalized, error)``. Non-padded values like ``2026-8-14``
+    are normalized to ``2026-08-14``. Unparseable values return
+    ``(None, reason)`` so the caller can drop the field and list the error.
+    """
+    import re as _re
+
+    if value is None:
+        return None, None
+    text = str(value or "").strip()
+    if not text:
+        return None, None
+    # Accept ISO datetime and take its date prefix.
+    candidate = text[:10]
+    match = _re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", candidate)
+    if not match:
+        return None, f"invalid date: {text}"
+    year, month, day = (int(part) for part in match.groups())
+    try:
+        normalized = time.strftime("%Y-%m-%d", time.struct_time(
+            (year, month, day, 0, 0, 0, 0, 0, -1)
+        ))
+    except (ValueError, OverflowError):
+        return None, f"invalid date: {text}"
+    return normalized, None
+
+
+def validate_edit_date(field: str, value: Any) -> str:
+    """Validate a date from the direct edit path (PATCH).
+
+    Raises :class:`UserStoreError` with an actionable message on invalid
+    input. Empty string is allowed (clear-on-empty contract).
+
+    Accepts ISO datetime (e.g. ``2026-08-01T10:00:00Z``) and preserves it.
+    Non-padded dates (e.g. ``2026-8-14``) are normalized to ``YYYY-MM-DD``.
+    """
+    if value is None or value == "":
+        return ""
+    text = str(value or "").strip()
+    # Accept ISO datetime and preserve it.
+    if len(text) >= 10 and text[10:11] in ("T", " "):
+        candidate = text[:10]
+        try:
+            time.strptime(candidate, "%Y-%m-%d")
+        except ValueError:
+            raise UserStoreError(
+                f"Invalid {field}: use YYYY-MM-DD format (e.g. 2026-08-14)"
+            )
+        return text
+    normalized, error = normalize_import_date(text)
+    if error is not None:
+        raise UserStoreError(
+            f"Invalid {field}: use YYYY-MM-DD format (e.g. 2026-08-14)"
+        )
+    return normalized or ""
+
 _JOB_UPDATE_CLEARABLE_FIELDS = (
     ("applied_at", "applied_at"),
     ("next_step", "next_step"),
@@ -223,6 +292,13 @@ def _validate_job_update(fields: dict[str, Any]) -> None:
         raise UserStoreError(f"Invalid seniority: {seniority}")
     if fields.get("status") is not None:
         fields["status"] = canonical_status(_validate_status(fields["status"]))
+    # Module 6: validate date fields on the direct edit path (PATCH).
+    # Invalid dates are rejected with 422 and an actionable message.
+    for date_field in _DATE_FIELDS:
+        if fields.get(date_field) is not None:
+            fields[date_field] = validate_edit_date(
+                date_field, fields[date_field]
+            )
     classification_pending = fields.get("classification_pending")
     if (
         classification_pending is not None

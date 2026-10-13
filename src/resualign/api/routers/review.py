@@ -53,10 +53,22 @@ def _date_str(ts: float) -> str:
 
 
 def _parse_date(value: str | None) -> str | None:
-    """Normalize a stored DATE / datetime string to its YYYY-MM-DD prefix."""
+    """Return a validated YYYY-MM-DD date, or None for absent values.
+
+    Module 6: values with an unrecognized shape are rejected instead of
+    being silently classified by their first ten characters.
+    """
     if not value:
         return None
-    return str(value)[:10]
+    text = str(value).strip()
+    if len(text) < 10:
+        return None
+    candidate = text[:10]
+    try:
+        time.strptime(candidate, "%Y-%m-%d")
+    except ValueError:
+        return None
+    return candidate
 
 
 def _attribution_summary(

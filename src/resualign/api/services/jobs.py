@@ -22,6 +22,7 @@ from ...job_library import (
     _normalize_source_url,
     _parse_salary_text,
     _text_dedupe_key,
+    normalize_import_date,
 )
 from ...llm_usage import llm_tenant_context, reset_llm_tenant, set_llm_tenant
 from ...observability import new_request_id, reset_request_id, set_request_id
@@ -710,6 +711,24 @@ def _run_import(import_id: str) -> None:
                 batch['skipped'] += 1
                 batch['errors'].append(f"{row.get('title') or 'Untitled'}: empty JD")
                 continue
+            # Module 6: normalize imported dates; drop invalid fields and
+            # list them in the import report instead of failing the whole row.
+            row_errors: list[str] = []
+            for date_field in (
+                'posting_date', 'applied_at', 'offer_at', 'rejected_at', 'deadline',
+            ):
+                if row.get(date_field) is None:
+                    continue
+                normalized, error = normalize_import_date(row[date_field])
+                if error is not None:
+                    row_errors.append(f"{date_field}: {error}")
+                    row[date_field] = None
+                else:
+                    row[date_field] = normalized
+            if row_errors:
+                batch['errors'].append(
+                    f"{row.get('title') or 'Untitled'}: {'; '.join(row_errors)}"
+                )
             try:
                 job = context._create_job_from_source(user, row)
             except (context.UserStoreError, context.LLMResponseError) as exc:

@@ -9,6 +9,8 @@ from resualign.job_library import (
     JOB_FUNCTIONS,
     SENIORITIES,
     JobLibraryStore,
+    normalize_import_date,
+    validate_edit_date,
 )
 from resualign.workspace import UserStoreError
 
@@ -808,3 +810,66 @@ def test_reconcile_rekeys_legacy_over_stripped_url_rows(db_path):
         )
     )
     assert second["job_id"] != job["job_id"]
+
+# ------------------------------------------------------------------ #
+# Module 6: date normalization and validation                        #
+# ------------------------------------------------------------------ #
+
+def test_normalize_import_date_normalizes_non_padded():
+    normalized, error = normalize_import_date("2026-8-14")
+    assert error is None
+    assert normalized == "2026-08-14"
+
+
+def test_normalize_import_date_accepts_iso_datetime():
+    normalized, error = normalize_import_date("2026-08-14T10:30:00Z")
+    assert error is None
+    assert normalized == "2026-08-14"
+
+
+def test_normalize_import_date_rejects_invalid():
+    normalized, error = normalize_import_date("not-a-date")
+    assert normalized is None
+    assert error is not None
+
+
+def test_normalize_import_date_rejects_out_of_range():
+    normalized, error = normalize_import_date("2026-13-40")
+    assert normalized is None
+    assert error is not None
+
+
+def test_normalize_import_date_none_and_empty():
+    assert normalize_import_date(None) == (None, None)
+    assert normalize_import_date("") == (None, None)
+
+
+def test_validate_edit_date_accepts_valid():
+    assert validate_edit_date("applied_at", "2026-08-14") == "2026-08-14"
+    assert validate_edit_date("applied_at", "2026-8-14") == "2026-08-14"
+
+
+def test_validate_edit_date_rejects_invalid():
+    import pytest
+    with pytest.raises(UserStoreError, match="YYYY-MM-DD"):
+        validate_edit_date("applied_at", "not-a-date")
+
+
+def test_validate_edit_date_allows_empty():
+    assert validate_edit_date("applied_at", "") == ""
+    assert validate_edit_date("applied_at", None) == ""
+
+
+def test_update_job_rejects_invalid_date(db_path):
+    store = _store(db_path)
+    job = store.create_job(
+        tenant_id="tenant-1",
+        title="Backend",
+        jd_text="Python backend engineer.",
+    )
+    import pytest
+    with pytest.raises(UserStoreError, match="YYYY-MM-DD"):
+        store.update_job(
+            "tenant-1", job["job_id"],
+            posting_date="not-a-date",
+        )

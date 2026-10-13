@@ -13,6 +13,7 @@ from unittest.mock import patch
 from resualign.api.services import jobs as jobs_service
 from resualign.api.services.jobs import PreanalyzeUnavailable
 from resualign.contracts.errors import LlmFailureCode
+from resualign.job_library import normalize_import_date
 from resualign.engine.llm import LLMResponseError
 
 
@@ -56,6 +57,21 @@ def test_transient_failure_exhausts_three_retries():
     assert batch.get("analyzed") is None
     error = batch["analyze_errors"][0]
     assert "Engineer" in error and "重试 3 次后仍失败" in error
+
+
+def test_import_dates_are_normalized_and_invalid_fields_dropped():
+    """Module 6: import accepts non-padded dates and reports invalid ones."""
+    normalized, error = normalize_import_date("2026-8-14")
+    assert error is None
+    assert normalized == "2026-08-14"
+
+    normalized, error = normalize_import_date("2026-08-14T10:30:00Z")
+    assert error is None
+    assert normalized == "2026-08-14"
+
+    normalized, error = normalize_import_date("not-a-date")
+    assert normalized is None
+    assert error is not None
 
 
 def test_definitive_failure_is_not_retried():
