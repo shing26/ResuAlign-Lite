@@ -259,7 +259,10 @@ export function buildDiagnosisMarkdownFrom(diagnosis, title, originalContent = "
 /* Hash routing                                                        */
 /* ------------------------------------------------------------------ */
 
-const ROUTE_NAMES = ["resume", "resumes", "jobs", "workspace", "settings", "dashboard", "review", "today"];
+/* v3 重做移除了「今日待办」，路由名必须同步摘掉：它留在列表里会让
+ * parseHashValue 把 #/today「认下来」，可 handleRoute 根本没有对应视图，
+ * 于是 URL 停在今日待办、页面却是 default 分支的驾驶舱（#152）。 */
+const ROUTE_NAMES = ["resume", "resumes", "jobs", "workspace", "settings", "dashboard", "review"];
 
 /* UX 走查 P1-A（2026-08-28）：裸 #/resumes 归一化为列表哨兵，与
  * #/resume/list 等价出列表；#/resume/<id> 才进单份档案。 */
