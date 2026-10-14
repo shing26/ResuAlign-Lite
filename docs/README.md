@@ -1,6 +1,7 @@
 # docs/ 目录导航
 
-一句话规则：**平铺层 = 活文档，子目录 = 归档。** 新增文档前先看这里，别往平铺层堆历史报告。
+一句话规则：**平铺层 = 活文档，`plans/` + `reports/` = 归档。** 新增文档前先看这里，
+别往平铺层堆历史报告；`assets/` 是出图产物，既不是活文档也不是归档。
 
 （本仓库长期由多个 agent 交替开发，曾经 40+ 份带日期的报告平铺在 `docs/` 根下。
 2026-09-16 做了一次归档，此页是给下一位 agent 的导航，避免再次堆积。）
@@ -31,6 +32,7 @@
 | `reports/` | 带日期的一次性报告：QA 走查、评审、调研、交接（handoff）、方向裁决、模块验证 |
 | `superpowers/plans/` | superpowers 工作流的执行计划 |
 | `agents/`、`adr/` | 见上 |
+| `assets/` | README 出图产物（效果对照 / 幻觉率）+ 出图口径；由 `scripts/make_readme_figures.py` 生成，**别手改 SVG**（`--check` 会抓） |
 
 默认：**归档文档不再更新**；若某份归档件重新变成活文档，把它移回平铺层再改。
 
@@ -45,6 +47,7 @@
 | QA / 走查报告 | `docs/reports/qa-dogfood-report-YYYY-MM-DD.md`（约定见 `docs/agents/qa-dogfooder.md`） |
 | 一次性评审、调研、裁决报告 | `docs/reports/<slug>-YYYY-MM-DD.md` |
 | 计划 / 规格 / 票据 | `docs/plans/<slug>-YYYY-MM-DD.md` |
+| README 图 | `docs/assets/`（改 `scripts/make_readme_figures.py` 再跑一次，不要直接编辑 SVG） |
 | 长期维护的操作文档 | `docs/` 平铺层 |
 
 命名统一用**英文 kebab-case + 日期后缀**，中文标题留在文档 H1。
