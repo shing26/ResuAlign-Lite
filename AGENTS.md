@@ -186,6 +186,13 @@ Reolink 编辑器调用 90s 超时 2/3。字段拆分（ADR-0060）落地后复�
    最坏单发估算 `45+75+150=270s`，远低于 watchdog 1800s。该值由
    `tests/api/test_r4_aie_guardrails.py` 锁定，改值先拍新 ADR。
 
+**#165 后实测（2026-10-20，`48e2eb3`）**：同节点 3×3，隔离目录
+`nvidia/nemotron-3-super-120b-a12b` = **3/9 succeeded、1/9 usable、
+0 次基础设施错误、0 次 deadline**。Reolink #3 整轮 193.9s，编辑器
+调用 170.4s / 2 次 POST，单次均未过 150s。结论：暂不继续放宽墙钟；
+剩余瓶颈是编辑器证据化与产出质量，app 自用线仍为 0/3。详见
+`docs/reports/app-self-use-post-165-2026-10-20.md`。
+
 ### 模块布局是刻意的：平铺 + 层表，别顺手分包 (2026-09-28)
 
 `src/resualign/` 一级的平铺模块**不是失序**。层归属由
