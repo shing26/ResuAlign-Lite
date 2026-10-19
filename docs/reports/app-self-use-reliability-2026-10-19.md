@@ -325,3 +325,58 @@ ADR 决定字段拆分（建议 `supported_keywords` vs `unsupported_keywords`�
 契约产出；在这之前，编辑器的可改写语料反而更窄（刻意 fail-closed）。下一
 步是用同一 3×3 复测拆分后的产出，并单独处理编辑器 90s 超时。app 自用线
 仍为 **0/3**，新工作台继续关闭。
+
+### 拆分后 3×3 复测：2/9（2026-10-19 20:15–20:29）
+
+同节点 `nvidia/nemotron-3-super-120b-a12b`、同 3 份 JD、隔离数据目录
+（`.scratch/p0_159_samples.py`，`P0_SAMPLES=3`）。原始结果
+`.scratch/p0-159-samples/results.json`（前两轮分别存为
+`results-post-guard.json`、`results-pre-guard.json`）。
+
+| 用例 | 三轮 usable | 终态 | 形态 |
+| --- | --- | --- | --- |
+| 腾讯后台开发 | 1 / 0 / 0 | 1 succeeded | #1 专业技能清单改写通过；#2 #3 技能清单新增条目被拦 |
+| Dida 后端开发 | 0 / 3 / 0 | 1 succeeded | #2 三条通过（技能清单+核心项目+工作方式）；#1 #3 evaluator 判幻觉 |
+| Reolink web 后端 | 0 / 0 / 0 | 0 succeeded | 三轮全被拦（技能清单新增 + evaluator 判幻觉） |
+
+**2/9 succeeded，0 次基础设施错误**（对照：guard 后 0/9、guard 前 3/9）。
+产出从「全是假通过」变成「少量真通过 + 大量诚实拦截」，但 Reolink 仍 0/3。
+
+### 两个新发现（都不在 #164 的修复范围内）
+
+**发现 1：`jd_context` 仍然把整个 JD 灌进 allowlist——假通过的洞没堵死。**
+上游 `allowlist_corpus` 的键列表里含 `jd_context`，上游 `SKILL.md` 把它定义为
+「one-line summary of what this employer is buying」；app 的
+`engine/__init__.py` 却传 `truncate_text(filtered_jd or jd_text, 6000)`——
+**整段 JD 原文**。实测（腾讯 JD 609 字符，全部落进 corpus）：
+
+| 词 | 在 corpus | 在简历 |
+| --- | --- | --- |
+| MySQL | ✅ | ❌ |
+| C++ | ✅ | ❌ |
+| 算法 | ✅ | ❌ |
+| Kubernetes | ❌ | ❌ |
+
+也就是说：JD 里出现、简历没有、又没被 gap analyzer 列进 `missing_keywords`
+的词，仍能通过内容级校验。app 侧 guard 只拦 `missing_keywords`，拦不到这一类。
+**修复方向**：按上游契约传「一句话摘要」而不是 6000 字 JD 原文；或把
+`jd_context` 移出 allowlist 语料。属契约变更，需要决策（同 #164 的处理方式）。
+
+**发现 2：编辑器 90s 墙钟是「每次 POST」而不是「每次调用」。**
+`_WallClockDeadlineExceeded` 在 `chat_structured` 的 TransportError 分支里
+不重试，所以编辑器**首发超过 90s 即硬失败**（上一轮 Reolink 2/3 就是这么死的，
+日志 `wall-clock deadline exceeded (90.0s)`）。本轮同一路径 0 次超时，因为
+POST 都在 90s 内返回——但余量很薄：
+
+| 用例 | 编辑器单次调用 | attempts | 输出 tokens |
+| --- | ---: | ---: | ---: |
+| 腾讯 #1 | 81.9s | 1 | 2923 |
+| Reolink #1 | 105.2s | 2 | 3362 |
+| Reolink #3 | 131.3s | 2 | 4775 |
+| Dida #2 | 152.7s | 2 | 4327 |
+
+>90s 的那几条都是**两个 POST 之和**（首发 schema/parse 失败后带反馈重试），
+所以没触发 deadline。但 81.9s 的单发已逼近 90s 线。结论：**墙钟值得放宽**
+（例如 `RESUALIGN_ROLE_TIMEOUT_EDITOR` 90 → 150），最坏 2×150=300s 仍远低于
+watchdog 1800s。但它是 AIE 决策域的护栏数字（`tests/api/test_r4_aie_guardrails.py`
+与 `test_settings_routes.py` 锁着），要改得先拍，不顺手调。

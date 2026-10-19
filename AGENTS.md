@@ -167,10 +167,24 @@ parity**（`tests/engine/test_gate.py::TestDriftLockParity` 与
 （`nvidia/nemotron-3-super-120b-a12b`）= **0/9 可用**，前一轮是 3/9。前一轮
 那 3 个「可用」正是被 allowlist 放行的编造项，guard 已把它们改判
 `fabricated`——**guard 修的是假通过，不是「编辑器产不出真建议」**。同一轮
-Reolink 编辑器调用 90s 超时 2/3。字段拆分已按 ADR-0060 落地，但**产出效果
-尚未复测**：`supported_keywords` 要模型真按新契约产出，否则可改写语料反而
-更窄（刻意 fail-closed）。下一步 = 同一 3×3 复测 + 单独处理编辑器 90s
-超时。原始数据见 `.scratch/p0-159-samples/results{,-pre-guard}.json`。
+Reolink 编辑器调用 90s 超时 2/3。字段拆分（ADR-0060）落地后复测
+**2/9 可用、0 次基础设施错误**（腾讯 1/3、Dida 1/3、Reolink 0/3）。原始
+数据见 `.scratch/p0-159-samples/results{,-post-guard,-pre-guard}.json`。
+
+**两个已知未修的洞（改前先读）**：
+
+1. **`jd_context` 仍把整段 JD 灌进 allowlist**。上游契约说它是「one-line
+   summary」，app 的 `engine/__init__.py` 传
+   `truncate_text(filtered_jd or jd_text, 6000)`——整段原文。实测腾讯 JD
+   609 字符全部进 corpus，`MySQL`/`C++`/`算法` 这些「JD 有、简历没有」的词
+   照样通过内容级校验。app 侧 `_missing_keyword_violation` 只拦
+   `missing_keywords`，拦不到这一类。要堵需按上游契约传一句话摘要，或把
+   `jd_context` 移出 allowlist（契约变更，先拍）。
+2. **编辑器 90s 墙钟是每次 POST，不是每次调用**。`_WallClockDeadlineExceeded`
+   在 `chat_structured` 的 TransportError 分支不重试，首发 >90s 即硬失败
+   （上一轮 Reolink 2/3 如此）。本轮 0 次超时，但腾讯 #1 单发 81.9s 已逼近。
+   `_ROLE_TIMEOUT_DEFAULTS` 是 AIE 决策域护栏（`tests/api/test_r4_aie_guardrails.py`
+   锁着），要改先拍。
 
 ### 模块布局是刻意的：平铺 + 层表，别顺手分包 (2026-09-28)
 
