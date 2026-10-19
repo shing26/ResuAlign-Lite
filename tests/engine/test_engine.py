@@ -30,6 +30,25 @@ def test_engine_full_pipeline():
     assert mock.call_count == 4
 
 
+def test_engine_passes_profile_summary_not_raw_jd_to_editor():
+    mock = MockLLMClient([_diag(), _jd_profile_only(), _gap_only(), _tailor()])
+    raw_jd = (
+        "RAW_JD_SENTINEL 这是一段很长的岗位描述，不应被重新塞进编辑器上下文。"
+        "团队使用 Kubernetes 与 Consul 处理高并发交易。"
+    )
+    run(
+        ResuAlignConfig(model="m"),
+        "Python dev resume",
+        jd_text=raw_jd,
+        llm_client=mock,
+    )
+    editor_prompt = mock.structured_calls[-1][1]
+    assert "RAW_JD_SENTINEL" not in editor_prompt
+    assert "Kubernetes" not in editor_prompt
+    assert "Java" in editor_prompt
+    assert "Microservices" in editor_prompt
+
+
 def test_engine_jd_and_tailoring_use_extended_timeouts(monkeypatch):
     seen_timeouts = []
     seen_retries = []
@@ -63,7 +82,7 @@ def test_engine_jd_and_tailoring_use_extended_timeouts(monkeypatch):
         "Python dev resume",
         jd_text="Java backend",
     )
-    assert seen_timeouts == [45.0, 75.0, 90.0]
+    assert seen_timeouts == [45.0, 75.0, 150.0]
     assert seen_retries == [None, None, 1]
 
 
@@ -93,7 +112,7 @@ def test_engine_eval_defaults_to_false():
     assert mock.call_count == 4
 
 
-def test_engine_passes_business_scenarios_to_tailor():
+def test_engine_passes_profile_summary_not_raw_jd_to_tailor():
     class CaptureClient(MockLLMClient):
         def __init__(self):
             super().__init__([_diag(), _jd_profile_only(), _gap_only(), _tailor()])
@@ -112,7 +131,8 @@ def test_engine_passes_business_scenarios_to_tailor():
         llm_client=mock,
     )
     assert "Java" in mock.tailor_user
-    assert "Java backend" in mock.tailor_user
+    assert "Microservices" in mock.tailor_user
+    assert "Java backend" not in mock.tailor_user
 
 
 def test_engine_passes_custom_prompt_to_tailor():
@@ -505,7 +525,7 @@ def test_is_local_llm_detection():
 def test_direct_path_local_editor_skips_whole_doc_fallback(monkeypatch):
     """P1（2026-09-07 双轴审查补）：engine.run 直连分支（CLI/.env 场景）对
     本地节点同样必须传 whole_doc_fallback=False——审查发现该分支漏传，
-    全败时仍会走整文档 fallback 在 90s deadline 上必然超时。"""
+    全败时仍会走整文档 fallback 在 150s deadline 上仍可能超时。"""
     from resualign.engine.llm import LLMResponseError
     from resualign.schema_registry import (
         Analysis,

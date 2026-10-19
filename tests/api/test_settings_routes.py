@@ -161,7 +161,7 @@ def test_settings_status_reports_the_enforced_guardrail_numbers():
     """The settings page must show the runtime timeouts, not a hardcoded guess.
 
     2026-09-24: the deleted Guardrails panel claimed "40s"; the real per-role
-    timeouts are 45-90s and env-overridable.
+    timeouts are 45-150s and env-overridable.
     """
     with patch(
         "resualign.api.build_config", return_value=_config()
@@ -172,7 +172,7 @@ def test_settings_status_reports_the_enforced_guardrail_numbers():
         "diagnose": 45.0,
         "profiler": 75.0,
         "gap_analyzer": 60.0,
-        "editor": 90.0,
+        "editor": 150.0,
         "evaluator": 60.0,
     }
 

@@ -24,7 +24,7 @@ BULLET_REWRITE_PROMPT_VERSION = get_prompt_version(_BULLET_REWRITE_STAGE)
 # - 变更点 2：diffs 由「at most 15」封顶为 3-10 条；proposed ≤ 250 字、reason ≤ 40 字；
 #   sections 只含改动章节（消费方缺席回退原文已确认：engine.py:278-280、
 #   api/routers/jobs.py:461 draft 走 diffs 而非全量 sections）
-# - 变更点 3：删除假指令 Max tokens: 1500 / Temperature（editor 90s×2 超时风险）
+# - 变更点 3：删除假指令 Max tokens: 1500 / Temperature（编辑器墙钟超时风险）
 # - 变更点 4：provenance/original 必须逐字匹配原文，add 型 original 为空字符串
 # - 缓存影响：版本常量随文本变更 bump，缓存键自动失效。
 # PROMPT_VERSION bump: tailor/v2 -> v3（2026-10-19，#163 P0）
@@ -336,6 +336,9 @@ def _gap_support_text(gap_report_text: str) -> str:
     it is deliberately excluded — letting it through is how a JD gap became a
     claimed skill. This mirrors `gate.allowlist_corpus`, which is the vendored
     copy of this function.
+
+    `jd_context` is excluded too (ADR-0061 / #165): it is a one-line summary
+    about the employer, i.e. prompt context, not evidence about the candidate.
     """
     try:
         data = _json.loads(gap_report_text or "{}")
@@ -347,7 +350,6 @@ def _gap_support_text(gap_report_text: str) -> str:
         "misaligned_emphasis",
         "strength_matches",
         "business_scenarios",
-        "jd_context",
     ):
         value = data.get(key)
         if isinstance(value, str):
@@ -1015,9 +1017,8 @@ def rewrite_bullet(
                 source_span=(0, len(original)),
             )
             # P0（#76）：缓存产物同样过内容级校验，编造内容不得标 verified。
-            unsupported = _unsupported_content(
-                diff.proposed, original, jd_context or ""
-            )
+            # ADR-0061 / #165：jd_context 只留在 prompt 里，不再充当内容许可。
+            unsupported = _unsupported_content(diff.proposed, original)
             if unsupported:
                 _mark_unsupported(diff, unsupported)
             else:
@@ -1056,7 +1057,9 @@ def rewrite_bullet(
     # P0（#76）：重写产物过内容级校验后才能标 verified；改写铁律是
     # 「只应用指令到已有事实上」，proposed 中出现 original/JD 语料都
     # 支撑不了的数字或专名即视为编造。
-    unsupported = _unsupported_content(proposed, original, jd_context or "")
+    # ADR-0061 / #165：jd_context 只留在 prompt 里，不再充当内容许可；
+    # proposed 的新术语必须能在原 bullet 里找到依据。
+    unsupported = _unsupported_content(proposed, original)
     if unsupported:
         _mark_unsupported(diff, unsupported)
     else:
@@ -1228,7 +1231,9 @@ def tailor_resume_map_reduce(
     except (ValueError, TypeError):
         gap_report = {}
     focus = _focus_phrases(gap_report)
-    jd_context = (jd_context or str(gap_report.get("jd_context") or "")).strip()
+    # ADR-0061: only the caller's explicit prompt summary is allowed here.
+    # Never fall back to a gap-report field, which may contain legacy raw JD.
+    jd_context = (jd_context or "").strip()
 
     units = split_resume_units(resume_text)
     bullets = [u for u in units if u["kind"] == "bullet"]

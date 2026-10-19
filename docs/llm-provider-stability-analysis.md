@@ -22,8 +22,10 @@ ResuAlign 已经具备角色化 LLM 拆分（ADR-0030）、分级超时、角色
 
 ### 根因 1：单体大 Prompt / 大输出导致 HTTP 阻塞与队列断连
 
-- `engine.py` 在 editor 节点调用 `tailor_resume(...)` 时，传入 `resume_text`
-  全文 + `gap_report_text`（含 `jd_context`，上限 `MAX_JD_CONTEXT_CHARS=6000`）。
+- `engine.py` 在 editor 节点调用 `tailor_resume(...)` 时传入 `resume_text`
+  全文 + `gap_report_text`；`jd_context` 自 ADR-0061 起只是结构化摘要
+  （≤300 字），不再是整段 JD。`MAX_JD_CONTEXT_CHARS=6000` 只保留给
+  evaluator 等非 allowlist 输入。
 - `tailor.py` 的 `TAILOR_PROMPT` 要求模型同时输出 `sections`（整份重写正文）与
   最多 15 条 `diffs`。即便增量改写，输出包仍可能很长。
 - `llm.py` 的 `OpenAIClient` 使用同步 `httpx.Client`（`stream=False`）一次性
@@ -33,8 +35,9 @@ ResuAlign 已经具备角色化 LLM 拆分（ADR-0030）、分级超时、角色
 
 ### 根因 2：小模型指令遵循上限（Cognitive Overload）
 
-- 当 editor 换成 NVIDIA 免费 8B 或本地小模型时，`TAILOR_PROMPT` 的 14 条规则 +
-  Gap Report + 长 `jd_context` 叠加，远超 8B 模型的稳定遵循区间。
+- 当 editor 换成 NVIDIA 免费 8B 或本地小模型时，`TAILOR_PROMPT` 的规则集 +
+  Gap Report 叠加，远超 8B 模型的稳定遵循区间；ADR-0061 已避免再灌入
+  整段 JD。
 - 结果表现为三种格式坍塌：输出闲散文案、Markdown 未闭合、JSON 字段缺失。
   `tailor.py` 内 14 条规则大多是在"如何改写"的业务规则，不是行为约束，进一步
   加重小模型负担。

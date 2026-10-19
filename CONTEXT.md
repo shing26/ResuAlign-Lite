@@ -34,8 +34,10 @@
 | CSS 架构与主题 | [0043](docs/adr/0043-at-layer-single-file-css-architecture.md) · [0044](docs/adr/0044-token-single-namespace-convergence.md) · [0047](docs/adr/0047-supersede-adr0033-decision1-dark-default-teal-accent.md) |
 | 加固 / 评分实证 | [0052](docs/adr/0052-freeze-window-hardening-and-layering-ratchet.md) · [0054](docs/adr/0054-score-evidence-hardening.md) |
 | 岗位表同步 / 护栏面板 | [0055](docs/adr/0055-job-table-auto-sync-and-dedupe-precheck.md) · [0056](docs/adr/0056-drop-decorative-guardrails-panel.md) |
+| allowlist / JD 上下文边界 | [0060](docs/adr/0060-gap-report-keyword-split.md) · [0061](docs/adr/0061-jd-context-not-a-content-license.md) |
+| 编辑器墙钟 | [0062](docs/adr/0062-editor-wall-clock-150s.md) |
 
-> 全量决策见 `docs/adr/`（编号 0001–0058；**0029 有意缺号**，见 ADR-0036）。
+> 全量决策见 `docs/adr/`（编号 0001–0062；**0029 有意缺号**，见 ADR-0036）。
 > 历史轨迹见 [`CHANGELOG.md`](CHANGELOG.md)，交付状态见 [`docs/STATUS.md`](docs/STATUS.md)。
 
 ---
@@ -57,6 +59,11 @@ _Avoid_: 模板简历、多份主简历并行
 
 **Gap Report**
 主简历 vs JD Profile 的结构化对比：缺失关键词、错位强调、可保留的强匹配项。
+
+**JD Context**
+给编辑器看的一行岗位上下文摘要，只帮助措辞方向，不是候选人事实来源，
+**永不进入 allowlist**。app 由 `jd_context_summary()` 从结构化画像生成，
+不传 JD 原文；见 ADR-0061。
 
 **Tailored Resume**
 针对某个 JD 改写的主简历版本；每处改动都指回主简历原文，不新增事实。

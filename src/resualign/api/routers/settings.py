@@ -283,7 +283,7 @@ def settings_status(user: dict[str, Any] = Depends(get_current_user)):
         "personal_mode": context._PERSONAL_MODE,
         # Runtime guardrail facts, read from the process that enforces them.
         # The settings page used to hardcode "40s / 并发 1"; the real per-role
-        # timeouts are 45-90s (env-overridable), so the display must not guess.
+        # timeouts are 45-150s (env-overridable), so the display must not guess.
         "worker_concurrency": context._WORKER_CONCURRENCY,
         "role_timeouts": role_timeouts(),
         "resume_count": len(

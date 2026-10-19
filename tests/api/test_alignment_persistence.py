@@ -388,7 +388,7 @@ def test_workspace_session_hydrates_persisted_results_after_restart():
 
 def test_workbench_probe_402_blocks_with_actionable_message():
     """Phase A1: a definitive quota failure (402) blocks queueing with an
-    actionable message instead of a 90s timeout then a failed job."""
+    actionable message instead of a 150s timeout then a failed job."""
     job = _create_job()
     resume = _create_resume()
     with patch(

@@ -532,6 +532,14 @@ def test_rewrite_bullet_endpoint_persists_replacement():
     api_module._jobs.update_job(
         _auth_user_id(),
         job_id,
+        jd_profile={
+            "must_have_skills": ["Java"],
+            "business_scenarios": ["trade settlement"],
+        },
+        gap_report={
+            "supported_keywords": ["Redis caching"],
+            "missing_keywords": ["Kubernetes"],
+        },
         diffs=[
             {
                 "diff_id": "diff-1",
@@ -571,6 +579,9 @@ def test_rewrite_bullet_endpoint_persists_replacement():
     args = rewrite_mock.call_args
     assert args[0][2] == "high_concurrency"
     assert args[1]["tenant"] == _auth_user_id()
+    assert "Java" in args[1]["jd_context"]
+    assert "Python backend engineer with Redis" not in args[1]["jd_context"]
+    assert "Kubernetes" not in args[1]["jd_context"]
 
     persisted = client.get(
         f"/api/jobs/{job_id}", headers=_auth_headers()

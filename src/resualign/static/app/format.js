@@ -3417,7 +3417,7 @@ export const ROLE_TIMEOUT_FALLBACK_S = {
   diagnose: 45,
   profiler: 75,
   gap_analyzer: 60,
-  editor: 90,
+  editor: 150,
   evaluator: 60,
 };
 export const WORKER_CONCURRENCY_FALLBACK = 1;

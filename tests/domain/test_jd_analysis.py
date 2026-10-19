@@ -1,4 +1,4 @@
-from resualign.jd_analysis import profile_and_gaps
+from resualign.jd_analysis import jd_context_summary, profile_and_gaps
 from resualign.models import GapReport, JDProfile
 from tests.conftest import _gap, _profile
 
@@ -29,3 +29,25 @@ def test_combined_prompt_mentions_both_outputs():
     assert "gap_report" in system
     assert "Resume:" in user
     assert "Job Description:" in user
+
+
+def test_jd_context_summary_is_structured_bounded_and_ignores_raw_context():
+    profile = JDProfile(
+        must_have_skills=["Java", "Spring Boot"],
+        nice_to_have_skills=["Redis"],
+        business_scenarios=["trade settlement"],
+        min_years_experience=3,
+    )
+    gap = GapReport(
+        supported_keywords=["Redis caching"],
+        missing_keywords=["Kubernetes"],
+    )
+    summary = jd_context_summary(profile, gap)
+    assert "Java" in summary
+    assert "Redis caching" in summary
+    assert "Kubernetes" not in summary
+    assert "jd_context" not in summary
+    assert len(summary) <= 300
+    assert "\n" not in summary
+
+    assert jd_context_summary({"jd_context": "raw JD sentinel"}) == ""

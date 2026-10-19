@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict
 from typing import Any
 
@@ -76,6 +77,89 @@ def jd_profile_to_dict(profile: JDProfile) -> dict:
     data["nice_to_have"] = profile.nice_to_have
     data["business_scene"] = profile.business_scene
     return data
+
+
+def _context_values(value: Any, *, limit: int) -> list[str]:
+    """Normalize one structured context field to a short, deduped list."""
+    if isinstance(value, str):
+        source = [value]
+    elif isinstance(value, (list, tuple)):
+        source = value
+    else:
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in source:
+        text = re.sub(r"\s+", " ", str(item or "")).strip()
+        key = text.casefold()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        result.append(text)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _context_data(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if value is None:
+        return {}
+    try:
+        return asdict(value)
+    except TypeError:
+        return {}
+
+
+def jd_context_summary(
+    profile: JDProfile | dict[str, Any] | None,
+    gap_report: GapReport | dict[str, Any] | None = None,
+    *,
+    max_chars: int = 300,
+) -> str:
+    """Build prompt-only JD context; never pass the raw JD back into a prompt."""
+    profile_data = _context_data(profile)
+    gap_data = _context_data(gap_report)
+
+    def field(data: dict[str, Any], *names: str) -> Any:
+        for name in names:
+            if name in data:
+                return data.get(name)
+        return None
+
+    parts: list[str] = []
+
+    def add(label: str, value: Any, limit: int) -> None:
+        values = _context_values(value, limit=limit)
+        if values:
+            parts.append(f"{label}：{'、'.join(values)}")
+
+    add(
+        "岗位要求",
+        field(profile_data, "must_have_skills", "required_skills"),
+        8,
+    )
+    add(
+        "加分项",
+        field(profile_data, "nice_to_have_skills", "nice_to_have"),
+        5,
+    )
+    add(
+        "业务场景",
+        field(profile_data, "business_scenarios", "business_scene"),
+        5,
+    )
+    add("软技能", field(profile_data, "soft_skills"), 3)
+    add("学历要求", field(profile_data, "education_requirements"), 3)
+    add("可改写方向", field(gap_data, "supported_keywords"), 6)
+
+    years = field(profile_data, "min_years_experience")
+    if isinstance(years, int) and years > 0:
+        parts.append(f"经验要求：{years} 年以上")
+
+    summary = re.sub(r"\s+", " ", "；".join(parts)).strip()
+    return summary[:max_chars].rstrip() if max_chars > 0 else ""
 
 
 def proactive_jd_profile(

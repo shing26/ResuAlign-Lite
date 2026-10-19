@@ -9,7 +9,7 @@ Tiered timeouts (env overrides via ``RESUALIGN_ROLE_TIMEOUT_<ROLE>``):
 
 - profiler: 75s (was 30s; #116 甲案 after muse p95=43.9s) / gap_analyzer: 60s
 - diagnose: 45s
-- editor: 90s (heavier generation)
+- editor: 150s (heavier generation; #165 wall-clock calibration)
 - evaluator: 60s
 - connect timeout: 30s (shared via OpenAIClient.DEFAULT_CONNECT_TIMEOUT)
 """
@@ -76,13 +76,14 @@ def clear_node_cooldown() -> None:
 # muse-glimmer-30b p95=43.9s/max=124.3s、qwen2.5:7b p95=61.7s，而 ADR-0018 合并
 # 画像+缺口调用走 profiler——原 30s 线低于该模型 p95，结构性必超时（#110 的
 # 60.3s/71.7s 硬失败、#115 的零产出归因主因）。profiler 30→75（覆盖 71.7s 观测），
-# gap_analyzer 30→60；其余角色维持 AIE 表。最坏单发墙钟 45+75+90=210s，远低于
+# gap_analyzer 30→60；其余角色维持 AIE 表。editor 90→150（#165：上一轮
+# Reolink 2/3 撞 90s，腾讯单发 81.9s）；最坏单发墙钟 45+75+150=270s，远低于
 # watchdog RESUALIGN_JOB_MAX_RUNTIME_S=1800。
 _ROLE_TIMEOUT_DEFAULTS: dict[str, float] = {
     "diagnose": 45.0,
     "profiler": 75.0,
     "gap_analyzer": 60.0,
-    "editor": 90.0,
+    "editor": 150.0,
     "evaluator": 60.0,
 }
 # R4 P0-2（03-AIE §③）：per-role max_tokens 钳制表 —— 值 = 04b-PE 契约输出上限

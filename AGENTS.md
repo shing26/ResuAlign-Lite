@@ -155,13 +155,15 @@ ADR-0059 已取代 ADR-0041 的 app 冻结总闸。执行 app 相关动作前先
 固定为「JD 要、简历**没有依据**」的真缺口，**永不进 allowlist**。上游
 `gate.py::allowlist_corpus` 与 app `tailor.py::_gap_support_text` 键列表
 一致（`supported_keywords / misaligned_emphasis / strength_matches /
-business_scenarios / jd_context`）。改动顺序固定：**先上游 truetailor
+business_scenarios`）。`jd_context` 仅作提示词上下文，永不进入 allowlist
+（ADR-0061 / #165）。改动顺序固定：**先上游 truetailor
 （gate + fixtures + SKILL/README/contract）→ 再同步 vendor
 （`src/resualign/gate.py` + `tests/fixtures/gate/` + `VENDOR.json`）→ 再重跑
 parity**（`tests/engine/test_gate.py::TestDriftLockParity` 与
 `tests/platform/test_skill_vendor_lock.py`）。ADR-0041 决定 11 漂移锁不变。
-黄金场景现为 **19** 个（`d11-` / `e8-missing-keyword-not-a-rewrite-source`
-锁住新规则）。app 侧 `gap_analyzer/v3`、`jd-analysis-v4`、`tailor/v4`。
+黄金场景现为 **21** 个（`d11-` / `e8-missing-keyword-not-a-rewrite-source`
+锁住 #164，`d12-` / `e9-jd-context-is-not-a-license` 锁住 #165）。app 侧
+`gap_analyzer/v3`、`jd-analysis-v4`、`tailor/v4`。
 
 **guard 后实测（2026-10-19，别把它当「已解决」）**：3 份真实 JD × 3
 （`nvidia/nemotron-3-super-120b-a12b`）= **0/9 可用**，前一轮是 3/9。前一轮
@@ -171,20 +173,18 @@ Reolink 编辑器调用 90s 超时 2/3。字段拆分（ADR-0060）落地后复�
 **2/9 可用、0 次基础设施错误**（腾讯 1/3、Dida 1/3、Reolink 0/3）。原始
 数据见 `.scratch/p0-159-samples/results{,-post-guard,-pre-guard}.json`。
 
-**两个已知未修的洞（改前先读）**：
+**#165 处置（已拍，ADR-0061 / 0062）**：
 
-1. **`jd_context` 仍把整段 JD 灌进 allowlist**。上游契约说它是「one-line
-   summary」，app 的 `engine/__init__.py` 传
-   `truncate_text(filtered_jd or jd_text, 6000)`——整段原文。实测腾讯 JD
-   609 字符全部进 corpus，`MySQL`/`C++`/`算法` 这些「JD 有、简历没有」的词
-   照样通过内容级校验。app 侧 `_missing_keyword_violation` 只拦
-   `missing_keywords`，拦不到这一类。要堵需按上游契约传一句话摘要，或把
-   `jd_context` 移出 allowlist（契约变更，先拍）。
-2. **编辑器 90s 墙钟是每次 POST，不是每次调用**。`_WallClockDeadlineExceeded`
-   在 `chat_structured` 的 TransportError 分支不重试，首发 >90s 即硬失败
-   （上一轮 Reolink 2/3 如此）。本轮 0 次超时，但腾讯 #1 单发 81.9s 已逼近。
-   `_ROLE_TIMEOUT_DEFAULTS` 是 AIE 决策域护栏（`tests/api/test_r4_aie_guardrails.py`
-   锁着），要改先拍。
+1. **`jd_context` 已从内容许可链移除**。上游 `allowlist_corpus` 不再接收
+   该键，而且 context-only JSON 不再回退返回原文；app 主流程和工作台
+   单条重试统一传 `jd_context_summary()` 生成的结构化摘要（≤300 字），
+   不传 JD 原文，不传 `missing_keywords`。`rewrite_bullet` 的事实校验只认
+   原 bullet。
+2. **编辑器墙钟已放宽到 150s，但仍是每次 POST 的硬截止**。
+   `_WallClockDeadlineExceeded` 在 TransportError 分支不重试，首发 >150s
+   仍会硬失败。150s 的依据是 Reolink 上一轮 2/3 撞 90s、腾讯单发 81.9s；
+   最坏单发估算 `45+75+150=270s`，远低于 watchdog 1800s。该值由
+   `tests/api/test_r4_aie_guardrails.py` 锁定，改值先拍新 ADR。
 
 ### 模块布局是刻意的：平铺 + 层表，别顺手分包 (2026-09-28)
 

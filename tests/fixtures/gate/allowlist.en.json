@@ -17,5 +17,5 @@
   "business_scenarios": [
     "peak load and degradation under real traffic"
   ],
-  "jd_context": "The employer is buying latency and availability ownership, not ticket throughput."
+  "jd_context": "The employer is buying latency and availability ownership, not ticket throughput; the platform runs on Nomad."
 }

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ...alignment_lifecycle import transition_alignment
 from ...app.context import context
+from ...jd_analysis import jd_context_summary
 from ...llm_usage import llm_tenant_context
 from ..deps import get_current_user, get_local_ingest_user
 from ..schemas import (
@@ -633,13 +634,9 @@ def rewrite_workbench_bullet(
             detail='LLM 未配置。请设置 API Key（远程供应商）或激活 Ollama 本地节点。',
         )
     context.enforce_daily_llm_cap(user['user_id'])
-    jd_context = json.dumps(
-        {
-            'jd_profile': job.get('jd_profile'),
-            'gap_report': job.get('gap_report'),
-            'jd_text': (job.get('jd_text') or '')[:6000],
-        },
-        ensure_ascii=False,
+    jd_context = jd_context_summary(
+        job.get('jd_profile'),
+        job.get('gap_report'),
     )
     with llm_tenant_context(user['user_id']):
         with context.OpenAIClient(

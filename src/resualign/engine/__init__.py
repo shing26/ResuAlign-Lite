@@ -10,7 +10,7 @@ from ..contracts.errors import LlmFailureCode
 from ..evaluator import evaluate
 from ..extractor import extract_structured
 from ..gap_analyzer import analyze_gaps
-from ..jd_analysis import jd_profile_to_dict
+from ..jd_analysis import jd_context_summary, jd_profile_to_dict
 from ..jd_profiler import profile_jd
 from ..models import GapReport, Report, ResuAlignConfig, TailoredResume
 from ..rule_diagnose import diagnose_resume_local
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 MAX_JD_INPUT_CHARS = 8000
 MAX_JD_CONTEXT_CHARS = 6000
+MAX_JD_CONTEXT_SUMMARY_CHARS = 300
 # Tailoring is the longest single stage. Two attempts keep a degraded
 # provider from multiplying a slow response into a six-minute failure.
 TAILOR_MAX_RETRIES = 1
@@ -100,7 +101,7 @@ def _editor_call_plan(
     Local nodes (Ollama/localhost) get the bullet-level map-reduce editor:
     dozens of tiny per-bullet JSON calls fit a small local model far better
     than one whole-document rewrite (measured 2026-08-30: a 7B model at
-    ~13 tok/s needs ~200s for the full-editor contract vs the 90s editor
+    ~13 tok/s needs ~200s for the full-editor contract vs the 150s editor
     role timeout, and tends to omit the diffs array entirely). Cloud nodes
     keep the whole-document path for maximum rewrite quality. Coarse
     restructuring always uses the whole-document editor.
@@ -129,7 +130,7 @@ def _editor_call_plan(
                 # one connection to avoid VRAM pressure from parallel runs.
                 "parallel": not LLMNodeStore._is_local_node(editor_node),
                 # Whole-document editing needs ~200s on a 7B local model vs
-                # the 90s editor deadline (measured, see docstring above), so
+                # the 150s editor deadline (measured, see docstring above), so
                 # the all-bullets-failed fallback can never succeed locally.
                 # Local nodes keep the partial result (invalid_diffs with
                 # 「生成失败，可单条重试」) instead of burning 2x the deadline.
@@ -467,15 +468,18 @@ def run(
             notify("gap_analyzed", _gap_progress_message(report.gap_report))
             notify("tailoring", "正在生成 STAR 精修建议（约 3-15 条）...")
             import json as _json
+            jd_context = jd_context_summary(
+                report.jd_profile,
+                report.gap_report,
+                max_chars=MAX_JD_CONTEXT_SUMMARY_CHARS,
+            )
             gap_report_str = _json.dumps({
                 "supported_keywords": report.gap_report.supported_keywords,
                 "missing_keywords": report.gap_report.missing_keywords,
                 "misaligned_emphasis": report.gap_report.misaligned_emphasis,
                 "strength_matches": report.gap_report.strength_matches,
                 "business_scenarios": report.jd_profile.business_scenarios,
-                "jd_context": truncate_text(
-                    filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
-                ),
+                "jd_context": jd_context,
             }, ensure_ascii=False)
             if use_roles:
                 editor_fn, editor_kwargs = _editor_call_plan(
@@ -486,9 +490,7 @@ def run(
                     gap_report_text=gap_report_str,
                     prompt_focus=prompt_focus,
                     custom_prompt=custom_prompt,
-                    jd_context=truncate_text(
-                        filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
-                    ),
+                    jd_context=jd_context,
                 )
                 try:
                     tailor_result, _ = call_with_role(
@@ -527,9 +529,7 @@ def run(
                             granularity=granularity,
                             prompt_focus=prompt_focus,
                             custom_prompt=custom_prompt,
-                            jd_context=truncate_text(
-                                filtered_jd or jd_text, MAX_JD_CONTEXT_CHARS
-                            ),
+                            jd_context=jd_context,
                             parallel=False,
                             # Same reasoning as _editor_call_plan: the
                             # whole-document editor cannot finish inside the

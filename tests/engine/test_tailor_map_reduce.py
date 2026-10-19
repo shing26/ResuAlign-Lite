@@ -204,9 +204,36 @@ def test_map_reduce_all_failed_falls_back_to_whole_doc_by_default():
     assert llm.whole_doc_calls == 1
 
 
+def test_map_reduce_does_not_read_jd_context_from_gap_report():
+    """ADR-0061: legacy raw JD inside gap_report.jd_context is not a fallback."""
+    import json
+
+    llm = MockBulletLLM()
+    gap = json.dumps(
+        {
+            "supported_keywords": ["Python"],
+            "missing_keywords": [],
+            "misaligned_emphasis": [],
+            "strength_matches": [],
+            "business_scenarios": [],
+            "jd_context": "RAW_JD_SENTINEL Kubernetes and Consul",
+        },
+        ensure_ascii=False,
+    )
+    tailor_resume_map_reduce(
+        llm,
+        RESUME,
+        gap,
+        parallel=False,
+        whole_doc_fallback=False,
+    )
+    assert llm.calls
+    assert all("RAW_JD_SENTINEL" not in call for call in llm.calls)
+
+
 def test_map_reduce_local_node_all_failed_keeps_partial_result():
     """P1（2026-09-07）：本地节点全败不再走整文档 fallback——7B 模型整文档
-    契约 ~200s 必超 editor 90s deadline（engine._editor_call_plan 实测注释），
+    契约 ~200s 必超 editor 150s deadline（engine._editor_call_plan 实测注释），
     fallback 只会把 deadline 烧两遍后整 run 失败。应保留 invalid_diffs
     「生成失败，可单条重试」的诚实部分结果。"""
     llm = ProbeWholeDocLLM()
