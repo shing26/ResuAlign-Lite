@@ -66,3 +66,21 @@ def test_all_blocked_hallucination_fails_without_reported_gap():
     assert status == "failed"
     assert error is not None
     assert error.startswith("no_output: ")
+
+
+def test_no_safe_rewrite_fails_with_explanatory_reason():
+    reason = (
+        "岗位存在能力或经历缺口，但没有 supported_keywords 带有可在简历原文中"
+        "逐字定位的证据，因此没有安全改写依据。"
+    )
+    status, error = resolve_alignment_outcome(
+        kept_diffs=[],
+        gap_report={"missing_keywords": ["Kubernetes"]},
+        tailor_degraded=False,
+        eval_hallucinated=False,
+        no_safe_rewrite=True,
+        no_safe_rewrite_reason=reason,
+    )
+
+    assert status == "failed"
+    assert error == f"no_output: {reason}"

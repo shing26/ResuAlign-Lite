@@ -1,4 +1,5 @@
 from .engine.llm import LLMClient, _structured_or_json
+from .evidence import anchored_supported_keywords
 from .models import GapReport
 from .prompt_versions import GAP_ANALYZER as _GAP_ANALYZER_STAGE
 from .prompt_versions import get_prompt_version
@@ -18,17 +19,21 @@ from .schema_registry import GapReportSchema
 # - 变更点 2：missing_keywords 收窄为「简历原文完全没有依据」的真缺口，
 #   只用于诊断/评分/UI，永不进 allowlist（原先它同时承担两个语义，导致
 #   「JD 要什么」被当成「我会什么」假通过内容级校验）。
+# PROMPT_VERSION bump: gap_analyzer/v3 -> v4（2026-10-20，#166）
+# - 变更点：supported_keywords 必须同时返回 supported_keyword_evidence，
+#   把每个可改写方向锚定到一段逐字来自简历原文的证据句。
 GAP_ANALYZER_PROMPT_VERSION = get_prompt_version(_GAP_ANALYZER_STAGE)
 
 
-GAP_ANALYSIS_PROMPT = """PROMPT_VERSION: gap_analyzer/v3
+GAP_ANALYSIS_PROMPT = """PROMPT_VERSION: gap_analyzer/v4
 
 你是简历-岗位差距分析师。对照岗位画像与主简历，找出简历与 JD 的差距。
 
-## Output Contract（只能输出一个 JSON 对象，4 个字段，不得增减字段）
-键名固定为：supported_keywords / missing_keywords / misaligned_emphasis / strength_matches
+## Output Contract（只能输出一个 JSON 对象，5 个字段，不得增减字段）
+键名固定为：supported_keywords / supported_keyword_evidence / missing_keywords / misaligned_emphasis / strength_matches
 
 - supported_keywords：JD 要求、而简历原文**已有事实依据**（同一技能或场景在简历里出现过）但简历没有明确写出来的关键词或紧凑配对短语，0-8 项，每项 ≤ 30 字符。例如简历写了「基于 Redis 的缓存」，JD 要 "Redis caching for high concurrency"，则该项属于 supported_keywords。这是唯一允许作为「新说法」写进简历的来源。
+- supported_keyword_evidence：对象，键必须与 supported_keywords 一一对应；值是简历原文中逐字存在的证据句，不得改写、概括或从 JD 复制。找不到逐字证据的方向不要放进 supported_keywords。
 - missing_keywords：JD 要求、而简历原文**完全没有依据**的真缺口，0-12 项，每项 ≤ 30 字符。只用于诊断与差距说明，**禁止**写进简历。语义重复的缺口合并为一项，不要堆砌同义表述。
 - misaligned_emphasis：简历有但强调方向与 JD 不符的点，0-4 项，每项 ≤ 30 字符；没有给 []。
 - strength_matches：简历已满足的 JD 要求（成功对接的证据），2-8 项，每项 ≤ 30 字符。
@@ -39,8 +44,9 @@ GAP_ANALYSIS_PROMPT = """PROMPT_VERSION: gap_analyzer/v3
 3. 技术名词保留原文英文拼写。
 
 ## 提交前自查
-- 4 个字段齐全、类型正确；数量与单项长度在上限内；无重复项；
-- supported_keywords 里的每一项都能在简历原文里指出依据；
+- 5 个字段齐全、类型正确；数量与单项长度在上限内；无重复项；
+- supported_keywords 与 supported_keyword_evidence 的键一一对应；
+- evidence 的每一项都能在简历原文中逐字找到；
 - 只输出一个 JSON 对象，无 markdown fence，无解释文字。"""
 
 
@@ -65,8 +71,14 @@ def analyze_gaps(
             cache_content,
         )
         if cached is not None:
+            supported, evidence = anchored_supported_keywords(
+                cached.get("supported_keywords", []),
+                cached.get("supported_keyword_evidence", {}),
+                resume_text,
+            )
             return GapReport(
-                supported_keywords=cached.get("supported_keywords", []),
+                supported_keywords=supported,
+                supported_keyword_evidence=evidence,
                 missing_keywords=cached.get("missing_keywords", []),
                 misaligned_emphasis=cached.get("misaligned_emphasis", []),
                 strength_matches=cached.get("strength_matches", []),
@@ -77,8 +89,14 @@ def analyze_gaps(
     # engine.py:212-227 在结构失败（code ∈ schema/parse/empty）时降级为空 gap +
     # gap_degraded，不整体 fail；本行与降级 patch 同时合入（合入顺序：降级先于/同时）。
     result = _structured_or_json(client, GAP_ANALYSIS_PROMPT, user, GapReportSchema)
+    supported, evidence = anchored_supported_keywords(
+        result.get("supported_keywords", []),
+        result.get("supported_keyword_evidence", {}),
+        resume_text,
+    )
     gap = GapReport(
-        supported_keywords=result.get("supported_keywords", []),
+        supported_keywords=supported,
+        supported_keyword_evidence=evidence,
         missing_keywords=result.get("missing_keywords", []),
         misaligned_emphasis=result.get("misaligned_emphasis", []),
         strength_matches=result.get("strength_matches", []),

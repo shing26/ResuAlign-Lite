@@ -42,7 +42,9 @@ _PROMPT_VERSIONS: dict[str, str] = {
     # 变更点：拆分「简历有依据但未写明」的 supported_keywords（唯一可进
     # allowlist 的新术语来源）与「简历完全无依据」的 missing_keywords
     # （只做诊断，禁止写进简历）。缓存键随版本失效。
-    GAP_ANALYZER: "v3",
+    # PROMPT_VERSION bump: gap_analyzer/v3 -> v4（2026-10-20，#166）
+    # 变更点：每个 supported_keyword 必须带简历原文证据映射。
+    GAP_ANALYZER: "v4",
     # PROMPT_VERSION bump: evaluator/v1 -> v2（2026-08-25，对照 04b-PE §2.6）
     # 变更点：评分锚点与不确定兜底值；hallucination 判定边界收紧。
     EVALUATOR: "v3",
@@ -51,7 +53,9 @@ _PROMPT_VERSIONS: dict[str, str] = {
     # PROMPT_VERSION bump: jd-analysis-v3 -> v4（2026-10-19，#164）
     # 变更点：gap_report 拆出 supported_keywords（可进 allowlist），
     # missing_keywords 收窄为真缺口。
-    JD_ANALYSIS: "jd-analysis-v4",
+    # PROMPT_VERSION bump: jd-analysis-v4 -> v5（2026-10-20，#166）
+    # 变更点：supported_keywords 必须附简历原文证据。
+    JD_ANALYSIS: "jd-analysis-v5",
     # PROMPT_VERSION bump: jd_profiler/v1 -> v2（2026-08-25，对照 04b-PE §2.2）
     # 变更点：business_scenarios 0-6 项封顶；各列表数量/长度封顶。
     JD_PROFILER: "v2",
@@ -68,7 +72,10 @@ _PROMPT_VERSIONS: dict[str, str] = {
     # PROMPT_VERSION bump: tailor/v3 -> v4（2026-10-19，#164）
     # 变更点：缺口分 supported_keywords（可改写方向）与 missing_keywords
     # （真缺口，不得写进简历），与 gap_analyzer/v3 的字段拆分对齐。
-    TAILOR: "v4",
+    # PROMPT_VERSION bump: tailor/v4 -> v5（2026-10-20，#166）
+    # 变更点：编辑方向必须绑定可在简历原文逐字定位的证据，缺证据时
+    # 显式无安全改写，不得补写证据。
+    TAILOR: "v5",
 }
 
 STAGES: tuple[str, ...] = tuple(_PROMPT_VERSIONS)

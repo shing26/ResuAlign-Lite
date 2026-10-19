@@ -60,6 +60,11 @@ _Avoid_: 模板简历、多份主简历并行
 **Gap Report**
 主简历 vs JD Profile 的结构化对比：缺失关键词、错位强调、可保留的强匹配项。
 
+**Supported Keyword Evidence**
+偏差报告中每个 `supported_keywords` 方向的逐项原文锚点：键是候选改写方向，
+值是主简历中可逐字定位、且与该方向有共同实质术语的证据句。缺锚点或证据与
+方向无关时，该方向不得进入编辑素材。
+
 **JD Context**
 给编辑器看的一行岗位上下文摘要，只帮助措辞方向，不是候选人事实来源，
 **永不进入 allowlist**。app 由 `jd_context_summary()` 从结构化画像生成，

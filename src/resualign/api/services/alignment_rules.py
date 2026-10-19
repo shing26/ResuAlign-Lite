@@ -124,6 +124,8 @@ def resolve_alignment_outcome(
     gap_report: Any,
     tailor_degraded: bool,
     eval_hallucinated: bool,
+    no_safe_rewrite: bool = False,
+    no_safe_rewrite_reason: str = "",
 ) -> tuple[str, str | None]:
     """Return ``(alignment_status, alignment_error)`` for a finished run."""
     if tailor_degraded:
@@ -136,6 +138,11 @@ def resolve_alignment_outcome(
             "真实性评估判定本轮改写存在无依据内容，"
             "全部建议已拦截；请核对后重试对齐"
         )
+    elif no_safe_rewrite:
+        alignment_error = (
+            no_safe_rewrite_reason.strip()
+            or "岗位存在缺口，但简历原文没有足够依据，因此没有安全改写。"
+        )
     else:
         alignment_error = None
     # ADR-0041 决定 5 分型甲（#111）：有缺口 ∧ usable=0 = 质量失败——就该红、
@@ -145,7 +152,11 @@ def resolve_alignment_outcome(
     # 建议时，必须失败，不能靠“缺口列表为空”留下假绿灯。
     blocked_hallucination = eval_hallucinated and not kept_diffs
     alignment_status = "succeeded"
-    if not kept_diffs and (report_has_gap(gap_report) or blocked_hallucination):
+    if not kept_diffs and (
+        report_has_gap(gap_report)
+        or blocked_hallucination
+        or no_safe_rewrite
+    ):
         alignment_status = "failed"
         alignment_error = (
             "no_output: "

@@ -132,6 +132,98 @@ def test_tailor_prompt_instructs_section_per_diff():
     assert "项目经历" in mock.last_system
 
 
+def test_tailor_drops_supported_keywords_without_resume_evidence():
+    resume = "使用 Redis 做缓存。"
+    gap = json.dumps(
+        {
+            "supported_keywords": ["Redis caching", "Kubernetes"],
+            "supported_keyword_evidence": {
+                "Redis caching": "使用 Redis 做缓存。",
+                "Kubernetes": "使用 Kubernetes 部署服务。",
+            },
+            "missing_keywords": [],
+            "misaligned_emphasis": [],
+            "strength_matches": [],
+        },
+        ensure_ascii=False,
+    )
+    mock = MockLLM(result={"sections": {}, "diffs": []})
+
+    tailor_resume(mock, resume, gap)
+
+    assert "Redis caching" in mock.last_user
+    assert "使用 Redis 做缓存。" in mock.last_user
+    assert "Kubernetes" not in mock.last_user
+
+
+def test_tailor_returns_no_safe_rewrite_without_anchored_directions():
+    resume = "使用 Java 与 Spring Boot 开发后端服务。"
+    gap = json.dumps(
+        {
+            "supported_keywords": ["Kubernetes"],
+            "supported_keyword_evidence": {
+                "Kubernetes": "使用 Kubernetes 部署服务。",
+            },
+            "missing_keywords": ["Kubernetes"],
+            "misaligned_emphasis": [],
+            "strength_matches": [],
+        },
+        ensure_ascii=False,
+    )
+    mock = MockLLM(result={"sections": {}, "diffs": []})
+
+    result = tailor_resume(mock, resume, gap)
+
+    assert result.diffs == []
+    assert result.invalid_diffs == []
+    assert result.no_safe_rewrite is True
+    assert "原文" in result.no_safe_rewrite_reason
+    assert mock.last_user is None
+
+
+def test_tailor_rejects_supported_keyword_with_unrelated_evidence():
+    resume = "使用 Java 与 Spring Boot 开发后端服务。"
+    gap = json.dumps(
+        {
+            "supported_keywords": ["Kubernetes"],
+            "supported_keyword_evidence": {
+                "Kubernetes": "使用 Java 与 Spring Boot 开发后端服务。",
+            },
+            "missing_keywords": ["Kubernetes"],
+            "misaligned_emphasis": [],
+            "strength_matches": [],
+        },
+        ensure_ascii=False,
+    )
+    mock = MockLLM(result={"sections": {}, "diffs": []})
+
+    result = tailor_resume(mock, resume, gap)
+
+    assert result.no_safe_rewrite is True
+    assert mock.last_user is None
+
+
+def test_tailor_keeps_editing_with_anchored_strength_matches():
+    resume = "使用 Java 与 Spring Boot 开发后端服务。"
+    gap = json.dumps(
+        {
+            "supported_keywords": [],
+            "supported_keyword_evidence": {},
+            "missing_keywords": ["Kubernetes"],
+            "misaligned_emphasis": [],
+            "strength_matches": ["Java"],
+        },
+        ensure_ascii=False,
+    )
+    mock = MockLLM(result={"sections": {}, "diffs": []})
+
+    result = tailor_resume(mock, resume, gap)
+
+    assert result.no_safe_rewrite is False
+    assert mock.last_user is not None
+    assert "Java" in mock.last_user
+
+
 def test_tailor_prompt_caps_diff_output():
     # R4: 04b-PE §2.5 —— diffs 封顶「≤ 10 条」、reason「≤ 40 字」（旧文案
     # "at most 15 diffs / 80 characters" 已被新契约取代）。
@@ -558,6 +650,8 @@ _SKILLS_RESUME = (
 # 因此能穿过内容级校验（这正是 #163 要堵的洞）。
 _SKILLS_GAP = json.dumps(
     {
+        "supported_keywords": ["Java"],
+        "supported_keyword_evidence": {"Java": "Java"},
         "missing_keywords": ["TCP/UDP网络协议", "进程间通讯编程", "设计模式"],
         "misaligned_emphasis": [],
         "strength_matches": ["Java Spring Boot 后端开发"],
@@ -766,6 +860,8 @@ def test_tailor_filters_unsupported_missing_keywords_from_editor_prompt():
     resume = "专业技能清单\n- 熟悉 Java 与 Spring Boot，做过 Redis 缓存。\n"
     gap = json.dumps(
         {
+                "supported_keywords": ["Java"],
+                "supported_keyword_evidence": {"Java": "Java"},
             "missing_keywords": ["Redis", "设计模式"],
             "misaligned_emphasis": [],
             "strength_matches": ["Java 与 Spring Boot"],

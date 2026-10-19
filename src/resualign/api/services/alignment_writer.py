@@ -131,6 +131,10 @@ def persist_alignment(
         gap_report=result.get("gap_report"),
         tailor_degraded=bool(result.get("tailor_degraded")),
         eval_hallucinated=eval_hallucinated,
+        no_safe_rewrite=bool(result.get("no_safe_rewrite")),
+        no_safe_rewrite_reason=str(
+            result.get("no_safe_rewrite_reason") or ""
+        ),
     )
     try:
         context._jobs.save_alignment(

@@ -27,6 +27,7 @@ class JDProfile(BaseModel):
 
 class GapReport(BaseModel):
     supported_keywords: list[str] = Field(default_factory=list)
+    supported_keyword_evidence: dict[str, str] = Field(default_factory=dict)
     missing_keywords: list[str] = Field(default_factory=list)
     misaligned_emphasis: list[str] = Field(default_factory=list)
     strength_matches: list[str] = Field(default_factory=list)

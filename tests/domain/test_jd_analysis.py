@@ -31,6 +31,35 @@ def test_combined_prompt_mentions_both_outputs():
     assert "Job Description:" in user
 
 
+def test_profile_and_gaps_keeps_only_resume_backed_supported_keywords():
+    class EvidenceClient:
+        def chat_json(self, system, user, model=None):
+            return {
+                "jd_profile": _profile(),
+                "gap_report": {
+                    "supported_keywords": ["Redis caching", "Kubernetes"],
+                    "supported_keyword_evidence": {
+                        "Redis caching": "使用 Redis 做缓存",
+                        "Kubernetes": "使用 Kubernetes 部署服务",
+                    },
+                    "missing_keywords": [],
+                    "misaligned_emphasis": [],
+                    "strength_matches": ["Java"],
+                },
+            }
+
+    _, gap = profile_and_gaps(
+        EvidenceClient(),
+        "使用 Redis 做缓存",
+        "JD asks for Redis and Kubernetes",
+    )
+
+    assert gap.supported_keywords == ["Redis caching"]
+    assert gap.supported_keyword_evidence == {
+        "Redis caching": "使用 Redis 做缓存"
+    }
+
+
 def test_jd_context_summary_is_structured_bounded_and_ignores_raw_context():
     profile = JDProfile(
         must_have_skills=["Java", "Spring Boot"],

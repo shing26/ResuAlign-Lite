@@ -5,6 +5,7 @@ import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+from ..evidence import anchored_supported_keywords
 from ..models import DiffItem, TailoredResume
 from ..prompt_versions import BULLET_REWRITE as _BULLET_REWRITE_STAGE
 from ..prompt_versions import TAILOR as _TAILOR_STAGE
@@ -97,7 +98,7 @@ def _wants_metric_placeholder(
     return bool(_QUANT_INTENT_RE.search(reason or ""))
 
 
-TAILOR_PROMPT = """PROMPT_VERSION: tailor/v4
+TAILOR_PROMPT = """PROMPT_VERSION: tailor/v5
 
 你是精确的简历编辑器。给定主简历与差距报告，重写简历以弥合差距。铁律：不得编造。禁止新增简历中不存在的技能、经验、指标、工具、公司或项目；只允许改述、重排、重强调已有事实。差距报告分两类：supported_keywords 是「JD 要、简历原文已有依据但没写明」的词，可以据此把已有事实换个更贴 JD 的说法；missing_keywords 是「JD 要、简历原文毫无依据」的真缺口，只能用于说明差距，绝不写进简历。
 
@@ -125,11 +126,11 @@ TAILOR_PROMPT = """PROMPT_VERSION: tailor/v4
 2. 简历已支持 JD 关键词时，用 JD 的确切短语改写该条（如 "Redis caching for high concurrency"），但只能依托简历已有事实，不新增能力。
 3. 原文无数字/指标时禁止补数；不要自行添加占位符或「待人工确认」标注（系统按规则自动追加），不得把占位符当事实呈现。
 4. 每条 proposed 的技术名词、业务场景短语必须能在 original 或简历原文中找到依据；provenance 必须逐字匹配简历原文（允许空白差异，不允许大意或改写）。
-5. 改写方向：supported_keywords / misaligned_emphasis 只用来指明改写方向；每条 proposed 都必须依托简历原文已有的事实，supported_keyword 也只能给已有事实换一个更贴 JD 的说法。missing_keywords 里的真缺口不要覆盖，更不要为了「覆盖」而新增内容——没有安全改写就干脆不产出该条 diff（产出更少但真实的建议，好过产出无法支撑的建议）。
+5. 改写方向：supported_keywords / supported_keyword_evidence 是成对证据——只有 evidence 能在简历原文逐字定位的方向才可改写；misaligned_emphasis 只用来指明已有事实的重强调方向。每条 proposed 都必须依托简历原文已有的事实，supported_keyword 也只能给已有事实换一个更贴 JD 的说法。missing_keywords 里的真缺口不要覆盖，更不要为了「覆盖」而新增内容——没有安全改写就干脆不产出该条 diff（产出更少但真实的建议，好过产出无法支撑的建议）。
 6. 语言：与简历原文同语言；JD 技术短语保留英文原文（如 "production Kubernetes deployment"、"FastAPI async endpoints"）。
 7. section 字段逐字节写简历中的章节标题。
 8. 技能清单/专业技能类章节（skills）只能改写已有条目，禁止新增条目：不得把 JD 里出现、而简历原文没有的能力、术语或工具作为新技能写进去。
-9. 允许 diffs 为空：如果所有缺口都缺少原文事实支撑，返回 `"diffs": []` 与 `"sections": {}`；这是正确的“无安全改写”结果，不要为了数量硬凑。
+9. 允许 diffs 为空：如果所有缺口都缺少原文事实支撑，返回 `"diffs": []` 与 `"sections": {}`；这是正确的“无安全改写”结果，不要为了数量硬凑。supported_keyword_evidence 缺失或无法在原文定位的方向必须忽略，不得自行补写证据。
 
 ## 提交前自查
 - 每个 provenance / original 都能在简历原文逐字找到；
@@ -734,12 +735,17 @@ def _keyword_present(text: str, keyword: str) -> bool:
 def _filter_gap_report_for_editor(
     gap_report_text: str | dict | None, resume_text: str
 ) -> str:
-    """Drop unsupported missing_keywords before the editor sees the gap report.
+    """Keep only gap directions backed by the resume before editing.
 
     The app's gap analyzer uses `missing_keywords` for true JD gaps, while the
     upstream gate treats the same key as a resume-supported allowlist. Filtering
     here keeps the upstream gate contract untouched and prevents true gaps from
     entering either the editor prompt or `_gap_support_text`.
+
+    Since #166, a supported keyword is usable only when its
+    `supported_keyword_evidence` quote can be located in the resume. Missing
+    evidence fails closed: the keyword is removed rather than letting the model
+    invent an anchor.
     """
     if isinstance(gap_report_text, dict):
         data = dict(gap_report_text)
@@ -752,15 +758,56 @@ def _filter_gap_report_for_editor(
             return gap_report_text if isinstance(gap_report_text, str) else ""
         data = dict(data)
     missing = data.get("missing_keywords")
-    if not isinstance(missing, list):
-        return _json.dumps(data, ensure_ascii=False)
-    data["missing_keywords"] = [
-        str(keyword)
-        for keyword in missing
-        if str(keyword).strip()
-        and _keyword_present(resume_text, str(keyword))
-    ]
+    if isinstance(missing, list):
+        data["missing_keywords"] = [
+            str(keyword)
+            for keyword in missing
+            if str(keyword).strip()
+            and _keyword_present(resume_text, str(keyword))
+        ]
+
+    supported = data.get("supported_keywords")
+    raw_evidence = data.get("supported_keyword_evidence")
+    evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
+    if isinstance(supported, list):
+        kept, kept_evidence = anchored_supported_keywords(
+            supported, evidence, resume_text
+        )
+        data["supported_keywords"] = kept
+        data["supported_keyword_evidence"] = kept_evidence
     return _json.dumps(data, ensure_ascii=False)
+
+
+def _gap_report_data(gap_report_text: str | dict | None) -> dict:
+    """Return a structured gap report payload, or an empty dict if malformed."""
+    if isinstance(gap_report_text, dict):
+        return dict(gap_report_text)
+    try:
+        data = _json.loads(gap_report_text or "{}")
+    except (ValueError, TypeError):
+        return {}
+    return dict(data) if isinstance(data, dict) else {}
+
+
+def _no_safe_rewrite_reason(
+    gap_report_text: str | dict | None,
+    editor_gap_report: str,
+) -> str | None:
+    """Explain why a gap cannot be rewritten without adding unsupported facts."""
+    raw = _gap_report_data(gap_report_text)
+    editor = _gap_report_data(editor_gap_report)
+    if (
+        editor.get("supported_keywords")
+        or editor.get("misaligned_emphasis")
+        or editor.get("strength_matches")
+    ):
+        return None
+    if not (raw.get("supported_keywords") or raw.get("missing_keywords")):
+        return None
+    return (
+        "岗位存在能力或经历缺口，但没有 supported_keywords 带有可在简历原文中"
+        "逐字定位的证据，因此没有安全改写依据。"
+    )
 
 
 def _missing_keyword_violation(
@@ -940,6 +987,14 @@ def tailor_resume(
     editor_gap_report = _filter_gap_report_for_editor(
         gap_report_text, resume_text
     )
+    no_safe_reason = _no_safe_rewrite_reason(
+        gap_report_text, editor_gap_report
+    )
+    if no_safe_reason:
+        return TailoredResume(
+            no_safe_rewrite=True,
+            no_safe_rewrite_reason=no_safe_reason,
+        )
     user = f"Resume:\n{resume_text}\n\nGap Report:\n{editor_gap_report}"
     system = f"{TAILOR_PROMPT}\n\n{guide}\n\n{focus_guide}"
     custom = (custom_prompt or "").strip()
@@ -1121,6 +1176,11 @@ def _focus_phrases(gap_report: dict) -> list[str]:
         for item in (gap_report.get(key) or []):
             if isinstance(item, str) and item.strip():
                 phrases.append(item.strip())
+    evidence = gap_report.get("supported_keyword_evidence")
+    if isinstance(evidence, dict):
+        for item in evidence.values():
+            if isinstance(item, str) and item.strip():
+                phrases.append(item.strip())
     return phrases
 
 
@@ -1226,6 +1286,14 @@ def tailor_resume_map_reduce(
     editor_gap_report = _filter_gap_report_for_editor(
         gap_report_text, resume_text
     )
+    no_safe_reason = _no_safe_rewrite_reason(
+        gap_report_text, editor_gap_report
+    )
+    if no_safe_reason:
+        return TailoredResume(
+            no_safe_rewrite=True,
+            no_safe_rewrite_reason=no_safe_reason,
+        )
     try:
         gap_report = _json.loads(editor_gap_report or "{}")
     except (ValueError, TypeError):

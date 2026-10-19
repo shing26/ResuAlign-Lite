@@ -153,8 +153,13 @@ def _profile():
 
 
 def _gap():
-    return {"missing_keywords": ["Redis"], "misaligned_emphasis": [],
-            "strength_matches": ["Java"]}
+    return {
+        "supported_keywords": ["Python"],
+        "supported_keyword_evidence": {"Python": "Python"},
+        "missing_keywords": ["Redis"],
+        "misaligned_emphasis": [],
+        "strength_matches": ["Java"],
+    }
 
 
 def _jd_analysis():

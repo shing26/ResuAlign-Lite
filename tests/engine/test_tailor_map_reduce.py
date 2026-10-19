@@ -1,5 +1,6 @@
 """Unit coverage for the bullet-level map-reduce editor (Phase 2, ADR-0032)."""
 
+import json
 import re
 
 import pytest
@@ -46,17 +47,30 @@ class MockBulletLLM:
         }
 
 
-def _gap_report_json(phrases, *, as_missing=False):
+def _gap_report_json(phrases, *, as_missing=False, supported=None):
     """Build a gap report for the bullet editor.
 
     ``as_missing`` puts the phrases in the true-gap bucket (the #164 guard
     path); the default puts them in ``supported_keywords``, which is what
     drives bullet targeting after the split.
     """
-    import json
-
+    supported_keywords = (
+        list(supported)
+        if supported is not None
+        else ([] if as_missing else phrases)
+    )
+    evidence_by_phrase = {
+        "FastAPI async endpoints": "技术栈: FastAPI",
+        "Python": "使用 Python 开发后端服务",
+        "Redis": "使用 Redis 做缓存与会话管理",
+    }
     return json.dumps({
-        "supported_keywords": [] if as_missing else phrases,
+        "supported_keywords": supported_keywords,
+        "supported_keyword_evidence": {
+            phrase: evidence_by_phrase[phrase]
+            for phrase in supported_keywords
+            if phrase in evidence_by_phrase
+        },
         "missing_keywords": phrases if as_missing else [],
         "misaligned_emphasis": [],
         "strength_matches": [],
@@ -74,8 +88,9 @@ RESUME = (
 
 def test_map_reduce_targets_first_bullet_by_fallback():
     llm = MockBulletLLM()
+    resume = RESUME + "技术栈: FastAPI\n"
     result = tailor_resume_map_reduce(
-        llm, RESUME, _gap_report_json(["FastAPI async endpoints"])
+        llm, resume, _gap_report_json(["FastAPI async endpoints"])
     )
     assert isinstance(result, TailoredResume)
     assert len(result.diffs) == 1
@@ -87,7 +102,7 @@ def test_map_reduce_targets_first_bullet_by_fallback():
     assert d.provenance_state == "verified"
     # source_span must point into the full resume text (not the bare bullet).
     assert d.source_span is not None
-    assert RESUME[d.source_span[0]:d.source_span[1]] == d.original
+    assert resume[d.source_span[0]:d.source_span[1]] == d.original
     # Untouched bullet passes through verbatim in the reassembled section.
     assert "使用 Redis 做缓存与会话管理" in result.sections.get("工作经历", "")
 
@@ -99,6 +114,25 @@ def test_map_reduce_targets_bullet_matching_focus_phrase():
     )
     assert len(result.diffs) == 1
     assert result.diffs[0].original == "使用 Redis 做缓存与会话管理"
+
+
+def test_map_reduce_returns_no_safe_without_resume_evidence():
+    llm = MockBulletLLM()
+    gap = _gap_report_json(["Kubernetes"])
+    payload = json.loads(gap)
+    payload["supported_keyword_evidence"] = {}
+    result = tailor_resume_map_reduce(
+        llm,
+        RESUME,
+        json.dumps(payload, ensure_ascii=False),
+        parallel=False,
+        whole_doc_fallback=False,
+    )
+
+    assert llm.calls == []
+    assert result.diffs == []
+    assert result.no_safe_rewrite is True
+    assert "原文" in result.no_safe_rewrite_reason
 
 
 def test_map_reduce_records_single_failure_and_keeps_others():
@@ -212,6 +246,9 @@ def test_map_reduce_does_not_read_jd_context_from_gap_report():
     gap = json.dumps(
         {
             "supported_keywords": ["Python"],
+            "supported_keyword_evidence": {
+                "Python": "使用 Python 开发后端服务",
+            },
             "missing_keywords": [],
             "misaligned_emphasis": [],
             "strength_matches": [],
@@ -272,7 +309,9 @@ def test_map_reduce_blocks_missing_keyword_in_existing_bullet():
     result = tailor_resume_map_reduce(
         llm,
         RESUME,
-        _gap_report_json(["设计模式"], as_missing=True),
+        _gap_report_json(
+            ["设计模式"], as_missing=True, supported=["Python"]
+        ),
         parallel=False,
         whole_doc_fallback=False,
     )

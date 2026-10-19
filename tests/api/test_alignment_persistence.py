@@ -546,6 +546,54 @@ def test_eval_hallucination_blocks_diffs_into_invalid():
     assert "真实性评估" in blocked["reason"]
 
 
+def test_no_safe_rewrite_persists_explanatory_no_output():
+    """#166:等 evidence 锚点为空时，完成态必须可机读且有具体原因。"""
+    job = _create_job()
+    resume = _create_resume()
+    reason = (
+        "岗位要求 Kubernetes，但简历原文没有可逐字定位的证据，"
+        "因此没有安全改写。"
+    )
+    report = Report(
+        score=72,
+        skills=["Python"],
+        model="test-model",
+        jd_profile=JDProfile(must_have_skills=["Kubernetes"]),
+        gap_report=GapReport(missing_keywords=["Kubernetes"]),
+        tailored_resume=TailoredResume(
+            no_safe_rewrite=True,
+            no_safe_rewrite_reason=reason,
+        ),
+        diffs=[],
+        no_safe_rewrite=True,
+        no_safe_rewrite_reason=reason,
+    )
+    with patch("resualign.api._run_job"), patch(
+        "resualign.api.build_config", return_value=_config()
+    ):
+        queued = client.post(
+            f"/api/jobs/{job['job_id']}/workbench",
+            json={"master_resume_id": resume["resume_id"]},
+            headers=_auth_headers(),
+        )
+    assert queued.status_code == 202
+    analysis_job_id = queued.json()["job_id"]
+
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api.run", return_value=report
+    ):
+        api_module._run_job(analysis_job_id)
+
+    persisted = client.get(
+        f"/api/jobs/{job['job_id']}", headers=_auth_headers()
+    ).json()
+    assert persisted["alignment_status"] == "failed"
+    assert persisted["usable_diffs"] == 0
+    assert persisted["has_gap"] is True
+    assert persisted["alignment_reason"] == "no_output"
+    assert persisted["last_alignment_error"] == f"no_output: {reason}"
+
+
 def _persist_single_diff_job(diff: DiffItem) -> str:
     """Queue + run a workbench job that persists exactly one diff; return
     the library job_id for rewrite-route tests."""

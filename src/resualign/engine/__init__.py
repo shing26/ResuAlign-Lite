@@ -475,6 +475,9 @@ def run(
             )
             gap_report_str = _json.dumps({
                 "supported_keywords": report.gap_report.supported_keywords,
+                "supported_keyword_evidence": (
+                    report.gap_report.supported_keyword_evidence
+                ),
                 "missing_keywords": report.gap_report.missing_keywords,
                 "misaligned_emphasis": report.gap_report.misaligned_emphasis,
                 "strength_matches": report.gap_report.strength_matches,
@@ -558,6 +561,14 @@ def run(
             # 产出空改写并置 tailor_degraded，任务继续而非整体 fail——诊断/
             # 画像/缺口照常保存（重试改写有 precomputed_diagnosis + profiler
             # 缓存兜底），用户等了整个管线不该因最后一个阶段颗粒无收。
+
+            report.no_safe_rewrite = bool(
+                getattr(report.tailored_resume, "no_safe_rewrite", False)
+            )
+            report.no_safe_rewrite_reason = str(
+                getattr(report.tailored_resume, "no_safe_rewrite_reason", "")
+                or ""
+            )
 
             # Diffs from tailor_resume replace the old legacy alignment diffs
             report.diffs = report.tailored_resume.diffs
