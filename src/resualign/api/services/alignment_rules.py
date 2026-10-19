@@ -140,10 +140,12 @@ def resolve_alignment_outcome(
         alignment_error = None
     # ADR-0041 决定 5 分型甲（#111）：有缺口 ∧ usable=0 = 质量失败——就该红、
     # 可重跑（旧语义「全 noop/全拦截仍 succeeded」废除）。「no_output: 」
-    # 前缀是机读契约，投影据此派生 alignment_reason；无缺口 ∧ usable=0 维持
-    # succeeded，由前端渲染「无缺口 · 无需改写」。
+    # 前缀是机读契约，投影据此派生 alignment_reason。无缺口 ∧ usable=0
+    # 且没有真实性拦截时维持 succeeded；但 evaluator 已判幻觉并拦空全部
+    # 建议时，必须失败，不能靠“缺口列表为空”留下假绿灯。
+    blocked_hallucination = eval_hallucinated and not kept_diffs
     alignment_status = "succeeded"
-    if not kept_diffs and report_has_gap(gap_report):
+    if not kept_diffs and (report_has_gap(gap_report) or blocked_hallucination):
         alignment_status = "failed"
         alignment_error = (
             "no_output: "

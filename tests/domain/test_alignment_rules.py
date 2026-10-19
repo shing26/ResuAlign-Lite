@@ -1,4 +1,7 @@
-from resualign.api.services.alignment_rules import split_verified_diffs
+from resualign.api.services.alignment_rules import (
+    resolve_alignment_outcome,
+    split_verified_diffs,
+)
 
 
 def test_split_verified_diffs_quarantines_only_flagged_diffs():
@@ -46,3 +49,20 @@ def test_split_verified_diffs_falls_back_to_global_block_without_ids():
 
     assert kept == []
     assert [diff["diff_id"] for diff in invalid] == ["keep-1", "bad-1"]
+
+
+def test_all_blocked_hallucination_fails_without_reported_gap():
+    """A blocked hallucination is still a failed run, not a green no-gap run."""
+    status, error = resolve_alignment_outcome(
+        kept_diffs=[],
+        gap_report={
+            "missing_keywords": [],
+            "misaligned_emphasis": [],
+        },
+        tailor_degraded=False,
+        eval_hallucinated=True,
+    )
+
+    assert status == "failed"
+    assert error is not None
+    assert error.startswith("no_output: ")
