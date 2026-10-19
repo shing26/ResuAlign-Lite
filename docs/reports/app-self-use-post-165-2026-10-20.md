@@ -52,3 +52,15 @@ allowlist”这两个假通过入口，不是产出质量本身。本轮没有�
 因此 app 自用验证线仍是 **0/3**：本轮没有执行采纳、保存定稿或导出，不能用
 “3/9 succeeded”冒充用户可用样本。下一轮优先级应继续放在编辑器证据化与
 产出质量，而不是继续放大时间预算。
+
+## 诊断后回放（2026-10-20）
+
+随后按 #159 的真实样本定位到一个终态矛盾：腾讯 #2 与 Reolink #3 都是
+`usable_diffs=0`、`hallucinated=true`，但 `gap_missing_count=0`，因此旧
+`resolve_alignment_outcome` 只在 `report_has_gap()` 为真时判 `failed`，留下了
+`succeeded` 假绿灯。修复 `bc463dd` 后，evaluator 已拦截全部建议且没有 kept
+diff 时一律归为 `failed` + `no_output:`，不再依赖缺口列表是否登记。
+
+用本文件对应的原始采样回放，这两例应从旧结果的 `succeeded` 归为
+`failed`，聚合变为 **1/9 succeeded、1/9 usable**。这不改变 app 自用验证线
+**0/3** 的结论；它只是把“跑完没报错”和“产出了用户可采纳的建议”分开。
