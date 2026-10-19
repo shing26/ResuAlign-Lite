@@ -27,6 +27,19 @@ BULLET_REWRITE_PROMPT_VERSION = get_prompt_version(_BULLET_REWRITE_STAGE)
 # - 变更点 3：删除假指令 Max tokens: 1500 / Temperature（editor 90s×2 超时风险）
 # - 变更点 4：provenance/original 必须逐字匹配原文，add 型 original 为空字符串
 # - 缓存影响：版本常量随文本变更 bump，缓存键自动失效。
+# PROMPT_VERSION bump: tailor/v2 -> v3（2026-10-19，#163 P0）
+# 本次升级说明：
+# - 变更点 1：规则 5 由「每个 missing_keyword 至少被覆盖」改为「只覆盖原文有
+#   事实支撑的缺口；没有安全改写就不产出该条 diff」——旧措辞直接诱导编辑器
+#   用 JD 术语填充缺口（腾讯 JD 实证：把 TCP/UDP/设计模式等补进技能清单）。
+# - 变更点 2：新增规则 8：技能清单/专业技能章节只能改写已有条目、禁止新增。
+# - 缓存影响：版本常量随文本变更 bump，缓存键自动失效。
+# PROMPT_VERSION bump: tailor/v3 -> v4（2026-10-19，#164）
+# 本次升级说明：
+# - 变更点 1：缺口分两类——supported_keywords（JD 要、简历有依据但没写明）
+#   才是改写方向；missing_keywords（简历毫无依据的真缺口）不得写进简历。
+#   旧措辞把两者混为 missing_keyword，编辑器据此把 JD 术语当已有能力。
+# - 缓存影响：版本常量随文本变更 bump，缓存键自动失效。
 TAILOR_PROMPT_VERSION = get_prompt_version(_TAILOR_STAGE)
 
 BULLET_REWRITE_PROMPT = """PROMPT_VERSION: bullet_rewrite/v3
@@ -84,9 +97,9 @@ def _wants_metric_placeholder(
     return bool(_QUANT_INTENT_RE.search(reason or ""))
 
 
-TAILOR_PROMPT = """PROMPT_VERSION: tailor/v2
+TAILOR_PROMPT = """PROMPT_VERSION: tailor/v4
 
-你是精确的简历编辑器。给定主简历与差距报告，重写简历以弥合差距。铁律：不得编造。禁止新增简历中不存在的技能、经验、指标、工具、公司或项目；只允许改述、重排、重强调已有事实。
+你是精确的简历编辑器。给定主简历与差距报告，重写简历以弥合差距。铁律：不得编造。禁止新增简历中不存在的技能、经验、指标、工具、公司或项目；只允许改述、重排、重强调已有事实。差距报告分两类：supported_keywords 是「JD 要、简历原文已有依据但没写明」的词，可以据此把已有事实换个更贴 JD 的说法；missing_keywords 是「JD 要、简历原文毫无依据」的真缺口，只能用于说明差距，绝不写进简历。
 
 ## Output Contract（只能输出一个 JSON 对象，2 个字段）
 {"sections": {章节名: 重写后的纯文本}, "diffs": [...]}
@@ -96,7 +109,7 @@ TAILOR_PROMPT = """PROMPT_VERSION: tailor/v2
 - 每章为纯文本，保持原文 Markdown 列表风格；技术名词保留原文英文拼写。
 - 部署注意：当前实施已确认「sections 消费方在缺席时回退原文」（`engine.py:278-280`，draft 由 `_apply_diffs` 生成走 diffs 而非 sections，`api/routers/jobs.py:461`）——**「只含改动章节」模式可直接启用**；若未来消费方变化，本约束可降级为「sections 含所有章节，未改动章节与原文逐字一致」。
 
-### diffs：3-10 条，按影响从大到小；每条对象字段（键名固定）
+### diffs：0-10 条，按影响从大到小；每条对象字段（键名固定）
 {
   "type": "modify" | "add" | "remove",
   "section": 简历中的确切章节名（逐字节写自简历标题，如"项目经历"、"工作经历"），
@@ -112,13 +125,16 @@ TAILOR_PROMPT = """PROMPT_VERSION: tailor/v2
 2. 简历已支持 JD 关键词时，用 JD 的确切短语改写该条（如 "Redis caching for high concurrency"），但只能依托简历已有事实，不新增能力。
 3. 原文无数字/指标时禁止补数；不要自行添加占位符或「待人工确认」标注（系统按规则自动追加），不得把占位符当事实呈现。
 4. 每条 proposed 的技术名词、业务场景短语必须能在 original 或简历原文中找到依据；provenance 必须逐字匹配简历原文（允许空白差异，不允许大意或改写）。
-5. 覆盖检查：完成后确认差距报告中每个 missing_keyword / misaligned_emphasis 至少被一条 diff 或一个改动的章节覆盖；无法用已有事实覆盖的，不要硬凑。
+5. 改写方向：supported_keywords / misaligned_emphasis 只用来指明改写方向；每条 proposed 都必须依托简历原文已有的事实，supported_keyword 也只能给已有事实换一个更贴 JD 的说法。missing_keywords 里的真缺口不要覆盖，更不要为了「覆盖」而新增内容——没有安全改写就干脆不产出该条 diff（产出更少但真实的建议，好过产出无法支撑的建议）。
 6. 语言：与简历原文同语言；JD 技术短语保留英文原文（如 "production Kubernetes deployment"、"FastAPI async endpoints"）。
 7. section 字段逐字节写简历中的章节标题。
+8. 技能清单/专业技能类章节（skills）只能改写已有条目，禁止新增条目：不得把 JD 里出现、而简历原文没有的能力、术语或工具作为新技能写进去。
+9. 允许 diffs 为空：如果所有缺口都缺少原文事实支撑，返回 `"diffs": []` 与 `"sections": {}`；这是正确的“无安全改写”结果，不要为了数量硬凑。
 
 ## 提交前自查
 - 每个 provenance / original 都能在简历原文逐字找到；
 - proposed 中不得出现原文没有的技术名、数字、公司、项目名；
+- 技能清单类章节没有新增条目（proposed 的条目数不多于 original）；
 - diffs 数量 ≤ 10；type / confidence 只用枚举值；add 型 original 必须为空字符串；
 - 只输出一个 JSON 对象，无 markdown fence，无解释文字。"""
 
@@ -314,6 +330,12 @@ def _gap_support_text(gap_report_text: str) -> str:
     The tailor prompt instructs the model to reuse the JD's exact phrases
     for facts the resume already supports, so JD terminology (skills,
     scenarios, context) is legitimate rewrite material, not fabrication.
+
+    Only `supported_keywords` may widen the corpus (ADR-0060 / #164).
+    `missing_keywords` names JD requirements the resume does NOT evidence, so
+    it is deliberately excluded — letting it through is how a JD gap became a
+    claimed skill. This mirrors `gate.allowlist_corpus`, which is the vendored
+    copy of this function.
     """
     try:
         data = _json.loads(gap_report_text or "{}")
@@ -321,7 +343,7 @@ def _gap_support_text(gap_report_text: str) -> str:
         return ""
     parts: list[str] = []
     for key in (
-        "missing_keywords",
+        "supported_keywords",
         "misaligned_emphasis",
         "strength_matches",
         "business_scenarios",
@@ -627,6 +649,181 @@ def gate_diff_items(
     return diffs, invalid_diffs
 
 
+# ---------------------------------------------------------------------------
+# Editor output contract（2026-10-19，#163 P0）：技能清单是「能力声明」，
+# 编辑器可以改写已有条目，但不得让清单增长。实证失败形态（腾讯后台开发
+# JD，见 docs/reports/app-self-use-reliability-2026-10-19.md）：整卷编辑器
+# 把 JD 的 missing_keyword 拼成一条新技能写进「专业技能清单」。
+#
+# 为什么不在 gate_diff_items 里做：这些术语经由 gap report 的
+# missing_keywords 进入 allowlist 语料，而「JD 术语可作为改写素材」是
+# 上游 true-tailor 的既定规则（tests/fixtures/gate 的 d8/e6 场景就是它，
+# VENDOR.json 锁了字节）。改语料语义 = 改上游 gate 规则，必须先在
+# truetailor 落地再同步。因此本契约作为**编辑器产出约束**留在 app 侧，
+# 不进入 parity 链；上游等价规则在 P0 报告里登记为 handoff。
+# ---------------------------------------------------------------------------
+_SKILLS_SECTION_RE = re.compile(r"技能|skill", re.IGNORECASE)
+_BULLET_ENTRY_RE = re.compile(r"^\s*(?:[-•▪●○◦·∙‣*]|\d+(?:[.、)]))\s+")
+_SKILLS_GROWTH_REASON = (
+    "已拦截：技能清单只能改写已有条目，不能新增（JD 术语不等于你的能力）"
+)
+_MISSING_KEYWORD_REASON = (
+    "已拦截：JD 缺口术语在简历原文中无依据（不得把岗位要求写成已有能力）"
+)
+
+
+def _bullet_entry_count(text: str) -> int:
+    """Count bullet entries in a block; plain text counts as a single entry."""
+    marked = [
+        line
+        for line in (text or "").splitlines()
+        if _BULLET_ENTRY_RE.match(line)
+    ]
+    if marked:
+        return len(marked)
+    return 1 if (text or "").strip() else 0
+
+
+def _skills_entry_growth(diff: DiffItem) -> bool:
+    """Whether a diff grows a skills list beyond its source entry count."""
+    if diff.type not in {"modify", "add"}:
+        return False
+    if not _SKILLS_SECTION_RE.search(diff.section or ""):
+        return False
+    return _bullet_entry_count(diff.proposed) > _bullet_entry_count(diff.original)
+
+
+def _gap_missing_keywords(gap_report_text: str | dict | None) -> list[str]:
+    """Return the gap report's missing_keywords, accepting JSON or a dict."""
+    if isinstance(gap_report_text, dict):
+        data = gap_report_text
+    else:
+        try:
+            data = _json.loads(gap_report_text or "{}")
+        except (ValueError, TypeError):
+            return []
+    if not isinstance(data, dict):
+        return []
+    value = data.get("missing_keywords")
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _keyword_present(text: str, keyword: str) -> bool:
+    """Case-insensitive term match; Latin tokens need token boundaries."""
+    haystack = (text or "").lower()
+    needle = (keyword or "").strip().lower()
+    if not needle:
+        return False
+    if re.search(r"[\u4e00-\u9fff]", needle):
+        return needle in haystack
+    if re.fullmatch(r"[a-z0-9]+", needle):
+        return (
+            re.search(
+                rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])",
+                haystack,
+            )
+            is not None
+        )
+    return needle in haystack
+
+
+def _filter_gap_report_for_editor(
+    gap_report_text: str | dict | None, resume_text: str
+) -> str:
+    """Drop unsupported missing_keywords before the editor sees the gap report.
+
+    The app's gap analyzer uses `missing_keywords` for true JD gaps, while the
+    upstream gate treats the same key as a resume-supported allowlist. Filtering
+    here keeps the upstream gate contract untouched and prevents true gaps from
+    entering either the editor prompt or `_gap_support_text`.
+    """
+    if isinstance(gap_report_text, dict):
+        data = dict(gap_report_text)
+    else:
+        try:
+            data = _json.loads(gap_report_text or "{}")
+        except (ValueError, TypeError):
+            return gap_report_text if isinstance(gap_report_text, str) else ""
+        if not isinstance(data, dict):
+            return gap_report_text if isinstance(gap_report_text, str) else ""
+        data = dict(data)
+    missing = data.get("missing_keywords")
+    if not isinstance(missing, list):
+        return _json.dumps(data, ensure_ascii=False)
+    data["missing_keywords"] = [
+        str(keyword)
+        for keyword in missing
+        if str(keyword).strip()
+        and _keyword_present(resume_text, str(keyword))
+    ]
+    return _json.dumps(data, ensure_ascii=False)
+
+
+def _missing_keyword_violation(
+    diff: DiffItem,
+    resume_text: str,
+    gap_report_text: str | dict | None,
+) -> str | None:
+    """Return a missing keyword copied into proposed without resume support.
+
+    `missing_keywords` is the JD-side gap list. It is legitimate rewrite
+    direction, never evidence that the candidate already has the term. This
+    app-side guard closes the gap where the upstream allowlist lets those
+    terms through the content check.
+    """
+    if diff.type not in {"modify", "add"} or not diff.proposed:
+        return None
+    for keyword in _gap_missing_keywords(gap_report_text):
+        if not _keyword_present(diff.proposed, keyword):
+            continue
+        if _keyword_present(resume_text, keyword):
+            continue
+        if _keyword_present(diff.original, keyword):
+            continue
+        return keyword
+    return None
+
+
+def _apply_editor_output_contract(
+    diffs: list[DiffItem],
+    invalid_diffs: list[DiffItem],
+    *,
+    resume_text: str = "",
+    gap_report_text: str | dict | None = None,
+) -> list[DiffItem]:
+    """Demote skills-list growth from usable diffs to blocked ones (#163).
+
+    Mutates the moved diffs (state/reason) and appends them to
+    ``invalid_diffs``, mirroring how the content check reports a block so the
+    UI projection shows the same「已拦截」shape.
+    """
+    kept: list[DiffItem] = []
+    for diff in diffs:
+        growth = _skills_entry_growth(diff)
+        missing_keyword = _missing_keyword_violation(
+            diff, resume_text, gap_report_text
+        )
+        if not growth and not missing_keyword:
+            kept.append(diff)
+            continue
+        diff.provenance_state = "fabricated"
+        diff.confidence = "low"
+        reasons: list[str] = []
+        if growth:
+            reasons.append(_SKILLS_GROWTH_REASON)
+        if missing_keyword:
+            reasons.append(
+                f"{_MISSING_KEYWORD_REASON}；命中术语：{missing_keyword}"
+            )
+        diff.reason = (
+            (f"{diff.reason}；" if diff.reason else "") + "；".join(reasons)
+        )
+        invalid_diffs.append(diff)
+    return kept
+
+
 _SECTION_SPAN_RE = re.compile(
     r"^\s*(?:#{1,6}\s*)?(?:个人(?:信息|简介)|教育(?:背景|经历)|工作经历|"
     r"项目(?:经历|经验)|专业技能|技能清单|证书|荣誉|自我评价|"
@@ -738,7 +935,10 @@ def tailor_resume(
             f"Invalid prompt_focus: {prompt_focus}; expected "
             "balanced, quantified, or skills"
         )
-    user = f"Resume:\n{resume_text}\n\nGap Report:\n{gap_report_text}"
+    editor_gap_report = _filter_gap_report_for_editor(
+        gap_report_text, resume_text
+    )
+    user = f"Resume:\n{resume_text}\n\nGap Report:\n{editor_gap_report}"
     system = f"{TAILOR_PROMPT}\n\n{guide}\n\n{focus_guide}"
     custom = (custom_prompt or "").strip()
     if custom:
@@ -758,9 +958,15 @@ def tailor_resume(
     diffs, invalid_diffs = gate_diff_items(
         result.get("diffs", []),
         resume_text,
-        _gap_support_text(gap_report_text),
+        _gap_support_text(editor_gap_report),
         strict_provenance=strict_provenance,
         prompt_focus=prompt_focus,
+    )
+    diffs = _apply_editor_output_contract(
+        diffs,
+        invalid_diffs,
+        resume_text=resume_text,
+        gap_report_text=gap_report_text,
     )
     return TailoredResume(
         sections=result.get("sections", {}),
@@ -908,7 +1114,7 @@ def split_resume_units(resume_text: str) -> list[dict]:
 
 def _focus_phrases(gap_report: dict) -> list[str]:
     phrases: list[str] = []
-    for key in ("missing_keywords", "misaligned_emphasis", "business_scenarios"):
+    for key in ("supported_keywords", "misaligned_emphasis", "business_scenarios"):
         for item in (gap_report.get(key) or []):
             if isinstance(item, str) and item.strip():
                 phrases.append(item.strip())
@@ -1014,8 +1220,11 @@ def tailor_resume_map_reduce(
             f"Invalid granularity: {granularity}; expected fine, medium, or coarse"
         )
     instruction = _pick_bullet_instruction(granularity, prompt_focus)
+    editor_gap_report = _filter_gap_report_for_editor(
+        gap_report_text, resume_text
+    )
     try:
-        gap_report = _json.loads(gap_report_text or "{}")
+        gap_report = _json.loads(editor_gap_report or "{}")
     except (ValueError, TypeError):
         gap_report = {}
     focus = _focus_phrases(gap_report)
@@ -1092,10 +1301,18 @@ def tailor_resume_map_reduce(
     invalid_diffs: list[DiffItem] = []
     accepted: set[str] = set()
     for diff in rewrites:
+        # 编辑器产出约束（#163）：技能清单增长在此处就拦下——既不进 usable，
+        # 也不写回 sections（否则被拦的内容仍会出现在重组后的章节里）。
+        growth = _skills_entry_growth(diff)
+        missing_keyword = _missing_keyword_violation(
+            diff, resume_text, gap_report_text
+        )
         if (
             diff.proposed
             and diff.proposed.strip()
             and diff.provenance_state != "fabricated"
+            and not growth
+            and not missing_keyword
         ):
             accepted.add(diff.original)
             diffs.append(diff)
@@ -1104,6 +1321,19 @@ def tailor_resume_map_reduce(
             if diff.provenance_state == "fabricated":
                 # 内容级校验拦截（#76）：保留「已拦截：…」原因，不冒充生成失败。
                 diff.reason = (diff.reason or "") + " [可单条重试]"
+            elif growth:
+                diff.provenance_state = "fabricated"
+                diff.reason = (
+                    (diff.reason or "") + _SKILLS_GROWTH_REASON + " [可单条重试]"
+                )
+            elif missing_keyword:
+                diff.provenance_state = "fabricated"
+                diff.reason = (
+                    (diff.reason or "")
+                    + _MISSING_KEYWORD_REASON
+                    + f"；命中术语：{missing_keyword}"
+                    + " [可单条重试]"
+                )
             else:
                 diff.provenance_state = "missing"
                 diff.reason = (diff.reason or "") + " [生成失败，可单条重试]"

@@ -267,7 +267,14 @@ def _unsupported_content(proposed: str, *supported_texts: str) -> list[str]:
 
 def allowlist_corpus(payload: str) -> str:
     """Gap-report JSON allowlist extraction (port of tailor._gap_support_text);
-    plain text passes through unchanged."""
+    plain text passes through unchanged.
+
+    `supported_keywords` is the only keyword field that may widen the corpus:
+    it names JD terms the resume already evidences somewhere, so quoting them
+    is not a new claim. `missing_keywords` is deliberately absent — it names
+    genuine gaps (JD requirements the resume does NOT evidence), and letting
+    those through is exactly how "the JD said it" turned into "I did it"
+    (issue #164)."""
     try:
         data = json.loads(payload or "{}")
     except (ValueError, TypeError):
@@ -276,7 +283,7 @@ def allowlist_corpus(payload: str) -> str:
         return payload or ""
     parts: list[str] = []
     for key in (
-        "missing_keywords",
+        "supported_keywords",
         "misaligned_emphasis",
         "strength_matches",
         "business_scenarios",

@@ -1,8 +1,11 @@
 {
-  "missing_keywords": [
+  "supported_keywords": [
     "SLO",
     "capacity reasoning",
     "incident-to-steady-state ownership"
+  ],
+  "missing_keywords": [
+    "Terraform"
   ],
   "misaligned_emphasis": [
     "Northwind work reads as feature delivery; the JD buys ownership of a service through incidents"

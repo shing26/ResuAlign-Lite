@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from resualign.engine.tailor import (
@@ -27,9 +29,11 @@ class MockLLM:
             }],
         }
         self.last_system = None
+        self.last_user = None
 
     def chat_json(self, system, user, model=None):
         self.last_system = system
+        self.last_user = user
         return self.result
 
 
@@ -535,3 +539,240 @@ def test_derive_section_diffs_keeps_existing_bullet_diffs():
         invalid_diffs=[],
     )
     assert derive_section_diffs(tailored, resume) == tailored.diffs
+
+
+# ---------------------------------------------------------------------------
+# Editor output contract（2026-10-19，#163 P0）：技能清单禁止增长。
+# 实证形态：腾讯后台开发 JD，整卷编辑器把 missing_keyword 拼成一条新技能
+# 写进「专业技能清单」。这些词经由 gap report 的 missing_keywords 进入
+# allowlist 语料，所以内容级校验会放行——约束必须独立于 allowlist 语义，
+# 按「条目数」判定。
+# ---------------------------------------------------------------------------
+
+_SKILLS_RESUME = (
+    "专业技能清单\n"
+    "- 后端工程深度：熟练 Java 与 Spring Boot，具备多租户与幂等设计经验。\n"
+)
+
+# missing_keywords 里的词就是 JD 要、简历没有的；它们同时是 allowlist 语料，
+# 因此能穿过内容级校验（这正是 #163 要堵的洞）。
+_SKILLS_GAP = json.dumps(
+    {
+        "missing_keywords": ["TCP/UDP网络协议", "进程间通讯编程", "设计模式"],
+        "misaligned_emphasis": [],
+        "strength_matches": ["Java Spring Boot 后端开发"],
+    },
+    ensure_ascii=False,
+)
+
+
+def test_tailor_blocks_skills_list_growth_from_jd_keywords():
+    """JD 关键词直灌技能清单 → 必须拦成 invalid，不得冒充 verified。"""
+    original = (
+        "- 后端工程深度：熟练 Java 与 Spring Boot，具备多租户与幂等设计经验。"
+    )
+    injected = (
+        original
+        + "\n- 系统基础能力：掌握常用设计模式（如单例、工厂、观察者）。"
+    )
+    mock = MockLLM(result={
+        "sections": {"专业技能清单": injected},
+        "diffs": [{
+            "type": "modify",
+            "section": "专业技能清单",
+            "original": original,
+            "proposed": injected,
+            "reason": "补齐缺失关键词",
+            "confidence": "high",
+            "provenance": original,
+        }],
+    })
+    result = tailor_resume(mock, _SKILLS_RESUME, _SKILLS_GAP)
+    assert result.diffs == []
+    assert len(result.invalid_diffs) == 1
+    blocked = result.invalid_diffs[0]
+    assert blocked.provenance_state == "fabricated"
+    assert "技能清单" in blocked.reason
+
+
+def test_tailor_blocks_two_skills_growth_diffs_like_tencent_run():
+    """腾讯实证形态：两条 diff 都靠追加条目「覆盖缺口」，两条都要拦。"""
+    original = (
+        "- 后端工程深度：熟练 Java 与 Spring Boot，具备多租户与幂等设计经验。"
+    )
+    extra = "\n- 系统基础能力：熟悉 TCP/UDP 网络协议与进程间通讯，掌握设计模式。"
+    mock = MockLLM(result={
+        "sections": {"专业技能清单": original + extra},
+        "diffs": [
+            {
+                "type": "modify",
+                "section": "专业技能清单",
+                "original": original,
+                "proposed": original + extra,
+                "reason": "补齐缺失关键词",
+                "confidence": "high",
+                "provenance": original,
+            },
+            {
+                "type": "modify",
+                "section": "专业技能清单",
+                "original": original,
+                "proposed": original + extra,
+                "reason": "补齐缺失关键词",
+                "confidence": "high",
+                "provenance": original,
+            },
+        ],
+    })
+    result = tailor_resume(mock, _SKILLS_RESUME, _SKILLS_GAP)
+    assert result.diffs == []
+    assert len(result.invalid_diffs) == 2
+    assert all(d.provenance_state == "fabricated" for d in result.invalid_diffs)
+
+
+def test_tailor_allows_skills_rewrite_without_new_entries():
+    """改写已有技能条目（不新增条目）仍应可用。"""
+    original = "- 熟悉 Java 与 Spring Boot，具备多租户设计经验。"
+    resume = f"专业技能清单\n{original}\n"
+    mock = MockLLM(result={
+        "sections": {"专业技能清单": "- 熟练 Java 与 Spring Boot，具备多租户与幂等设计经验。"},
+        "diffs": [{
+            "type": "modify",
+            "section": "专业技能清单",
+            "original": original,
+            "proposed": "- 熟练 Java 与 Spring Boot，具备多租户与幂等设计经验。",
+            "reason": "重强调已有事实",
+            "confidence": "high",
+            "provenance": original,
+        }],
+    })
+    result = tailor_resume(mock, resume, _SKILLS_GAP)
+    assert len(result.diffs) == 1
+    assert result.invalid_diffs == []
+
+
+def test_editor_output_contract_only_guards_skills_sections():
+    """叙事章节（项目/工作经历）不受「禁止新增条目」约束。"""
+    original = "- 搭建 Redis 缓存层"
+    resume = f"项目经历\n{original}\n"
+    mock = MockLLM(result={
+        "sections": {"项目经历": original + "\n- 补充一条项目要点"},
+        "diffs": [{
+            "type": "modify",
+            "section": "项目经历",
+            "original": original,
+            "proposed": original + "\n- 补充一条项目要点",
+            "reason": "补充项目细节",
+            "confidence": "high",
+            "provenance": original,
+        }],
+    })
+    result = tailor_resume(mock, resume, "Gap report")
+    assert len(result.diffs) == 1
+    assert result.invalid_diffs == []
+
+
+def test_tailor_blocks_missing_keyword_appended_to_existing_bullet():
+    """中文缺口词续写进已有条目时，条目数不变也必须拦下。"""
+    original = "- 熟练 Java 与 Spring Boot，具备多租户设计经验。"
+    proposed = (
+        "- 熟练 Java 与 Spring Boot，具备多租户设计经验；"
+        "掌握常用设计模式（如单例、工厂、观察者）。"
+    )
+    resume = f"专业技能清单\n{original}\n"
+    mock = MockLLM(result={
+        "sections": {"专业技能清单": proposed},
+        "diffs": [{
+            "type": "modify",
+            "section": "专业技能清单",
+            "original": original,
+            "proposed": proposed,
+            "reason": "强化岗位关键词",
+            "confidence": "high",
+            "provenance": original,
+        }],
+    })
+    result = tailor_resume(mock, resume, _SKILLS_GAP)
+    assert result.diffs == []
+    assert len(result.invalid_diffs) == 1
+    blocked = result.invalid_diffs[0]
+    assert blocked.provenance_state == "fabricated"
+    assert "设计模式" in blocked.reason
+
+
+def test_tailor_allows_missing_keyword_when_resume_already_supports_it():
+    """同一术语若简历原文已有事实，不得被临时 guard 误拦。"""
+    original = "- 熟练 Java 与 Spring Boot，掌握常用设计模式。"
+    proposed = (
+        "- 熟练 Java 与 Spring Boot，具备多租户与幂等设计经验，"
+        "掌握常用设计模式。"
+    )
+    resume = f"专业技能清单\n{original}\n"
+    mock = MockLLM(result={
+        "sections": {"专业技能清单": proposed},
+        "diffs": [{
+            "type": "modify",
+            "section": "专业技能清单",
+            "original": original,
+            "proposed": proposed,
+            "reason": "重强调已有事实",
+            "confidence": "high",
+            "provenance": original,
+        }],
+    })
+    result = tailor_resume(mock, resume, _SKILLS_GAP)
+    assert len(result.diffs) == 1
+    assert result.invalid_diffs == []
+
+
+def test_skills_entry_growth_is_structural_not_keyword_based():
+    """按条目数判定：改写变长不算增长，新增一条才算；非技能章节不设限。"""
+    from resualign.engine.tailor import _skills_entry_growth
+    from resualign.models import DiffItem
+
+    def diff(section, original, proposed, kind="modify"):
+        return DiffItem(
+            section=section, type=kind, original=original, proposed=proposed
+        )
+
+    assert _skills_entry_growth(diff("专业技能", "- a", "- a 更长的改写")) is False
+    assert _skills_entry_growth(diff("专业技能清单", "- a", "- a\n- b")) is True
+    assert _skills_entry_growth(diff("Skills", "- a", "- a\n- b")) is True
+    assert _skills_entry_growth(diff("项目经历", "- a", "- a\n- b")) is False
+    # remove 型不受约束（只删不增）
+    assert (
+        _skills_entry_growth(
+            diff("专业技能", "- a", "- a\n- b", kind="remove")
+        ) is False
+    )
+
+
+def test_tailor_prompt_forbids_skills_list_growth():
+    """提示词契约：#163 的两个新增约束必须真的在 system prompt 里。"""
+    mock = MockLLM()
+    tailor_resume(mock, "Worked on backend", "Gap")
+    assert "禁止新增条目" in mock.last_system
+    assert "没有安全改写" in mock.last_system
+    assert "diffs：0-10 条" in mock.last_system
+    assert "允许 diffs 为空" in mock.last_system
+    # 旧措辞（要求覆盖每个 missing_keyword）已移除——它正是诱导直灌的指令。
+    assert "每个 missing_keyword / misaligned_emphasis 至少被一条 diff" not in (
+        mock.last_system
+    )
+
+
+def test_tailor_filters_unsupported_missing_keywords_from_editor_prompt():
+    """无简历依据的缺口词不送编辑器，也不进 allowlist 语料。"""
+    resume = "专业技能清单\n- 熟悉 Java 与 Spring Boot，做过 Redis 缓存。\n"
+    gap = json.dumps(
+        {
+            "missing_keywords": ["Redis", "设计模式"],
+            "misaligned_emphasis": [],
+            "strength_matches": ["Java 与 Spring Boot"],
+        },
+        ensure_ascii=False,
+    )
+    mock = MockLLM(result={"sections": {}, "diffs": []})
+    tailor_resume(mock, resume, gap)
+    assert "Redis" in mock.last_user
+    assert "设计模式" not in mock.last_user

@@ -1,5 +1,6 @@
 {
-  "missing_keywords": ["Kafka"],
+  "supported_keywords": ["Kafka"],
+  "missing_keywords": ["Elasticsearch"],
   "misaligned_emphasis": [],
   "strength_matches": ["库存扣减"],
   "business_scenarios": ["高并发场景"],

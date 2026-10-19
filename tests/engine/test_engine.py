@@ -100,7 +100,7 @@ def test_engine_passes_business_scenarios_to_tailor():
             self.tailor_user = ""
 
         def chat_json(self, system, user, model=None):
-            if "PROMPT_VERSION: tailor/v2" in system:
+            if "PROMPT_VERSION: tailor/v4" in system:
                 self.tailor_user = user
             return super().chat_json(system, user, model)
 
@@ -122,7 +122,7 @@ def test_engine_passes_custom_prompt_to_tailor():
             self.tailor_system = ""
 
         def chat_json(self, system, user, model=None):
-            if "PROMPT_VERSION: tailor/v2" in system:
+            if "PROMPT_VERSION: tailor/v4" in system:
                 self.tailor_system = system
             return super().chat_json(system, user, model)
 
@@ -209,7 +209,7 @@ def test_engine_passes_granularity_to_tailor():
             self.tailor_system = ""
 
         def chat_json(self, system, user, model=None):
-            if "PROMPT_VERSION: tailor/v2" in system:
+            if "PROMPT_VERSION: tailor/v4" in system:
                 self.tailor_system = system
             return super().chat_json(system, user, model)
 
@@ -244,7 +244,7 @@ def test_engine_passes_prompt_focus_to_tailor():
             self.tailor_system = ""
 
         def chat_json(self, system, user, model=None):
-            if "PROMPT_VERSION: tailor/v2" in system:
+            if "PROMPT_VERSION: tailor/v4" in system:
                 self.tailor_system = system
             return super().chat_json(system, user, model)
 
@@ -539,7 +539,10 @@ def test_direct_path_local_editor_skips_whole_doc_fallback(monkeypatch):
                 }
             if name == GapReportSchema.__name__:
                 return {
-                    "missing_keywords": ["Python", "Redis"],
+                    # The resume evidences both terms, so under the #164 split
+                    # they are supported keywords, not true gaps.
+                    "supported_keywords": ["Python", "Redis"],
+                    "missing_keywords": [],
                     "misaligned_emphasis": [],
                     "strength_matches": [],
                 }

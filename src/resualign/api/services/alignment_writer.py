@@ -113,10 +113,16 @@ def persist_alignment(
         isinstance(eval_score, dict)
         and eval_score.get("hallucination_detected")
     )
+    eval_hallucinated_diff_ids = (
+        list(eval_score.get("hallucinated_diff_ids") or [])
+        if isinstance(eval_score, dict)
+        else []
+    )
     kept_diffs, invalid_diffs = split_verified_diffs(
         list(result.get("diffs") or []),
         list(tailored.get("invalid_diffs") or []),
         eval_hallucinated=eval_hallucinated,
+        eval_hallucinated_diff_ids=eval_hallucinated_diff_ids,
         job_label=library_job_id,
     )
     result["diffs"] = kept_diffs

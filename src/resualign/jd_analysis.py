@@ -24,6 +24,9 @@ from .prompt_versions import get_prompt_version
 # - 说明：profile_and_gaps 为死代码路径（M3，无生产调用方），仍保留最小维护
 # - 缓存影响：版本常量随文本变更 bump（api/routers/jobs.py:475-482 预分析缓存键
 #   直接引用本常量，漏 bump 会新旧结果串扰）。
+# PROMPT_VERSION bump: jd-analysis-v3 -> jd-analysis-v4（2026-10-19，#164）
+# - 变更点：gap_report 拆出 supported_keywords（唯一可进 allowlist 的来源）；
+#   missing_keywords 收窄为「简历原文完全没有依据」的真缺口。
 JD_ANALYSIS_PROMPT_VERSION = get_prompt_version(_JD_ANALYSIS_STAGE)
 
 # Fields the current JDProfile model accepts. Cache payloads are filtered
@@ -38,7 +41,7 @@ _JD_PROFILE_FIELDS = (
     "education_requirements",
 )
 
-JD_ANALYSIS_PROMPT = """PROMPT_VERSION: jd_analysis/v3
+JD_ANALYSIS_PROMPT = """PROMPT_VERSION: jd_analysis/v4
 
 你是岗位画像与差距分析师。输入：主简历 + 岗位描述。输出一个 JSON 对象，包含且仅包含两个顶层字段：jd_profile 与 gap_report。两个子对象都必须完整给出。
 
@@ -53,8 +56,9 @@ JD_ANALYSIS_PROMPT = """PROMPT_VERSION: jd_analysis/v3
 - min_years_experience：整数年数；未提及给 null。
 - education_requirements：学历/专业要求，0-3 项，每项 ≤ 20 字符。
 
-### gap_report（3 个字段，键名固定）
-- missing_keywords：JD 要求但简历未体现的关键词或紧凑配对短语（如 "Redis caching for high concurrency"），5-12 项，每项 ≤ 30 字符；语义重复合并，不堆砌。
+### gap_report（4 个字段，键名固定）
+- supported_keywords：JD 要求、简历原文已有依据但没写明的关键词或紧凑配对短语（如简历写了 Redis 缓存、JD 要 "Redis caching for high concurrency"），0-8 项，每项 ≤ 30 字符；这是唯一可进 allowlist 的新术语来源。
+- missing_keywords：JD 要求、简历原文完全没有依据的真缺口，0-12 项，每项 ≤ 30 字符；只用于诊断，禁止写进简历。
 - misaligned_emphasis：简历有但强调方向与 JD 不符的点，0-4 项，每项 ≤ 30 字符；没有给 []。
 - strength_matches：简历已满足的 JD 要求，2-8 项，每项 ≤ 30 字符。
 
@@ -105,6 +109,7 @@ def _gap_report_from_cache(raw: dict[str, Any] | None) -> GapReport | None:
     if not isinstance(raw, dict):
         return None
     return GapReport(
+        supported_keywords=raw.get("supported_keywords", []),
         missing_keywords=raw.get("missing_keywords", []),
         misaligned_emphasis=raw.get("misaligned_emphasis", []),
         strength_matches=raw.get("strength_matches", []),
@@ -151,6 +156,7 @@ def profile_and_gaps(
         education_requirements=profile_raw.get("education_requirements", []),
     )
     gap = GapReport(
+        supported_keywords=gap_raw.get("supported_keywords", []),
         missing_keywords=gap_raw.get("missing_keywords", []),
         misaligned_emphasis=gap_raw.get("misaligned_emphasis", []),
         strength_matches=gap_raw.get("strength_matches", []),
@@ -164,6 +170,7 @@ def profile_and_gaps(
             {
                 "jd_profile": jd_profile_to_dict(profile),
                 "gap_report": {
+                    "supported_keywords": gap.supported_keywords,
                     "missing_keywords": gap.missing_keywords,
                     "misaligned_emphasis": gap.misaligned_emphasis,
                     "strength_matches": gap.strength_matches,

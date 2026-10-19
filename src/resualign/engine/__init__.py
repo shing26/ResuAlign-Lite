@@ -468,6 +468,7 @@ def run(
             notify("tailoring", "正在生成 STAR 精修建议（约 3-15 条）...")
             import json as _json
             gap_report_str = _json.dumps({
+                "supported_keywords": report.gap_report.supported_keywords,
                 "missing_keywords": report.gap_report.missing_keywords,
                 "misaligned_emphasis": report.gap_report.misaligned_emphasis,
                 "strength_matches": report.gap_report.strength_matches,

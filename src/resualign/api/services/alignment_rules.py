@@ -50,17 +50,41 @@ def split_verified_diffs(
     invalid_diffs: list[dict[str, Any]],
     *,
     eval_hallucinated: bool,
+    eval_hallucinated_diff_ids: list[str] | None = None,
     job_label: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return ``(kept, invalid)`` after the zero-hallucination gate.
 
-    P0（2026-09-06 安全审查 #74）：evaluator 自评判定幻觉时硬阻断——本轮
-    diffs 不作为已验证建议保存，整体降级 invalid（ADR-0019 零幻觉硬门）。
-    Phase A2：否则剔除 no-op diffs 并把它们折进 invalid_diffs。
+    P0（2026-09-06 安全审查 #74）：evaluator 自评判定幻觉时不得冒充已验证
+    建议。2026-10-19 起若 evaluator 给出 `hallucinated_diff_ids`，只隔离被
+    指认的 diff；没有 id 映射时回退整轮硬阻断（ADR-0019 零幻觉硬门）。
+    Phase A2：剔除 no-op diffs 并把它们折进 invalid_diffs。
     """
     if eval_hallucinated and raw_diffs:
+        flagged_ids = {
+            str(diff_id)
+            for diff_id in (eval_hallucinated_diff_ids or [])
+            if str(diff_id)
+        }
+        if flagged_ids:
+            blocked_source = [
+                diff
+                for diff in raw_diffs
+                if str(diff.get("diff_id") or "") in flagged_ids
+            ]
+            kept_source = [
+                diff
+                for diff in raw_diffs
+                if str(diff.get("diff_id") or "") not in flagged_ids
+            ]
+            if not blocked_source:
+                blocked_source = list(raw_diffs)
+                kept_source = []
+        else:
+            blocked_source = list(raw_diffs)
+            kept_source = []
         blocked = []
-        for diff in raw_diffs:
+        for diff in blocked_source:
             diff = dict(diff)
             diff["provenance_state"] = "fabricated"
             reason = (diff.get("reason") or "").rstrip("；;。 ")
@@ -72,11 +96,14 @@ def split_verified_diffs(
             blocked.append(diff)
         logger.warning(
             "library job %s: evaluator flagged hallucination; "
-            "blocked %d diff(s) from verified advice",
+            "blocked %d of %d diff(s) from verified advice",
             job_label,
+            len(blocked_source),
             len(raw_diffs),
         )
-        return [], list(invalid_diffs) + blocked
+        noop_diffs = [diff for diff in kept_source if is_noop_diff(diff)]
+        kept = [diff for diff in kept_source if not is_noop_diff(diff)]
+        return kept, list(invalid_diffs) + noop_diffs + blocked
     noop_diffs = [diff for diff in raw_diffs if is_noop_diff(diff)]
     kept = [diff for diff in raw_diffs if not is_noop_diff(diff)]
     invalid = list(invalid_diffs)

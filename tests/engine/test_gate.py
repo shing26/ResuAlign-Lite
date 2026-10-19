@@ -192,6 +192,30 @@ class TestDriftLockParity:
             assert "term" in got["detail"], diff_id
 
 
+def test_gap_support_text_excludes_missing_keywords():
+    """#164: only `supported_keywords` may widen the app's allowlist corpus.
+
+    The app's gap analyzer uses `missing_keywords` for genuine JD gaps, so
+    feeding that key into the corpus is exactly how "the JD asked for it"
+    passed the content check as a claimed skill.
+    """
+    from resualign.engine.tailor import _gap_support_text
+
+    payload = json.dumps(
+        {
+            "supported_keywords": ["Kafka"],
+            "missing_keywords": ["Elasticsearch"],
+            "strength_matches": ["库存扣减"],
+        },
+        ensure_ascii=False,
+    )
+    corpus = _gap_support_text(payload)
+    assert "Kafka" in corpus
+    assert "Elasticsearch" not in corpus
+    # The vendored standalone gate must agree with the app on the same payload.
+    assert gate.allowlist_corpus(payload) == corpus
+
+
 class TestCliContract:
     def test_summary_line_format(self, tmp_path, capsys):
         log = tmp_path / "run.jsonl"
@@ -210,7 +234,7 @@ class TestCliContract:
         summary = [line for line in out.splitlines() if line.startswith("GATE:")]
         assert len(summary) == 1
         assert re.fullmatch(
-            r"GATE: 10 diffs / 6 blocked \(missing=2, fabricated=3, noop=1\) "
+            r"GATE: 11 diffs / 7 blocked \(missing=2, fabricated=4, noop=1\) "
             r"/ resume-sha256=[0-9a-f]{12}",
             summary[0],
         ), summary[0]
@@ -218,7 +242,7 @@ class TestCliContract:
         assert entry["round"] == 2
         assert entry["trigger"] == "eval:round1"
         assert entry["usable"] == 4
-        assert entry["blocked"] == {"missing": 2, "fabricated": 3, "noop": 1}
+        assert entry["blocked"] == {"missing": 2, "fabricated": 4, "noop": 1}
         assert len(entry["resume_sha256"]) == 64
 
     def test_missing_file_exits_2(self, tmp_path, capsys):

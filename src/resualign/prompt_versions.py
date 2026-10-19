@@ -38,13 +38,20 @@ _PROMPT_VERSIONS: dict[str, str] = {
     # PROMPT_VERSION bump: gap_analyzer/v1 -> v2（2026-08-25，对照 04b-PE §2.3）
     # 变更点：missing_keywords 5-12 项、每项 ≤ 30 字符；misaligned/strength
     # 数量封顶；删除假指令 Max tokens。
-    GAP_ANALYZER: "v2",
+    # PROMPT_VERSION bump: gap_analyzer/v2 -> v3（2026-10-19，#164）
+    # 变更点：拆分「简历有依据但未写明」的 supported_keywords（唯一可进
+    # allowlist 的新术语来源）与「简历完全无依据」的 missing_keywords
+    # （只做诊断，禁止写进简历）。缓存键随版本失效。
+    GAP_ANALYZER: "v3",
     # PROMPT_VERSION bump: evaluator/v1 -> v2（2026-08-25，对照 04b-PE §2.6）
     # 变更点：评分锚点与不确定兜底值；hallucination 判定边界收紧。
-    EVALUATOR: "v2",
+    EVALUATOR: "v3",
     # PROMPT_VERSION bump: jd-analysis-v2 -> v3（2026-08-25，对照 04b-PE §2.4）
     # 变更点：组合契约改为纯静态文本；各字段带数量/长度上限。
-    JD_ANALYSIS: "jd-analysis-v3",
+    # PROMPT_VERSION bump: jd-analysis-v3 -> v4（2026-10-19，#164）
+    # 变更点：gap_report 拆出 supported_keywords（可进 allowlist），
+    # missing_keywords 收窄为真缺口。
+    JD_ANALYSIS: "jd-analysis-v4",
     # PROMPT_VERSION bump: jd_profiler/v1 -> v2（2026-08-25，对照 04b-PE §2.2）
     # 变更点：business_scenarios 0-6 项封顶；各列表数量/长度封顶。
     JD_PROFILER: "v2",
@@ -55,7 +62,13 @@ _PROMPT_VERSIONS: dict[str, str] = {
     BULLET_REWRITE: "v3",
     # PROMPT_VERSION bump: tailor/v1 -> v2（2026-08-25，对照 04b-PE §2.5）
     # 变更点：规则压缩为 7 条；diffs 3-10 条；provenance 必须逐字匹配。
-    TAILOR: "v2",
+    # PROMPT_VERSION bump: tailor/v2 -> v3（2026-10-19，#163 P0）
+    # 变更点：缺口覆盖改为「只覆盖原文有支撑的缺口，无安全改写就不产出」；
+    # 新增「技能清单类章节禁止新增条目」规则。
+    # PROMPT_VERSION bump: tailor/v3 -> v4（2026-10-19，#164）
+    # 变更点：缺口分 supported_keywords（可改写方向）与 missing_keywords
+    # （真缺口，不得写进简历），与 gap_analyzer/v3 的字段拆分对齐。
+    TAILOR: "v4",
 }
 
 STAGES: tuple[str, ...] = tuple(_PROMPT_VERSIONS)

@@ -46,11 +46,18 @@ class MockBulletLLM:
         }
 
 
-def _gap_report_json(phrases):
+def _gap_report_json(phrases, *, as_missing=False):
+    """Build a gap report for the bullet editor.
+
+    ``as_missing`` puts the phrases in the true-gap bucket (the #164 guard
+    path); the default puts them in ``supported_keywords``, which is what
+    drives bullet targeting after the split.
+    """
     import json
 
     return json.dumps({
-        "missing_keywords": phrases,
+        "supported_keywords": [] if as_missing else phrases,
+        "missing_keywords": phrases if as_missing else [],
         "misaligned_emphasis": [],
         "strength_matches": [],
         "business_scenarios": [],
@@ -217,3 +224,33 @@ def test_map_reduce_local_node_all_failed_keeps_partial_result():
     # Sections reassembled verbatim — no whole-doc text leaked in.
     assert "使用 Python 开发后端服务" in result.sections.get("工作经历", "")
     assert "使用 Redis 做缓存与会话管理" in result.sections.get("工作经历", "")
+
+
+class MissingKeywordBulletLLM(MockBulletLLM):
+    """Appends a JD gap term to the rewritten bullet without new entries."""
+
+    def chat_structured(self, system, user, schema_model, model=None):
+        if getattr(schema_model, "__name__", "") == TailoredResumeSchema.__name__:
+            return super().chat_structured(system, user, schema_model, model)
+        match = re.search(r"Original bullet:\n(.*?)\n", user)
+        original = match.group(1).strip() if match else "bullet"
+        return {
+            "proposed": f"{original}，掌握常用设计模式",
+            "reason": "强化岗位关键词",
+        }
+
+
+def test_map_reduce_blocks_missing_keyword_in_existing_bullet():
+    llm = MissingKeywordBulletLLM()
+    result = tailor_resume_map_reduce(
+        llm,
+        RESUME,
+        _gap_report_json(["设计模式"], as_missing=True),
+        parallel=False,
+        whole_doc_fallback=False,
+    )
+    assert result.diffs == []
+    assert len(result.invalid_diffs) == 1
+    assert result.invalid_diffs[0].provenance_state == "fabricated"
+    assert "设计模式" in result.invalid_diffs[0].reason
+    assert "设计模式" not in result.sections.get("工作经历", "")

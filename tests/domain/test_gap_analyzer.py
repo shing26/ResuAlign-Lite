@@ -33,7 +33,21 @@ def test_analyze_gaps_prompt_mentions_gap():
     mock = MockLLM()
     _ = analyze_gaps(mock, "Resume", "JD")
     # R4: 04b-PE §2.3 新提示词已中文化，首行版本标记作为稳定断言锚点。
-    assert "PROMPT_VERSION: gap_analyzer/v2" in mock.last_system
+    assert "PROMPT_VERSION: gap_analyzer/v3" in mock.last_system
+
+
+def test_analyze_gaps_returns_supported_keywords():
+    """#164: the analyzer must emit the evidenced bucket separately from the
+    true-gap bucket, or the allowlist has no legitimate JD terminology."""
+    mock = MockLLM({
+        "supported_keywords": ["Redis caching"],
+        "missing_keywords": ["Kubernetes"],
+        "misaligned_emphasis": [],
+        "strength_matches": ["Java"],
+    })
+    report = analyze_gaps(mock, "Resume text...", "JD profile...")
+    assert report.supported_keywords == ["Redis caching"]
+    assert report.missing_keywords == ["Kubernetes"]
 
 
 def test_analyze_gaps_cache_hit_skips_llm(tmp_path):

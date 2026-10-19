@@ -54,6 +54,7 @@ class JDProfile:
 
 @dataclass
 class GapReport:
+    supported_keywords: list[str] = field(default_factory=list)
     missing_keywords: list[str] = field(default_factory=list)
     misaligned_emphasis: list[str] = field(default_factory=list)
     strength_matches: list[str] = field(default_factory=list)
@@ -65,6 +66,7 @@ class EvalScore:
     improvement: int = 0
     hallucination_detected: bool = False
     hallucination_details: list[str] = field(default_factory=list)
+    hallucinated_diff_ids: list[str] = field(default_factory=list)
     gap_coverage: float = 0.0
 
 

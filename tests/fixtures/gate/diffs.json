@@ -98,5 +98,15 @@
     "provenance": "主导配置推送模块，支持万级实例秒级生效",
     "reason": "Flink appears in neither the resume nor the JD allowlist",
     "confidence": "high"
+  },
+  {
+    "diff_id": "d11-missing-keyword-not-a-rewrite-source",
+    "type": "modify",
+    "section": "项目经历",
+    "original": "主导配置推送模块，支持万级实例秒级生效",
+    "proposed": "主导配置推送模块，引入 Elasticsearch 支撑检索，支持万级实例秒级生效",
+    "provenance": "主导配置推送模块，支持万级实例秒级生效",
+    "reason": "Elasticsearch sits in missing_keywords (a real JD gap), so it must NOT widen the allowlist",
+    "confidence": "medium"
   }
 ]

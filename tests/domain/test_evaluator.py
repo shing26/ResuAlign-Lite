@@ -36,8 +36,55 @@ def test_evaluate_hallucination_detected():
         "jd_match_score": 60, "improvement": 10,
         "hallucination_detected": True,
         "hallucination_details": ["Claimed Kubernetes experience"],
+        "hallucinated_diff_ids": ["diff-2"],
         "gap_coverage": 0.5,
     })
-    score = evaluate(mock, "orig", "tailored", "jd")
+    score = evaluate(
+        mock,
+        "orig",
+        "tailored",
+        "jd",
+        diffs=[
+            {
+                "diff_id": "diff-2",
+                "type": "modify",
+                "original": "orig",
+                "proposed": "tailored",
+                "provenance": "orig",
+            }
+        ],
+    )
     assert score.hallucination_detected
+    assert score.hallucinated_diff_ids == ["diff-2"]
     assert "Kubernetes" in score.hallucination_details[0]
+
+
+def test_evaluate_maps_invalid_provenance_to_diff_id():
+    mock = MockLLM(result={
+        "jd_match_score": 80,
+        "improvement": 10,
+        "hallucination_detected": False,
+        "hallucination_details": [],
+        "hallucinated_diff_ids": [],
+        "gap_coverage": 0.5,
+    })
+    score = evaluate(
+        mock,
+        "Built backend services",
+        "Built scalable backend",
+        "jd",
+        diffs=[
+            {
+                "diff_id": "diff-valid",
+                "type": "modify",
+                "provenance_quote": "Built backend services",
+            },
+            {
+                "diff_id": "diff-invalid",
+                "type": "modify",
+                "provenance_quote": "Invented fact",
+            },
+        ],
+    )
+    assert score.hallucination_detected is True
+    assert score.hallucinated_diff_ids == ["diff-invalid"]

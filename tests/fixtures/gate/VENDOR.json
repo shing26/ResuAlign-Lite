@@ -1,17 +1,17 @@
 {
   "note": "Vendored from the true-tailor skill repo (ADR-0041 决定 11 漂移锁). This repo holds a copy, not the source of truth: rule changes land upstream first and arrive here by re-sync. Hashes are taken after CRLF->LF normalization so any checkout config compares equal. tests/test_skill_vendor_lock.py fails if a byte here drifts from the record.",
   "upstream": "https://github.com/shing26/truetailor",
-  "synced_from": "8844476d16085fe726b9ec9e4c0a7620f6b27d2c",
-  "synced_at": "2026-09-15",
+  "synced_from": "2b864032b6c22dd4ce91994894a165cee7f51268",
+  "synced_at": "2026-10-19",
   "files": {
-    "tests/fixtures/gate/allowlist.en.json": "22b7c6d8cd649eab14c5bd176c202bee1b7db545507f749d77ff306e7d1b1ccb",
-    "tests/fixtures/gate/allowlist.json": "a206ba2569b43d9ca30ed3b67dcd87b57b5661a469232e527bcae6facad65a7a",
-    "tests/fixtures/gate/diffs.en.json": "60fa9b05d5dfa16210164fe70dd6a1f67d927c7916985b0ea965f2a4edd73b11",
-    "tests/fixtures/gate/diffs.json": "d5403689fe229f7f1af6172e33cc8d3ddafc51dfe2686b0b81165c5f0ae67bb8",
-    "tests/fixtures/gate/expected.en.json": "4378efdfc02a587b12fbb81de395d77dfda6b124ad0ba81f05e06259ab96eddf",
-    "tests/fixtures/gate/expected.json": "68057eb877f6661c19631c09c7a8feead46125774136d7c8cbfc0b67ee55827d",
-    "tests/fixtures/gate/resume.en.md": "f1661f81c2b67c101b8c5f6eee2ce5693d56ab204d1c6aa9035ea09d8731c1a2",
+    "tests/fixtures/gate/allowlist.en.json": "96f74a494ba710b3f59d60cdc9608139e10c4f985bbb5e4e775e07482ad9c6b1",
+    "tests/fixtures/gate/allowlist.json": "c450c63738f08115250fa483738b28edecd792a188682e773f6815bab66f2791",
+    "tests/fixtures/gate/diffs.en.json": "21d1b71c0b9785c4d7f1e86283ba7418e915eef51e5f4abbe8f986f70e5daa76",
+    "tests/fixtures/gate/diffs.json": "2b0004c2ed8ae65744e42b8aae16d16723d91b28977b359224cc699ddf79ec33",
+    "tests/fixtures/gate/expected.en.json": "ef327876beecf5065164553f56151a05b267439d125211da1053c41bafa73d9e",
+    "tests/fixtures/gate/expected.json": "5f63f5ff16df612103c2ed9f6600d6808ace28df948f4f679150b0eadb725d76",
+    "tests/fixtures/gate/resume.en.md": "ad81c9508195e9c674aef0404c6f158a008836922ded0c0d9f7d2f9603e52a04",
     "tests/fixtures/gate/resume.md": "f0f44e3de0bd71b625f1f6c313d36672876f831e2483aa15832eeb05665a4812",
-    "src/resualign/gate.py": "12fd7cac8c079a3eb7fa4a37c229a49cd73318fd3406390ae1be3965f2496b80"
+    "src/resualign/gate.py": "8f6cd86a8a230c083319158a5ab3ebd4a54dff42f63ae4eca15e0f39352d703f"
   }
 }
