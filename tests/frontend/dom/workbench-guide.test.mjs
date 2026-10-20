@@ -6,7 +6,11 @@ import assert from "node:assert/strict";
 import "./happy-setup.mjs";
 
 import { state } from "../../../src/resualign/static/app/events.js";
-import { renderSplitCanvas } from "../../../src/resualign/static/app/split-canvas.js";
+import {
+  applyJobResultToSession,
+  buildSessionFromJob,
+  renderSplitCanvas,
+} from "../../../src/resualign/static/app/split-canvas.js";
 
 function job(overrides = {}) {
   return {
@@ -240,4 +244,233 @@ test("idle/succeeded workbench does not render the bottom action bar", () => {
     );
     assert.equal(document.querySelector("[data-wb-action-bar]"), null);
   }
+});
+
+test("job.result event preserves a no-safe terminal instead of forcing success", () => {
+  const session = {
+    job: job({ job_id: "j-live-safe" }),
+    jd: {},
+    gap: {
+      gap_report: {
+        missing_keywords: ["Kubernetes"],
+        misaligned_emphasis: ["平台稳定性"],
+      },
+    },
+    alignment: { status: "running", diffs: [] },
+    meta: {},
+  };
+  applyJobResultToSession(session, {
+    job_id: "j-live-safe",
+    alignment: {
+      status: "failed",
+      reason: "no_safe_rewrite",
+      error: "岗位要求 Kubernetes，但简历原文没有可逐字定位的证据。",
+      notice: null,
+      diffs: [],
+      invalid_diffs: [],
+      draft: null,
+      eval_score: null,
+    },
+    result: { diffs: [], invalid_diffs: [] },
+  });
+  assert.equal(session.alignment.status, "failed");
+  assert.equal(session.alignment.reason, "no_safe_rewrite");
+  assert.equal(
+    session.alignment.error,
+    "岗位要求 Kubernetes，但简历原文没有可逐字定位的证据。",
+  );
+});
+
+test("job.result event preserves a model failure instead of forcing success", () => {
+  const session = {
+    job: job({ job_id: "j-live-model" }),
+    jd: {},
+    gap: {},
+    alignment: { status: "running", diffs: [] },
+    meta: {},
+  };
+  applyJobResultToSession(session, {
+    job_id: "j-live-model",
+    alignment: {
+      status: "failed",
+      reason: "model_failed",
+      error: "模型响应超时",
+      notice: null,
+      diffs: [],
+      invalid_diffs: [],
+      draft: null,
+      eval_score: null,
+    },
+    result: { diffs: [], invalid_diffs: [] },
+  });
+  assert.equal(session.alignment.status, "failed");
+  assert.equal(session.alignment.reason, "model_failed");
+});
+
+test("persisted terminal reasons survive refresh for all three outcomes", () => {
+  const cases = [
+    {
+      reason: "no_safe_rewrite",
+      status: "failed",
+      error: "简历原文没有可逐字定位的证据。",
+      needle: /无安全改写/,
+      forbidden: /已对齐/,
+    },
+    {
+      reason: "model_failed",
+      status: "failed",
+      error: "模型响应超时",
+      needle: /模型失败|对齐失败/,
+      forbidden: /已对齐/,
+    },
+    {
+      reason: "no_gap",
+      status: "succeeded",
+      error: null,
+      needle: /无需改写/,
+      forbidden: /已对齐/,
+    },
+  ];
+  for (const item of cases) {
+    const session = buildSessionFromJob(
+      job({
+        job_id: `j-${item.reason}`,
+        alignment_status: item.status,
+        alignment_reason: item.reason,
+        alignment_error: item.error,
+        usable_diffs: 0,
+        has_gap: item.reason !== "no_gap",
+        gap_report:
+          item.reason === "no_gap"
+            ? { missing_keywords: [], misaligned_emphasis: [] }
+            : { missing_keywords: ["Kubernetes"] },
+        diffs: [],
+        invalid_diffs: [],
+      }),
+    );
+    document.body.innerHTML = '<div id="app-router-view"></div>';
+    state.route = {
+      name: "workspace",
+      jobId: `j-${item.reason}`,
+      resumeId: null,
+    };
+    state.wbMobilePane = "controls";
+    renderSplitCanvas(
+      document.querySelector("#app-router-view"),
+      session,
+      [{ resume_id: "r1", title: "主简历", current_version: 1 }],
+      [session.job],
+    );
+    const html = document.querySelector("#app-router-view").innerHTML;
+    assert.equal(session.alignment.reason, item.reason);
+    assert.equal(session.alignment.error, item.error);
+    assert.match(html, item.needle);
+    assert.doesNotMatch(html, item.forbidden);
+    assert.doesNotMatch(html, /no_output:/);
+  }
+});
+
+function renderTerminal(jobId, alignment, gap = {}) {
+  document.body.innerHTML = '<div id="app-router-view"></div>';
+  const jobData = job({ job_id: jobId });
+  state.route = { name: "workspace", jobId, resumeId: null };
+  state.wbMobilePane = "controls";
+  state.wbAcceptedBullets = {};
+  renderSplitCanvas(
+    document.querySelector("#app-router-view"),
+    {
+      job: jobData,
+      jd: {},
+      gap: { status: "ready", gap_report: gap, ...gap },
+      alignment,
+      meta: {},
+    },
+    [{ resume_id: "r1", title: "主简历", current_version: 1 }],
+    [jobData],
+  );
+  return document.querySelector("#app-router-view");
+}
+
+test("no_safe_rewrite renders evidence explanation without green or generic failure", () => {
+  const app = renderTerminal(
+    "j-safe",
+    {
+      status: "failed",
+      reason: "no_safe_rewrite",
+      error: "岗位要求 Kubernetes，但简历原文没有可逐字定位的证据。",
+      diffs: [],
+      invalid_diffs: [],
+    },
+    {
+      missing_keywords: ["Kubernetes"],
+      misaligned_emphasis: ["平台稳定性"],
+      gap_report: {
+        missing_keywords: ["Kubernetes"],
+        misaligned_emphasis: ["平台稳定性"],
+      },
+    },
+  );
+  const html = app.innerHTML;
+  assert.match(html, /无安全改写/);
+  assert.match(html, /原文依据不足/);
+  assert.match(html, /Kubernetes/);
+  assert.match(html, /未改写方向：平台稳定性/);
+  assert.doesNotMatch(html, /已对齐|任务失败|no_output:/);
+  assert.equal(document.querySelectorAll('[data-action="run-alignment"]').length, 0);
+  assert.ok(
+    document.querySelector(
+      '[data-action="set-wb-tab-v3"][data-wb-tab-v3="inspector"]',
+    ),
+  );
+  assert.equal(
+    document.querySelectorAll("[data-export-dock] button[disabled]").length,
+    3,
+  );
+});
+
+test("model failure renders rerun and node-change guidance", () => {
+  const app = renderTerminal("j-model", {
+    status: "failed",
+    reason: "model_failed",
+    error: "模型响应超时",
+    diffs: [
+      {
+        diff_id: "stale-1",
+        type: "modify",
+        original: "Built a service",
+        proposed: "Built a faster service",
+        provenance_state: "verified",
+      },
+    ],
+    invalid_diffs: [],
+  });
+  assert.match(app.innerHTML, /对齐失败 · 超时/);
+  assert.match(app.innerHTML, /模型响应超时/);
+  assert.match(app.innerHTML, /换节点重试/);
+  assert.doesNotMatch(app.innerHTML, /pill-success">已对齐|dot-success/);
+  assert.match(
+    document.querySelector('[data-action="run-alignment"]').textContent,
+    /重新运行对齐/,
+  );
+});
+
+test("true no-gap stays amber, says no rewrite, and disables unsaved export", () => {
+  const app = renderTerminal("j-gap", {
+    status: "succeeded",
+    reason: "no_gap",
+    notice: "当前岗位没有需要补足的明确缺口，简历无需改写。",
+    draft: "未保存的候选稿",
+    diffs: [],
+    invalid_diffs: [],
+  });
+  assert.match(app.innerHTML, /无需改写/);
+  assert.doesNotMatch(app.innerHTML, /已对齐/);
+  assert.equal(
+    document.querySelectorAll("[data-export-dock] button[disabled]").length,
+    3,
+  );
+  assert.equal(document.querySelector("[data-action='run-alignment']"), null);
+  assert.equal(document.querySelector("[data-align-run]"), null);
+  const finalPanel = document.querySelector("[data-final-draft-panel]");
+  assert.ok(!finalPanel || finalPanel.hidden);
 });

@@ -805,8 +805,8 @@ def _no_safe_rewrite_reason(
     if not (raw.get("supported_keywords") or raw.get("missing_keywords")):
         return None
     return (
-        "岗位存在能力或经历缺口，但没有 supported_keywords 带有可在简历原文中"
-        "逐字定位的证据，因此没有安全改写依据。"
+        "岗位存在能力或经历缺口，但没有可在简历原文中逐字定位的证据，"
+        "因此没有安全改写依据。"
     )
 
 

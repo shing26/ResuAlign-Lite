@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from unittest.mock import patch
 
@@ -350,6 +351,10 @@ def test_workspace_session_hydrates_persisted_results_after_restart():
     with patch("resualign.api._run_job"), patch(
         "resualign.api.build_config", return_value=_config()
     ):
+        client.get(
+            f"/api/workspace/session/{job['job_id']}",
+            headers=_auth_headers(),
+        )
         queued = client.post(
             f"/api/jobs/{job['job_id']}/workbench",
             json={"master_resume_id": resume["resume_id"]},
@@ -537,7 +542,7 @@ def test_eval_hallucination_blocks_diffs_into_invalid():
     assert persisted["alignment_status"] == "failed"
     assert persisted["usable_diffs"] == 0
     assert persisted["has_gap"] is True
-    assert persisted["alignment_reason"] == "no_output"
+    assert persisted["alignment_reason"] == "model_failed"
     assert persisted["last_alignment_error"].startswith("no_output: ")
     assert persisted["diffs"] == []
     assert len(persisted["invalid_diffs"]) == 1
@@ -571,6 +576,10 @@ def test_no_safe_rewrite_persists_explanatory_no_output():
     with patch("resualign.api._run_job"), patch(
         "resualign.api.build_config", return_value=_config()
     ):
+        client.get(
+            f"/api/workspace/session/{job['job_id']}",
+            headers=_auth_headers(),
+        )
         queued = client.post(
             f"/api/jobs/{job['job_id']}/workbench",
             json={"master_resume_id": resume["resume_id"]},
@@ -590,8 +599,86 @@ def test_no_safe_rewrite_persists_explanatory_no_output():
     assert persisted["alignment_status"] == "failed"
     assert persisted["usable_diffs"] == 0
     assert persisted["has_gap"] is True
-    assert persisted["alignment_reason"] == "no_output"
+    assert persisted["alignment_reason"] == "no_safe_rewrite"
     assert persisted["last_alignment_error"] == f"no_output: {reason}"
+    assert persisted["alignment_error"] == reason
+
+    live_workspace = client.get(
+        f"/api/workspace/session/{job['job_id']}",
+        headers=_auth_headers(),
+    ).json()
+    with client.stream(
+        "GET",
+        f"/api/workbench/session/{live_workspace['session_id']}/events?replay=1",
+        headers=_auth_headers(),
+    ) as stream:
+        current_event = ""
+        result_event = None
+        for line in stream.iter_lines():
+            if line.startswith("event: "):
+                current_event = line.split(" ", 1)[1]
+            elif line.startswith("data: ") and current_event == "job.result":
+                result_event = json.loads(line[6:])
+    assert result_event is not None
+    assert result_event["alignment"]["status"] == "failed"
+    assert result_event["alignment"]["reason"] == "no_safe_rewrite"
+    assert result_event["alignment"]["error"] == reason
+    assert "no_output:" not in result_event["alignment"]["error"]
+
+    api_module._session_store = (
+        api_module._workbench_service.WorkstationSessionStore()
+    )
+    workspace = client.get(
+        f"/api/workspace/session/{job['job_id']}",
+        headers=_auth_headers(),
+    ).json()
+    assert workspace["alignment"]["reason"] == "no_safe_rewrite"
+    assert workspace["alignment"]["error"] == reason
+    assert workspace["alignment"]["notice"] is None
+    assert "no_output:" not in workspace["alignment"]["error"]
+
+
+def test_tailor_degraded_without_diff_persists_model_failure():
+    job = _create_job()
+    resume = _create_resume()
+    report = Report(
+        score=72,
+        skills=["Python"],
+        model="test-model",
+        jd_profile=JDProfile(must_have_skills=["Python"]),
+        gap_report=GapReport(missing_keywords=[]),
+        tailored_resume=TailoredResume(),
+        diffs=[],
+        tailor_degraded=True,
+    )
+    with patch("resualign.api._run_job"), patch(
+        "resualign.api.build_config", return_value=_config()
+    ):
+        queued = client.post(
+            f"/api/jobs/{job['job_id']}/workbench",
+            json={"master_resume_id": resume["resume_id"]},
+            headers=_auth_headers(),
+        )
+    analysis_job_id = queued.json()["job_id"]
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api.run", return_value=report
+    ):
+        api_module._run_job(analysis_job_id)
+
+    persisted = client.get(
+        f"/api/jobs/{job['job_id']}", headers=_auth_headers()
+    ).json()
+    assert persisted["alignment_status"] == "failed"
+    assert persisted["alignment_reason"] == "model_failed"
+    assert persisted["usable_diffs"] == 0
+    assert persisted["last_alignment_error"].startswith("no_output: ")
+    workspace = client.get(
+        f"/api/workspace/session/{job['job_id']}",
+        headers=_auth_headers(),
+    ).json()
+    assert workspace["alignment"]["reason"] == "model_failed"
+    assert workspace["alignment"]["error"]
+    assert "no_output:" not in workspace["alignment"]["error"]
 
 
 def _persist_single_diff_job(diff: DiffItem) -> str:

@@ -36,8 +36,9 @@
 | 岗位表同步 / 护栏面板 | [0055](docs/adr/0055-job-table-auto-sync-and-dedupe-precheck.md) · [0056](docs/adr/0056-drop-decorative-guardrails-panel.md) |
 | allowlist / JD 上下文边界 | [0060](docs/adr/0060-gap-report-keyword-split.md) · [0061](docs/adr/0061-jd-context-not-a-content-license.md) |
 | 编辑器墙钟 | [0062](docs/adr/0062-editor-wall-clock-150s.md) |
+| 工作台终态分型 | [0063](docs/adr/0063-workbench-terminal-outcomes.md) |
 
-> 全量决策见 `docs/adr/`（编号 0001–0062；**0029 有意缺号**，见 ADR-0036）。
+> 全量决策见 `docs/adr/`（编号 0001–0063；**0029 有意缺号**，见 ADR-0036）。
 > 历史轨迹见 [`CHANGELOG.md`](CHANGELOG.md)，交付状态见 [`docs/STATUS.md`](docs/STATUS.md)。
 
 ---
@@ -83,7 +84,8 @@ modify/remove 中 `original` 与 `proposed` 逐字相同者，移入 `invalid_di
 
 **Alignment**
 「简历 vs JD → 建议改动」的过程。UI 中「已对齐」= 该岗位 final draft 的
-`alignment_status` 为 succeeded，**不是**第六种投递状态。
+`alignment_status` 为 succeeded 且 `usable_diffs>=1`，**不是**第六种投递
+状态；零可用产出必须再按 `alignment_reason` 区分无安全改写、模型失败与真无缺口。
 
 **Diagnosis**（最小版）
 不接 JD 的简历评估：0–100 分 + 技能 + 问题/建议。UI 中称「诊断分」。
@@ -207,11 +209,14 @@ _Avoid_: 与采纳率混用（一个量、一个率）
 **无建议（badge）**
 零可用产出对齐的终端语义，按证据分型（ADR-0041 决定 5 / #111）：新增
 `usable_diffs` 计数（noop 过滤与拦截后的有效 diff 数）。**有缺口 ∧ usable=0 →
-`failed` + reason `no_output`**（可重跑）；**无缺口 ∧ usable=0 → 保 `succeeded`**，
+`failed` + 原始 `last_alignment_error` 的 `no_output:` 机读前缀**；#167 起
+`alignment_reason` 持久区分 `no_safe_rewrite` / `model_failed` / `no_gap`，
+API 同时投影干净的 `alignment_error`。无缺口 ∧ usable=0 → 保 `succeeded`，
 徽章「无缺口 · 无需改写」，不得渲染为「已对齐」。驾驶舱「完成对齐」分子只数
 `usable_diffs≥1`，「100% 完成率」从制度上不可能出现。
 _Avoid_: 拿「跑完没报错」当「产出了价值」；把「无缺口」当可信结论
-（小模型摆烂与真无缺口同形，文案必须带换模型重跑引导）
+（文案只陈述当前 JD 未发现明确缺口，不把模型未产出包装成能力背书；
+重跑或换模型引导只属于 `model_failed`）
 
 **节点预检 (LLM pre-flight probe)**
 对齐排队前对实际服务节点做的 5s 最小连通 + 鉴权探测。确定性 HTTP 失败

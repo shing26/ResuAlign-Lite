@@ -2,6 +2,7 @@
    All values are derived from the live API, never hard-coded. */
 import { alignmentStatusLabel, esc, formatDate, jobStatusLabel, state } from "./events.js";
 import {
+  alignmentOutcomeKind,
   atsHealthScoreLevel,
   atsHealthTone,
   dashboardEmptyGuideHtml,
@@ -179,13 +180,25 @@ export async function renderDashboard(container) {
    * 蓝主按钮（点进去才撞红横幅）。 */
   const qFailed = ["failed", "canceled", "expired"].includes(qStatus);
   const qBusy = ["running", "queued"].includes(qStatus);
+  const qKind = quick ? alignmentOutcomeKind(quick) : "";
+  const qStatusLabel =
+    qKind === "no_safe_rewrite"
+      ? "无安全改写"
+      : qKind === "no_gap"
+        ? "无需改写"
+        : alignmentStatusLabel(qStatus);
   let quickRowClass = "";
   let quickBadgeClass = "pill-warn";
   let quickBadgeLabel = alignmentStatusLabel(qStatus);
   let quickBtnClass = "btn btn-primary btn-sm";
   let quickBtnLabel = "继续";
   let quickBtnExtra = "";
-  if (qFailed) {
+  if (qFailed && qKind === "no_safe_rewrite") {
+    quickBadgeClass = "badge badge-amber";
+    quickBadgeLabel = "无安全改写 · 查看证据";
+    quickBtnClass = "btn btn-outline btn-sm";
+    quickBtnLabel = "查看证据";
+  } else if (qFailed) {
     quickRowClass = " quick-row--failed";
     quickBadgeClass = "badge badge-red";
     quickBadgeLabel = "上次失败 · 重新运行";
@@ -193,8 +206,13 @@ export async function renderDashboard(container) {
     quickBtnLabel = "重新运行";
     /* Module 5: show failure_detail (with code) when available. */
     if (quick.failure_detail) {
-      quickBadgeLabel = `上次失败 · ${quick.failure_detail.split(":")[0] || "未知原因"}`;
+      quickBadgeLabel = `上次失败 · 对齐未完成`;
     }
+  } else if (qStatus === "succeeded" && qKind === "no_gap") {
+    quickBadgeClass = "badge badge-amber";
+    quickBadgeLabel = "无需改写";
+    quickBtnClass = "btn btn-outline btn-sm";
+    quickBtnLabel = "查看";
   } else if (qStatus === "succeeded") {
     quickBadgeClass = "badge badge-green";
     quickBadgeLabel = "已对齐";
@@ -215,7 +233,7 @@ export async function renderDashboard(container) {
       <div class="quick-row${quickRowClass}" data-quick-continue>
         <div class="quick-main">
           <div class="quick-title">${escAttr(quick.title || "未命名岗位")}</div>
-          <div class="quick-meta">${escAttr(quick.company || "未知公司")} · ${escAttr(alignmentStatusLabel(quick.alignment_status))}</div>
+          <div class="quick-meta">${escAttr(quick.company || "未知公司")} · ${escAttr(qStatusLabel)}</div>
         </div>
         <div class="quick-right">
           <span class="${quickBadgeClass}">${escAttr(quickBadgeLabel)}</span>

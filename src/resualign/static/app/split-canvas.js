@@ -14,6 +14,7 @@ import {
 import {
   PROVENANCE_LABELS,
   alignProgressPercent,
+  alignmentOutcomeKind,
   alignmentControls,
   diffCard,
   diffList,
@@ -106,6 +107,7 @@ function alignmentFailureKind(message, status) {
 function workbenchAlignmentErrorBanner(alignment) {
   const status = alignment && alignment.status;
   if (!["failed", "canceled", "expired"].includes(status)) return "";
+  if (alignmentOutcomeKind(alignment) === "no_safe_rewrite") return "";
   const errorText = (alignment && alignment.error) || "对齐任务失败，请重新运行";
   const kind = alignmentFailureKind(errorText, status);
   const meta = [];
@@ -126,15 +128,43 @@ function workbenchAlignmentErrorBanner(alignment) {
   );
 }
 
+function workbenchNoSafeRewriteBanner(alignment, gap) {
+  if (alignmentOutcomeKind(alignment) !== "no_safe_rewrite") return "";
+  const report = (gap && gap.gap_report) || {};
+  const missing = (report.missing_keywords || [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  const rejected = (report.misaligned_emphasis || [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  const detail = String(alignment.error || "");
+  return (
+    `<div class="align-error-banner align-notice-banner" role="status" data-align-no-safe-banner>` +
+    `<strong>无安全改写 · 原文依据不足</strong>` +
+    `<span>${esc(detail || "岗位存在缺口，但简历原文没有足够依据，系统未生成改写。")}</span>` +
+    (missing.length
+      ? `<span class="align-error-meta">无原文依据：${esc(missing.join("、"))}</span>`
+      : "") +
+    (rejected.length
+      ? `<span class="align-error-meta">未改写方向：${esc(rejected.join("、"))}</span>`
+      : "") +
+    `<button class="btn btn-outline btn-sm" type="button" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector">查看证据缺口</button>` +
+    `</div>`
+  );
+}
+
 /* 空结果告警（2026-08-30 诊断 P0-C）：对齐 succeeded 但 0 条建议时，
  * 此前与真正成功的渲染完全一致 —— 用户读到的是「跑完了却什么都没有」。
  * 后端 alignment.notice 命名两种空形态（门禁拦截 / 模型未产出结构化建议）。 */
 function workbenchAlignmentNoticeBanner(alignment) {
   const notice = alignment && alignment.notice;
   if (!notice) return "";
+  const kind = alignmentOutcomeKind(alignment);
+  if (kind === "no_safe_rewrite") return "";
+  const title = kind === "no_gap" ? "无需改写" : "对齐完成 · 无可用建议";
   return (
     `<div class="align-error-banner align-notice-banner" role="status" data-align-notice-banner>` +
-    `<strong>对齐完成 · 无可用建议</strong>` +
+    `<strong>${esc(title)}</strong>` +
     `<span>${esc(notice)}</span>` +
     `</div>`
   );
@@ -160,13 +190,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
         version: job.final_draft_version || 1,
         updated_at: job.final_draft_updated_at,
       }
-    : sessionDraft
-      ? {
-          draft: sessionDraft,
-          version: job.final_draft_version || 1,
-          updated_at: job.final_draft_updated_at,
-        }
-      : null;
+    : null;
   const previous = {
     resumeId: $("[data-form='split-align'] [name='master_resume_id']")?.value,
     granularity: $("[data-form='split-align'] [name='granularity']")?.value,
@@ -185,6 +209,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
     (session && session.alignment && session.alignment.draft) ||
     null;
   const alignment = (session && session.alignment) || {};
+  const alignmentKind = alignmentOutcomeKind(alignment);
   const alignmentRunning =
     alignment.status === "running" || alignment.status === "queued";
   const diffs = Array.isArray(alignment.diffs) ? alignment.diffs : [];
@@ -231,10 +256,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const livesheetActive = activeAuxPane === "livesheet" || state.wbMobilePane === "diff";
   const suggestActive = activeAuxPane === "suggest";
   const controlsActive = activeAuxPane === "controls";
-  const hasGuideDraft = Boolean(
-    job.final_draft ||
-      (session && session.alignment && session.alignment.draft),
-  );
+  const hasGuideDraft = Boolean(job.final_draft);
   /* 默认落在「对照编辑」：定稿预览是核验态，不该默认占掉主区，
    * 更不能把用户挡在逐条采纳的操作面之外。 */
   if (state.wbViewMode !== "a4" && state.wbViewMode !== "diff") {
@@ -261,13 +283,13 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <div class="wb-context-title">
             <span class="context-kicker">目标岗位</span>
             <h2>${esc(job.title || "岗位工作台")}</h2>
-            ${alignment.status === "succeeded" ? '<span class="pill pill-success">已对齐</span>' : ""}
+            ${alignment.status === "succeeded" && diffs.length ? '<span class="pill pill-success">已对齐</span>' : alignmentKind === "no_gap" ? '<span class="badge badge-amber">无需改写</span>' : alignmentKind === "no_safe_rewrite" ? '<span class="badge badge-amber">无安全改写</span>' : ""}
           </div>
           <div class="wb-context-meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)} · ${esc(jobStatusLabel(job.status))} · 匹配 ${matchScore == null ? "—" : `${esc(matchScore)} / 100`}</div>
           <div class="wb-tags">${tagItems.map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}</div>
         </div>
         <div class="wb-context-actions">
-          <span class="status-line"><span class="dot dot-success" aria-hidden="true"></span>${esc(diffs.length)} 条改写建议${invalidCount ? ` · ${esc(invalidCount)} 条建议复核` : ""} · ${esc(acceptedCount)} 已采纳 · ${esc(pendingCount)} 待采纳</span>
+          <span class="status-line">${alignment.status === "succeeded" && diffs.length ? '<span class="dot dot-success" aria-hidden="true"></span>' : ""}${esc(diffs.length)} 条改写建议${invalidCount ? ` · ${esc(invalidCount)} 条建议复核` : ""} · ${esc(acceptedCount)} 已采纳 · ${esc(pendingCount)} 待采纳</span>
           <select class="input input-sm" data-job-switcher aria-label="切换岗位">
             ${jobs.map((item) => `<option value="${esc(item.job_id)}" ${item.job_id === jobId ? "selected" : ""}>${esc(item.title)}${item.company ? ` · ${esc(item.company)}` : ""}</option>`).join("")}
           </select>
@@ -279,6 +301,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
         </div>
       </div>
       ${workbenchAlignmentErrorBanner(alignment)}
+      ${workbenchNoSafeRewriteBanner(alignment, gap)}
       <div data-wb-node-picker></div>
       ${workbenchAlignmentNoticeBanner(alignment)}
       ${workbenchGuideHtml(job, hasGuideDraft)}
@@ -682,8 +705,17 @@ function renderFinalDraftPanel(app) {
 
 /* Rehydrate a minimal three-pane session from a persisted library job
    (no live workbench session exists for API/import-created jobs). */
-function buildSessionFromJob(job) {
+export function buildSessionFromJob(job) {
   const profile = job.jd_profile || null;
+  const persistedStatus = job.alignment_status || "idle";
+  const alignmentStatus =
+    persistedStatus === "succeeded"
+      ? "succeeded"
+      : persistedStatus === "failed"
+        ? "failed"
+        : "idle";
+  const alignmentReason = job.alignment_reason || null;
+  const alignmentError = job.alignment_error || null;
   return {
     job,
     jd: {
@@ -694,10 +726,15 @@ function buildSessionFromJob(job) {
     },
     gap: job.gap_report || {},
     alignment: {
-      status:
-        job.alignment_status === "succeeded" ? "succeeded" : "idle",
-      stage: job.alignment_status === "succeeded" ? "done" : "",
-      error: null,
+      status: alignmentStatus,
+      stage: alignmentStatus === "succeeded" ? "done" : "",
+      reason: alignmentReason,
+      error:
+        alignmentStatus === "failed" ? alignmentError || null : null,
+      notice:
+        alignmentReason === "no_gap"
+          ? "当前岗位没有需要补足的明确缺口，简历无需改写。"
+          : null,
       diffs: job.diffs || [],
       invalid_diffs: job.invalid_diffs || [],
       draft: job.draft || job.final_draft || null,
@@ -707,9 +744,60 @@ function buildSessionFromJob(job) {
   };
 }
 
+export function applyJobResultToSession(session, data) {
+  if (!session || !data) return session;
+  if (data.job_id) {
+    session.job = { ...(session.job || {}), job_id: data.job_id };
+  }
+  const terminal = data.alignment && typeof data.alignment === "object"
+    ? data.alignment
+    : null;
+  if (terminal) {
+    session.alignment = {
+      ...(session.alignment || {}),
+      ...terminal,
+      status: terminal.status || data.status || "failed",
+      reason: terminal.reason || null,
+      error: terminal.error || null,
+      notice: terminal.notice || null,
+      diffs: terminal.diffs || (data.result && data.result.diffs) || [],
+      invalid_diffs:
+        terminal.invalid_diffs ||
+        (data.result && data.result.invalid_diffs) ||
+        [],
+      draft:
+        terminal.draft ??
+        (data.result && data.result.draft) ??
+        session.alignment?.draft ??
+        null,
+      eval_score:
+        terminal.eval_score ??
+        (data.result && data.result.eval_score) ??
+        null,
+    };
+  } else if (data.result) {
+    session.alignment = {
+      ...(session.alignment || {}),
+      status: data.status || "succeeded",
+      stage: "done",
+      reason: data.reason || null,
+      error: data.error || null,
+      notice: data.notice || null,
+      diffs: data.result.diffs || [],
+      invalid_diffs: data.result.invalid_diffs || [],
+      draft: data.result.draft || session.alignment?.draft || null,
+      eval_score: data.result.eval_score || null,
+    };
+  }
+  return session;
+}
+
 async function reconcileAlignmentFailure(session) {
   const job = (session && session.job) || {};
   if (!job || job.alignment_status === "succeeded") return session;
+  if (job.alignment_status === "failed" && session.alignment?.reason) {
+    return session;
+  }
   const workbenchJobId = job.workbench_job_id;
   if (!workbenchJobId) return session;
   try {
@@ -1115,19 +1203,7 @@ function handleEvent(eventName, data) {
       "error",
     );
   } else if (eventName === "job.result") {
-    if (data.job_id) {
-      activeSession.job = { ...(activeSession.job || {}), job_id: data.job_id };
-    }
-    if (data.result) {
-      activeSession.alignment = {
-        status: "succeeded",
-        stage: "done",
-        diffs: data.result.diffs || [],
-        invalid_diffs: data.result.invalid_diffs || [],
-        draft: data.result.draft || activeSession.alignment?.draft || null,
-        eval_score: data.result.eval_score || null,
-      };
-    }
+    applyJobResultToSession(activeSession, data);
   }
   const app = $("#app-router-view");
   if (app) {

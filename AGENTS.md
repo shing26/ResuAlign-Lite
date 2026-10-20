@@ -247,12 +247,15 @@ Reolink 编辑器调用 90s 超时 2/3。字段拆分（ADR-0060）落地后复�
   adds `usable_diffs` (backfilled from `diffs_json` length; first MIGRATIONS
   script with an UPDATE). Terminal typing happens at the workbench SAVE site
   (`services/jobs.py`, before `save_alignment`) — 有缺口 ∧ usable=0 →
-  `failed` + `last_alignment_error` prefix `no_output: ` (machine contract;
-  projection derives `alignment_reason`, never re-parse in UI); 无缺口 ∧
-  usable=0 → stays `succeeded`, badge 「无缺口 · 无需改写」. `analysis_ready`
-  unchanged. Dashboard 完成对齐 numerator counts `usable_diffs>=1` only;
-  legacy rows (no typing fields) keep the old 无建议/诊断完成 badges via the
-  fallback in `alignmentBadgeHtml`.
+  `failed` + `last_alignment_error` prefix `no_output: ` (machine contract);
+  无缺口 ∧ usable=0 → stays `succeeded`, badge 「无缺口 · 无需改写」。
+  #167 / migration 46 persists the user-facing terminal class in
+  `alignment_reason` (`no_safe_rewrite` / `model_failed` / `no_gap`); keep the
+  raw `no_output:` form only in `last_alignment_error`, expose the cleaned
+  `alignment_error` through API projections, and never parse the prefix in
+  UI. `analysis_ready` unchanged. Dashboard 完成对齐 numerator counts
+  `usable_diffs>=1` only; legacy rows (no typing fields) keep the old
+  无建议/诊断完成 badges via the fallback in `alignmentBadgeHtml`.
 - **#117 test-log isolation**: `tests/conftest.py` top-level
   `setdefault(RESUALIGN_LOG_DIR, <tmp>/resualign-pytest-logs)` before any
   `resualign.api` import — real `data/logs/app.log` stays clean (verified

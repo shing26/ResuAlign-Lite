@@ -636,10 +636,15 @@ export function workbenchProgressPipelineHtml(session) {
    * 模块 2（2026-10-11）：jd / gap / 对齐三个 stage 各自独立判失败，不再让
    * 对齐的失败把已经成功的 JD 画像一起染红（连坐显示）。 */
   const alignmentFailed = alignment.status === "failed";
+  const alignmentKind = alignmentOutcomeKind(alignment);
+  const noSafeRewrite =
+    alignmentFailed && alignmentKind === "no_safe_rewrite";
   const profileFailed = jd.status === "failed" && !jd.profile;
   const gapFailed = Boolean(gap.error) && !gap.gap_report;
   const alignmentNote = alignmentFailed
-    ? llmFailureSummary(alignment.code, alignment.error || "任务失败，请重试")
+    ? noSafeRewrite
+      ? String(alignment.error || "简历原文没有足够依据")
+      : llmFailureSummary(alignment.code, alignment.error || "任务失败，请重试")
     : "";
   const jdNote = profileFailed
     ? llmFailureSummary(jd.code, jd.error || "JD 画像提取失败")
@@ -650,9 +655,13 @@ export function workbenchProgressPipelineHtml(session) {
   const liveMessage = alignmentRunning
     ? alignment.message || ""
     : alignment.status === "succeeded"
-      ? "简历对齐已完成"
+      ? alignmentKind === "no_gap"
+        ? "岗位无需改写"
+        : "简历对齐已完成"
       : alignmentFailed
-        ? `任务失败：${alignmentNote}`
+        ? noSafeRewrite
+          ? `无安全改写：${alignmentNote}`
+          : `任务失败：${alignmentNote}`
         : jdNote
           ? `分析未完成：${jdNote}`
           : gapNote
@@ -841,17 +850,21 @@ export function diffCard(diff, index, jobId) {
       : PROVENANCE_LABELS[stateKey] || "来源待核对";
   const label = PROVENANCE_LABELS[stateKey] || "来源待核对";
   const noProvenance = !String(provenance || "").trim();
-  const invalid =
-    stateKey === "missing" ||
-    (type === "add" && noProvenance && stateKey !== "verified");
-  const invalidWarning = invalid
-    ? type === "add" && noProvenance
-      ? "该条为无来源新增，已作为硬门禁拦截，待人工复核。"
-      : "缺少来源，已作为硬门禁拦截，待人工复核。"
-    : "";
-  const typeLabel = { modify: "改写", add: "新增", remove: "删除" }[type] || "改写";
   const originalText = diff.original || "";
   const proposedText = diff.proposed || "";
+  const invalid =
+    stateKey === "missing" ||
+    stateKey === "fabricated" ||
+    (type === "add" && noProvenance && stateKey !== "verified");
+  const retryable = invalid && Boolean(String(originalText || "").trim());
+  const invalidWarning = invalid
+    ? retryable
+      ? "缺少来源，已拦截；该条真实性检查未通过，可在原句锚点内重新生成。"
+      : type === "add" && noProvenance
+        ? "该条为无来源新增，已作为硬门禁拦截；没有可定位的原文锚点，暂不能单条重试。"
+        : "缺少来源，已作为硬门禁拦截；没有可定位的原文锚点，暂不能单条重试。"
+    : "";
+  const typeLabel = { modify: "改写", add: "新增", remove: "删除" }[type] || "改写";
   /* #17: modify diffs get character-level marks inside the card's 原文/优化
    * blocks (diff-char-del on the original side, diff-char-ins on the
    * proposed side); add/remove diffs have no counterpart so they stay plain.
@@ -892,7 +905,7 @@ export function diffCard(diff, index, jobId) {
       <div class="diff-card__actions" data-diff-actions>
         ${invalid ? "" : `<button class="btn btn-primary btn-sm" data-action="accept-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_CHECK} 采纳</button>`}
         <button class="btn btn-ghost btn-sm" data-action="reject-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_X} 跳过</button>
-        <button class="btn btn-secondary btn-sm" data-action="polish-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}" data-instruction="quantified">${invalid ? `${icon("rotate-ccw", 16)} 重试此条` : "AI 润色"}</button>
+        ${!invalid || retryable ? `<button class="btn btn-secondary btn-sm" data-action="polish-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}" data-instruction="quantified">${invalid ? `${icon("rotate-ccw", 16)} 重试此条` : "AI 润色"}</button>` : ""}
         ${invalid ? "" : `<button class="btn btn-ghost btn-sm" data-action="toggle-bullet-edit" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${icon("pencil", 16)} 编辑</button>`}
       </div>
     </article>`;
@@ -906,6 +919,9 @@ export function diffList(session, jobId) {
     .map((diff, index) => diffCard(diff, index, jobId))
     .join("");
   if (!cards) {
+    if (alignmentOutcomeKind(alignment) === "no_gap") {
+      return '<div class="diff-card-list" data-diff-list></div>';
+    }
     /* P0-2: 失败/取消/过期态不再渲染「还没有对齐结果」首次引导卡 —— 失败反馈
      * 收敛到顶部错误横幅 + 顶栏危险级「重新运行对齐」单入口，避免同屏 3 个
      * 对齐入口、2 套标签（2026-08-25 走查实测的失败态三入口问题）。 */
@@ -937,6 +953,32 @@ export function alignmentControls(session, resumes, jobId) {
     .join("");
   const running = alignment.status === "running" || alignment.status === "queued";
   const failed = alignment.status === "failed";
+  const noSafeRewrite =
+    failed && alignmentOutcomeKind(alignment) === "no_safe_rewrite";
+  const noGap =
+    alignment.status === "succeeded" &&
+    alignmentOutcomeKind(alignment) === "no_gap";
+  const runLabel = running
+    ? "对齐运行中..."
+    : noGap
+      ? "无需改写"
+      : noSafeRewrite
+      ? "查看证据缺口"
+      : failed
+        ? "重新运行对齐"
+        : "一键生成对齐简历";
+  const statusText =
+    alignment.status === "succeeded"
+      ? alignmentOutcomeKind(alignment) === "no_gap"
+        ? "无需改写"
+        : "已生成对齐版本"
+      : noSafeRewrite
+        ? `无安全改写：${alignment.error || "简历原文没有足够依据"}`
+        : failed
+          ? `任务失败：${alignment.error || "请重试"}`
+          : alignment.status === "running" || alignment.status === "queued"
+            ? "正在生成..."
+            : "";
   return `
     <form class="align-form" data-form="split-align" novalidate>
       <input type="hidden" name="job_id" value="${esc(jobId)}">
@@ -966,9 +1008,9 @@ export function alignmentControls(session, resumes, jobId) {
         </label>
       </div>
       <div class="align-form__row">
-        <button class="btn btn-primary" type="submit" data-align-run ${running ? "disabled" : ""}>${running ? "对齐运行中..." : failed ? "重新运行对齐" : "一键生成对齐简历"}</button>
+        <button class="btn btn-primary" type="${noSafeRewrite || noGap ? "button" : "submit"}" ${noSafeRewrite ? 'data-action="set-wb-tab-v3" data-wb-tab-v3="inspector"' : noGap ? "" : "data-align-run"} ${running || noGap ? "disabled" : ""}>${runLabel}</button>
         <button class="btn btn-outline btn-sm" type="button" data-action="cancel-align-job" ${running ? "" : "hidden"}>${alignment.status === "queued" ? "取消任务" : "停止等待"}</button>
-        <span class="small muted" data-align-status>${alignment.status === "succeeded" ? "已生成对齐版本" : alignment.status === "failed" ? `任务失败：${esc(alignment.error || "请重试")}` : alignment.status === "running" || alignment.status === "queued" ? "正在生成..." : ""}</span>
+        <span class="small muted" data-align-status>${esc(statusText)}</span>
       </div>
       <label class="eval-option">
         <input type="checkbox" name="run_eval">
@@ -1103,24 +1145,51 @@ export function alignmentBadgeHtml(job) {
       : (job.diffs || []).length;
   const hasGap =
     typeof job.has_gap === "boolean" ? job.has_gap : usable === 0;
-  const reason = job.alignment_reason;
+  const kind = alignmentOutcomeKind(job);
+  const tip = String(
+    job.alignment_error || "对齐失败，请到工作台重新运行",
+  );
+  if (kind === "no_safe_rewrite") {
+    return `<span class="badge badge-amber" title="${esc(tip)}">无安全改写</span>`;
+  }
   if (status === "failed") {
-    const tip = String(job.last_alignment_error || "对齐失败，请到工作台重新运行").replace(
-      /^no_output:\s*/,
-    );
-    const label = reason === "no_output" ? "对齐失败 · 未产出建议" : "对齐失败";
+    const label = kind === "model_failed" ? "模型失败 · 可重试" : "对齐失败";
     return `<span class="badge badge-red" title="${esc(tip)}">${label}</span>`;
   }
   if (status === "succeeded") {
     if (usable >= 1) return '<span class="badge badge-green">已对齐</span>';
-    if (reason === "no_gap" || !hasGap) {
+    if (kind === "no_gap" || !hasGap) {
       return '<span class="badge badge-amber" title="该岗位无缺口，无需改写">无缺口 · 无需改写</span>';
     }
     // 有缺口却零产出，正常应已被服务端判 failed；旧数据行（无分型字段）
     // 维持原「降级提示 vs 泛无建议」双色区分，防御性兜底。
-    return job.last_alignment_error
-      ? `<span class="badge badge-amber" title="${esc(String(job.last_alignment_error).replace(/^no_output:\s*/, ""))}">诊断完成 · 改写未产出</span>`
+    return job.alignment_error
+      ? `<span class="badge badge-amber" title="${esc(String(job.alignment_error))}">诊断完成 · 改写未产出</span>`
       : '<span class="badge badge-amber" title="本次对齐未产出修改建议，可到工作台重新运行">无建议</span>';
+  }
+  return "";
+}
+
+/** Normalize persisted and workstation alignment shapes for terminal display. */
+export function alignmentOutcomeKind(value = {}) {
+  const reason = value.alignment_reason || value.reason || "";
+  if (
+    reason === "no_gap" ||
+    reason === "no_safe_rewrite" ||
+    reason === "model_failed"
+  ) {
+    return reason;
+  }
+  const status = value.alignment_status || value.status;
+  if (status === "failed") return "model_failed";
+  if (status === "succeeded") {
+    const usable =
+      typeof value.usable_diffs === "number"
+        ? value.usable_diffs
+        : (value.diffs || []).length;
+    const hasGap =
+      typeof value.has_gap === "boolean" ? value.has_gap : usable === 0;
+    if (usable === 0 && !hasGap) return "no_gap";
   }
   return "";
 }
@@ -1210,6 +1279,12 @@ function boardAlignButton(job) {
   const zeroDiff = alignStatus === "succeeded" && !(job.diffs || []).length;
   if (alignStatus === "idle") {
     return `<button type="button" class="btn btn-outline btn-sm board-card__align" data-action="align-job" data-id="${esc(job.job_id)}">开始对齐</button>`;
+  }
+  if (alignmentOutcomeKind(job) === "no_safe_rewrite") {
+    return `<button type="button" class="btn btn-outline btn-sm board-card__align" data-action="open-optimizer" data-id="${esc(job.job_id)}">查看证据</button>`;
+  }
+  if (alignmentOutcomeKind(job) === "no_gap") {
+    return `<button type="button" class="btn btn-outline btn-sm board-card__align" data-action="open-optimizer" data-id="${esc(job.job_id)}">查看说明</button>`;
   }
   if (alignStatus === "failed" || zeroDiff) {
     return `<button type="button" class="btn btn-outline btn-sm board-card__align" data-action="align-job" data-id="${esc(job.job_id)}">重新对齐</button>`;
@@ -2009,6 +2084,11 @@ export function workbenchPrimaryButtonHtml(
   alignment = null,
 ) {
   const hasResumes = Array.isArray(resumes) && resumes.length > 0;
+  const alignmentKind = alignmentOutcomeKind(alignment || {});
+  if (hasResumes && alignmentKind === "no_safe_rewrite") {
+    return '<button class="btn btn-outline" type="button" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector">查看证据缺口</button>';
+  }
+  if (alignmentKind === "no_gap") return "";
   /* P0-2: 失败/取消/过期统一走危险级「重新运行对齐」单入口（顶栏）。 */
   const failed = Boolean(
     alignment &&

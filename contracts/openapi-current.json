@@ -4024,6 +4024,33 @@
             "title": "Alignment Status",
             "default": "idle"
           },
+          "alignment_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "no_gap",
+                  "no_safe_rewrite",
+                  "model_failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alignment Reason"
+          },
+          "alignment_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alignment Error"
+          },
           "failure_detail": {
             "anyOf": [
               {
@@ -6737,6 +6764,71 @@
             "type": "string",
             "title": "Stage",
             "default": ""
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "no_gap",
+                  "no_safe_rewrite",
+                  "model_failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "elapsed_seconds": {
+            "type": "number",
+            "title": "Elapsed Seconds",
+            "default": 0.0
           },
           "diffs": {
             "items": {

@@ -444,6 +444,7 @@ _PATCH_EXPECTED = {
     "tailor_focus": "skills",
     "custom_prompt": "Keep it concise.",
     "last_alignment_error": "none",
+    "alignment_reason": "model_failed",
     "application_result": "screen_pass",
     "deadline": "2026-09-30",
 }
@@ -478,6 +479,7 @@ def test_update_whitelist_and_expected_payload_are_in_sync(db_path):
         "usable_diffs",
         "has_gap",
         "alignment_reason",
+        "alignment_error",
         "analysis_ready",
         "status_canonical",
         "status_label",
@@ -519,6 +521,8 @@ def test_update_job_patches_each_field_independently(db_path, field):
         derived_changes |= {"has_gap", "alignment_reason"}
     if field == "alignment_status":
         derived_changes |= {"alignment_reason", "analysis_ready"}
+    if field == "last_alignment_error":
+        derived_changes |= {"alignment_error"}
     for other in baseline:
         if other == field or other in derived_changes:
             continue

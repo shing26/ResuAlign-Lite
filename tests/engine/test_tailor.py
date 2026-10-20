@@ -178,6 +178,7 @@ def test_tailor_returns_no_safe_rewrite_without_anchored_directions():
     assert result.invalid_diffs == []
     assert result.no_safe_rewrite is True
     assert "原文" in result.no_safe_rewrite_reason
+    assert "supported_keywords" not in result.no_safe_rewrite_reason
     assert mock.last_user is None
 
 

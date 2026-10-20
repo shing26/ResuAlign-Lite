@@ -269,3 +269,87 @@ test("dashboard-view surfaces failure_detail on failed quick_continue", () => {
     "dashboard-view reads quick.failure_detail",
   );
 });
+
+test("dashboard quick-continue renders all three alignment outcomes", async (t) => {
+  const window = new Window();
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    localStorage: globalThis.localStorage,
+    fetch: globalThis.fetch,
+  };
+  globalThis.window = window;
+  globalThis.document = window.document;
+  globalThis.localStorage = window.localStorage;
+  t.after(() => {
+    globalThis.window = previous.window;
+    globalThis.document = previous.document;
+    globalThis.localStorage = previous.localStorage;
+    globalThis.fetch = previous.fetch;
+  });
+
+  const { renderDashboard } = await import(
+    "../../src/resualign/static/app/dashboard-view.js"
+  );
+  const cases = [
+    {
+      quick: {
+        job_id: "safe",
+        title: "No safe",
+        company: "Acme",
+        alignment_status: "failed",
+        alignment_reason: "no_safe_rewrite",
+        alignment_error: "简历原文没有足够依据",
+      },
+      includes: [/无安全改写/, /查看证据/],
+      excludes: [/重新运行/],
+    },
+    {
+      quick: {
+        job_id: "model",
+        title: "Model failed",
+        company: "Acme",
+        alignment_status: "failed",
+        alignment_reason: "model_failed",
+        alignment_error: "模型响应超时",
+      },
+      includes: [/上次失败/, /重新运行/],
+      excludes: [/无安全改写/],
+    },
+    {
+      quick: {
+        job_id: "gap",
+        title: "No gap",
+        company: "Acme",
+        alignment_status: "succeeded",
+        alignment_reason: "no_gap",
+        usable_diffs: 0,
+        diffs: [],
+      },
+      includes: [/无需改写/, /查看/],
+      excludes: [/已对齐/],
+    },
+  ];
+
+  for (const item of cases) {
+    globalThis.fetch = async (url) => {
+      const path = String(url);
+      const payload = path.includes("/api/dashboard")
+        ? { kpi: { jobs: 1 }, quick_continue: item.quick }
+        : path.includes("/api/jobs")
+          ? [item.quick]
+          : [];
+      return { ok: true, json: async () => payload };
+    };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderDashboard(container);
+    const row = container.querySelector("[data-quick-continue]");
+    for (const pattern of item.includes) {
+      assert.match(row.textContent, pattern);
+    }
+    for (const pattern of item.excludes) {
+      assert.doesNotMatch(row.textContent, pattern);
+    }
+  }
+});

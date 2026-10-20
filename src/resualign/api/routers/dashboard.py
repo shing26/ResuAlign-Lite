@@ -107,9 +107,15 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
                 title=job["title"],
                 company=job["company"],
                 alignment_status=job["alignment_status"],
+                alignment_reason=job.get("alignment_reason"),
+                alignment_error=(
+                    job.get("alignment_error")
+                    if job["alignment_status"] == "failed"
+                    else None
+                ),
                 updated_at=job["updated_at"],
                 failure_detail=(
-                    job.get("last_alignment_error")
+                    job.get("alignment_error")
                     if job["alignment_status"] == "failed"
                     else None
                 ),
@@ -122,9 +128,15 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
             title=first["title"],
             company=first["company"],
             alignment_status=first["alignment_status"],
+            alignment_reason=first.get("alignment_reason"),
+            alignment_error=(
+                first.get("alignment_error")
+                if first["alignment_status"] == "failed"
+                else None
+            ),
             updated_at=first["updated_at"],
             failure_detail=(
-                first.get("last_alignment_error")
+                first.get("alignment_error")
                 if first["alignment_status"] == "failed"
                 else None
             ),

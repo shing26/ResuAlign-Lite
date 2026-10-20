@@ -1596,6 +1596,7 @@ def _fail_claimed_job(
                 library_job_id,
                 alignment_status='failed',
                 last_alignment_error=error,
+                alignment_reason='model_failed',
             )
         except Exception:
             logger.exception(
@@ -1648,25 +1649,28 @@ def _notify_alignment_outcome(
                 "tentative": True,
             },
         )
+    alignment_state = {
+        "status": outcome.alignment_status,
+        "stage": "done",
+        "reason": outcome.alignment_reason,
+        "error": outcome.alignment_user_error,
+        "code": None,
+        "diffs": result.get("diffs") or [],
+        "invalid_diffs": outcome.invalid_diffs,
+        "draft": outcome.draft,
+        "eval_score": outcome.eval_score,
+        "notice": context._alignment_notice(
+            result.get("diffs") or [],
+            outcome.invalid_diffs,
+            outcome.draft,
+            outcome.alignment_reason,
+        ),
+    }
     context._session_store.update(
         session["session_id"],
         {
             "job": context._jobs.get_job(tenant_id, library_job_id),
-            "alignment": {
-                "status": outcome.alignment_status,
-                "stage": "done",
-                "diffs": result.get("diffs") or [],
-                "invalid_diffs": outcome.invalid_diffs,
-                "draft": outcome.draft,
-                "eval_score": outcome.eval_score,
-                "notice": (
-                    context._alignment_notice(
-                        result.get("diffs") or [],
-                        outcome.invalid_diffs,
-                        outcome.draft,
-                    )
-                ),
-            },
+            "alignment": alignment_state,
         },
     )
     context._session_store.emit(
@@ -1674,6 +1678,7 @@ def _notify_alignment_outcome(
         "job.result",
         {
             "job_id": library_job_id,
+            "alignment": alignment_state,
             "result": result,
         },
     )

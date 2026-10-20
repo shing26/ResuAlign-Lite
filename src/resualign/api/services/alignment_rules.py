@@ -15,6 +15,14 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def humanize_alignment_error(message: str | None) -> str | None:
+    """Strip the ADR-0041 machine prefix for user-facing projections."""
+    text = str(message or "").strip()
+    if text.startswith("no_output:"):
+        text = text.split(":", 1)[1].strip()
+    return text or None
+
+
 def is_noop_diff(diff: dict[str, Any]) -> bool:
     """Return True when a modify/remove diff changes nothing.
 
@@ -126,8 +134,13 @@ def resolve_alignment_outcome(
     eval_hallucinated: bool,
     no_safe_rewrite: bool = False,
     no_safe_rewrite_reason: str = "",
-) -> tuple[str, str | None]:
-    """Return ``(alignment_status, alignment_error)`` for a finished run."""
+) -> tuple[str, str | None, str | None]:
+    """Return ``(status, error, reason)`` for a finished alignment run.
+
+    ``alignment_error`` keeps the ADR-0041 ``no_output:`` machine prefix for
+    zero-output quality failures. ``reason`` adds the user-facing terminal
+    classification without changing that contract.
+    """
     if tailor_degraded:
         alignment_error: str | None = (
             "改写阶段多次失败，本轮只产出诊断与缺口分析；"
@@ -156,6 +169,7 @@ def resolve_alignment_outcome(
         report_has_gap(gap_report)
         or blocked_hallucination
         or no_safe_rewrite
+        or tailor_degraded
     ):
         alignment_status = "failed"
         alignment_error = (
@@ -165,4 +179,13 @@ def resolve_alignment_outcome(
                 or "该岗位存在能力/经验缺口，但本轮未产出任何可用改写建议"
             )
         )
-    return alignment_status, alignment_error
+    if not kept_diffs:
+        if no_safe_rewrite:
+            alignment_reason: str | None = "no_safe_rewrite"
+        elif alignment_status == "failed":
+            alignment_reason = "model_failed"
+        else:
+            alignment_reason = "no_gap"
+    else:
+        alignment_reason = None
+    return alignment_status, alignment_error, alignment_reason

@@ -18,6 +18,7 @@ from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
 from resualign.llm_usage import reset_llm_tenant, set_llm_tenant
 
 from ...app.context import context
+from .alignment_rules import humanize_alignment_error
 from .jobs import _gap_stage_error_text, _run_gap_stage
 
 logger = logging.getLogger(__name__)
@@ -486,7 +487,10 @@ def _gap_score(gap_report: Any) -> Optional[float]:
 
 
 def alignment_notice(
-    diffs: Any, invalid_diffs: Any, draft: Any = None
+    diffs: Any,
+    invalid_diffs: Any,
+    draft: Any = None,
+    reason: str | None = None,
 ) -> Optional[str]:
     """Banner text when an alignment "succeeded" with no actionable product.
 
@@ -503,6 +507,12 @@ def alignment_notice(
         return None
     if diff_count:
         return None
+    if reason == "no_safe_rewrite":
+        return None
+    if reason == "model_failed":
+        return None
+    if reason == "no_gap":
+        return "当前岗位没有需要补足的明确缺口，简历无需改写。"
     if invalid_count:
         return (
             f"{invalid_count} 条改写建议因溯源未命中原文被硬门禁拦截："
@@ -526,6 +536,10 @@ def _session_sections_from_job(
     persisted jd/gap/alignment sections instead of empty placeholders (B6).
     """
     alignment_status = job.get("alignment_status") or "idle"
+    alignment_reason = job.get("alignment_reason")
+    alignment_error = job.get("alignment_error") or humanize_alignment_error(
+        job.get("last_alignment_error")
+    )
     return {
         "jd": {
             "profile": job.get("jd_profile"),
@@ -551,6 +565,9 @@ def _session_sections_from_job(
             "stage": (
                 "done" if alignment_status == "succeeded" else ""
             ),
+            "reason": alignment_reason,
+            "error": alignment_error or None,
+            "code": None,
             "diffs": job.get("diffs") or [],
             "invalid_diffs": job.get("invalid_diffs") or [],
             "draft": job.get("draft"),
@@ -559,6 +576,7 @@ def _session_sections_from_job(
                 job.get("diffs"),
                 job.get("invalid_diffs"),
                 job.get("draft"),
+                alignment_reason,
             ),
         },
     }

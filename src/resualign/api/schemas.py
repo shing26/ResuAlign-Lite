@@ -14,6 +14,11 @@ _SALARY_TEXT_MAX = 500
 _URL_MAX = 2_000
 _RULE_VALUE_MAX = 2_000
 _LABEL_MAX = 200
+AlignmentReason = Literal[
+    "no_gap",
+    "no_safe_rewrite",
+    "model_failed",
+]
 
 
 class AnalyzeRequest(BaseModel):
@@ -280,6 +285,12 @@ class WorkstationGapSection(BaseModel):
 class WorkstationAlignmentSection(BaseModel):
     status: Literal["idle", "queued", "running", "succeeded", "failed"] = "idle"
     stage: str = ""
+    reason: AlignmentReason | None = None
+    error: str | None = None
+    code: str | None = None
+    notice: str | None = None
+    message: str | None = None
+    elapsed_seconds: float = 0.0
     diffs: list[dict[str, Any]] = Field(default_factory=list)
     invalid_diffs: list[dict[str, Any]] = Field(default_factory=list)
     draft: str | None = None
@@ -448,6 +459,8 @@ class DashboardQuickContinue(BaseModel):
     title: str
     company: str | None = None
     alignment_status: str = "idle"
+    alignment_reason: AlignmentReason | None = None
+    alignment_error: str | None = None
     # Module 5: failure detail for quick_continue card. Distinguishes
     # never-run / failed-with-code / in-flight. Drives the reason badge
     # on the dashboard card (frozen ticket #48).

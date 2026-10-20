@@ -62,6 +62,29 @@ __all__ = [
 # 投递结果归因枚举：记录"这份定稿投出去的结局"，用于验证对齐质量
 # （对齐 vs 未对齐简历的通过率）。空串清除（ADR-0027 clear-on-empty）。
 APPLICATION_RESULTS = ("screen_pass", "ats_reject", "no_response", "other")
+ALIGNMENT_REASONS = (
+    "no_gap",
+    "no_safe_rewrite",
+    "model_failed",
+)
+
+
+def _human_alignment_error(message: str | None) -> str | None:
+    """Return the user-facing error while preserving the stored machine form."""
+    text = str(message or "").strip()
+    if text.startswith("no_output:"):
+        text = text.split(":", 1)[1].strip()
+    return text or None
+
+
+def _validate_alignment_reason(alignment_reason: str | None) -> None:
+    if (
+        alignment_reason is not None
+        and alignment_reason != ""
+        and alignment_reason not in ALIGNMENT_REASONS
+    ):
+        raise UserStoreError(f"Invalid alignment_reason: {alignment_reason}")
+
 
 _JOB_UPDATE_PARAMETERS = (
     "title",
@@ -97,6 +120,7 @@ _JOB_UPDATE_PARAMETERS = (
     "match_reason",
     "match_updated_at",
     "alignment_status",
+    "alignment_reason",
     "diffs",
     "invalid_diffs",
     "draft",
@@ -272,6 +296,7 @@ _JOB_UPDATE_CLEARABLE_FIELDS = (
     ("rejected_at", "rejected_at"),
     ("next_step_due_at", "next_step_due_at"),
     ("interview_stage", "interview_stage"),
+    ("alignment_reason", "alignment_reason"),
     ("application_result", "application_result"),
     ("deadline", "deadline"),
 )
@@ -345,6 +370,7 @@ def _validate_job_update(fields: dict[str, Any]) -> None:
         "failed",
     ):
         raise UserStoreError(f"Invalid alignment_status: {alignment_status}")
+    _validate_alignment_reason(fields.get("alignment_reason"))
 
 
 def _resolve_job_update_lifecycle(
@@ -481,6 +507,7 @@ CREATE TABLE IF NOT EXISTS library_jobs (
     match_updated_at REAL,
     alignment_status TEXT NOT NULL DEFAULT 'idle',
     last_alignment_error TEXT,
+    alignment_reason TEXT,
     diffs_json TEXT NOT NULL DEFAULT '[]',
     invalid_diffs_json TEXT NOT NULL DEFAULT '[]',
     usable_diffs INTEGER NOT NULL DEFAULT 0,
@@ -919,6 +946,13 @@ class JobLibraryStore(_SqliteStore):
             "NOT NULL DEFAULT 0; "
             "UPDATE library_jobs "
             "SET usable_diffs = json_array_length(diffs_json);",
+        ),
+        # 46（#167）：持久化用户可理解的终态分类。alignment_status 仍只有
+        # succeeded/failed；no_output: 机读前缀也保持原契约，本列只区分
+        # no_safe_rewrite / model_failed / no_gap。
+        (
+            46,
+            "ALTER TABLE library_jobs ADD COLUMN alignment_reason TEXT",
         ),
     )
 
@@ -1500,7 +1534,8 @@ class JobLibraryStore(_SqliteStore):
             with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT job_id, title, company, status, jd_profile_json, "
-                    "alignment_status, last_alignment_error, applied_at, offer_at, "
+                    "alignment_status, alignment_reason, last_alignment_error, "
+                    "usable_diffs, applied_at, offer_at, "
                     "next_step_due_at, updated_at "
                     "FROM library_jobs WHERE tenant_id = ? "
                     "ORDER BY updated_at DESC",
@@ -1519,6 +1554,22 @@ class JobLibraryStore(_SqliteStore):
                     else None
                 ),
                 "alignment_status": row["alignment_status"] or "idle",
+                "alignment_reason": (
+                    row["alignment_reason"]
+                    or (
+                        "model_failed"
+                        if row["alignment_status"] == "failed"
+                        else "no_gap"
+                        if (
+                            row["alignment_status"] == "succeeded"
+                            and int(row["usable_diffs"] or 0) == 0
+                        )
+                        else None
+                    )
+                ),
+                "alignment_error": _human_alignment_error(
+                    row["last_alignment_error"]
+                ),
                 "last_alignment_error": row["last_alignment_error"] or None,
                 "applied_at": row["applied_at"] or None,
                 "offer_at": row["offer_at"] or None,
@@ -1564,6 +1615,7 @@ class JobLibraryStore(_SqliteStore):
         match_reason: str | None = None,
         match_updated_at: float | None = None,
         alignment_status: str | None = None,
+        alignment_reason: str | None = None,
         diffs: list[dict[str, Any]] | None = None,
         invalid_diffs: list[dict[str, Any]] | None = None,
         draft: str | None = None,
@@ -1596,6 +1648,13 @@ class JobLibraryStore(_SqliteStore):
         preserving terminal timestamps.
         """
         updates = _collect_job_update_fields(locals())
+        if updates.get("alignment_status") in ("queued", "running"):
+            updates["alignment_reason"] = ""
+        elif (
+            updates.get("alignment_status") == "failed"
+            and not updates.get("alignment_reason")
+        ):
+            updates["alignment_reason"] = "model_failed"
         _validate_job_update(updates)
         append_only_snapshot, snapshot_applied_at, lifecycle_found = (
             _resolve_job_update_lifecycle(
@@ -1892,6 +1951,7 @@ class JobLibraryStore(_SqliteStore):
         alignment_status: str = "succeeded",
         last_alignment_error: str | None = None,
         usable_diffs: int | None = None,
+        alignment_reason: str | None = None,
     ) -> Optional[dict[str, Any]]:
         """Persist a terminal alignment product for one library job.
 
@@ -1913,6 +1973,7 @@ class JobLibraryStore(_SqliteStore):
             "failed",
         ):
             raise UserStoreError(f"Invalid alignment_status: {alignment_status}")
+        _validate_alignment_reason(alignment_reason)
         usable = len(diffs or []) if usable_diffs is None else int(usable_diffs)
         now = time.time()
         with self._lock:
@@ -1931,6 +1992,7 @@ class JobLibraryStore(_SqliteStore):
                     "match_score = ?, match_score_detail_json = ?, "
                     "match_reason = ?, match_updated_at = ?, "
                     "alignment_status = ?, last_alignment_error = ?, "
+                    "alignment_reason = ?, "
                     "diffs_json = ?, invalid_diffs_json = ?, "
                     "usable_diffs = ?, draft = ?, "
                     "eval_score_json = ?, model = ?, prompt_version = ?, "
@@ -1957,6 +2019,7 @@ class JobLibraryStore(_SqliteStore):
                         match_updated_at,
                         alignment_status,
                         last_alignment_error,
+                        alignment_reason,
                         json.dumps(diffs or [], ensure_ascii=False),
                         json.dumps(invalid_diffs or [], ensure_ascii=False),
                         usable,
@@ -2302,11 +2365,9 @@ class JobLibraryStore(_SqliteStore):
             )
         except (TypeError, ValueError):
             match_score_detail = None
-        # #111 / ADR-0041 决定 5：usable_diffs 是持久列；has_gap 与
-        # alignment_reason 由投影派生（无新状态）——no_gap=无缺口零产出、
-        # no_output=有缺口零产出（后者终态即 failed，理由前缀在
-        # last_alignment_error）。前端徽章/驾驶舱分子据此分型，不再以
-        # alignment_status 单字段当「已对齐」绿灯。
+        # #111 / ADR-0041 决定 5 + #167：usable_diffs 和显式终态原因
+        # 都是持久列；旧行仍从 gap/error 派生兼容值。no_output 继续留在
+        # last_alignment_error 机读前缀里，用户文案由 reason 分流。
         usable_diffs = int(row["usable_diffs"] or 0)
         try:
             gap_report = (
@@ -2321,10 +2382,18 @@ class JobLibraryStore(_SqliteStore):
             or (gap_report.get("misaligned_emphasis") or [])
         )
         last_error = row["last_alignment_error"] or ""
-        if alignment_status == "succeeded" and usable_diffs == 0 and not has_gap:
+        stored_reason = row["alignment_reason"] or ""
+        if stored_reason in ALIGNMENT_REASONS:
+            alignment_reason: str | None = stored_reason
+        elif alignment_status == "succeeded" and usable_diffs == 0 and not has_gap:
             alignment_reason: str | None = "no_gap"
         elif alignment_status == "failed" and last_error.startswith("no_output"):
-            alignment_reason = "no_output"
+            # Legacy rows cannot distinguish model failure from no-safe
+            # rewrite. Keep the public taxonomy at three reasons and make the
+            # conservative retryable classification.
+            alignment_reason = "model_failed"
+        elif alignment_status == "failed":
+            alignment_reason = "model_failed"
         else:
             alignment_reason = None
         return {
@@ -2379,6 +2448,7 @@ class JobLibraryStore(_SqliteStore):
             "match_updated_at": row["match_updated_at"],
             "alignment_status": alignment_status,
             "last_alignment_error": row["last_alignment_error"] or None,
+            "alignment_error": _human_alignment_error(last_error),
             "diffs": json.loads(row["diffs_json"] or "[]"),
             "invalid_diffs": json.loads(row["invalid_diffs_json"] or "[]"),
             "usable_diffs": usable_diffs,

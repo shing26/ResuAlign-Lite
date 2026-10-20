@@ -321,7 +321,10 @@ def test_dashboard_quick_continue_failed_includes_failure_detail():
     quick = body["quick_continue"]
     assert quick["job_id"] == failed["job_id"]
     assert quick["alignment_status"] == "failed"
-    assert quick["failure_detail"] == "no_output: model returned empty"
+    assert quick["alignment_reason"] == "model_failed"
+    assert quick["alignment_error"] == "model returned empty"
+    assert quick["failure_detail"] == "model returned empty"
+    assert "no_output:" not in quick["failure_detail"]
 
 
 def test_dashboard_quick_continue_idle_has_no_failure_detail():
@@ -361,6 +364,7 @@ def test_dashboard_quick_continue_falls_back_to_latest_when_all_succeeded():
 
     body = client.get("/api/dashboard", headers=_auth_headers()).json()
     assert body["quick_continue"]["job_id"] == newest["job_id"]
+    assert body["quick_continue"]["alignment_reason"] == "no_gap"
 
 
 def test_dashboard_is_tenant_scoped():

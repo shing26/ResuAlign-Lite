@@ -11,7 +11,7 @@ from resualign.alignment_lifecycle import (
     is_terminal,
     transition_alignment,
 )
-from resualign.job_library import JobLibraryStore
+from resualign.job_library import JobLibraryStore, UserStoreError
 
 
 @pytest.fixture
@@ -119,7 +119,7 @@ def test_projection_no_gap_when_usable_zero(store):
     assert saved["alignment_reason"] == "no_gap"
 
 
-def test_projection_no_output_when_failed_with_gap(store):
+def test_projection_legacy_no_output_maps_to_model_failed(store):
     job_id = _create_job(store)
     saved = store.save_alignment(
         "local",
@@ -131,7 +131,39 @@ def test_projection_no_output_when_failed_with_gap(store):
     )
     assert saved["usable_diffs"] == 0
     assert saved["has_gap"] is True
-    assert saved["alignment_reason"] == "no_output"
+    assert saved["alignment_reason"] == "model_failed"
+
+
+def test_save_alignment_persists_explicit_terminal_reason(store):
+    job_id = _create_job(store)
+    saved = store.save_alignment(
+        "local",
+        job_id,
+        diffs=[],
+        gap_report={"missing_keywords": ["Kubernetes"]},
+        alignment_status="failed",
+        last_alignment_error="no_output: 简历原文没有足够依据",
+        alignment_reason="no_safe_rewrite",
+    )
+
+    assert saved["alignment_reason"] == "no_safe_rewrite"
+    assert (
+        store.get_job("local", job_id)["alignment_reason"]
+        == "no_safe_rewrite"
+    )
+
+
+def test_save_alignment_rejects_unknown_terminal_reason(store):
+    job_id = _create_job(store)
+    with pytest.raises(UserStoreError, match="Invalid alignment_reason"):
+        store.save_alignment(
+            "local",
+            job_id,
+            diffs=[],
+            gap_report={"missing_keywords": ["Kubernetes"]},
+            alignment_status="failed",
+            alignment_reason="no_output",
+        )
 
 
 def test_legacy_db_backfills_usable_diffs(tmp_path):

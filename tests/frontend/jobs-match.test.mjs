@@ -377,6 +377,22 @@ test("boardCard failed alignment_status shows 重新对齐 button", () => {
   assert.equal(btn.textContent, "重新对齐");
 });
 
+test("boardCard no-safe failure routes to evidence review, not rerun", () => {
+  const body = bodyFrom(
+    boardCard(
+      makeAlignJob({
+        alignment_status: "failed",
+        alignment_reason: "no_safe_rewrite",
+        alignment_error: "简历原文没有足够依据",
+      }),
+    ),
+  );
+  const action = body.querySelector(".board-card__align");
+  assert.equal(action.dataset.action, "open-optimizer");
+  assert.match(action.textContent, /查看证据/);
+  assert.equal(body.querySelector('[data-action="align-job"]'), null);
+});
+
 test("boardCard succeeded with zero diffs shows 重新对齐 button", () => {
   const body = bodyFrom(
     boardCard(makeAlignJob({ alignment_status: "succeeded", diffs: [] })),
@@ -384,6 +400,22 @@ test("boardCard succeeded with zero diffs shows 重新对齐 button", () => {
   const btn = body.querySelector(".board-card__align");
   assert.ok(btn, "succeeded+0 diff job must have an align button");
   assert.equal(btn.textContent, "重新对齐");
+});
+
+test("boardCard true no-gap does not offer rerun", () => {
+  const body = bodyFrom(
+    boardCard(
+      makeAlignJob({
+        alignment_status: "succeeded",
+        alignment_reason: "no_gap",
+        diffs: [],
+      }),
+    ),
+  );
+  const action = body.querySelector(".board-card__align");
+  assert.equal(action.dataset.action, "open-optimizer");
+  assert.match(action.textContent, /查看说明/);
+  assert.equal(body.querySelector('[data-action="align-job"]'), null);
 });
 
 test("boardCard succeeded with diffs shows no align button", () => {
@@ -415,7 +447,7 @@ test("boardCard distinguishes degraded tailor from plain empty diffs", () => {
       ...DETAIL_JOB,
       alignment_status: "succeeded",
       diffs: [],
-      last_alignment_error: "改写阶段多次失败，本轮只产出诊断与缺口分析",
+      alignment_error: "改写阶段多次失败，本轮只产出诊断与缺口分析",
     }),
   );
   const amberTexts = (body) =>

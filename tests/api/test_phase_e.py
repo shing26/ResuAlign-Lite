@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from unittest.mock import patch
 
@@ -261,6 +262,12 @@ def _noop_report(gap_missing=None):
 def _run_noop_to_terminal(report):
     job = _create_job()
     resume = _create_resume()
+    # Workbench SSE only exists for a live session; create the same session
+    # the browser opens before queueing the analysis.
+    client.get(
+        f"/api/workspace/session/{job['job_id']}",
+        headers=_auth_headers(),
+    )
     with patch("resualign.api._run_job"), patch(
         "resualign.api.build_config", return_value=_config()
     ):
@@ -281,16 +288,47 @@ def _run_noop_to_terminal(report):
     return persisted
 
 
-def test_all_noop_with_gaps_fails_as_no_output():
-    """#111: 有缺口 + usable=0 → failed，机读 reason no_output。"""
+def _replay_job_result(session_id: str) -> dict:
+    """Return the terminal alignment payload from a replayed stream."""
+    with client.stream(
+        "GET",
+        f"/api/workbench/session/{session_id}/events?replay=1",
+        headers=_auth_headers(),
+    ) as stream:
+        current_event = ""
+        for line in stream.iter_lines():
+            if line.startswith("event: "):
+                current_event = line.split(" ", 1)[1]
+            elif line.startswith("data: ") and current_event == "job.result":
+                return json.loads(line[6:])
+    raise AssertionError("job.result event was not emitted")
+
+
+def test_all_noop_with_gaps_fails_as_model_failure():
+    """#167: a gap with no usable diff is a retryable model failure."""
     persisted = _run_noop_to_terminal(_noop_report(gap_missing=["Redis"]))
     assert persisted["alignment_status"] == "failed"
     assert persisted["usable_diffs"] == 0
     assert persisted["has_gap"] is True
-    assert persisted["alignment_reason"] == "no_output"
+    assert persisted["alignment_reason"] == "model_failed"
     assert persisted["last_alignment_error"].startswith("no_output:")
+    assert persisted["alignment_error"] == persisted["last_alignment_error"].removeprefix(
+        "no_output: "
+    )
     assert len(persisted["diffs"]) == 0, "noop 不得计入 usable diffs"
     assert len(persisted["invalid_diffs"]) == 1
+    workspace = client.get(
+        f"/api/workspace/session/{persisted['job_id']}",
+        headers=_auth_headers(),
+    ).json()
+    assert workspace["alignment"]["reason"] == "model_failed"
+    assert workspace["alignment"]["error"]
+    assert "no_output:" not in workspace["alignment"]["error"]
+    event = _replay_job_result(workspace["session_id"])
+    assert event["alignment"]["status"] == "failed"
+    assert event["alignment"]["reason"] == "model_failed"
+    assert event["alignment"]["error"] == persisted["alignment_error"]
+    assert "no_output:" not in event["alignment"]["error"]
 
 
 def test_all_noop_without_gaps_succeeds_as_no_gap():
@@ -300,8 +338,20 @@ def test_all_noop_without_gaps_succeeds_as_no_gap():
     assert persisted["usable_diffs"] == 0
     assert persisted["has_gap"] is False
     assert persisted["alignment_reason"] == "no_gap"
+    assert persisted["alignment_error"] is None
     assert len(persisted["diffs"]) == 0
     assert len(persisted["invalid_diffs"]) == 1
+    workspace = client.get(
+        f"/api/workspace/session/{persisted['job_id']}",
+        headers=_auth_headers(),
+    ).json()
+    assert workspace["alignment"]["status"] == "succeeded"
+    assert workspace["alignment"]["reason"] == "no_gap"
+    assert "无需改写" in workspace["alignment"]["notice"]
+    event = _replay_job_result(workspace["session_id"])
+    assert event["alignment"]["status"] == "succeeded"
+    assert event["alignment"]["reason"] == "no_gap"
+    assert "无需改写" in event["alignment"]["notice"]
 
 
 def test_noop_mixed_with_real_diff_is_green_with_count():

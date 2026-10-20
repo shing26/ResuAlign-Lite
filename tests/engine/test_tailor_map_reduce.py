@@ -133,6 +133,7 @@ def test_map_reduce_returns_no_safe_without_resume_evidence():
     assert result.diffs == []
     assert result.no_safe_rewrite is True
     assert "原文" in result.no_safe_rewrite_reason
+    assert "supported_keywords" not in result.no_safe_rewrite_reason
 
 
 def test_map_reduce_records_single_failure_and_keeps_others():

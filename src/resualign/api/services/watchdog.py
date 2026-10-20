@@ -101,6 +101,7 @@ def scan_once(now: float | None = None) -> list[str]:
                     library_job_id,
                     alignment_status="failed",
                     last_alignment_error=error,
+                    alignment_reason="model_failed",
                 )
             except Exception:
                 logger.exception(

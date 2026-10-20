@@ -141,6 +141,29 @@ test("workbenchProgressPipelineHtml shows completion text when succeeded", () =>
   assert.match(html, /简历对齐已完成/);
 });
 
+test("workbenchProgressPipelineHtml distinguishes no-safe and no-gap terminals", () => {
+  const noSafe = workbenchProgressPipelineHtml({
+    alignment: {
+      status: "failed",
+      reason: "no_safe_rewrite",
+      error: "简历原文没有足够依据",
+    },
+  });
+  assert.match(noSafe, /无安全改写/);
+  assert.match(noSafe, /简历原文没有足够依据/);
+  assert.doesNotMatch(noSafe, /任务失败|no_output:/);
+
+  const noGap = workbenchProgressPipelineHtml({
+    alignment: {
+      status: "succeeded",
+      reason: "no_gap",
+      diffs: [],
+    },
+  });
+  assert.match(noGap, /无需改写/);
+  assert.doesNotMatch(noGap, /简历对齐已完成/);
+});
+
 test("workbenchProgressPipelineHtml escapes the live message", () => {
   const html = workbenchProgressPipelineHtml({
     alignment: { status: "queued", message: "检查 <真实性与指标>" },
@@ -281,6 +304,37 @@ test("diffCard offers per-item retry on invalid cards", () => {
   assert.doesNotMatch(invalid, /data-action="accept-bullet"/);
 
   assert.match(diffCard(SAMPLE_DIFF, 0, "job-1"), /AI 润色/);
+});
+
+test("diffCard offers retry only when a source anchor exists", () => {
+  const anchored = diffCard(
+    {
+      type: "modify",
+      original: "Built a backend service",
+      proposed: "Built a Kubernetes platform",
+      reason: "已拦截：Kubernetes 在简历原文中无依据",
+      provenance_state: "fabricated",
+    },
+    3,
+    "job-1",
+  );
+  assert.match(anchored, /data-action="polish-bullet"/);
+  assert.match(anchored, /重试此条/);
+  assert.match(anchored, /Kubernetes 在简历原文中无依据/);
+
+  const unanchored = diffCard(
+    {
+      type: "add",
+      original: "",
+      proposed: "凭空新增",
+      reason: "没有可定位的原文锚点",
+      provenance_state: "fabricated",
+    },
+    4,
+    "job-1",
+  );
+  assert.doesNotMatch(unanchored, /data-action="polish-bullet"/);
+  assert.match(unanchored, /没有可定位的原文锚点/);
 });
 
 test("diffList renders cards or the empty state", () => {
@@ -570,6 +624,40 @@ test("alignmentControls offers rerun on failure and keeps run button enabled", (
   assert.doesNotMatch(html, /data-align-progress/);
 });
 
+test("alignmentControls routes no-safe rewrites to evidence review, not model rerun", () => {
+  const html = alignmentControls(
+    {
+      alignment: {
+        status: "failed",
+        reason: "no_safe_rewrite",
+        error: "简历原文没有足够依据",
+      },
+    },
+    [],
+    "job-9",
+  );
+  assert.match(html, /查看证据缺口/);
+  assert.doesNotMatch(html, /重新运行对齐|任务失败/);
+  assert.match(html, /简历原文没有足够依据/);
+});
+
+test("alignmentControls does not offer rerun for true no-gap", () => {
+  const html = alignmentControls(
+    {
+      alignment: {
+        status: "succeeded",
+        reason: "no_gap",
+        diffs: [],
+      },
+    },
+    [{ resume_id: "r1", title: "主简历", current_version: 1 }],
+    "job-9",
+  );
+  assert.match(html, /无需改写/);
+  assert.match(html, /disabled/);
+  assert.doesNotMatch(html, /data-align-run|一键生成对齐简历|重新运行对齐/);
+});
+
 /* ------------------------------------------------------------------ */
 /* exportDock                                                          */
 /* ------------------------------------------------------------------ */
@@ -607,6 +695,21 @@ test("exportDock enables the three final actions for a saved final draft", () =>
   ]) {
     assert.match(html, new RegExp(`data-action="${action}"`));
   }
+});
+
+test("diffList suppresses the first-run guide for true no-gap", () => {
+  const html = diffList(
+    {
+      alignment: {
+        status: "succeeded",
+        reason: "no_gap",
+        diffs: [],
+        invalid_diffs: [],
+      },
+    },
+    "job-1",
+  );
+  assert.doesNotMatch(html, /还没有对齐结果|开始对齐/);
 });
 
 /* ------------------------------------------------------------------ */
