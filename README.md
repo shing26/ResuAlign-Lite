@@ -53,7 +53,7 @@ ResuAlign-Lite 把这件事当工程问题做：一个跑在本机的 FastAPI + 
 
 ![幻觉发生率对比：门禁前 8/8 编造断言到达交付面，门禁后 0/8](docs/assets/hallucination-rate.svg)
 
-*口径：n=8 是**构造注入**（2 例合成对抗用例 × 4 条 `must_not_contain`），只报计数、不做统计推断——LLM-as-a-Judge（`evaluator/v2`）那一栏因此不出数，它需要真实模型节点，且 2 例样本支持不了比率。复现：`python benchmarks/run_benchmark.py --offline` 与 `python -m benchmarks.agent.harness.probes`；图由 `python scripts/make_readme_figures.py` 生成（`--check` 会抓出人手改图）。*
+*口径：n=8 是**构造注入**（2 例合成对抗用例 × 4 条 `must_not_contain`），只报计数、不做统计推断——LLM-as-a-Judge（`evaluator/v3`）那一栏因此不出数，它需要真实模型节点，且 2 例样本支持不了比率。复现：`python benchmarks/run_benchmark.py --offline` 与 `python -m benchmarks.agent.harness.probes`；图由 `python scripts/make_readme_figures.py` 生成（`--check` 会抓出人手改图）。*
 
 ## ✨ 核心特性
 

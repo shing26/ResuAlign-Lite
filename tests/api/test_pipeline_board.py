@@ -293,8 +293,8 @@ def test_bulk_status_endpoint_validates_tenant_ownership():
     assert untouched["status"] == "draft"
 
 
-def test_patch_status_rejects_backward_transition():
-    """Module 3: backward status transitions are rejected with 422."""
+def test_patch_applied_from_interview_appends_without_downgrade():
+    """ADR-0027: recording an application never downgrades a later stage."""
     job = _create_job()
     job_id = job["job_id"]
     # Move to interview first.
@@ -303,19 +303,14 @@ def test_patch_status_rejects_backward_transition():
         json={"status": "interview"},
         headers=_auth_headers(),
     )
-    # Attempt to move back to applied → 422.
+    # Re-record the application after reaching interview.
     r = client.patch(
         f"/api/jobs/{job_id}",
         json={"status": "applied"},
         headers=_auth_headers(),
     )
-    assert r.status_code == 422
-    assert "Illegal status transition" in r.json()["detail"]
-    # Status unchanged.
-    body = client.get(
-        f"/api/jobs/{job_id}", headers=_auth_headers()
-    ).json()
-    assert body["status"] == "interview"
+    assert r.status_code == 200
+    assert r.json()["status"] == "interview"
 
 
 def test_patch_status_rejects_backward_to_draft():

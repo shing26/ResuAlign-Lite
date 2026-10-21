@@ -104,6 +104,24 @@ def test_no_gap_zero_output_succeeds_without_claiming_alignment():
     assert reason == "no_gap"
 
 
+def test_supported_keyword_zero_output_is_a_model_failure():
+    status, error, reason = resolve_alignment_outcome(
+        kept_diffs=[],
+        gap_report={
+            "supported_keywords": ["Redis caching"],
+            "missing_keywords": [],
+            "misaligned_emphasis": [],
+        },
+        tailor_degraded=False,
+        eval_hallucinated=False,
+    )
+
+    assert status == "failed"
+    assert error is not None
+    assert error.startswith("no_output: ")
+    assert reason == "model_failed"
+
+
 def test_tailor_degraded_without_diff_is_a_model_failure():
     status, error, reason = resolve_alignment_outcome(
         kept_diffs=[],

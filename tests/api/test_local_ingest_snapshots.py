@@ -5,7 +5,6 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
-from resualign.job_library import StatusTransitionError
 from resualign.jobs import JobRegistry
 from resualign.settings_store import SettingsStore
 from resualign.workspace import (
@@ -346,14 +345,8 @@ def test_apply_freezes_snapshot_and_reapply_appends_without_downgrade():
     assert snapshots[1]["final_draft"] == "# Draft v1"
 
 
-def test_reapplying_applied_from_interview_is_rejected():
-    """Module 3: backward transition interview -> applied is now 422.
-
-    Previously (ADR-028) this was an append-only re-record that pinned the
-    status to interview while updating applied_at. Module 3 replaces that
-    with a strict funnel: any backward move is rejected. Use revive=True
-    for the explicit "重新打开" action.
-    """
+def test_reapplying_applied_from_interview_appends_without_downgrade():
+    """ADR-0027: recording an application never downgrades a later stage."""
     store = api_module._jobs
     job = store.create_job(
         tenant_id="local",
@@ -369,16 +362,20 @@ def test_reapplying_applied_from_interview_is_rejected():
     )
     assert store.list_application_snapshots("local", job["job_id"]) == []
 
-    with pytest.raises(StatusTransitionError, match="Illegal status transition"):
-        store.update_job(
-            "local",
-            job["job_id"],
-            status="已投递",
-            applied_at="2026-08-03",
-        )
-    # Status unchanged.
+    updated = store.update_job(
+        "local",
+        job["job_id"],
+        status="已投递",
+        applied_at="2026-08-03",
+    )
     current = store.get_job("local", job["job_id"])
+    assert updated["status"] == "interview"
     assert current["status"] == "interview"
+    assert current["applied_at"] == "2026-08-03"
+    snapshots = store.list_application_snapshots("local", job["job_id"])
+    assert len(snapshots) == 1
+    assert snapshots[0]["final_draft"] == "# Intern draft"
+    assert snapshots[0]["applied_at"] == "2026-08-03"
 
 
 def test_legacy_applied_job_without_snapshot_stays_empty():

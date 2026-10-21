@@ -25,7 +25,7 @@ python -m benchmarks.agent.harness.probes        # 6 项探针 9 组全绿
 
 - `benchmarks/cases/adversarial_hallucination_claims.json` / `..._projects.json`
   —— 两例合成对抗用例，`must_not_contain` 各 4 条，合计 n=8。
-- `tests/fixtures/gate/expected.en.json` —— 门禁黄金 fixtures：7 条 diff → usable 5 · blocked 2。
+- `tests/fixtures/gate/expected.en.json` —— 门禁黄金 fixtures：9 条 diff → usable 5 · blocked 4。
 - `benchmarks/agent/` —— 机械判卷 harness 与 PHASE0_PROTOCOL。
 
 ## 面板 2 的取数片段
@@ -69,7 +69,7 @@ gate.verdict(item, resume)
 
 - **n=8 是构造注入，不是统计抽样**。所以图上只报计数与到达率，不做任何统计推断；
   这正是 README 里「样本不足只报计数，不给误导性比率」的同一条口径。
-- **LLM-as-a-Judge 那一栏刻意不出数**。`evaluator/v2` 是真裁判（输出
+- **LLM-as-a-Judge 那一栏刻意不出数**。`evaluator/v3` 是真裁判（输出
   `hallucination_detected` / `hallucination_details`），但它需要真实模型节点，
   且 2 例样本支持不了比率。Phase 0 的判分改用机械判卷，协议原话：
   「裁判必须比考生便宜且不会做梦」。

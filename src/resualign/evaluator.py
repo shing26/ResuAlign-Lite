@@ -83,18 +83,24 @@ def evaluate(client, original_resume, tailored_text, jd_text, diffs=None):
     raw_diff_ids = result.get("hallucinated_diff_ids") or []
     if not isinstance(raw_diff_ids, list):
         raw_diff_ids = []
-    hallucinated_diff_ids = [
-        str(diff_id)
-        for diff_id in raw_diff_ids
-        if str(diff_id) in known_diff_ids
-    ]
+    unmapped_hallucination = False
+    hallucinated_diff_ids = []
+    for diff_id in raw_diff_ids:
+        normalized_id = str(diff_id)
+        if normalized_id in known_diff_ids:
+            hallucinated_diff_ids.append(normalized_id)
+        else:
+            unmapped_hallucination = True
+    if raw_diff_ids:
+        # Contradictory model output must fail closed rather than silently
+        # trusting a false aggregate boolean.
+        hallucination_detected = True
     try:
         gap_coverage = float(result.get("gap_coverage", 0.0))
     except (TypeError, ValueError):
         gap_coverage = 0.0
     gap_coverage = max(0.0, min(1.0, gap_coverage))
     hallucination_details = list(result.get("hallucination_details") or [])
-    unmapped_hallucination = False
     if diffs:
         for diff in diffs:
             if isinstance(diff, dict):

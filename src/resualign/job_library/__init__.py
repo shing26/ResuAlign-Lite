@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional, Sequence
 
+from ..alignment_lifecycle import gap_report_has_gap
 from ..store_base import UserStoreError, _SqliteStore
 from .models import (
     JOB_FUNCTIONS,
@@ -75,6 +76,31 @@ def _human_alignment_error(message: str | None) -> str | None:
     if text.startswith("no_output:"):
         text = text.split(":", 1)[1].strip()
     return text or None
+
+
+def _parse_gap_report(value: Any) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(value) if value else None
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _derive_alignment_reason(
+    alignment_status: str | None,
+    alignment_reason: str | None,
+    usable_diffs: int,
+    gap_report: dict[str, Any] | None,
+) -> str | None:
+    """Derive the public terminal reason for persisted and legacy rows."""
+    stored_reason = alignment_reason or ""
+    if stored_reason in ALIGNMENT_REASONS:
+        return stored_reason
+    if alignment_status == "failed":
+        return "model_failed"
+    if alignment_status == "succeeded" and usable_diffs == 0:
+        return "model_failed" if gap_report_has_gap(gap_report) else "no_gap"
+    return None
 
 
 def _validate_alignment_reason(alignment_reason: str | None) -> None:
@@ -251,10 +277,9 @@ def normalize_import_date(value: Any) -> tuple[str | None, str | None]:
         return None, f"invalid date: {text}"
     year, month, day = (int(part) for part in match.groups())
     try:
-        normalized = time.strftime("%Y-%m-%d", time.struct_time(
-            (year, month, day, 0, 0, 0, 0, 0, -1)
-        ))
-    except (ValueError, OverflowError):
+        normalized = f"{year:04d}-{month:02d}-{day:02d}"
+        datetime.strptime(normalized, "%Y-%m-%d")
+    except ValueError:
         return None, f"invalid date: {text}"
     return normalized, None
 
@@ -388,12 +413,6 @@ def _resolve_job_update_lifecycle(
     current = store.get_job(tenant_id, job_id)
     if current is None:
         return False, None, False
-    # Validate the transition (forward/skip always OK; backward only via revive).
-    validate_status_transition(
-        current.get("status"),
-        status,
-        revive=revive,
-    )
     if (
         not revive
         and canonical_status(status) == "applied"
@@ -406,6 +425,12 @@ def _resolve_job_update_lifecycle(
             or time.strftime("%Y-%m-%d"),
             True,
         )
+    # Validate the transition (forward/skip always OK; backward only via revive).
+    validate_status_transition(
+        current.get("status"),
+        status,
+        revive=revive,
+    )
     lifecycle = status_lifecycle_fields(
         current,
         status,
@@ -639,7 +664,7 @@ def _normalize_source_url(url: str) -> str:
     rebuilt = urllib.parse.urlunsplit(
         (
             parts.scheme.lower(),
-            _normalize_netloc(parts.netloc),
+            _normalize_netloc(parts.netloc, parts.scheme),
             _normalize_percent_encoding(parts.path).rstrip("/"),
             _normalize_query(parts.query),
             fragment,
@@ -658,13 +683,12 @@ def _normalize_percent_encoding(text: str) -> str:
     )
 
 
-def _normalize_netloc(netloc: str) -> str:
+def _normalize_netloc(netloc: str, scheme: str) -> str:
     """Lowercase the host and drop the scheme's default port."""
     lowered = (netloc or "").lower()
-    if lowered.endswith(":80"):
-        lowered = lowered[: -len(":80")]
-    if lowered.endswith(":443"):
-        lowered = lowered[: -len(":443")]
+    default_port = {"http": ":80", "https": ":443"}.get(scheme.lower())
+    if default_port and lowered.endswith(default_port):
+        lowered = lowered[: -len(default_port)]
     return lowered
 
 
@@ -1534,15 +1558,19 @@ class JobLibraryStore(_SqliteStore):
             with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT job_id, title, company, status, jd_profile_json, "
-                    "alignment_status, alignment_reason, last_alignment_error, "
-                    "usable_diffs, applied_at, offer_at, "
+                    "gap_report_json, alignment_status, alignment_reason, "
+                    "last_alignment_error, usable_diffs, applied_at, offer_at, "
                     "next_step_due_at, updated_at "
                     "FROM library_jobs WHERE tenant_id = ? "
                     "ORDER BY updated_at DESC",
                     (tenant_id,),
                 ).fetchall()
-        return [
-            {
+        dashboard: list[dict[str, Any]] = []
+        for row in rows:
+            alignment_status = row["alignment_status"] or "idle"
+            usable_diffs = int(row["usable_diffs"] or 0)
+            gap_report = _parse_gap_report(row["gap_report_json"])
+            dashboard.append({
                 "job_id": row["job_id"],
                 "title": row["title"],
                 "company": row["company"],
@@ -1553,19 +1581,12 @@ class JobLibraryStore(_SqliteStore):
                     if row["jd_profile_json"]
                     else None
                 ),
-                "alignment_status": row["alignment_status"] or "idle",
-                "alignment_reason": (
-                    row["alignment_reason"]
-                    or (
-                        "model_failed"
-                        if row["alignment_status"] == "failed"
-                        else "no_gap"
-                        if (
-                            row["alignment_status"] == "succeeded"
-                            and int(row["usable_diffs"] or 0) == 0
-                        )
-                        else None
-                    )
+                "alignment_status": alignment_status,
+                "alignment_reason": _derive_alignment_reason(
+                    alignment_status,
+                    row["alignment_reason"],
+                    usable_diffs,
+                    gap_report,
                 ),
                 "alignment_error": _human_alignment_error(
                     row["last_alignment_error"]
@@ -1575,9 +1596,8 @@ class JobLibraryStore(_SqliteStore):
                 "offer_at": row["offer_at"] or None,
                 "next_step_due_at": row["next_step_due_at"] or None,
                 "updated_at": row["updated_at"],
-            }
-            for row in rows
-        ]
+            })
+        return dashboard
     def update_job(
         self,
         tenant_id: str,
@@ -2369,33 +2389,15 @@ class JobLibraryStore(_SqliteStore):
         # 都是持久列；旧行仍从 gap/error 派生兼容值。no_output 继续留在
         # last_alignment_error 机读前缀里，用户文案由 reason 分流。
         usable_diffs = int(row["usable_diffs"] or 0)
-        try:
-            gap_report = (
-                json.loads(row["gap_report_json"])
-                if row["gap_report_json"]
-                else None
-            )
-        except (TypeError, ValueError):
-            gap_report = None
-        has_gap = bool(gap_report) and bool(
-            (gap_report.get("missing_keywords") or [])
-            or (gap_report.get("misaligned_emphasis") or [])
-        )
+        gap_report = _parse_gap_report(row["gap_report_json"])
+        has_gap = gap_report_has_gap(gap_report)
         last_error = row["last_alignment_error"] or ""
-        stored_reason = row["alignment_reason"] or ""
-        if stored_reason in ALIGNMENT_REASONS:
-            alignment_reason: str | None = stored_reason
-        elif alignment_status == "succeeded" and usable_diffs == 0 and not has_gap:
-            alignment_reason: str | None = "no_gap"
-        elif alignment_status == "failed" and last_error.startswith("no_output"):
-            # Legacy rows cannot distinguish model failure from no-safe
-            # rewrite. Keep the public taxonomy at three reasons and make the
-            # conservative retryable classification.
-            alignment_reason = "model_failed"
-        elif alignment_status == "failed":
-            alignment_reason = "model_failed"
-        else:
-            alignment_reason = None
+        alignment_reason = _derive_alignment_reason(
+            alignment_status,
+            row["alignment_reason"],
+            usable_diffs,
+            gap_report,
+        )
         return {
             "job_id": row["job_id"],
             "tenant_id": row["tenant_id"],

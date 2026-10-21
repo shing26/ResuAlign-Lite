@@ -88,3 +88,61 @@ def test_evaluate_maps_invalid_provenance_to_diff_id():
     )
     assert score.hallucination_detected is True
     assert score.hallucinated_diff_ids == ["diff-invalid"]
+
+
+def test_nonempty_hallucinated_ids_force_detection():
+    mock = MockLLM(result={
+        "jd_match_score": 80,
+        "improvement": 10,
+        "hallucination_detected": False,
+        "hallucination_details": [],
+        "hallucinated_diff_ids": ["diff-2"],
+        "gap_coverage": 0.5,
+    })
+    score = evaluate(
+        mock,
+        "orig",
+        "tailored",
+        "jd",
+        diffs=[
+            {
+                "diff_id": "diff-2",
+                "type": "modify",
+                "original": "orig",
+                "proposed": "tailored",
+                "provenance": "orig",
+            }
+        ],
+    )
+
+    assert score.hallucination_detected is True
+    assert score.hallucinated_diff_ids == ["diff-2"]
+
+
+def test_unknown_hallucinated_id_falls_back_to_global_block():
+    mock = MockLLM(result={
+        "jd_match_score": 80,
+        "improvement": 10,
+        "hallucination_detected": False,
+        "hallucination_details": [],
+        "hallucinated_diff_ids": ["not-in-input"],
+        "gap_coverage": 0.5,
+    })
+    score = evaluate(
+        mock,
+        "orig",
+        "tailored",
+        "jd",
+        diffs=[
+            {
+                "diff_id": "diff-2",
+                "type": "modify",
+                "original": "orig",
+                "proposed": "tailored",
+                "provenance": "orig",
+            }
+        ],
+    )
+
+    assert score.hallucination_detected is True
+    assert score.hallucinated_diff_ids == []

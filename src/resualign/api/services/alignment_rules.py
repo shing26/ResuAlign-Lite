@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ...alignment_lifecycle import gap_report_has_gap
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,17 +42,13 @@ def is_noop_diff(diff: dict[str, Any]) -> bool:
 
 
 def report_has_gap(gap_report: Any) -> bool:
-    """#111 / ADR-0041 决定 5 分型谓词：缺口证据 = missing/misaligned 非空。
+    """#111 / ADR-0041 决定 5 分型谓词：缺口证据 = 可行动方向非空。
 
     None/空报告一律视为「无缺口」——7B 摆烂与真无缺口数据同形，宁可保守
     （零产出但无证据时保 succeeded + 「无缺口 · 无需改写」徽章，由换模型
     引导兜底），也不凭猜把一轮 run 判成质量失败。
     """
-    if not isinstance(gap_report, dict):
-        return False
-    return bool(gap_report.get("missing_keywords")) or bool(
-        gap_report.get("misaligned_emphasis")
-    )
+    return gap_report_has_gap(gap_report)
 
 
 def split_verified_diffs(

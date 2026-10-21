@@ -119,6 +119,28 @@ def test_projection_no_gap_when_usable_zero(store):
     assert saved["alignment_reason"] == "no_gap"
 
 
+def test_supported_keyword_is_a_gap_in_job_and_dashboard_projections(store):
+    job_id = _create_job(store)
+    store.update_job(
+        "local",
+        job_id,
+        alignment_status="succeeded",
+        alignment_reason="",
+        gap_report={
+            "supported_keywords": ["Redis caching"],
+            "missing_keywords": [],
+            "misaligned_emphasis": [],
+        },
+    )
+
+    job = store.get_job("local", job_id)
+    assert job["has_gap"] is True
+    assert job["alignment_reason"] == "model_failed"
+
+    dashboard = store.list_dashboard_jobs("local")
+    assert dashboard[0]["alignment_reason"] == "model_failed"
+
+
 def test_projection_legacy_no_output_maps_to_model_failed(store):
     job_id = _create_job(store)
     saved = store.save_alignment(

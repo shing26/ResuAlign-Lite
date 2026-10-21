@@ -31,11 +31,19 @@ from __future__ import annotations
 
 import argparse
 import html
+import importlib.util
+import json
 import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "docs" / "assets"
+BENCH_CASES = (
+    ROOT / "benchmarks" / "cases" / "adversarial_hallucination_claims.json",
+    ROOT / "benchmarks" / "cases" / "adversarial_hallucination_projects.json",
+)
+GATE_EXPECTED = ROOT / "tests" / "fixtures" / "gate" / "expected.en.json"
+PROMPT_VERSIONS = ROOT / "src" / "resualign" / "prompt_versions.py"
 
 # --- palette (roles, not moods) -------------------------------------------
 INK = "#0B0D11"          # primary text
@@ -55,6 +63,35 @@ FONT_SANS = (
     "Inter, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif"
 )
 FONT_MONO = "JetBrains Mono, Consolas, 'Liberation Mono', monospace"
+
+
+def load_json(path: pathlib.Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_prompt_registry() -> dict:
+    spec = importlib.util.spec_from_file_location("resualign_prompt_versions", PROMPT_VERSIONS)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {PROMPT_VERSIONS}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def figure_data() -> dict[str, object]:
+    cases = [load_json(path) for path in BENCH_CASES]
+    injected = sum(len(case.get("must_not_contain", [])) for case in cases)
+    gate_summary = load_json(GATE_EXPECTED)["summary"]
+    prompt_registry = load_prompt_registry()
+    return {
+        "injected": injected,
+        "gate_diffs": int(gate_summary["diffs"]),
+        "gate_usable": int(gate_summary["usable"]),
+        "gate_blocked": sum(int(value) for value in gate_summary["blocked"].values()),
+        "evaluator_version": prompt_registry.get_prompt_version(
+            prompt_registry.EVALUATOR
+        ),
+    }
 
 
 def esc(value: object) -> str:
@@ -423,6 +460,12 @@ def bar_row(
 
 
 def figure_hallucination() -> str:
+    data = figure_data()
+    injected = data["injected"]
+    gate_diffs = data["gate_diffs"]
+    gate_usable = data["gate_usable"]
+    gate_blocked = data["gate_blocked"]
+    evaluator_version = data["evaluator_version"]
     width = 1400
     height = 812
     out: list[str] = [
@@ -431,7 +474,8 @@ def figure_hallucination() -> str:
         text(
             MARGIN,
             92,
-            "n = 8 条编造断言（2 例合成对抗用例 × 4 条），确定性构造，不是统计抽样",
+            f"n = {injected} 条编造断言（{len(BENCH_CASES)} 例合成对抗用例），"
+            "确定性构造，不是统计抽样",
             size=14,
             fill=MUTED,
         ),
@@ -441,7 +485,13 @@ def figure_hallucination() -> str:
     left_w = 800
     out.append(panel(left_x, 132, left_w, 536))
     out.append(text(left_x + 28, 176, "编造断言到达交付面的比例", size=15, fill=INK, weight="700"))
-    out.append(text(left_x + 28, 200, "分母固定为注入的 8 条断言；只报计数，不据此做统计推断", size=12.2, fill=MUTED))
+    out.append(text(
+        left_x + 28,
+        200,
+        f"分母固定为注入的 {injected} 条断言；只报计数，不据此做统计推断",
+        size=12.2,
+        fill=MUTED,
+    ))
 
     track_w = 560
     out.append(
@@ -451,7 +501,7 @@ def figure_hallucination() -> str:
             track_w,
             label="无门禁 · 提案原样交付",
             fraction=1.0,
-            value="8 / 8  =  100%",
+            value=f"{injected} / {injected}  =  100%",
             caption="FakeLLMClient 注入的编造载荷原样留在改写提案里（构造事实，非实测模型）",
             fill=ALERT,
         )
@@ -463,7 +513,7 @@ def figure_hallucination() -> str:
             track_w,
             label="反幻觉门禁 · fail-closed",
             fraction=0.0,
-            value="0 / 8  =  0%",
+            value=f"0 / {injected}  =  0%",
             caption="provenance 解析 → 内容检查 → noop 过滤；实测 0 条进入输出",
             fill=ACCENT,
         )
@@ -473,7 +523,7 @@ def figure_hallucination() -> str:
             left_x + 28,
             560,
             track_w,
-            label="LLM-as-a-Judge 复核 · evaluator v2",
+            label=f"LLM-as-a-Judge 复核 · evaluator {evaluator_version}",
             fraction=None,
             value="不发布比率",
             caption="需真实模型节点；2 例样本支持不了比率——仓库口径是有几个报几个",
@@ -497,14 +547,14 @@ def figure_hallucination() -> str:
         (
             "门禁黄金 fixtures · vendor 锁定",
             [
-                "7 条 diff → usable 5 · blocked 2（fabricated）",
+                f"{gate_diffs} 条 diff → usable {gate_usable} · blocked {gate_blocked}",
                 "e2/e3 锁定句中专有名词；e4/e5 锁定误报方向",
                 "与 true-tailor 双向对拍，漂移即挂",
             ],
             ACCENT,
         ),
         (
-            "产品内 LLM 裁判 · evaluator/v2",
+            f"产品内 LLM 裁判 · evaluator/{evaluator_version}",
             [
                 "输出 hallucination_detected · details(0–5)",
                 "定位：对齐质量复核，不承担幻觉率判据",
@@ -542,7 +592,13 @@ def figure_hallucination() -> str:
             font=FONT_MONO,
         )
     )
-    return svg(width, height, "".join(out), "幻觉发生率门禁前后对比：8 条编造断言，门禁前 100% 泄漏，门禁后 0 条进入输出")
+    return svg(
+        width,
+        height,
+        "".join(out),
+        f"幻觉发生率门禁前后对比：{injected} 条编造断言，"
+        "门禁前全部泄漏，门禁后 0 条进入输出",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

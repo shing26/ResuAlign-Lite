@@ -13,8 +13,8 @@ from unittest.mock import patch
 from resualign.api.services import jobs as jobs_service
 from resualign.api.services.jobs import PreanalyzeUnavailable
 from resualign.contracts.errors import LlmFailureCode
-from resualign.job_library import normalize_import_date
 from resualign.engine.llm import LLMResponseError
+from resualign.job_library import normalize_import_date
 
 
 def _run(side_effect, batch=None):

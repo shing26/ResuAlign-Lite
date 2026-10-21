@@ -648,6 +648,9 @@ class TestSourceUrlNormalization:
         # Default ports are dropped.
         assert normalize("https://x.com:443/a") == normalize("https://x.com/a")
         assert normalize("http://x.com:80/a") == normalize("http://x.com/a")
+        # A port that is default for another scheme is still identity-bearing.
+        assert normalize("https://x.com:80/a") != normalize("https://x.com/a")
+        assert normalize("http://x.com:443/a") != normalize("http://x.com/a")
         # Identity-bearing query params survive alongside tracking noise.
         assert (
             normalize("https://x.com/detail?postId=99&utm_source=mail")
@@ -841,6 +844,13 @@ def test_normalize_import_date_rejects_out_of_range():
     normalized, error = normalize_import_date("2026-13-40")
     assert normalized is None
     assert error is not None
+
+
+def test_normalize_import_date_rejects_impossible_calendar_days():
+    for value in ("2026-02-30", "2026-04-31"):
+        normalized, error = normalize_import_date(value)
+        assert normalized is None
+        assert error is not None
 
 
 def test_normalize_import_date_none_and_empty():

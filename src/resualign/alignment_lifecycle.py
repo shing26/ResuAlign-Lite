@@ -30,6 +30,20 @@ ALIGNMENT_STATUSES = ("idle", "queued", "running", "succeeded", "failed")
 
 TERMINAL_STATUSES = ("succeeded", "failed")
 
+GAP_REPORT_ACTION_FIELDS = (
+    "supported_keywords",
+    "missing_keywords",
+    "misaligned_emphasis",
+)
+
+
+def gap_report_has_gap(gap_report: Any) -> bool:
+    """Return whether a gap report contains a direction that needs action."""
+    if not isinstance(gap_report, dict):
+        return False
+    return any(bool(gap_report.get(field)) for field in GAP_REPORT_ACTION_FIELDS)
+
+
 # prev -> allowed next statuses. Self-transitions are permitted: they cover
 # idempotent re-writes such as re-triggering a queued/running job with new
 # parameters (the router re-queues with fresh fields) and recovery

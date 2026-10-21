@@ -9,9 +9,9 @@ from resualign.job_library import (
     allowed_transition_targets,
     can_transition_status,
     is_terminal_status,
+    status_lifecycle_fields,
     validate_status_transition,
 )
-from resualign.job_library import status_lifecycle_fields
 
 TODAY = "2026-08-14"
 
