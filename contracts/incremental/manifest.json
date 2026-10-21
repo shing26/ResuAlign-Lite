@@ -10,6 +10,7 @@
     "/api/jobs/job-table/sync",
     "/api/jobs/preanalyze-pending",
     "/api/jobs/preanalyze-pending/{batch_id}",
+    "/api/jobs/preanalyze-pending/{batch_id}/cancel",
     "/api/jobs/{job_id}/analysis-status",
     "/api/jobs/{job_id}/exports",
     "/api/jobs/{job_id}/match",

@@ -503,6 +503,54 @@
         }
       }
     },
+    "/api/jobs/preanalyze-pending/{batch_id}/cancel": {
+      "post": {
+        "summary": "Cancel Preanalyze Batch",
+        "description": "Stop a running bulk preanalysis sweep; analyzed results are kept.",
+        "operationId": "cancel_preanalyze_batch_api_jobs_preanalyze_pending__batch_id__cancel_post",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Batch Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs/job-table": {
       "get": {
         "summary": "Job Table Status",

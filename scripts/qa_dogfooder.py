@@ -293,6 +293,13 @@ class Runner:
                     const s = getComputedStyle(el);
                     if (s.display === 'none' || s.visibility === 'hidden') return;
                     if (el.closest('[hidden]')) return;
+                    /* 未展开的 <details> 内容：Chrome 会给 ::details-content
+                     * 加 content-visibility，子节点却仍报告陈旧的布局盒
+                     * （实测导出菜单关闭时 142x28、right=463，展开后
+                     * right=351 完全可达）。不排除就会把收起的菜单报成
+                     * 横向溢出。summary 本身要留着。 */
+                    const closedDetails = el.closest('details:not([open])');
+                    if (closedDetails && !el.closest('summary')) return;
                     if (insideScrollable(el)) return;
                     const r = el.getBoundingClientRect();
                     if (r.width > 0 && (r.right > vw + 2 || r.left < -2)) {
@@ -379,7 +386,6 @@ class Runner:
                 ("jobs", "#/jobs"),
                 ("resume", "#/resume"),
                 ("settings", "#/settings"),
-                ("today", "#/today"),
                 ("workspace-empty", "#/workspace"),
                 ("unknown-route", "#/does-not-exist"),
             ]
@@ -616,10 +622,34 @@ class Runner:
                 wait_until="domcontentloaded",
             )
             self.wait_view(page)
+            # split-align 挂在 optimizer 画布里，画布本身是异步就位的。
+            # wait_view 只看「有文本且没有骨架屏」，会在画布挂上之前就返回，
+            # 接着的 resume_select 等待必然超时 —— 那是时序，不是缺陷。
+            # 与 tests/e2e/test_workbench_flow.py 用同一个选择器。
+            try:
+                page.wait_for_selector(
+                    "[data-surface-mode='optimizer']", timeout=15000
+                )
+            except PlaywrightTimeoutError:
+                record(
+                    "P2",
+                    "功能缺陷",
+                    "工作台未进入对齐画布",
+                    "[data-surface-mode='optimizer'] 15s 内未出现",
+                    "岗位工作台应渲染对齐画布",
+                    ["打开岗位工作台"],
+                    clue="renderOptimizerCanvas 渲染条件",
+                )
+                return
             resume_select = page.locator(
                 "[data-form='split-align'] [name='master_resume_id']"
             )
             try:
+                # v3 工作台把对齐表单收在「对齐设置」标签页后面，默认停在
+                # 对照编辑。表单一直在 DOM 里，只是 hidden —— 直接等可见性
+                # 会误报成「缺少主简历选择器」。
+                if not resume_select.is_visible():
+                    page.locator("[data-wb-tab-v3='controls']").first.click()
                 resume_select.wait_for(timeout=15000)
                 resumes = api_call(self.base_url, "GET", "/api/master-resumes")
                 if not resumes:
@@ -637,15 +667,17 @@ class Runner:
                     "[data-form='split-align'] [name='master_resume_id']",
                     resumes[0]["resume_id"],
                 )
-            except PlaywrightTimeoutError:
+            except PlaywrightTimeoutError as exc:
+                seen = page.evaluate("() => [...document.querySelectorAll('[data-form]')].map(f => f.dataset.form).join(',')")
                 record(
                     "P2",
                     "功能缺陷",
                     "工作台缺少主简历选择器",
-                    "工作台未渲染 split-align 表单",
+                    "工作台未渲染 split-align 表单，见 findings.json evidence",
                     "应能选择主简历并发起对齐",
                     ["打开岗位工作台"],
                     clue="检查 split-canvas 渲染条件",
+                    evidence=f"forms=[{seen}] exc={str(exc)[:300]}",
                 )
                 return
 
@@ -992,24 +1024,31 @@ class Runner:
             context.close()
 
     def check_today_view(self, browser) -> None:
-        """MVP-08: #/today renders reminders (or a clean empty state)."""
+        """#152: #/today redirects to the dashboard and corrects the URL."""
         context = browser.new_context(
             viewport={"width": 1440, "height": 900}
         )
         page = self.new_page(context)
         try:
-            self.goto(page, "#/today")
+            # 不能用 self.goto：它在等 hash 变成 #/today，而修好之后
+            # （#152）这个 hash 会被 replaceState 改写成 #/dashboard。
+            self.goto(page, "#/today", wait=False)
+            page.wait_for_timeout(1500)
+            self.wait_view(page)
             text = page.locator("#app-router-view").inner_text()
             self.check_console(page, "today-view")
-            if "今日待办" not in text:
+            # v3 移除了今日待办。修好之后（#152）#/today 应当显式重定向到
+            # 驾驶舱并把 URL 一起纠正，而不是停在 #/today 却显示驾驶舱。
+            landed = page.evaluate("location.hash")
+            if landed != "#/dashboard" or "今日待办" in text:
                 record(
                     "P2",
                     "功能缺陷",
-                    "今日待办视图未渲染",
-                    f"view text={text[:80]!r}",
-                    "#/today 应显示今日待办视图",
+                    "#/today 是死路由：落到驾驶舱，URL 与页面不一致",
+                    f"重定向后 hash={landed!r}，视图含今日待办={'今日待办' in text}",
+                    "#/today 应重定向到 #/dashboard 并同步纠正 URL",
                     ["访问 #/today"],
-                    clue="main.js today 路由 / todayViewHtml",
+                    clue="main.js handleRoute 的 case 'today' / format.js ROUTE_NAMES",
                 )
         finally:
             context.close()
@@ -1226,13 +1265,18 @@ class Runner:
             viewport={"width": 390, "height": 844}
         )
         page = self.new_page(context)
+        # The six tabs the v3 shell actually ships (index.html .app-rail).
+        # "today" used to be asserted here; the v3 redesign dropped it from the
+        # nav, so asking for it only ever produced a phantom P1 and trained
+        # people to ignore this case. Its *route* is still covered by
+        # check_today_view, which is where a real regression belongs.
         targets = {
             "dashboard": "#/dashboard",
+            "review": "#/review",
             "workspace": "#/workspace",
             "jobs": "#/jobs",
             "resume": "#/resume",
             "settings": "#/settings",
-            "today": "#/today",
         }
         try:
             self.goto(page, "#/dashboard")
@@ -1253,6 +1297,22 @@ class Runner:
                     continue
                 box = button.bounding_box()
                 hit = None
+                offscreen = False
+                if box:
+                    # .tabs--rail 是 overflow-x:auto 的横向滚动容器，6 个 tab
+                    # 在 390px 下放不下，后两个初始停在视口外。elementFromPoint
+                    # 对视口外坐标返回 null，直接拿它判「不可点击」会把一个
+                    # 滚得到、点得动的导航误报成 P1。先滚进视口再判定。
+                    nav_scrolls = page.evaluate(
+                        "() => { const n = document.querySelector('.tabs--rail');"
+                        " return !!n && n.scrollWidth > n.clientWidth; }"
+                    )
+                    center_x = box["x"] + box["width"] / 2
+                    if nav_scrolls and center_x > page.viewport_size["width"]:
+                        offscreen = True
+                        button.scroll_into_view_if_needed()
+                        page.wait_for_timeout(300)
+                        box = button.bounding_box()
                 if box:
                     hit = page.evaluate(
                         """(pt) => {
@@ -1269,6 +1329,16 @@ class Runner:
                             "x": box["x"] + box["width"] / 2,
                             "y": box["y"] + box["height"] / 2,
                         },
+                    )
+                if offscreen:
+                    record(
+                        "P3",
+                        "视觉适配",
+                        f"移动端导航 {route} 初始在首屏外且无滚动提示",
+                        f"390px 下 .tabs--rail 需横向滚动，{route} 初始不可见",
+                        "要么给出可滚动/折叠的视觉提示，要么压进一屏",
+                        ["390x844 访问 #/dashboard"],
+                        clue=".tabs--rail overflow-x:auto，无渐隐或箭头提示",
                     )
                 if not box or not hit or hit["route"] != route:
                     record(
@@ -1523,42 +1593,250 @@ class Runner:
         finally:
             context.close()
 
-    def check_invalid_url_blocker(self, browser) -> None:
+    def check_invalid_job_table_path(self, browser) -> None:
+        """Invalid job-table input must produce feedback, not a silent no-op.
+
+        Replaces the removed URL-fetch case, which had been probing
+        ``[data-fetch-url]`` long after 8f7bfed deleted the fetch bar and blew
+        the whole harness up (#149).
+        """
         context = browser.new_context(
             viewport={"width": 1440, "height": 900}
         )
         page = self.new_page(context)
         try:
             self.goto(page, "#/jobs")
-            page.fill('[data-fetch-url]', "not-a-url")
-            page.click('[data-action="fetch-job-url"]')
-            page.wait_for_timeout(3000)
-            errors = self.errors(page)
-            badge = page.locator("[data-blocker-badge]").inner_text()
-            toast_text = page.locator("#toast-region").inner_text()
-            feedback = badge + " " + toast_text
-            if errors["page"]:
-                record(
-                    "P1",
-                    "异常处理",
-                    "无效链接抓取导致页面异常",
-                    "; ".join(errors["page"]),
-                    "无效链接应有 blocker 反馈而非页面异常",
-                    ["岗位库输入 not-a-url", "点击自动抓取"],
-                    clue="检查 fetch pipeline 前端 catch",
-                )
-            if not feedback.strip():
+            page.locator("details.toolbar-more summary").click()
+            page.click('[data-action="show-import"]')
+            # 等待表单真的可见，而不是靠 sleep 赌时序
+            page.wait_for_selector(
+                '[data-form="job-import"]:not([hidden])', timeout=10000
+            )
+
+            # Empty path: the button must complain instead of doing nothing.
+            page.fill('[name="job_table_path"]', "")
+            page.click('[data-action="sync-job-table"]')
+            page.wait_for_timeout(600)
+            toast_text = page.locator("#toast-region").inner_text().strip()
+            if not toast_text:
                 record(
                     "P2",
                     "交互反馈",
-                    "无效链接抓取无任何反馈",
-                    "页面没有 blocker 徽标或 toast",
-                    "应提示链接无效并生成 blocker",
-                    ["岗位库输入 not-a-url", "点击自动抓取"],
-                    clue="检查 blocker badge 渲染",
+                    "岗位表路径为空时点击同步无任何反馈",
+                    "既无 toast 也无状态文案",
+                    "应提示先填写岗位表 CSV 路径",
+                    ["岗位库 → 数据 → 批量导入", "清空岗位表路径", "点同步岗位表"],
+                    clue="main.js sync-job-table 的空路径分支",
                 )
+
+            # A relative path and a non-CSV suffix must both be rejected with a
+            # message rather than queued.
+            for bad, label in (
+                ("relative/岗位总表.csv", "相对路径"),
+                ("C:/tmp/岗位总表.txt", "非 CSV 后缀"),
+            ):
+                page.fill('[name="job_table_path"]', bad)
+                page.click('[data-action="sync-job-table"]')
+                page.wait_for_timeout(1200)
+                text = (
+                    page.locator("[data-job-table-status]").inner_text()
+                    + page.locator("#toast-region").inner_text()
+                ).strip()
+                if not text:
+                    record(
+                        "P2",
+                        "异常处理",
+                        f"岗位表{label}未给出任何反馈",
+                        "状态区与 toast 均为空",
+                        "应提示路径不合法",
+                        [f"岗位表路径填 {bad}", "点同步岗位表"],
+                        clue="resolve_job_table_path 的 JobTableError → 422",
+                    )
         finally:
             context.close()
+
+    def _write_job_table(self, rows: list[tuple[str, str, str, str, str | None]]):
+        """Write a WorkBuddy-style CSV + JD folder. Returns (csv, jd_dir).
+
+        A row whose last element is None gets no JD markdown, reproducing the
+        real "WorkBuddy logged the row before writing its JD" state.
+        """
+        base = Path(self.app_tmp_path) / "qa-job-table"
+        jd_dir = base / "JD库"
+        jd_dir.mkdir(parents=True, exist_ok=True)
+        lines = ["公司,岗位,地点,投递入口,JD文件"]
+        for company, title, location, url, jd_name in rows:
+            reference = ""
+            if jd_name:
+                (jd_dir / jd_name).write_text(
+                    f"{title}\n公司：{company}\n地点：{location}\n"
+                    f"要求：Java、Spring Boot、SQL。",
+                    encoding="utf-8",
+                )
+                reference = f"JD库/{jd_name}"
+            lines.append(f"{company},{title},{location},{url},{reference}")
+        table = base / "岗位总表.csv"
+        table.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
+        return table, jd_dir
+
+    def _sync_job_table(self, table, jd_dir) -> dict:
+        api_call(
+            self.base_url,
+            "PUT",
+            "/api/settings",
+            {
+                "job_table": {
+                    "path": str(table),
+                    "jd_dir": str(jd_dir),
+                    "auto_sync": False,
+                    "preanalyze": False,
+                    "interval_minutes": 60,
+                }
+            },
+        )
+        start = api_call(self.base_url, "POST", "/api/jobs/job-table/sync")
+        if not start.get("queued"):
+            return start
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            status = api_call(
+                self.base_url, "GET", f"/api/jobs/import/{start['import_id']}"
+            )
+            if not status["queued"]:
+                return status
+            time.sleep(0.5)
+        raise AssertionError("job-table import did not finish")
+
+    def check_job_table_sync(self, browser) -> None:
+        """Postings sharing one employer landing page must all land (#145).
+
+        The table deliberately gives three DJI roles the same careers URL and
+        one row no JD body at all: before #145 the import worker dropped every
+        posting after the first as "Duplicate job already exists", and the UI
+        only ever showed a count (#146).
+        """
+        portal = "https://we.dji.com/zh-cn/campus/position?project=intern"
+        table, jd_dir = self._write_job_table(
+            [
+                ("大疆创新", "AI 实习生 - 后端开发", "深圳", portal, "dji-be.md"),
+                ("大疆创新", "AI 实习生 - 前端开发", "深圳", portal, "dji-fe.md"),
+                ("大疆创新", "AI DevOps 工程师", "深圳", portal, "dji-ops.md"),
+                ("大疆创新", "缺正文的岗位", "深圳", portal, None),
+            ]
+        )
+        status = self._sync_job_table(table, jd_dir)
+        if status["skipped"]:
+            record(
+                "P1",
+                "数据丢失",
+                "共用门户页 URL 的岗位被去重丢弃",
+                f"created={status['created']} skipped={status['skipped']} "
+                f"errors={status['errors']}",
+                "同公司不同岗位共用公司门户页时全部应入库",
+                ["岗位库 → 数据 → 批量导入", "同步一份多岗位共用 URL 的岗位表"],
+                clue="job_table.py 的 URL 去重分支缺少门户页回退",
+            )
+        # A re-sync must be a no-op: the stable identity keeps it free.
+        again = api_call(self.base_url, "POST", "/api/jobs/job-table/sync")
+        if again.get("queued") or again.get("total"):
+            record(
+                "P2",
+                "状态同步",
+                "岗位表二次同步重复入队",
+                f"{again}",
+                "未变更的岗位表二次同步应为 no-op（0 次 LLM 调用）",
+                ["连续点两次同步岗位表"],
+                clue="_drop_known_rows 的身份键识别",
+            )
+
+        # The skipped-row detail must be on screen, naming the rows that did
+        # not land, instead of only a counter (#146 / #151).
+        context = browser.new_context(
+            viewport={"width": 1440, "height": 900}
+        )
+        page = self.new_page(context)
+        try:
+            self.goto(page, "#/jobs")
+            page.locator("details.toolbar-more summary").click()
+            page.click('[data-action="show-import"]')
+            page.wait_for_selector(
+                '[data-form="job-import"]:not([hidden])', timeout=10000
+            )
+            # 必须用一张**没被同步过**的新表：上面已经用同一张表同步了两轮
+            # （幂等检查），所有行都成了已知重复，第三轮 errors 为空，
+            # 明细自然是空的 —— 那是检查自己的顺序依赖，不是产品不渲染。
+            ui_table, ui_jd_dir = self._write_job_table(
+                [
+                    ("商汤科技", "UI 检查岗位 - 后端", "上海", portal, "ui-be.md"),
+                    ("商汤科技", "UI 检查缺正文岗位", "上海", portal, None),
+                ]
+            )
+            page.fill('[name="job_table_path"]', str(ui_table))
+            page.fill('[name="job_table_jd_dir"]', str(ui_jd_dir))
+            page.click('[data-action="sync-job-table"]')
+            page.wait_for_function(
+                "() => { const s = document.querySelector('[data-job-table-status]');"
+                " return s && /完成|失败|没有/.test(s.textContent); }",
+                timeout=180000,
+            )
+            detail = page.locator("[data-job-table-detail]")
+            text = detail.inner_text() if detail.count() else ""
+            # 断言后端契约短语（job_table.queue_job_rows 的
+            # "<岗位名>: 缺少 JD 正文（…）"），而不是 fixture 里的岗位标题
+            # —— 后者一改标题这条检查就假失败。
+            if "缺少 JD 正文" not in text:
+                record(
+                    "P1",
+                    "交互反馈",
+                    "同步结果明细未列出未入库的岗位",
+                    f"detail={text[:120]!r}",
+                    "缺 JD 正文的行应逐条列出，而不是只给一个计数",
+                    ["同步含缺 JD 行的岗位表", "查看同步完成后的提示区"],
+                    clue="main.js sync-job-table 未渲染 status.errors",
+                )
+            self.check_console(page, "job-table-sync")
+        finally:
+            context.close()
+
+    def check_preanalyze_pending(self, browser) -> None:
+        """一键预分析 must analyze once and then skip (#150 follow-up guard)."""
+        first = api_call(self.base_url, "POST", "/api/jobs/preanalyze-pending")
+        if not first.get("queued"):
+            # No pending jobs (e.g. an earlier case failed): nothing to guard.
+            return
+        status = first
+        deadline = time.monotonic() + 600
+        while time.monotonic() < deadline:
+            status = api_call(
+                self.base_url,
+                "GET",
+                f"/api/jobs/preanalyze-pending/{first['batch_id']}",
+            )
+            if not status["queued"]:
+                break
+            time.sleep(1.0)
+        if status["analyzed"] + status["skipped"] < first["total"]:
+            record(
+                "P2",
+                "状态同步",
+                "一键预分析未覆盖全部待分析岗位",
+                f"total={first['total']} analyzed={status['analyzed']} "
+                f"skipped={status['skipped']} errors={status['errors'][:3]}",
+                "每个待分析岗位都应被处理（成功或跳过）",
+                ["岗位库点一键预分析"],
+                clue="_run_preanalyze_batch 的循环",
+            )
+        second = api_call(self.base_url, "POST", "/api/jobs/preanalyze-pending")
+        if second.get("queued"):
+            record(
+                "P1",
+                "功能缺陷",
+                "已预分析的岗位被重复排队",
+                f"第二次点击仍返回 queued=true total={second.get('total')}",
+                "已分析的岗位应被跳过，二次点击应无待办",
+                ["点两次一键预分析"],
+                clue="_collect_pending_preanalyze_job_ids",
+            )
 
     def check_mobile_viewport(self, browser) -> None:
         context = browser.new_context(
@@ -1571,7 +1849,6 @@ class Runner:
                 ("jobs", "#/jobs"),
                 ("resume", "#/resume"),
                 ("settings", "#/settings"),
-                ("today", "#/today"),
                 ("workspace", "#/workspace"),
             ]:
                 try:
@@ -1664,34 +1941,59 @@ class Runner:
             context.close()
 
     def run(self, browser) -> None:
-        self.check_routes(browser)
-        self.check_empty_states(browser)
-        self.check_deterministic_job_fields()
-        self.check_resume_flow(browser)
-        self.check_match_score_sort(browser)
-        self.check_resume_diagnosis_persistence(browser)
-        self.check_special_char_escaping(browser)
-        self.check_job_and_workbench(browser)
-        self.check_export_final_draft(browser)
-        self.check_settings_and_theme(browser)
-        self.check_today_view(browser)
-        self.check_cost_guard()
-        self.check_backup_restore_guard()
-        self.check_long_jd_input(browser)
-        self.check_missing_workspace_job(browser)
-        self.check_invalid_url_blocker(browser)
-        self.check_mobile_viewport(browser)
-        self.check_mobile_nav_clickable(browser)
-        self.check_network_degradation(browser)
-        self.check_double_submit(browser)
+        checks = [
+            ("routes", lambda: self.check_routes(browser)),
+            ("empty-states", lambda: self.check_empty_states(browser)),
+            ("deterministic-fields", self.check_deterministic_job_fields),
+            ("resume-flow", lambda: self.check_resume_flow(browser)),
+            ("match-score-sort", lambda: self.check_match_score_sort(browser)),
+            (
+                "resume-diagnosis-persistence",
+                lambda: self.check_resume_diagnosis_persistence(browser),
+            ),
+            ("special-chars", lambda: self.check_special_char_escaping(browser)),
+            ("job-workbench", lambda: self.check_job_and_workbench(browser)),
+            ("export-final", lambda: self.check_export_final_draft(browser)),
+            ("settings-theme", lambda: self.check_settings_and_theme(browser)),
+            ("today-view", lambda: self.check_today_view(browser)),
+            ("cost-guard", self.check_cost_guard),
+            ("backup-restore", self.check_backup_restore_guard),
+            ("long-jd", lambda: self.check_long_jd_input(browser)),
+            ("missing-workspace", lambda: self.check_missing_workspace_job(browser)),
+            ("invalid-job-table-path", lambda: self.check_invalid_job_table_path(browser)),
+            ("job-table-sync", lambda: self.check_job_table_sync(browser)),
+            ("preanalyze-pending", lambda: self.check_preanalyze_pending(browser)),
+            ("mobile-viewport", lambda: self.check_mobile_viewport(browser)),
+            ("mobile-nav", lambda: self.check_mobile_nav_clickable(browser)),
+            ("network-degradation", lambda: self.check_network_degradation(browser)),
+            ("double-submit", lambda: self.check_double_submit(browser)),
+        ]
+        for name, check in checks:
+            try:
+                check()
+            except Exception as exc:  # noqa: BLE001 - a broken case must not
+                # take the whole run's evidence down with it. Selector drift in
+                # one case used to abort the harness and leave findings.json
+                # holding the *previous* run's (empty) result, which is exactly
+                # how a stale URL-fetch case hid #145 for a release (#149).
+                record(
+                    "P1",
+                    "QA harness",
+                    f"用例 {name} 抛异常，后续用例已继续",
+                    f"{type(exc).__name__}: {exc}",
+                    "单个用例失败不应中断整轮走查",
+                    [f"scripts/qa_dogfooder.py::{name}"],
+                    clue="用例锚点可能已随产品演进而漂移",
+                )
+                print(f"  [harness] case {name} raised: {exc}")
 
 
 def main() -> int:
     llm = FakeLLMServer()
-    llm.start()
     app = AppServer(llm)
-    app.start()
     try:
+        llm.start()
+        app.start()
         runner = Runner(
             app.base_url,
             app_tmp_path=app.tmp_path,
@@ -1706,20 +2008,26 @@ def main() -> int:
     finally:
         app.stop()
         llm.stop()
-
-    ARTIFACTS.mkdir(parents=True, exist_ok=True)
-    (ARTIFACTS / "findings.json").write_text(
-        json.dumps(FINDINGS, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    (ARTIFACTS / "console-all.log").write_text(
-        "\n".join(CONSOLE_MESSAGES),
-        encoding="utf-8",
-    )
+        # Evidence is written whether or not the run survived: a crashed
+        # harness that leaves the previous run's findings.json in place reads
+        # as "no problems found" to anyone (or any CI job) looking at it.
+        ARTIFACTS.mkdir(parents=True, exist_ok=True)
+        (ARTIFACTS / "findings.json").write_text(
+            json.dumps(FINDINGS, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        (ARTIFACTS / "console-all.log").write_text(
+            "\n".join(CONSOLE_MESSAGES),
+            encoding="utf-8",
+        )
     print(f"findings: {len(FINDINGS)}")
     for finding in FINDINGS:
         print(f"  [{finding['severity']}] {finding['category']} {finding['title']}")
-    return 0
+    # P0/P1 findings fail the run so CI can gate on this; everything else is
+    # advisory. Before this the exit code only ever signalled "the harness
+    # itself crashed", which told CI nothing about the product.
+    blocking = [f for f in FINDINGS if f["severity"] in ("P0", "P1")]
+    return 1 if blocking else 0
 
 
 if __name__ == "__main__":
