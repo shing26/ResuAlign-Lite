@@ -591,6 +591,7 @@ def _drop_known_rows(
                 title=row.get("title"),
                 location=row.get("location"),
                 extra_key=row.get("dedupe_key"),
+                prefer_identity=bool(row.get("shared_portal_url")),
             )
             is not None
         )

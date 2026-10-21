@@ -542,6 +542,7 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
     payload['jd_text'] = jd_text
     source_type = payload.get('source_type') or ('url' if jd_url else 'paste')
     source_url = payload.get('source_url') or (jd_url or None)
+    prefer_identity = bool(payload.get('shared_portal_url'))
     dedupe_key = payload.get('dedupe_key') or _dedupe_key_for(
         source_type, source_url, jd_text
     )
@@ -558,6 +559,7 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
         title=fields['title'],
         location=fields['location'],
         extra_key=payload.get('dedupe_key'),
+        prefer_identity=prefer_identity,
     )
     if duplicate is not None:
         raise context.UserStoreError('Duplicate job already exists')
@@ -578,7 +580,7 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
         classification_pending = 1
     job_function = payload.get('job_function') or classification.get('job_function')
     seniority = payload.get('seniority') or classification.get('seniority')
-    return context._jobs.create_job(tenant_id=user['user_id'], title=title, jd_text=jd_text, company=company, location=location, salary_min=salary_min, salary_max=salary_max, salary_currency=payload.get('salary_currency') or 'CNY', source_type=source_type, source_url=source_url, dedupe_key=dedupe_key, job_function=job_function, seniority=seniority, tech_tags=payload.get('tech_tags') or classification.get('tech_tags') or [], status=payload.get('status') or '未投递', classification_pending=classification_pending, posting_date=payload.get('posting_date'), applied_at=payload.get('applied_at'), next_step=payload.get('next_step'), notes=payload.get('notes'), offer_at=payload.get('offer_at'), rejected_at=payload.get('rejected_at'), allowed_job_functions=job_functions, allowed_seniorities=seniorities)
+    return context._jobs.create_job(tenant_id=user['user_id'], title=title, jd_text=jd_text, company=company, location=location, salary_min=salary_min, salary_max=salary_max, salary_currency=payload.get('salary_currency') or 'CNY', source_type=source_type, source_url=source_url, dedupe_key=dedupe_key, prefer_identity=prefer_identity, job_function=job_function, seniority=seniority, tech_tags=payload.get('tech_tags') or classification.get('tech_tags') or [], status=payload.get('status') or '未投递', classification_pending=classification_pending, posting_date=payload.get('posting_date'), applied_at=payload.get('applied_at'), next_step=payload.get('next_step'), notes=payload.get('notes'), offer_at=payload.get('offer_at'), rejected_at=payload.get('rejected_at'), allowed_job_functions=job_functions, allowed_seniorities=seniorities)
 
 
 def _local_ingest_job(

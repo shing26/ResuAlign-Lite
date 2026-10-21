@@ -8,6 +8,7 @@ Both preanalysis sweeps share one helper: the import auto-preanalyze chain and
 the one-click "preanalyze all unanalyzed" batch, so the two paths must agree
 on which failures are retried and on the recorded error text.
 """
+import threading
 from unittest.mock import patch
 
 from resualign.api.services import jobs as jobs_service
@@ -122,6 +123,9 @@ def _run_batch(side_effect, jobs=None):
         "skipped": 0,
         "errors": [],
         "done": False,
+        "stopped": False,
+        "canceled": False,
+        "stop": threading.Event(),
     }
     with patch.object(
         jobs_service, "preanalyze_job", side_effect=side_effect

@@ -1058,6 +1058,7 @@ class JobLibraryStore(_SqliteStore):
         prompt_version: str | None = None,
         generated_at: float | None = None,
         dedupe_key: str | None = None,
+        prefer_identity: bool = False,
         allowed_job_functions: Sequence[str] | None = None,
         allowed_seniorities: Sequence[str] | None = None,
     ) -> dict[str, Any]:
@@ -1111,6 +1112,7 @@ class JobLibraryStore(_SqliteStore):
                 title=title,
                 location=location,
                 extra_key=dedupe_key,
+                prefer_identity=prefer_identity,
             )
             is not None
         ):
@@ -1235,6 +1237,7 @@ class JobLibraryStore(_SqliteStore):
         title: str | None = None,
         location: str | None = None,
         extra_key: str | None = None,
+        prefer_identity: bool = False,
     ) -> Optional[dict[str, Any]]:
         """Return the oldest job matching any dedupe candidate, else None.
 
@@ -1246,8 +1249,15 @@ class JobLibraryStore(_SqliteStore):
         full-scan precedent.
         The text candidate hashes each stored body on the fly, so a row
         stored under a URL key still catches an identical pasted body.
+        ``prefer_identity`` drops the URL candidate for shared employer
+        landing pages; the explicit job-table identity/text still dedupe a
+        genuine repeat without collapsing sibling postings.
         """
-        url_key = "url:" + _normalize_source_url(source_url or "")
+        url_key = (
+            ""
+            if prefer_identity
+            else "url:" + _normalize_source_url(source_url or "")
+        )
         text_key = (
             _text_dedupe_key(text) if (text or "").strip() else ""
         )
@@ -1258,6 +1268,7 @@ class JobLibraryStore(_SqliteStore):
         )
         if not (url_key != "url:" or text_key or identity or extra_key):
             return None
+        candidate_keys = {key for key in (url_key, text_key, extra_key) if key}
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
@@ -1267,7 +1278,7 @@ class JobLibraryStore(_SqliteStore):
                     (tenant_id,),
                 ).fetchall()
         for row in rows:
-            if row["dedupe_key"] in (url_key, text_key, extra_key):
+            if row["dedupe_key"] in candidate_keys:
                 return self._row_to_library_job(row)
             if url_key != "url:" and row["source_url"] and (
                 _normalize_source_url(row["source_url"]) == url_key[4:]
