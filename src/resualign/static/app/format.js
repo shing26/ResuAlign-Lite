@@ -1163,6 +1163,18 @@ export function diffList(session, jobId) {
     if (alignmentOutcomeKind(alignment) === "no_gap") {
       return '<div class="diff-card-list" data-diff-list></div>';
     }
+    /* B5（2026-10-23）：终态「对齐完成但无可用建议」时，横幅已经给出结论，
+     * 主区不该再显示「还没有对齐结果 / 点开始对齐」的首次引导（同屏自相矛盾）。
+     * 有 notice 的成功终态给一个轻量说明，不重复给「开始对齐」入口。 */
+    if (alignment.status === "succeeded" && alignment.notice) {
+      return `<div class="diff-card-list" data-diff-list>
+        <div class="wb-notice-empty" data-wb-notice-empty>
+          <strong>本轮没有可采纳的改写</strong>
+          <p>${esc(String(alignment.notice))}</p>
+          <p class="muted small">原始简历与定稿不受影响；需要更多改写时可以换更强的模型节点后重跑。</p>
+        </div>
+      </div>`;
+    }
     /* P0-2: 失败/取消/过期态不再渲染「还没有对齐结果」首次引导卡 —— 失败反馈
      * 收敛到顶部错误横幅 + 顶栏危险级「重新运行对齐」单入口，避免同屏 3 个
      * 对齐入口、2 套标签（2026-08-25 走查实测的失败态三入口问题）。 */
@@ -3216,7 +3228,7 @@ export function skillGapHtml(gaps, onSkillGapUrl, options = {}) {
         <thead>
           <tr>
             <th scope="col">技能</th>
-            <th scope="col" class="is-num">需求岗位</th>
+            <th scope="col" class="is-num">要求岗位数</th>
             <th scope="col">需求强度</th>
             <th scope="col" aria-label="操作"></th>
           </tr>
@@ -3546,18 +3558,44 @@ export function versionChangeSummary(previous, version) {
   return text.length > 60 ? `${text.slice(0, 60)}…` : text;
 }
 
+/** 相邻版本的增删行数（RS-04：版本时间线显示「+N / −M 行」，
+ *  比截断 60 字的摘要更能说明「这版改了多少」）。 */
+export function versionChangeStats(previous, version) {
+  const rows = lineDiff(
+    previous ? previous.content : "",
+    version ? version.content : "",
+  );
+  const added = rows.filter((row) => row.type === "add").length;
+  const removed = rows.filter((row) => row.type !== "add").length;
+  return { added, removed };
+}
+
 /** 版本时间线（竖线）：每条 vN + 创建时间 + 变更摘要 + 当前标记；非当前版本
  *  提供「预览」（data-action=preview-version）与「回滚」（rollback-resume）。
- *  resumeId 用于回滚按钮的 data-id。 */
+ *  resumeId 用于回滚按钮的 data-id。
+ *  RS-04：单版本时折叠成一行（之前一条 v1 也占 108px 且没有操作）；
+ *  多版本在每行补「+N / −M 行」统计，摘要仍保留给逐行阅读。 */
 export function versionTimelineHtml(versions, currentVersion, resumeId = "") {
   const list = Array.isArray(versions) ? versions : [];
   if (!list.length) {
     return `<div class="version-timeline" data-version-timeline><div class="muted small">暂无版本</div></div>`;
   }
+  if (list.length === 1) {
+    const only = list[0];
+    return `<div class="version-timeline version-timeline--single" data-version-timeline>
+    <div class="version-timeline-item is-current" data-version-item data-version="${esc(only.version)}">
+      <span class="version-timeline__no">v${esc(only.version)}</span>
+      <span class="badge badge-green" data-version-current>当前</span>
+      <span class="small muted">${formatDate(only.created_at)}</span>
+      <span class="version-timeline__summary muted small" data-version-summary>初始版本</span>
+    </div>
+  </div>`;
+  }
   const items = list
     .map((version, index) => {
       const current = Number(version.version) === Number(currentVersion);
       const summary = versionChangeSummary(list[index - 1], version);
+      const stats = versionChangeStats(list[index - 1], version);
       return `
     <div class="version-timeline-item${current ? " is-current" : ""}" data-version-item data-version="${esc(version.version)}">
       <div class="version-timeline__dot" aria-hidden="true"></div>
@@ -3566,6 +3604,7 @@ export function versionTimelineHtml(versions, currentVersion, resumeId = "") {
           <span class="version-timeline__no">v${esc(version.version)}</span>
           ${current ? '<span class="badge badge-green" data-version-current>当前</span>' : ""}
           <span class="small muted">${formatDate(version.created_at)}</span>
+          ${index > 0 ? `<span class="version-timeline__stats" data-version-stats title="相对上一版：+${stats.added} 行 / −${stats.removed} 行">+${stats.added} / −${stats.removed}</span>` : ""}
         </div>
         <div class="version-timeline__summary" data-version-summary>${esc(summary)}</div>
         ${current ? "" : `

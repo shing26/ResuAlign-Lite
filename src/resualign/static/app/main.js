@@ -1230,8 +1230,13 @@ async function exportFinalDraft(format, options = {}) {
  * 引用会让新按钮顶着「一键预分析」的样子却执行取消。所以每次画都重新
  * 按选择器取当前真正在文档里的那个。 */
 let activePreanalyze = null;
+/* 批量对齐的提交闸门：确认按钮随弹窗销毁只能挡住连点弹窗，挡不住「弹窗关掉、
+ * POST 还在路上时再点一次工具栏」——那会排两批、花两遍钱。 */
+let batchAlignSubmitting = false;
 
 const PREANALYZE_SELECTOR = '[data-action="preanalyze-pending"]';
+const BATCH_ALIGN_SELECTOR =
+  '[data-action="batch-align-pending"][data-batch-align]';
 
 function paintPreanalyzeButton() {
   const button = document.querySelector(PREANALYZE_SELECTOR);
@@ -1257,6 +1262,113 @@ function resetPreanalyzeButton() {
   button.title = "";
   button.disabled = false;
   if (label) button.textContent = label;
+}
+
+/* J5（审计 2026-10-22）：「一键预分析 / 批量对齐」点下去就是一长串真实的
+ * 模型调用，可按钮上只有动作名，没有数量、时长、花费 —— 用户要么不敢点，
+ * 要么点完才发现搞大了。后端没有「先问价」的接口，所以这里用岗位库当前
+ * 已加载的列表（renderKanban 拉的 /api/jobs?limit=500，与看板同源）做前端
+ * 估算，弹窗与按钮文案都必须写明「按当前列表估算」。
+ *
+ * 预分析成本常量来自代码注释与实测（每个岗位 2 次串行 LLM 调用、约 3.5s/岗）：
+ * 87 个岗位 ≈ 174 次调用、5 分钟以上。改这里之前先重跑一次实测。 */
+const PREANALYZE_SECONDS_PER_JOB = 3.5;
+const PREANALYZE_CALLS_PER_JOB = 2;
+
+/* 复刻后端 job_needs_preanalyze：有 JD 正文 ∧（分类待定 ∨ 还没 JD 画像）。
+ * 漏掉 jd_text 会高估没有正文的岗位；审计时 318 条里 87 条命中，与后端扫描
+ * 结果一致（此后随实际预分析进度变化）。 */
+function estimatePreanalyzePending() {
+  return (state.jobs || []).filter(
+    (job) =>
+      (job.jd_text || "").trim() &&
+      (!job.jd_profile || Boolean(job.classification_pending)),
+  ).length;
+}
+
+/* 复刻后端 _pending_library_jobs 的前端下限：idle / failed 一律进队；queued
+ * 只在「注册任务已终态」时补跑，而前端拿不到注册表状态，所以这里不计入，
+ * 弹窗里说明是估算。当前真实数据：idle 87 + failed 209 = 296。 */
+function estimateBatchAlignPending() {
+  return (state.jobs || []).filter((job) =>
+    ["idle", "failed"].includes(job.alignment_status || "idle"),
+  ).length;
+}
+
+function estimateBatchMinutes(seconds) {
+  /* 不足 1 分钟也要说「约 1 分钟」：写 0 分钟等于没给预期。 */
+  return Math.max(1, Math.round(seconds / 60));
+}
+
+/* J5 第二步（预分析）：确认弹窗点「开始预分析」后才真正发请求。
+ * 按钮节点可能已被 render() 换掉，所以按选择器重新取，绝不持有旧引用
+ * （见 activePreanalyze 的注释）。逻辑与原 handler 完全一致，只是多了一层
+ * 「先讲代价」的前置确认。 */
+async function startPreanalyzeBatch() {
+  const button = document.querySelector(PREANALYZE_SELECTOR);
+  if (!button || activePreanalyze) return;
+  const label = button.textContent;
+  button.disabled = true;
+  try {
+    const start = await api("/api/jobs/preanalyze-pending", { method: "POST" });
+    if (!start.queued) {
+      button.disabled = false;
+      toast("没有待预分析的岗位", "success");
+      return;
+    }
+    /* 预分析是每岗位两次串行 LLM 调用（实测 ~3.5s/岗位），120 个岗位
+     * 约 7 分钟。按钮置灰等于让用户干等，所以改成进度按钮 + 「停止」：
+     * 已分析的结果保留，剩下的不再排队。 */
+    activePreanalyze = {
+      batchId: start.batch_id,
+      canceling: false,
+      label,
+      total: start.total,
+      analyzed: 0,
+    };
+    paintPreanalyzeButton();
+    const timer = window.setInterval(async () => {
+      try {
+        const status = await api(
+          `/api/jobs/preanalyze-pending/${start.batch_id}`,
+        );
+        if (activePreanalyze) {
+          activePreanalyze.analyzed = status.analyzed;
+          if (!activePreanalyze.canceling) paintPreanalyzeButton();
+        }
+        if (!status.queued) {
+          window.clearInterval(timer);
+          resetPreanalyzeButton();
+          const failed = (status.errors || []).length;
+          if (status.canceled) {
+            toast(
+              `已停止：已分析 ${status.analyzed}，剩余 ${status.total - status.analyzed - status.skipped} 个未处理`,
+              "info",
+            );
+          } else if (status.stopped && failed) {
+            /* 定义性阻断（欠费/鉴权）会让整批在首行停下：把后端给的
+             * 可执行原因直接透出，而不是只报「失败 1」。 */
+            toast(status.errors[0], "error");
+          } else {
+            toast(
+              `预分析完成：已分析 ${status.analyzed}，跳过 ${status.skipped}` +
+                (failed ? `，失败 ${failed}` : ""),
+              status.analyzed ? "success" : "error",
+            );
+          }
+          render();
+        }
+      } catch (error) {
+        window.clearInterval(timer);
+        resetPreanalyzeButton();
+        toast(error.message, "error");
+      }
+    }, 1500);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = label;
+    toast(error.message, "error");
+  }
 }
 
 const actions = {
@@ -1680,6 +1792,11 @@ const actions = {
       toast(error.message, "error");
     }
   },
+  /* J5（审计 2026-10-22）：原来点一下就直接 POST —— 一次点击 = 87 个岗位 x
+   * 2 次模型调用、5 分钟以上，而按钮文案里没有任何数量与代价。改成两步：
+   * 先按当前列表估算并弹窗讲清「处理多少 / 多久 / 几次调用 / 可停止」，
+   * 用户点「开始预分析」才真正排队；取消只关弹窗、不发任何请求。
+   * 「取消」排在动作区第一个，回车/空格不会顺手把这一批钱花掉。 */
   "preanalyze-pending": async (button) => {
     /* 正在跑的时候，同一个按钮就是「停止」。 */
     if (activePreanalyze) {
@@ -1702,68 +1819,36 @@ const actions = {
       }
       return;
     }
-    const label = button.textContent;
-    button.disabled = true;
-    try {
-      const start = await api("/api/jobs/preanalyze-pending", { method: "POST" });
-      if (!start.queued) {
-        button.disabled = false;
-        toast("没有待预分析的岗位", "success");
-        return;
-      }
-      /* 预分析是每岗位两次串行 LLM 调用（实测 ~3.5s/岗位），120 个岗位
-       * 约 7 分钟。按钮置灰等于让用户干等，所以改成进度按钮 + 「停止」：
-       * 已分析的结果保留，剩下的不再排队。 */
-      activePreanalyze = {
-        batchId: start.batch_id,
-        canceling: false,
-        label,
-        total: start.total,
-        analyzed: 0,
-      };
-      paintPreanalyzeButton();
-      const timer = window.setInterval(async () => {
-        try {
-          const status = await api(
-            `/api/jobs/preanalyze-pending/${start.batch_id}`,
-          );
-          if (activePreanalyze) {
-            activePreanalyze.analyzed = status.analyzed;
-            if (!activePreanalyze.canceling) paintPreanalyzeButton();
-          }
-          if (!status.queued) {
-            window.clearInterval(timer);
-            resetPreanalyzeButton();
-            const failed = (status.errors || []).length;
-            if (status.canceled) {
-              toast(
-                `已停止：已分析 ${status.analyzed}，剩余 ${status.total - status.analyzed - status.skipped} 个未处理`,
-                "info",
-              );
-            } else if (status.stopped && failed) {
-              /* 定义性阻断（欠费/鉴权）会让整批在首行停下：把后端给的
-               * 可执行原因直接透出，而不是只报「失败 1」。 */
-              toast(status.errors[0], "error");
-            } else {
-              toast(
-                `预分析完成：已分析 ${status.analyzed}，跳过 ${status.skipped}` +
-                  (failed ? `，失败 ${failed}` : ""),
-                status.analyzed ? "success" : "error",
-              );
-            }
-            render();
-          }
-        } catch (error) {
-          window.clearInterval(timer);
-          resetPreanalyzeButton();
-          toast(error.message, "error");
-        }
-      }, 1500);
-    } catch (error) {
-      button.disabled = false;
-      button.textContent = label;
-      toast(error.message, "error");
+    const pending = estimatePreanalyzePending();
+    if (!pending) {
+      /* 没有可分析的岗位时不弹空弹窗、也不发请求：后端会 422，白等一次往返。 */
+      toast("没有待分析的岗位", "info");
+      return;
     }
+    const calls = pending * PREANALYZE_CALLS_PER_JOB;
+    const minutes = estimateBatchMinutes(
+      pending * PREANALYZE_SECONDS_PER_JOB,
+    );
+    showModal(
+      "确认一键预分析",
+      `<p>将处理 <b>${pending}</b> 个待分析岗位（按当前列表估算）。</p>
+       <ul class="small muted">
+         <li>每个岗位约 ${PREANALYZE_CALLS_PER_JOB} 次模型调用（分类 + JD 画像提取），合计约 <b>${calls}</b> 次</li>
+         <li>串行执行，约 ${PREANALYZE_SECONDS_PER_JOB} 秒/岗，预计 <b>约 ${minutes} 分钟</b></li>
+         <li>开始后按钮会变成进度入口，可随时点它停止；已分析的结果保留</li>
+       </ul>
+       <p class="small muted">实际数量以后端扫描全库为准：当前筛选可能让估算偏低。</p>
+       <div class="actions">
+         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+         <button class="btn btn-primary" type="button" data-action="confirm-preanalyze-pending">开始预分析</button>
+       </div>`,
+    );
+  },
+  /* J5 第二步（预分析）：确认后才真正 POST。先关弹窗 —— 确认按钮节点随
+   * 弹窗销毁，天然挡住连点（连点会排两个批次、花两遍钱）。 */
+  "confirm-preanalyze-pending": async () => {
+    closeModal();
+    await startPreanalyzeBatch();
   },
   "clear-filters": () => {
     state.filters = {
@@ -2805,30 +2890,70 @@ const actions = {
     toast("已恢复最近一次批次结果", "success");
   },
   /* 一键分析全部待处理岗位（idle/failed/卡死的 queued），后端 selector=pending 选岗。
-   * 主简历/粒度复用批量面板当前选择，主简历未选时后端回退到最近更新的主简历。 */
+   * 主简历/粒度复用批量面板当前选择，主简历未选时后端回退到最近更新的主简历。
+   *
+   * J5（审计 2026-10-22）：原来点一下就直接排队 —— 用户看到「已排队 N 个」
+   * 时钱已经花出去了，而 N 可能接近全库（当前 296 个）。先讲清「多少个 /
+   * 每个多久 / 几次模型调用 / 怎么停」，确认后才 POST。
+   * 注意：真正的 POST 放在紧随其后的 confirm-batch-align-pending 里 ——
+   * phase-e.test.mjs 从本键起切片断言 /api/batch-align 与 selector=pending，
+   * 两者必须保持「确认键在前面、POST 键在后面」这个源码顺序。 */
   "batch-align-pending": async () => {
-    const form = $('[data-form="batch-align"]');
-    const data = form
-      ? Object.fromEntries(new FormData(form).entries())
-      : {};
-    const result = await api("/api/batch-align", {
-      method: "POST",
-      body: JSON.stringify({
-        selector: "pending",
-        master_resume_id: data.master_resume_id || "",
-        job_ids: [],
-        granularity: data.granularity || "fine",
-        prompt_focus: "balanced",
-        custom_prompt: data.custom_prompt || null,
-      }),
-    });
-    state.batchAlign = result;
-    openBatchPanel();
-    const cancel = $("[data-batch-cancel]");
-    if (cancel) cancel.hidden = false;
-    renderBatchResults(result);
-    startBatchPolling(result.batch_id);
-    toast(`已排队 ${result.queued} 个待处理岗位`, "success");
+    const pending = estimateBatchAlignPending();
+    if (!pending) {
+      toast("没有待对齐的岗位", "info");
+      return;
+    }
+    showModal(
+      "确认批量对齐",
+      `<p>将排队 <b>${pending}</b> 个岗位（按当前列表估算）。</p>
+       <ul class="small muted">
+         <li>每个岗位约 1–3 分钟，排队后由工作线程逐个执行</li>
+         <li>消耗 <b>${pending}</b> 次模型调用（每岗一次对齐）</li>
+         <li>排队后可在批量面板里点「取消排队」，停掉还没开始的任务</li>
+       </ul>
+       <p class="small muted">实际数量以后端扫描全库为准：当前筛选可能让估算偏低；卡在「排队中」的残留任务不计入。</p>
+       <div class="actions">
+         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+         <button class="btn btn-primary" type="button" data-action="confirm-batch-align-pending">开始排队</button>
+       </div>`,
+    );
+  },
+  /* J5 第二步（批量对齐）：确认后才真正 POST。先关弹窗 —— 确认按钮节点随
+   * 弹窗销毁，天然挡住连点；batchAlignSubmitting 再兜住「弹窗关掉、POST 还
+   * 在路上时又点一次工具栏」的窗口（那会排两批、花两遍钱）。 */
+  "confirm-batch-align-pending": async () => {
+    closeModal();
+    if (batchAlignSubmitting) return;
+    batchAlignSubmitting = true;
+    try {
+      const form = $('[data-form="batch-align"]');
+      const data = form
+        ? Object.fromEntries(new FormData(form).entries())
+        : {};
+      const result = await api("/api/batch-align", {
+        method: "POST",
+        body: JSON.stringify({
+          selector: "pending",
+          master_resume_id: data.master_resume_id || "",
+          job_ids: [],
+          granularity: data.granularity || "fine",
+          prompt_focus: "balanced",
+          custom_prompt: data.custom_prompt || null,
+        }),
+      });
+      state.batchAlign = result;
+      openBatchPanel();
+      const cancel = $("[data-batch-cancel]");
+      if (cancel) cancel.hidden = false;
+      renderBatchResults(result);
+      startBatchPolling(result.batch_id);
+      toast(`已排队 ${result.queued} 个待处理岗位`, "success");
+    } catch (error) {
+      toast(error.message || "批量对齐排队失败", "error");
+    } finally {
+      batchAlignSubmitting = false;
+    }
   },
   "toggle-theme": () => toggleTheme(),
   /* 网申结构化档案：生成 / 编辑（简历中心档案页侧栏卡）。 */
@@ -4232,6 +4357,30 @@ setCanvasRenderHook(async (app) => {
   wrap.setAttribute("data-batch-wrap", "");
   wrap.innerHTML = batchPanelHtml(state.jobs || [], resumes || []);
   mount.append(fab, wrap);
+});
+
+/* J5：工具栏两个批量按钮直接带「按当前列表估算」的数量（一键预分析（87）/
+ * 批量对齐（296）），用户不必先点开弹窗才知道这一批的规模。只改文案，不碰
+ * kanban.js；用渲染 hook 在 renderKanban 完成后写回。预分析批次进行中时
+ * 按钮归 paintPreanalyzeButton 管（「预分析中 x/y」是停止入口），这里绝不
+ * 覆盖它。 */
+setCanvasRenderHook((app) => {
+  if (!activePreanalyze) {
+    const preanalyzeButton = app.querySelector(PREANALYZE_SELECTOR);
+    if (preanalyzeButton) {
+      preanalyzeButton.textContent =
+        `一键预分析（${estimatePreanalyzePending()}）`;
+      preanalyzeButton.title =
+        "批量分析待处理岗位：每个约 2 次模型调用，点击后会先确认";
+    }
+  }
+  const batchAlignButton = app.querySelector(BATCH_ALIGN_SELECTOR);
+  if (batchAlignButton) {
+    batchAlignButton.textContent =
+      `批量对齐（${estimateBatchAlignPending()}）`;
+    batchAlignButton.title =
+      "排队全部待对齐岗位：每岗一次模型调用，点击后会先确认";
+  }
 });
 
 async function boot() {

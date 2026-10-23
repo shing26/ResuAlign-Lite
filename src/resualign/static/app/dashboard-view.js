@@ -129,6 +129,21 @@ export async function renderDashboard(container) {
     : "";
 
   const quality = payload.quality || null;
+  /* D4（2026-10-22 审计）：「已完成对齐」是全量口径、「已优化条目」是近 7 天口径，
+   * 原来只有后者标了时间窗，两个数字并排像自相矛盾（22 对齐却 0 产出）。
+   * 这里把两个口径都写明；quality.diffs_total===0 时不再输出「采纳 0/0 条建议」
+   * 这种除零文案（读起来像 bug），改成「近 N 天暂无建议记录」。 */
+  const qualityHint = (() => {
+    if (!quality) return "";
+    const days = toNumber(quality.window_days) || 7;
+    const saves = toNumber(quality.saves);
+    const total = toNumber(quality.diffs_total);
+    if (total === 0) {
+      return `近 ${days} 天暂无建议记录${saves ? ` · 定稿 ${saves} 次` : ""}`;
+    }
+    const accepted = toNumber(quality.diffs_accepted);
+    return `近 ${days} 天 · 定稿 ${saves} 次 · 采纳 ${accepted}/${total} 条建议`;
+  })();
   const atsTone = scoreTone(atsScore);
   const atsLabel = atsScore == null ? "未诊断" : atsHealthScoreLevel(atsScore);
   const atsMeter = atsScore == null
@@ -159,7 +174,7 @@ export async function renderDashboard(container) {
     <div class="metric-cell" data-kpi="aligned">
       <div class="metric-label">已完成对齐</div>
       <div class="metric-value">${escAttr(alignedCount)} <span>/ ${escAttr(jobsTotal)}</span></div>
-      <div class="metric-hint">完成率 ${escAttr(completionRate)}%${noGapCount ? ` · 无缺口 ${escAttr(noGapCount)}` : ""}</div>
+      <div class="metric-hint">全量口径 · 完成率 ${escAttr(completionRate)}%<br>有可用改写的岗位 / 全部岗位${noGapCount ? ` · 无缺口 ${escAttr(noGapCount)}` : ""}</div>
     </div>
     <div class="metric-cell" data-kpi="ats">
       <div class="metric-label">主简历 ATS</div>
@@ -170,7 +185,7 @@ export async function renderDashboard(container) {
     <div class="metric-cell" data-kpi="quality" ${quality ? "" : "hidden"}>
       <div class="metric-label">已优化条目</div>
       <div class="metric-value">${quality && quality.diffs_accepted != null ? `${escAttr(quality.diffs_accepted)}<span> 条</span>` : "—"}</div>
-      <div class="metric-hint">${quality ? `近 ${escAttr(quality.window_days)} 天 · 定稿 ${escAttr(quality.saves)} 次 · 采纳 ${escAttr(quality.diffs_accepted)}/${escAttr(quality.diffs_total)} 条建议` : ""}</div>
+      <div class="metric-hint">${qualityHint}</div>
     </div>`;
 
   const quick = payload.quick_continue || null;
@@ -257,6 +272,19 @@ export async function renderDashboard(container) {
     skill: shortenGapPhrase(gap.skill || "未命名技能"),
   }));
   const gapHtml = skillGapHtml(normalizedGaps, undefined, { variant: "table" });
+  /* D6（2026-10-22 审计）：原「技能缺口」只给全库需求频次，既不说「我缺什么」
+   * 也不给下一步（接口契约只有 {skill,count}，前端拿不到 covered 字段）。
+   * 短期纯前端方案：改叫「岗位高频技能」（数据确实来自全库岗位画像），
+   * 底部给一条主 CTA，把「看数字」接到工作台的「拿主简历对比」动作上。 */
+  const skillCtaHref =
+    quick && quick.job_id
+      ? `#/workspace/${encodeURIComponent(quick.job_id)}`
+      : "#/workspace";
+  /* gapHtml 自带 data-skill-gaps，外层保留同名容器（事件委托/测试都认它）。
+   * 无数据时 format.js 返回纯文本空态，用非 flush 的 panel-body 才有内边距。 */
+  const gapPanelClass = normalizedGaps.length
+    ? "panel-body panel-body--flush skill-gap-panel"
+    : "panel-body skill-gap-panel";
 
   const recentJobs = jobs
     .filter((job) => job && job.job_id)
@@ -330,11 +358,14 @@ export async function renderDashboard(container) {
         <aside class="panel dashboard-panel aux-pane">
           <div class="panel-head">
             <div>
-              <h2>技能缺口</h2>
-              <p>目标岗位高频硬技能</p>
+              <h2>岗位高频技能</h2>
+              <p>${escAttr(jobsTotal)} 个岗位里被要求最多的硬技能</p>
             </div>
           </div>
-          <div class="panel-body panel-body--flush skill-gap-panel" data-skill-gaps>${gapHtml}</div>
+          <div class="${gapPanelClass}" data-skill-gaps>${gapHtml}</div>
+          <div class="panel-body">
+            <a class="btn btn-secondary btn-sm" href="${escAttr(skillCtaHref)}" data-skill-gap-cta>拿主简历对比一次 →</a>
+          </div>
         </aside>
       </div>
     </div>`;

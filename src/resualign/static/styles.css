@@ -12993,3 +12993,211 @@ select,
   }
 }
 }
+
+@layer components {
+/* =====================================================================
+ * B5（2026-10-23）：工作台头部 / 三阶段流水线 / 版本时间线收尾
+ * 对应审计 W2 / W3 / RS-04。
+ * ===================================================================== */
+
+/* W2：头部从 213px 收到 ≤120px。
+ * 原来 main / actions 左右两栏，actions 里状态行、840px 的岗位切换 select、
+ * 按钮行各占一行（96px），main 里标题 + meta + 9 个技能 tag（两行）；
+ * 现在：技能 tag 让位给右栏「硬技能」（同一信息不在头部重复），actions
+ * 固定两行（状态行 / 切换器 + 按钮），select 限宽 320。 */
+.wb-context {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-2) var(--space-4);
+  min-height: 0;
+  padding: var(--space-3) var(--space-5);
+}
+
+.wb-context-main {
+  display: block;
+}
+
+.wb-tags {
+  display: none;
+}
+
+.wb-context-title {
+  flex-wrap: nowrap;
+}
+
+.wb-context-title h2 {
+  min-width: 0;
+}
+
+.wb-context-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 320px) auto;
+  grid-template-areas:
+    "status status"
+    "select buttons";
+  align-items: center;
+  justify-content: end;
+  gap: var(--space-1) var(--space-2);
+  flex-wrap: nowrap;
+}
+
+.wb-context-actions .status-line {
+  grid-area: status;
+  justify-self: end;
+  text-align: right;
+}
+
+.wb-context-actions [data-job-switcher] {
+  grid-area: select;
+  width: 100%;
+  min-width: 0;
+  max-width: 320px;
+}
+
+.wb-context-actions .row {
+  grid-area: buttons;
+  justify-self: end;
+  flex-wrap: nowrap;
+}
+
+/* W3：右栏三阶段流水线 251px → 一行 chip（≤60px）。
+ * 节点仍然保留 data-progress-step / is-done / is-active / is-failed，
+ * 只是从「每阶段一行 + 说明」压成「JD 画像 ✓ · 差距 ✓ · STAR ✗」；
+ * 说明文字（已抽取 N 项技能等）在右栏 tab 内已有更完整的出处。 */
+.workbench-live-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.workbench-live-progress__message {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.workbench-live-progress__step {
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line-faint);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+}
+
+.workbench-live-progress__step.is-active,
+.workbench-live-progress__step.is-failed {
+  border-color: currentColor;
+}
+
+.workbench-live-progress__dot {
+  width: 14px;
+  height: 14px;
+  margin-top: 0;
+}
+
+.workbench-live-progress__copy {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.workbench-live-progress__label {
+  font-size: var(--text-2xs);
+  font-weight: 600;
+}
+
+/* 失败原因已由横幅与摘要卡承担，chip 里不再重复整句。 */
+.workbench-live-progress__detail {
+  display: none;
+}
+
+/* RS-04：单版本折叠成一行（之前一条 v1 也占 108px）；多版本补增删行数。 */
+.version-timeline--single .version-timeline-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 0;
+  padding: var(--space-2) 0;
+}
+
+.version-timeline--single .version-timeline__dot {
+  display: none;
+}
+
+.version-timeline--single .version-timeline__summary {
+  margin: 0;
+}
+
+.version-timeline__stats {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  /* 移动端头部改纵向：状态行 / 切换器 / 按钮各一行，避免 320px 里三列挤爆 */
+  .wb-context {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .wb-context-actions {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "status"
+      "select"
+      "buttons";
+    justify-content: stretch;
+  }
+
+  .wb-context-actions .status-line {
+    justify-self: start;
+    text-align: left;
+  }
+
+  .wb-context-actions [data-job-switcher] {
+    max-width: none;
+  }
+
+  .wb-context-actions .row {
+    justify-self: start;
+    flex-wrap: wrap;
+  }
+}
+}
+
+@layer components {
+/* B5：对齐完成但无可用建议时的轻量说明（替代「还没有对齐结果」首次引导） */
+.wb-notice-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+
+.wb-notice-empty strong {
+  color: var(--text-primary);
+  font-size: var(--text-base);
+}
+
+.wb-notice-empty p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+}
