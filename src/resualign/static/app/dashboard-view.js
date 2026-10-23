@@ -266,13 +266,15 @@ export async function renderDashboard(container) {
       (a, b) =>
         (Number(b.updated_at) || 0) - (Number(a.updated_at) || 0),
     )
-    .slice(0, 3);
+    /* 2026-10-22（审计 D3/D8）：原来固定 3 条，左卡底部空 135px 且没有
+     * 「看全部」出口；改为 5 条 + 表头出口，把空白变成内容。 */
+    .slice(0, 5);
   const recentHtml = recentJobs.length
     ? recentJobs
         .map(
           (job) => `
             <tr>
-              <td><a class="recent-job__title" href="#/workspace/${encodeURIComponent(job.job_id)}">${escAttr(job.title || "未命名岗位")}</a></td>
+              <td class="recent-job__cell"><a class="recent-job__title" href="#/workspace/${encodeURIComponent(job.job_id)}" title="${escAttr(job.title || "未命名岗位")}">${escAttr(job.title || "未命名岗位")}</a></td>
               <td><span class="badge pill-neutral"><span class="dot metric-dot metric-dot--${jobStatusTone(job.status)}" aria-hidden="true"></span>${escAttr(jobStatusLabel(job.status))}</span></td>
               <td class="is-num cell-muted">${escAttr(formatDate(job.updated_at))}</td>
               <td class="is-num"><a class="icon-btn recent-job__open" href="#/workspace/${encodeURIComponent(job.job_id)}" aria-label="打开 ${escAttr(job.title || "未命名岗位")} 的工作台">${icon("chevron-right", 16)}</a></td>
@@ -301,10 +303,16 @@ export async function renderDashboard(container) {
             <div class="recent-jobs">
               <div class="recent-jobs__head">
                 <h3>最近岗位动态</h3>
-                <span class="small muted">最近 3 条 · 投递快照</span>
+                <a class="link" href="#/jobs">查看全部 ${escAttr(kpi.jobs || 0)} 个岗位 →</a>
               </div>
               <div class="recent-jobs__list" data-dashboard-recent>
                 <table class="data-table recent-table">
+                  <colgroup>
+                    <col>
+                    <col class="recent-table__col-status">
+                    <col class="recent-table__col-time">
+                    <col class="recent-table__col-action">
+                  </colgroup>
                   <thead>
                     <tr>
                       <th scope="col">岗位</th>

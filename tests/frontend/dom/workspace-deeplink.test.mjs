@@ -27,10 +27,15 @@ function jsonBody(body, status = 200) {
   };
 }
 
+/* J10（2026-10-22）：工作台岗位切换器的 limit 从 200 提到 500（318 个岗位时
+ * 200 条会漏掉 118 个）。这里按前缀匹配，跟具体数字解耦，断言仍然只关心
+ * 「深链解析前先载入岗位列表」。 */
+const WORKBENCH_JOBS_URL_PREFIX = "/api/jobs?limit=";
+
 async function mockFetch(path) {
   const url = String(path);
   calls.push(url);
-  if (url.startsWith("/api/jobs?limit=200")) {
+  if (url.startsWith(WORKBENCH_JOBS_URL_PREFIX)) {
     return jsonBody([]);
   }
   return jsonBody({ detail: `no mock for ${url}` }, 404);
@@ -57,7 +62,7 @@ test("invalid workspace deep link redirects to dashboard without session 404s", 
     /岗位不存在，已返回驾驶舱/,
   );
   assert.ok(
-    calls.some((url) => url.startsWith("/api/jobs?limit=200")),
+    calls.some((url) => url.startsWith(WORKBENCH_JOBS_URL_PREFIX)),
     "workbench job list is loaded before resolving the deep link",
   );
   assert.ok(

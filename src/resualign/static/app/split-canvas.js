@@ -46,6 +46,11 @@ let fallbackPollTimer = 0;
 let fallbackEtag = "";
 let alignmentStartedAt = 0;
 let workbenchJobs = [];
+/* J10（审计 2026-10-22）：工作台岗位切换器的上限。原来是 limit=200，而库里
+ * 有 318 个岗位 —— 118 个岗位在下拉里根本不存在，用户想「从我已有的岗位切
+ * 过去」时找不到目标，会以为岗位丢了。提到 500 覆盖当前规模；真的顶到上限
+ * 时在切换器旁明确写「只载入了前 500 个」，不再假装下拉里就是全部。 */
+const WORKBENCH_JOBS_LIMIT = 500;
 let autoAnalyzedJd = false;
 /* #B4: once the alignment state has been reconciled against the real job
    (terminal status, expired job, or poll terminal), late replayed SSE
@@ -85,6 +90,7 @@ const ALIGN_FAILURE_KINDS = {
   empty: "返回为空",
   auth: "模型配置",
   ratelimit: "服务限流",
+  content_gate: "内容门禁拦截",
   expired: "任务已过期",
   canceled: "任务已取消",
   other: "任务失败",
@@ -99,6 +105,9 @@ function alignmentFailureKind(message, status) {
   if (/(empty|返回为空)/.test(text)) return "empty";
   if (/(429|rate limit|限流|繁忙)/.test(text)) return "ratelimit";
   if (/(401|403|api key|unauthorized|无效或缺少权限|无效或缺失)/.test(text)) return "auth";
+  /* 内容门禁（真实性评估 / 无依据内容）不是模型故障：换节点重试没有意义，
+   * 应该让用户去看被拦截的建议，而不是去换模型（W5）。 */
+  if (/(真实性|无依据|缺少来源|证据不足|已拦截)/.test(text)) return "content_gate";
   return "other";
 }
 
@@ -123,7 +132,11 @@ function workbenchAlignmentErrorBanner(alignment) {
     `<strong>对齐失败 · ${esc(ALIGN_FAILURE_KINDS[kind] || "任务失败")}</strong>` +
     `<span>${esc(errorText)}</span>` +
     (meta.length ? `<span class="align-error-meta">${esc(meta.join(" · "))}</span>` : "") +
-    `<button class="btn btn-outline btn-sm" type="button" data-action="show-node-picker">换节点重试</button>` +
+    /* 内容门禁失败时「换节点重试」是误诊：问题在被拦截的改写内容，不在模型
+     * 节点。这里不再给付费重试入口，改用下方主区的「被拦截建议」摘要卡。 */
+    (kind === "content_gate"
+      ? ""
+      : `<button class="btn btn-outline btn-sm" type="button" data-action="show-node-picker">换节点重试</button>`) +
     `</div>`
   );
 }
@@ -212,6 +225,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const alignmentKind = alignmentOutcomeKind(alignment);
   const alignmentRunning =
     alignment.status === "running" || alignment.status === "queued";
+  const alignmentFailed = alignment.status === "failed";
   const diffs = Array.isArray(alignment.diffs) ? alignment.diffs : [];
   if (jobId) {
     const persistedAccepted = (Array.isArray(job.diffs) ? job.diffs : [])
@@ -232,6 +246,10 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
     (diff) =>
       acceptedIds.has(diff.diff_id) || diff.provenance_state === "accepted",
   ).length;
+  /* J10：返回条数顶到 limit 时，说明列表被截断了 —— 下拉里不是全部岗位，
+   * 必须明说（否则用户会以为「库里就这么多」）。没顶到就是全量，不打扰。 */
+  const jobsCapped =
+    Array.isArray(jobs) && jobs.length >= WORKBENCH_JOBS_LIMIT;
   const pendingCount = Math.max(0, diffs.length - acceptedCount);
   /* UX 走查 2026-08-28：provenance 硬门禁拦截的建议卡（invalid_diffs）也会
      渲染在建议面板里，但头部计数此前只统计有效 diffs——出现「0 条改写建议」
@@ -289,10 +307,11 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <div class="wb-tags">${tagItems.map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}</div>
         </div>
         <div class="wb-context-actions">
-          <span class="status-line">${alignment.status === "succeeded" && diffs.length ? '<span class="dot dot-success" aria-hidden="true"></span>' : ""}${esc(diffs.length)} 条改写建议${invalidCount ? ` · ${esc(invalidCount)} 条建议复核` : ""} · ${esc(acceptedCount)} 已采纳 · ${esc(pendingCount)} 待采纳</span>
+          <span class="status-line">${alignment.status === "succeeded" && diffs.length ? '<span class="dot dot-success" aria-hidden="true"></span>' : ""}${alignmentFailed ? `${esc(invalidCount)} 条建议被门禁拦截 · 0 条可用建议` : `${esc(diffs.length)} 条改写建议${invalidCount ? ` · ${esc(invalidCount)} 条建议复核` : ""} · ${esc(acceptedCount)} 已采纳 · ${esc(pendingCount)} 待采纳`}</span>
           <select class="input input-sm" data-job-switcher aria-label="切换岗位">
             ${jobs.map((item) => `<option value="${esc(item.job_id)}" ${item.job_id === jobId ? "selected" : ""}>${esc(item.title)}${item.company ? ` · ${esc(item.company)}` : ""}</option>`).join("")}
           </select>
+          ${jobsCapped ? `<span class="small muted" data-job-switcher-cap>已载入前 ${WORKBENCH_JOBS_LIMIT} 个岗位，更多岗位请到岗位库筛选</span>` : ""}
           <div class="row">
             ${jobApplyLinkHtml(job)}
             <button class="btn btn-secondary" type="button" data-action="record-application" data-id="${esc(jobId)}">记录投递</button>
@@ -324,17 +343,21 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           </div>
           <div class="align-summary">
             <div><span class="summary-score">${matchScore == null ? "—" : esc(matchScore)}</span><span class="summary-unit">/ 100</span></div>
-            <div class="align-metrics">
+            ${alignmentFailed
+              ? `<div class="align-metrics align-metrics--failed">
+                   <span class="align-metrics__failed-note">本轮没有可用建议：${esc(invalidCount)} 条被门禁拦截，原因见上方横幅</span>
+                 </div>`
+              : `<div class="align-metrics">
               <div class="align-metric"><b>${esc(diffs.length)}</b><span>改写建议</span></div>
               <div class="align-metric"><b>${esc(acceptedCount)}</b><span>已采纳</span></div>
               <div class="align-metric"><b>${esc(pendingCount)}</b><span>待采纳</span></div>
               <div class="align-metric"><b>${alignment.eval_score && alignment.eval_score.hallucination_detected === false ? "通过" : alignment.eval_score && alignment.eval_score.hallucination_detected === true ? "风险" : "—"}</b><span>幻觉检测</span></div>
-            </div>
+            </div>`}
           </div>
           <div class="panel panel--success final-draft-panel" data-final-draft-panel hidden></div>
           ${viewMode === "a4" ? `<div class="a4-wrap" data-a4-wrap>${renderA4PaperHtml(liveSheetDraft)}</div>` : `<div class="diff-list">${diffList(session, jobId)}</div>`}
         </section>
-        <aside class="wb-aux">
+        <aside class="wb-aux ${state.wbMobilePane === "diff" ? "" : "is-active"}" data-wb-pane="controls">
           ${workbenchProgressPipelineHtml(session)}
           <div class="wb-tabs" role="tablist" aria-label="工作台辅助信息">
             ${viewMode === "a4" ? `<button type="button" class="wb-tab ${suggestActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="suggest" aria-selected="${suggestActive}">建议</button>` : ""}
@@ -838,7 +861,7 @@ export async function renderOptimizerCanvas(app, jobId) {
    * tryFocusSkill 在 Inspector 差距区高亮定位。 */
   pendingSkillFocus = parseSkillFromHash(window.location.hash);
   autoAnalyzedJd = false;
-  workbenchJobs = await api("/api/jobs?limit=200");
+  workbenchJobs = await api(`/api/jobs?limit=${WORKBENCH_JOBS_LIMIT}`);
   if (!jobId) {    if (workbenchJobs.length) {
       const targetId = workbenchJobs[0].job_id;
       const resumeId = state.route && state.route.resumeId;

@@ -9,6 +9,9 @@ const window = new Window({ url: "http://localhost:8011/#/jobs" });
 globalThis.window = window;
 globalThis.document = window.document;
 globalThis.localStorage = window.localStorage;
+/* B2（2026-10-22）：岗位库默认视图改为「列表」，本文件断言的是看板交互，
+ * 显式把视图固定成看板，避免默认值变化导致用例失效。 */
+globalThis.localStorage.setItem("resualign.jobs.view", "board");
 globalThis.FormData = window.FormData;
 globalThis.HTMLElement = window.HTMLElement;
 globalThis.Element = window.Element;

@@ -11,10 +11,25 @@ function escAttr(value) {
 
 const STAGE_ORDER = ["draft", "applied", "interview", "offer", "withdrawn"];
 
+/* R1（2026-10-22 界面打磨 B1）：7 天全 0 时不再画 7 个 4.8px 灰条——那看起来
+   像加载中的骨架屏，用户读不到「本周确实 0 投」的结论，也就不会改变投递行为。
+   这里返回「结论 + 下一步 + 主 CTA」；只要任意一天有投递，就走原柱状图逻辑。 */
 function paceBars(weekPace) {
   const days = Array.isArray(weekPace) ? weekPace : [];
+  if (!days.some((d) => toCount(d.count) > 0)) {
+    return `
+      <div class="review-pace review-pace--empty">
+        <div class="review-attr__empty muted small">
+          <strong>本周 0 次投递</strong>
+          <span>挑一个岗位今天投出去，复盘数据从第一次投递开始积累。</span>
+          <div class="review-attr__empty-cta">
+            <a class="btn btn-primary btn-sm" href="#/jobs">去岗位库挑一个 →</a>
+          </div>
+        </div>
+      </div>`;
+  }
   const max = Math.max(1, ...days.map((d) => toCount(d.count)));
-  return days
+  const cols = days
     .map((d) => {
       const count = toCount(d.count);
       const pct = Math.round((count / max) * 100);
@@ -27,6 +42,7 @@ function paceBars(weekPace) {
         </div>`;
     })
     .join("");
+  return `<div class="review-pace">${cols}</div>`;
 }
 
 function toCount(value) {
@@ -70,14 +86,28 @@ function actionList(jobs, emptyText) {
 function attributionCard(attribution) {
   const attr = attribution && typeof attribution === "object" ? attribution : {};
   const minSample = Number(attr.min_sample) || 3;
+  /* R4（2026-10-22 界面打磨 B1 顺手）：样本不足时原来只剩一个大「—」+ 11px
+     灰字，读起来像渲染失败。改成进度式表达：主数字 = 已积累/门槛，辅文说清
+     还差几条才能算过筛率——让用户看到「在攒样本」而不是「功能坏了」。 */
   const rateCell = (label, total, pass, rate) => {
+    const samples = toCount(total);
     const hasRate = rate != null;
+    let headline;
+    let hint;
+    if (hasRate) {
+      headline = `${Math.round(Number(rate) * 100)}<span>%</span>`;
+      hint = `${escAttr(label)} · ${escAttr(pass)}/${escAttr(total)} 过筛`;
+    } else if (samples < minSample) {
+      headline = `${samples}<span>/${minSample}</span>`;
+      hint = `${escAttr(label)} · 已积累 ${samples}/${minSample} 条归因，再标 ${minSample - samples} 条就能算过筛率`;
+    } else {
+      headline = "—";
+      hint = `${escAttr(label)} · 样本不足，暂不展示比率`;
+    }
     return `
       <div class="review-attr__cell" data-review-attr="${escAttr(label)}">
-        <div class="review-attr__rate">${hasRate ? `${Math.round(Number(rate) * 100)}<span>%</span>` : "—"}</div>
-        <div class="metric-hint">${escAttr(label)} · ${escAttr(pass)}/${escAttr(total)} 过筛${
-          hasRate ? "" : `（样本 < ${minSample}，暂不展示比率）`
-        }</div>
+        <div class="review-attr__rate">${headline}</div>
+        <div class="metric-hint">${hint}</div>
       </div>`;
   };
   const alignedTotal = toCount(attr.aligned_total);
@@ -201,6 +231,11 @@ export async function renderReviewView(container) {
       )
     : "";
 
+  /* R3（2026-10-22 界面打磨 B1）：chips 是全库口径，而卡片标题写的是「本周」，
+     两者贴在一起会被读成「图的图例」或「本周某天的量」。加一行小标题把口径
+     分开；N 取 stage_distribution 五项之和，与驾驶舱 KPI 的岗位总数同源。 */
+  const stageTitleHtml = `<p class="small muted" data-review-stages-title>岗位阶段分布（全库 ${escAttr(totalJobs)}）· 岗位库当前状态，与上方「近 7 天」口径不同</p>`;
+
   container.innerHTML = `
     <div class="view view-scroll dashboard-view">
       ${
@@ -221,7 +256,8 @@ export async function renderReviewView(container) {
             <span class="small muted">截至 ${escAttr(payload.generated_at || "")}</span>
           </div>
           <div class="panel-body">
-            <div class="review-pace">${paceBars(payload.week_pace)}</div>
+            ${paceBars(payload.week_pace)}
+            ${stageTitleHtml}
             <div class="review-stages" data-review-stages>${stageChips(payload.stage_distribution)}</div>
           </div>
         </section>

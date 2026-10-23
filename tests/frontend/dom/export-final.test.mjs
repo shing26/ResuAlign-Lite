@@ -108,7 +108,8 @@ async function mockFetch(path, options = {}) {
   if (method === "GET" && url.startsWith("/api/auth/me")) {
     return jsonBody({ ok: true });
   }
-  if (method === "GET" && url.startsWith("/api/jobs?limit=200")) {
+  /* J10（2026-10-22）：工作台岗位列表 limit 200 → 500，按前缀匹配与数字解耦。 */
+  if (method === "GET" && url.startsWith("/api/jobs?limit=")) {
     return jsonBody([JOB]);
   }
   if (method === "GET" && url.startsWith("/api/jobs?limit=100")) {

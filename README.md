@@ -114,7 +114,7 @@ ResuAlign-Lite 把这件事当工程问题做：一个跑在本机的 FastAPI + 
 - **Engine（`src/resualign/engine/`）**：LLM 提供商抽象与多节点存储（`llm.py` / `llm_nodes.py` / `llm_providers.py`）、角色路由（`role_router.py`）、受控定制（`tailor.py`）。门禁 `gate.py` 在包根目录、与引擎平级——它是可独立发布的规则核心，不是引擎的一个内部步骤。
 - **API & Service（`src/resualign/api/`）**：FastAPI 路由与服务层；成本护栏（`services/cost_guard.py`）与看门狗（`services/watchdog.py`）都在这一层执行。
 - **Storage**：SQLite WAL（`jobs.db` / `content.db` / `content-cache.db`），密钥经 `secret_box.py` 加密。
-- **UI（`src/resualign/static/`）**：原生 JS 单页 + `@layer` 单文件 CSS，默认浅色、可切暗色，teal 强调色；移动端完整适配（底部导航、抽屉交互）。
+- **UI（`src/resualign/static/`）**：原生 JS 单页 + `@layer` 单文件 CSS，默认浅色、可切暗色，teal 强调色；移动端完整适配（≤900px 顶部横向导航 + 抽屉交互，320 宽自动只留文字标签）。
 
 模块归属不靠目录直觉，而是由 `src/resualign/tools/modgraph.py` 的 `LAYERS` 声明定义，CI Stage 1 的 `modgraph --check` 用集合差棘轮只允许分层违规减少——顶层平铺模块是刻意的，不是待整理的堆积。原始 LLM 报文归档在 `src/resualign/archive/`（ADR-0052「归档层」，`RESUALIGN_LLM_TRACE=1` 才落盘），它是在用模块，不是死代码。
 

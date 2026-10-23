@@ -7337,6 +7337,8 @@ html {
 }
 
 .context-kicker {
+  flex: 0 0 auto;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   font-weight: 700;
@@ -7882,11 +7884,10 @@ html {
   margin-top: 0;
 }
 
-@media (hover: none) {
-  .board-card__reveal {
-    display: flex;
-  }
-}
+/* B4（2026-10-23，审计 J9）：删掉「触屏强制展开 reveal」的旧策略。
+ * 它在加入显式展开按钮之后已经过时——触屏上 reveal 永远展开，展开箭头
+ * 点了没反应，卡片反而有 505–820px 高。现在统一走
+ * .board-card[data-revealed="true"]（见上），触屏同样能展开/收起。 */
 
 .board-column__empty {
   min-height: 72px;
@@ -9113,12 +9114,61 @@ details > summary::-webkit-details-marker,
   color: var(--text-primary);
 }
 
+/* ---- 岗位卡片解剖 v2（2026-10-22）------------------------------------
+ * 背景：220px 宽的看板列里，顶行原本塞了复选框 + 匹配徽标 + 标题 + 展开
+ * 箭头 + 更多菜单五个控件。实测卡片 205px 时标题只剩 25px 宽，中文逐字
+ * 换行成 293px 高的竖排字（见 .scratch/ui-audit-2026-10-22/measure.py）。
+ * 顶行收窄为「复选框 + 标题 + 更多」，标题固定两行截断；匹配度与展开
+ * 箭头下移到元信息行，元信息单行省略。 */
 .board-card__top {
   position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .board-card__top .board-card__title {
+  flex: 1 1 auto;
   min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.board-card__top .board-more {
+  flex: 0 0 auto;
+}
+
+.board-card__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-top: 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.board-card__meta-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-card__meta .match-badge {
+  flex: 0 0 auto;
+  min-width: 0;
+  height: 20px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-2xs);
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .board-card__reveal-toggle {
@@ -11293,8 +11343,10 @@ select,
 }
 
 .dashboard-view .metric-strip.dashboard-strip {
-  max-width: calc(var(--space-1) * 280);
-  margin-inline: auto;
+  /* 2026-10-22：原 max-width:1120px 让 KPI 条比下方 .dash-grid 左右各缩进
+     22px，首屏两排元素不在一条竖线上（审计 D2）。改为与 grid 同宽。 */
+  max-width: none;
+  margin-inline: 0;
   background: transparent;
   border: 0;
   border-radius: 0;
@@ -11445,6 +11497,39 @@ select,
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
+}
+
+/* 最近岗位动态表（2026-10-22）：table-layout:fixed 下四列均分 164px，而
+ * .recent-job__title 是行内 <a>，overflow/text-overflow 对 inline 不生效
+ * → 链接盒实测 499px，压过状态列并盖住更新时间。列宽按内容分配，标题在
+ * 单元格内 block + 省略号截断。（审计 D1，桌面与移动端同源） */
+.dashboard-view .recent-table__col-status {
+  width: 116px;
+}
+
+.dashboard-view .recent-table__col-time {
+  width: 152px;
+}
+
+.dashboard-view .recent-table__col-action {
+  width: 44px;
+}
+
+.dashboard-view .recent-table .recent-job__cell {
+  overflow: hidden;
+}
+
+.dashboard-view .recent-table .recent-job__title {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-view .recent-table th:last-child,
+.dashboard-view .recent-table td:last-child {
+  padding: 0 var(--space-2);
 }
 
 .dashboard-view .data-table th,
@@ -11967,6 +12052,944 @@ select,
 @media (max-width: 360px) {
   .app-rail .tabs--rail button.nav-btn {
     padding: var(--space-2) 0;
+  }
+}
+}
+
+@layer components {
+/* =====================================================================
+ * B1（2026-10-22）：工作状态可见 / 筛选 / 空态 / 设置入口 / 复盘空态
+ * 这一段是 Lead 统一维护的 CSS（其余 agent 只写 JS，不并发改 styles.css）。
+ * ===================================================================== */
+
+/* J3：岗位卡折叠态的工作状态行（待分析 / 已对齐 / 对齐失败 / 已定稿） */
+.board-card__statusline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: calc(var(--space-1) * -1);
+}
+
+/* J3：工具条的工作状态筛选（纯前端视图筛选，按工作状态切，而不是投递阶段） */
+.jobs-workfilter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.jobs-workfilter__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.jobs-workfilter__btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.jobs-workfilter__btn[aria-pressed="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: var(--fw-emphasize);
+}
+
+.jobs-workfilter__count {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  opacity: 0.72;
+}
+
+/* J6：筛选零结果的列表级空态（与「空库」引导区分开） */
+.jobs-empty-filter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+  padding: var(--space-8) var(--space-6);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  text-align: center;
+}
+
+.jobs-empty-filter p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* J8：排序标签被 select 挤成两行 */
+.board-sort > span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* J6：筛选按钮上的生效条件数 */
+.board-filter__count {
+  margin-left: var(--space-1);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 var(--space-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: var(--text-2xs);
+  font-weight: var(--fw-emphasize);
+}
+
+/* S1：设置页简单模式的「更多设置」入口（自动化规则 / 本地摄入 Token / 节点分工） */
+.settings-more {
+  margin-top: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  overflow: hidden;
+}
+
+.settings-more__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--line-faint);
+}
+
+.settings-more__row:first-child {
+  border-top: 0;
+}
+
+.settings-more__row-main {
+  min-width: 0;
+}
+
+.settings-more__row-main strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--fw-emphasize);
+}
+
+.settings-more__row-main p {
+  margin: var(--space-1) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+@media (max-width: 640px) {
+  .settings-more__row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* R1：复盘「本周节奏」的 0 投递空态（不画 7 个占位灰条） */
+.review-pace--empty {
+  display: block;
+  height: auto;
+  min-height: 0;
+  padding: var(--space-4) 0;
+}
+
+.review-pace--empty .review-attr__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  text-align: left;
+}
+}
+
+@layer components {
+/* W1/W4（2026-10-22）：工作台失败态收敛 —— 头部指标改为一句结论，主区只留
+ * 一张「被拦截建议」摘要卡（默认折叠），避免 3 张 465px 大卡与「0 条建议」打架。 */
+.align-metrics--failed {
+  display: flex;
+  align-items: center;
+}
+
+.align-metrics__failed-note {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.wb-blocked {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+
+.wb-blocked__head strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  font-weight: var(--fw-emphasize);
+}
+
+.wb-blocked__head p {
+  margin: var(--space-1) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
+.wb-blocked__details {
+  margin-top: var(--space-1);
+}
+
+.wb-blocked__details summary {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.wb-blocked__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+}
+
+@layer components {
+/* B2（2026-10-22，审计 J2/J4/J7）：岗位库列表视图 + 看板空列折叠 + 卡片减负。
+ * 318 条数据在 5 等分看板里要滚 121 屏；列表视图一屏 8–10 条，看板只承担
+ * 投递阶段管理，空列折叠把 892px 还给有数据的列。 */
+
+/* 视图切换（列表 / 看板），沿用工具栏的 28px 高度台阶 */
+.jobs-viewtoggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: var(--space-hairline);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.jobs-viewtoggle__btn {
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.jobs-viewtoggle__btn:hover {
+  color: var(--text-primary);
+}
+
+.jobs-viewtoggle__btn[aria-pressed="true"] {
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-weight: var(--fw-emphasize);
+}
+
+/* 列表视图：单列行卡，列宽固定、标题单行省略 */
+.jobs-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  overflow-y: auto;
+  padding-right: var(--space-1);
+}
+
+.jobs-list__head,
+.job-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 64px 124px 104px 104px 196px;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.jobs-list__head {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-app);
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+}
+
+.job-row {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line-faint);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.job-row:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+.job-row__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-hairline);
+}
+
+.job-row__title {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-row__title:hover {
+  text-decoration: underline;
+}
+
+.job-row__meta {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-row__cell {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.job-row__actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+.job-row .board-status-select,
+.job-row__actions .board-status-select--row {
+  width: 92px;
+  flex: 0 0 auto;
+}
+
+.job-row__time {
+  white-space: nowrap;
+}
+
+.jobs-list__more {
+  align-self: center;
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+/* 看板空列折叠：56px 竖条，把横向空间让给有数据的列 */
+.board-column.is-collapsed {
+  flex: 0 0 56px;
+  min-width: 56px;
+  max-width: 56px;
+}
+
+.board-column.is-collapsed .board-col-head {
+  height: 100%;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-1);
+  border-bottom: 0;
+}
+
+.board-column.is-collapsed .board-col-head h3 {
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.board-col-collapsed__label {
+  writing-mode: vertical-rl;
+  letter-spacing: 0.12em;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+}
+
+/* 看板列内分页按钮 */
+.board-col__more {
+  flex: 0 0 auto;
+  margin: var(--space-1) 0;
+}
+
+@media (max-width: 900px) {
+  .jobs-list__head {
+    display: none;
+  }
+
+  .job-row {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "check main main"
+      "check work actions";
+    row-gap: var(--space-1);
+    align-items: start;
+  }
+
+  .job-row > .board-check {
+    grid-area: check;
+  }
+
+  .job-row__main {
+    grid-area: main;
+  }
+
+  .job-row__match,
+  .job-row__status,
+  .job-row__time {
+    display: none;
+  }
+
+  .job-row__work {
+    grid-area: work;
+  }
+
+  .job-row__actions {
+    grid-area: actions;
+  }
+
+  .job-row .board-status-select {
+    width: 96px;
+  }
+
+  /* 移动端工具条收成三条可横滑的行：视图/筛选/排序一行、工作状态一行、
+     批量工具一行。原来每组都换行，首屏被工具条吃掉 300px（B4 会重排整壳，
+     这里先把岗位库自己的高度压下来）。 */
+  .jobs-toolbar .toolbar-left {
+    gap: var(--space-2);
+  }
+
+  .jobs-workfilter,
+  .jobs-tools {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: var(--space-1);
+    scrollbar-width: none;
+  }
+
+  .jobs-workfilter::-webkit-scrollbar,
+  .jobs-tools::-webkit-scrollbar {
+    display: none;
+  }
+
+  .jobs-workfilter__btn,
+  .jobs-tools > * {
+    flex: 0 0 auto;
+  }
+}
+}
+
+@layer components {
+/* B3（2026-10-23，审计 RS-01）：简历正文按「真实文档」排版。
+ * 只作用于简历中心的纸张容器 `.resume-sheet .resume-doc`（打印走 #print-root
+ * 自己的 pt 字阶，不受影响）；纸张 token（--paper-*）此前只在打印里用，这里
+ * 正式接到预览上：白纸、16px 正文、1.7 行高、66ch 行宽上限。 */
+
+.resume-sheet .resume-doc {
+  margin: var(--space-4);
+  padding: var(--space-10) var(--space-10) var(--space-12);
+  background: var(--paper-bg);
+  border: 1px solid var(--paper-line);
+  border-radius: var(--radius-md);
+  color: var(--paper-ink);
+  /* 长文阅读用 1.7 行高，与打印的 1.5 分开（屏幕上更松） */
+  line-height: 1.7;
+}
+
+/* 每一块单独限宽并居中：标题的底边框不会因为限宽而断开。
+ * 用固定 px（=40 个汉字）而不是 66ch：ch 随每个块自己的字号变化，会让
+ * 12px 的联系行与 16px 的正文出现两条不同左边界（审计 SH-07 同类问题）。 */
+.resume-sheet .resume-doc > * {
+  max-width: calc(var(--space-16) * 10);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.resume-sheet .resume-doc .resume-doc__name {
+  margin: 0 0 var(--space-1);
+  color: var(--paper-ink);
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.resume-sheet .resume-doc .resume-doc__contact {
+  margin: 0 0 var(--space-5);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--paper-line);
+  color: var(--paper-ink-2);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
+/* 章节：16px + 细线，作为「可扫的骨架」（之前只有 14px 且与正文只差 2px） */
+.resume-sheet .resume-doc h1,
+.resume-sheet .resume-doc h2,
+.resume-sheet .resume-doc h3,
+.resume-sheet .resume-doc .resume-doc__section {
+  margin: var(--space-5) 0 var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--paper-line);
+  color: var(--paper-ink);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.resume-sheet .resume-doc h1 {
+  margin-top: 0;
+  border-bottom: 0;
+  font-size: var(--text-3xl);
+}
+
+/* 项目标题不做成章节：无底线、比正文重一档，避免 3 个项目把页面切碎 */
+.resume-sheet .resume-doc .resume-doc__project {
+  margin: var(--space-4) 0 var(--space-1);
+  padding-bottom: 0;
+  border-bottom: 0;
+  font-size: var(--text-base);
+  font-weight: 700;
+}
+
+.resume-sheet .resume-doc p {
+  margin: 0 0 var(--space-2);
+  color: var(--paper-ink);
+  font-size: var(--text-lg);
+  line-height: 1.7;
+}
+
+.resume-sheet .resume-doc .resume-doc__field {
+  margin-bottom: var(--space-1);
+  color: var(--paper-ink-2);
+}
+
+.resume-sheet .resume-doc .resume-doc__field strong {
+  color: var(--paper-ink);
+  font-weight: 600;
+}
+
+.resume-sheet .resume-doc ul {
+  margin: var(--space-1) 0 var(--space-3);
+  padding-left: var(--space-5);
+}
+
+.resume-sheet .resume-doc li {
+  margin-bottom: var(--space-1);
+  color: var(--paper-ink);
+  font-size: var(--text-lg);
+  line-height: 1.7;
+}
+
+.resume-sheet .resume-doc li::marker {
+  color: var(--paper-accent);
+}
+
+.resume-sheet .resume-doc code {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-xs);
+  background: var(--paper-grid);
+  color: var(--paper-ink);
+  font-size: 0.92em;
+}
+
+/* RS-03：移动端把 ATS 摘要提到诊断卡内（桌面隐藏，右侧栏已有完整卡） */
+.resume-ats-summary {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .resume-sheet .resume-doc {
+    margin: 0;
+    padding: var(--space-5) var(--space-4) var(--space-8);
+    border: 0;
+    border-radius: 0;
+  }
+
+  .resume-ats-summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-3);
+    padding: var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-1);
+    font-size: var(--text-sm);
+  }
+
+  .resume-ats-summary__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+  }
+
+  .resume-ats-summary__score {
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: var(--text-2xl);
+    font-weight: 700;
+  }
+
+  .resume-ats-summary__label {
+    color: var(--text-secondary);
+    font-size: var(--text-2xs);
+  }
+
+  .resume-ats-summary ul {
+    margin: 0;
+    padding-left: var(--space-4);
+    color: var(--text-secondary);
+    font-size: var(--text-xs);
+    line-height: 1.6;
+  }
+}
+}
+
+@layer components {
+/* =====================================================================
+ * B4（2026-10-23，审计 W8 / SH-02 / SH-06 / D10 / D12 / J9）
+ * 移动端壳层与逐页重排：≤900px 时导航 + 顶栏从 218px 降到 ≤150px；
+ * 工作台「调优 / 结果」恢复可用；看板改单列；驾驶舱 KPI 2×2、动态表变卡片。
+ * ===================================================================== */
+
+@media (max-width: 900px) {
+  /* SH-02：顶栏两行封顶 —— 第一行「页面标题 + 主题图标」，第二行整行搜索。
+     原来标题 / 主题 / 搜索各占一行（155px），现在目标 ≤96px。 */
+  .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title theme"
+      "search search";
+    align-items: center;
+    height: auto;
+    min-height: 0;
+    margin-bottom: var(--space-3);
+    padding: var(--space-1) var(--space-3);
+    gap: var(--space-1) var(--space-2);
+  }
+
+  .topbar-title,
+  .header-title {
+    grid-area: title;
+    min-width: 0;
+    flex-direction: row;
+    align-items: center;
+  }
+
+  #page-title {
+    overflow: hidden;
+    font-size: var(--text-xl);
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 拆掉两层 flex 包装，让标题 / 主题 / 搜索直接落到上面的 grid 区域 */
+  .topbar-actions.header-tools {
+    display: contents;
+  }
+
+  .topbar-actions__right {
+    grid-area: theme;
+    display: flex;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+
+  .topbar .command-bar,
+  .topbar .header-search {
+    grid-area: search;
+    order: 0;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    height: 36px;
+  }
+
+  .theme-toggle.icon-btn {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+    box-sizing: border-box;
+  }
+
+  .theme-toggle [data-theme-label] {
+    display: none;
+  }
+
+  /* SH-06：横向导航加 scroll-snap + 右缘渐隐，提示还能滑动 */
+  .tabs--rail {
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: var(--space-2);
+    padding-right: var(--space-6);
+    -webkit-mask-image: linear-gradient(
+      to right,
+      black 0,
+      black calc(100% - var(--space-6)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to right,
+      black 0,
+      black calc(100% - var(--space-6)),
+      transparent 100%
+    );
+  }
+
+  .tabs--rail button.nav-btn {
+    scroll-snap-align: start;
+  }
+
+  .tabs--rail button .rail-count {
+    min-width: 16px;
+    padding: 0 var(--space-1);
+    font-size: var(--text-2xs);
+  }
+
+  /* W8：工作台「调优 / 结果」双面板互斥（之前被后置 display:none 覆盖，
+     移动端两个面板永远上下堆叠，分段按钮点了没反应）。 */
+  .wb-mobile-tabs {
+    display: flex;
+  }
+
+  .wb-grid > .wb-main,
+  .wb-grid > .wb-aux {
+    display: none;
+  }
+
+  .wb-grid > .wb-main.is-active,
+  .wb-grid > .wb-aux.is-active {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* J9：岗位库看板在窄屏改单列纵向列表（横向 + 纵向双滚动无法用）；
+     空列直接隐藏（折叠竖条在纵向布局里没有意义）。 */
+  .jobs-view {
+    height: auto;
+    overflow: visible;
+  }
+
+  .jobs-view .board {
+    flex: 0 0 auto;
+    flex-direction: column;
+    height: auto;
+    overflow: visible;
+  }
+
+  .jobs-view .board-column {
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: none;
+    max-height: none;
+  }
+
+  .jobs-view .board-column.is-collapsed {
+    display: none;
+  }
+
+  .jobs-view .board-col-body {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .jobs-list {
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 640px) {
+  /* D10：驾驶舱 KPI 4 格纵排（384px）→ 2×2 紧凑网格 */
+  .dashboard-view .metric-strip.dashboard-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3) var(--space-4);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .dashboard-view .dashboard-strip .metric-cell {
+    padding: var(--space-1) 0;
+    border-left: 0;
+  }
+
+  /* 2×2 里没有横向空间放 hint：完成率/近 7 天这类说明让位给数字与计数，
+     整条 KPI 从 384px 压到 ~200px（审计 D10）。 */
+  .dashboard-view .dashboard-strip .metric-hint {
+    display: none;
+  }
+
+  .dashboard-view .dashboard-strip .metric-label {
+    font-size: var(--text-2xs);
+  }
+
+  .dashboard-view .dashboard-strip .metric-value {
+    margin-top: 0;
+    font-size: var(--text-xl);
+  }
+
+  .dashboard-view .metric-counts {
+    gap: var(--space-1);
+  }
+
+  .dashboard-view .metric-counts .count-pair {
+    gap: var(--space-1);
+    font-size: var(--text-2xs);
+    white-space: nowrap;
+  }
+
+  /* D12：最近岗位动态 4 列表格 → 双行卡片（标题 + 状态 / 时间 + 打开） */
+  .dashboard-view .recent-table thead {
+    display: none;
+  }
+
+  .dashboard-view .recent-table {
+    display: block;
+    width: 100%;
+    table-layout: auto;
+  }
+
+  .dashboard-view .recent-table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .dashboard-view .recent-table tr {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title status"
+      "time action";
+    gap: var(--space-1) var(--space-2);
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--line-faint);
+  }
+
+  .dashboard-view .recent-table td {
+    display: block;
+    height: auto;
+    padding: 0;
+    border-bottom: 0;
+  }
+
+  .dashboard-view .recent-table td:nth-child(1) {
+    grid-area: title;
+    overflow: hidden;
+  }
+
+  .dashboard-view .recent-table td:nth-child(2) {
+    grid-area: status;
+    justify-self: end;
+  }
+
+  .dashboard-view .recent-table td:nth-child(3) {
+    grid-area: time;
+  }
+
+  .dashboard-view .recent-table td:nth-child(4) {
+    grid-area: action;
+    justify-self: end;
+  }
+
+  /* S2：设置页头不再竖排断字（状态行 48×50、简单/专家被压成竖排） */
+  .settings-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+
+  .settings-head-actions {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .settings-head-actions .status-line {
+    white-space: nowrap;
+  }
+
+  .settings-mode-switch__btn {
+    white-space: nowrap;
+  }
+
+  /* 右端工具栏菜单改为右锚定，避免 left:0 时溢出屏幕右缘 */
+  .toolbar-more__menu {
+    right: 0;
+    left: auto;
+  }
+
+  /* 小屏导航再收紧一档，给 320–390 宽度留出余量 */
+  .tabs--rail button.nav-btn {
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-2);
+  }
+
+  .tabs--rail button .rail-label {
+    font-size: var(--text-2xs);
+  }
+}
+
+@media (max-width: 360px) {
+  .tabs--rail button.nav-btn {
+    padding: var(--space-2) var(--space-1);
+  }
+
+  /* 320 宽时 6 项 + 图标仍差 10px：最窄档只留文字标签，导航一次装下。
+     用 .app-rail 前缀压过 6262 行移动壳块里的 .app-rail .tabs--rail 规则。 */
+  .app-rail .tabs--rail button .rail-icon {
+    display: none;
+  }
+
+  .app-rail .tabs--rail button.nav-btn {
+    padding: var(--space-2) var(--space-1);
+  }
+
+  /* 320 宽装不下 6 项 + 计数徽标：徽标在岗位库页有同源信息，最窄档直接收掉，
+     并去掉右缘留白，让导航一次装下（不再出现「系统设置」被裁）。 */
+  .app-rail .rail-count {
+    display: none;
+  }
+
+  .tabs--rail {
+    padding-right: var(--space-1);
   }
 }
 }

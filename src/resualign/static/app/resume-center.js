@@ -5,6 +5,7 @@
  */
 import {
   api,
+  atsSummaryHtml,
   closeModal,
   recoverDiagnosis,
   recoverOptimization,
@@ -22,6 +23,7 @@ import {
   resumeListPreview,
   versionTimelineHtml,
 } from "./format.js";
+import { icon } from "./icons.js";
 
 /* ------------------------------------------------------------------ */
 /* ATS 诊断快照提取                                                     */
@@ -104,6 +106,17 @@ async function renderResumeDetailView(app, resumeId) {
       ? diagnosisFromSnapshot(state.diagnosis)
       : null);
   const diagnosisStatus = resume.diagnosis_status || { status: "missing" };
+  const hasDiagnosis =
+    diagnosis && Number.isFinite(Number(diagnosis.score));
+  /* 按钮文案由「有没有诊断结果」决定，而不是固定写死：未诊断时主 CTA 说
+   * 「诊断简历」，已有结果说「重新诊断」——同一个动作不换名字，用户不用
+   * 猜「诊断」和「重新诊断」有什么区别。 */
+  const diagnoseLabel =
+    diagnosisStatus.status === "valid" ||
+    diagnosisStatus.status === "stale" ||
+    hasDiagnosis
+      ? "重新诊断"
+      : "诊断简历";
   state.resumeVersions = versions;
   state.resumeCurrentContent = resume.content || "";
 
@@ -117,11 +130,31 @@ async function renderResumeDetailView(app, resumeId) {
         </div>
         <div class="resume-band-actions">
           <span class="status-line" data-resume-band-status><span class="dot ${diagnosisStatus.status === "valid" ? "dot-success" : diagnosisStatus.status === "stale" ? "dot-warn" : "dot-muted"}" aria-hidden="true"></span><span data-resume-band-status-text>最近诊断：${diagnosisStatusText(diagnosisStatus, diagnosis)}</span></span>
-          <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">诊断简历</button>
-          <button class="btn btn-secondary btn-sm" data-action="export-resume-md" data-id="${resume.resume_id}" title="导出简历正文 Markdown">导出简历 MD</button>
-          <button class="btn btn-secondary btn-sm" data-action="export-diagnosis-md" data-id="${resume.resume_id}" hidden title="导出最近一次诊断报告 Markdown">导出诊断 MD</button>
-          <button class="btn btn-secondary btn-sm" data-action="export-diagnosis" data-id="${resume.resume_id}" hidden title="导出最近一次诊断报告 PDF">导出诊断 PDF</button>
-          <button class="btn btn-danger btn-sm" data-action="delete-resume" data-id="${resume.resume_id}">删除</button>
+          <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">${diagnoseLabel}</button>
+          <!-- RS-02 按钮收敛：4 个平铺导出按钮收进「导出」下拉菜单。导出不花钱，
+               但仍然不该和主 CTA 抢同一个视觉层级；诊断报告两项在没有诊断
+               结果时保持 hidden，避免点了没反应的空入口。 -->
+          <details class="toolbar-more" data-resume-export>
+            <summary class="btn btn-secondary btn-sm export-dock__trigger" aria-label="导出">导出 ${icon("chevron-down", 16)}</summary>
+            <div class="export-dock__menu">
+              <button class="btn btn-secondary btn-sm" type="button" data-action="export-resume-md" data-id="${resume.resume_id}" title="导出简历正文 Markdown">导出简历 MD</button>
+              <button class="btn btn-secondary btn-sm" type="button" data-action="export-diagnosis-md" data-id="${resume.resume_id}" hidden title="导出最近一次诊断报告 Markdown">诊断报告 MD</button>
+              <button class="btn btn-secondary btn-sm" type="button" data-action="export-diagnosis" data-id="${resume.resume_id}" hidden title="导出最近一次诊断报告 PDF">诊断报告 PDF</button>
+              <button class="btn btn-outline btn-sm" type="button" data-action="print-resume" title="打开打印视图（可另存为 PDF）">打印预览</button>
+            </div>
+          </details>
+          <!-- 删除是破坏性动作：收进「⋯」，与导出、诊断拉开距离，误触成本降低。
+               二次确认仍在 main.js 的 delete-resume 里，不放宽。
+               用 .board-more 而不是 .toolbar-more：≤640px 的旧规则会把
+               .toolbar-more__menu 改成 left:0，菜单从右边界的按钮展开会撑出
+               屏幕（实测 390 宽下右边缘 468px）。.board-more__menu 保持 right:0。 -->
+          <details class="board-more" data-resume-more>
+            <summary class="board-more__trigger" aria-label="更多操作" title="更多操作">${icon("more-horizontal", 20)}</summary>
+            <div class="board-more__menu">
+              <button class="btn btn-ghost btn-sm" type="button" data-action="edit-resume" data-id="${resume.resume_id}">编辑简历</button>
+              <button class="btn btn-danger btn-sm" type="button" data-action="delete-resume" data-id="${resume.resume_id}">删除简历</button>
+            </div>
+          </details>
         </div>
       </div>
       <section class="panel diagnosis-panel diagnosis-banner" data-diagnosis-panel>
@@ -131,10 +164,11 @@ async function renderResumeDetailView(app, resumeId) {
             <span class="small muted" data-diagnosis-meta>${diagnosisStatusText(diagnosisStatus, diagnosis)}</span>
             ${diagnosisStatus.status === "stale" ? `<span class="small muted" data-diagnosis-reason>${esc(diagnosisStatus.reason || "诊断已过期")}</span>` : ""}
           </div>
-          <div class="diagnosis-banner__actions">
-            <button class="btn btn-primary btn-sm" data-action="diagnose-resume" data-id="${resume.resume_id}">重新诊断</button>
-          </div>
+          <!-- 诊断卡内不再放按钮：主 CTA 只在页头一处（RS-02）。卡里重复一个
+               同名按钮会让用户先犹豫「点哪个」，而诊断本身要花模型调用。 -->
         </div>
+        <p class="small muted" data-diagnosis-hint${hasDiagnosis ? " hidden" : ""}>还没有诊断，点右上角「诊断简历」。</p>
+        ${atsSummaryHtml(diagnosis)}
         <div class="progress-wrap" data-diagnosis-progress hidden>
           <div class="progress-track"><div class="progress-fill" data-diagnosis-fill style="width:5%"></div></div>
           <span class="small" data-diagnosis-stage>排队中</span>
@@ -177,10 +211,12 @@ async function renderResumeDetailView(app, resumeId) {
               <p>Markdown 文档 · 预览与源码双态</p>
             </div>
             <div class="resume-sheet-actions">
-              <button class="btn btn-primary btn-sm" data-action="toggle-resume-inline-edit" data-id="${resume.resume_id}">编辑源码</button>
-              <button class="btn btn-outline btn-sm" data-action="edit-resume" data-id="${resume.resume_id}">编辑</button>
-              <button class="btn btn-outline btn-sm" data-action="copy-resume-md" data-id="${resume.resume_id}">复制 MD</button>
-              <button class="btn btn-secondary btn-sm" data-action="print-resume" title="打开打印视图（可另存为 PDF）">打印预览</button>
+              <!-- 文档头只留「读/改」三件事：编辑（模态）、编辑源码（内联双态，
+                   data-action 契约保留）、复制 MD。打印预览只在页头「导出」下拉菜单
+                   里出现一次，不在文档头重复同一动作。 -->
+              <button class="btn btn-primary btn-sm" data-action="edit-resume" data-id="${resume.resume_id}">编辑</button>
+              <button class="btn btn-ghost btn-sm" data-action="toggle-resume-inline-edit" data-id="${resume.resume_id}">编辑源码</button>
+              <button class="btn btn-ghost btn-sm" data-action="copy-resume-md" data-id="${resume.resume_id}">复制 MD</button>
             </div>
           </div>
           <div class="resume-preview-bar" data-resume-preview-bar hidden>
@@ -201,7 +237,8 @@ async function renderResumeDetailView(app, resumeId) {
           <section class="rail-section" data-ats-health-card>
             <div class="rail-section-head">
               <h3>ATS 健康度</h3>
-              <span class="pill ${diagnosis && Number.isFinite(Number(diagnosis.score)) ? "pill-success" : "pill-neutral"}">${diagnosis && Number.isFinite(Number(diagnosis.score)) ? `${esc(diagnosis.score)} / 100` : "未诊断"}</span>
+              <!-- 标题旁的 "85 / 100" 胶囊与卡内大字重复（RS-02「85 分说了六遍」），
+                   直接去掉；分数只在卡内大字与页头状态行各出现一次。 -->
             </div>
             <div data-ats-health-mount>${atsHealthCardHtml(diagnosis)}</div>
           </section>
@@ -293,8 +330,10 @@ function resumeDetailSkeletonHtml() {
           <div class="skeleton is-shimmer" style="width:340px;height:14px;margin-top:10px"></div>
         </div>
         <div class="resume-band-actions">
-          <div class="skeleton is-shimmer" style="width:140px;height:28px"></div>
-          <div class="skeleton is-shimmer" style="width:110px;height:28px"></div>
+          <div class="skeleton is-shimmer" style="width:120px;height:20px"></div>
+          <div class="skeleton is-shimmer" style="width:96px;height:28px"></div>
+          <div class="skeleton is-shimmer" style="width:76px;height:28px"></div>
+          <div class="skeleton is-shimmer" style="width:28px;height:28px"></div>
         </div>
       </div>
       <section class="panel diagnosis-panel">
@@ -390,3 +429,50 @@ export async function renderResumeCenter(app, { resumeId = null, showList = fals
 
 /* 供 main.js 复用：编辑后 closeModal 由 handleForm 统一处理，这里保持契约 */
 export { closeModal };
+
+/* ------------------------------------------------------------------ */
+/* 简历中心页面内动作（事件委托）                                        */
+/* ------------------------------------------------------------------ */
+
+/* 三件事，都只属于简历详情页，不往 main.js 的动作表里加东西：
+ * 1) 「查看完整 ATS 建议」（RS-03 移动摘要）：摘要卡在诊断卡里，完整建议在
+ *    右栏 ATS 卡；窄屏时右栏排在正文之后，这里滚动并聚焦过去，给键盘用户
+ *    一个可见落点（只滚动，不触发任何请求）。
+ * 2) 导出/更多两个下拉互斥：原生 <details> 不会自动收起，两个都展开时会
+ *    互相盖住菜单项（实测「编辑简历/删除简历」压在「导出简历 MD」上面）。
+ * 3) 点菜单项或页面其它位置就收起浮层，避免菜单一直挂在页头上。 */
+if (typeof document !== "undefined") {
+  const RESUME_DOCKS =
+    "details[data-resume-export], details[data-resume-more]";
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    if (target.closest("[data-action='ats-summary-jump']")) {
+      const card = document.querySelector("[data-ats-health-card]");
+      if (card) {
+        card.setAttribute("tabindex", "-1");
+        card.focus({ preventScroll: true });
+        card.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+    const docks = [...document.querySelectorAll(RESUME_DOCKS)];
+    if (!docks.length) return;
+    const owner = target.closest(RESUME_DOCKS);
+    /* 点菜单项：执行完动作就收起当前菜单。 */
+    if (owner && target.closest("button[data-action]")) {
+      owner.open = false;
+      return;
+    }
+    /* 展开另一个菜单前先收起其它菜单（summary 点击交给浏览器原生 toggle）。 */
+    if (owner) {
+      docks.forEach((node) => {
+        if (node !== owner) node.open = false;
+      });
+      return;
+    }
+    docks.forEach((node) => {
+      node.open = false;
+    });
+  });
+}

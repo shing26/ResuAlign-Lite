@@ -240,12 +240,43 @@ function refreshHeaderMeta() {
   if (subtitleNode) subtitleNode.textContent = subtitle;
 }
 
+/* J10（审计 2026-10-22）：侧栏「岗位库」徽标此前写的是「这一次列表请求返回了
+ * 几行」。列表接口按 limit 截断（header 选择器只拉前 100 条），库里 318 条时
+ * 徽标显示 100，而同一屏的驾驶舱/看板写 318 —— 两个数字互相矛盾，用户会以为
+ * 岗位丢了。徽标的语义必须是「库里有几个岗位」，不是「这次拿到几行」。 */
+const JOBS_RAIL_TOTAL_CAP = 500;
+
 function refreshJobsRailCount(count) {
   const badge = $("[data-jobs-rail-count]");
   if (!badge) return;
   const total = Math.max(0, Number(count) || 0);
   badge.hidden = total === 0;
-  badge.textContent = total;
+  /* ≥500 只报「500+」：到了这个量级，精确到个位的数字对导航没有价值；而且
+   * 岗位库/看板本身也只拉前 500 条（审计 J7），徽标再大就会和列表对不上，
+   * 反而制造新的口径矛盾。 */
+  badge.textContent =
+    total >= JOBS_RAIL_TOTAL_CAP ? `${JOBS_RAIL_TOTAL_CAP}+` : String(total);
+  badge.title = `岗位库共 ${total} 个岗位`;
+}
+
+let jobsRailTotalFetch = null;
+
+/* J10：总数的唯一来源 = /api/dashboard 的 kpi.jobs（后端对整库计数，一次只读
+ * 请求）。刻意不为了这个数字把 header 选择器的列表拉到 500 条：那会让每次路由
+ * 切换都多下载约 5 倍 JSON，而选择器只需要「最近 100 个岗位」就够用。
+ * 拿不到总数时退回列表长度 —— 宁可显示一个下限，也不要显示一个看起来精确的
+ * 错数；请求失败不弹 toast：侧栏数字不该在别的页面上抢错误提示的位置。 */
+function refreshJobsRailTotal(fallbackCount) {
+  if (jobsRailTotalFetch) return;
+  jobsRailTotalFetch = api("/api/dashboard")
+    .then((data) => {
+      const total = Number(data && data.kpi && data.kpi.jobs);
+      refreshJobsRailCount(Number.isFinite(total) ? total : fallbackCount);
+    })
+    .catch(() => refreshJobsRailCount(fallbackCount))
+    .finally(() => {
+      jobsRailTotalFetch = null;
+    });
 }
 
 /* 蓝图路由收口：hash → 视图分发的唯一入口。route 名直接来自 hash
@@ -389,18 +420,29 @@ function renderApiKeyGuide(app) {
 
 let headerJobsCache = null;
 let headerJobsFetch = null;
+/* header 岗位快速选择器只保留「最近 100 个」，不跟着 J10 一起拉 500 条：
+ * 这是导航辅助，不是岗位库列表。 */
+const HEADER_JOBS_LIMIT = 100;
 
 function refreshHeaderJobSelect() {
   if (headerJobsFetch) return;
-  headerJobsFetch = api("/api/jobs?limit=100")
+  headerJobsFetch = api(`/api/jobs?limit=${HEADER_JOBS_LIMIT}`)
     .then((jobs) => {
       headerJobsCache = Array.isArray(jobs) ? jobs : [];
       populateHeaderJobSelect(headerJobsCache);
-      refreshJobsRailCount(headerJobsCache.length);
+      /* J10：只有「这次没被 limit 截断」时，列表长度才等于真总数，可以立刻
+       * 上屏（小库/新库不会先闪一个错数）；被截断时不用它冒充总数，交给
+       * refreshJobsRailTotal 从 kpi.jobs 取真值，避免出现「100」再跳「318」。 */
+      if (headerJobsCache.length < HEADER_JOBS_LIMIT) {
+        refreshJobsRailCount(headerJobsCache.length);
+      }
+      refreshJobsRailTotal(headerJobsCache.length);
       return headerJobsCache;
     })
     .catch(() => {
       headerJobsCache = headerJobsCache || [];
+      /* 列表拉失败也别让徽标停在旧值：总数接口是另一条路径，拿得到就先用它。 */
+      refreshJobsRailTotal(headerJobsCache.length);
       return headerJobsCache;
     })
     .finally(() => {
@@ -629,6 +671,112 @@ function writeSettingsMode(mode) {
   }
 }
 
+/* S1：简单模式「更多设置」三行各自对应专家模式里的哪个面板。用固定映射
+ * 而不是把选择器写进模板的 data 属性——模板只负责说「看哪一格」，DOM 结构
+ * 变了只改这里。 */
+const SETTINGS_MORE_TARGETS = {
+  automation: "[data-automation-panel]",
+  "local-ingest": "[data-local-ingest-panel]",
+  "role-bindings": "[data-role-bindings-panel]",
+};
+
+/* 「查看」被点击时目标面板还不存在（简单模式不渲染专家面板），所以先把
+ * 选择器暂存，等 renderSettingsView 重建完 DOM 再消费。 */
+let pendingSettingsPanel = null;
+
+function scrollToPendingSettingsPanel(app) {
+  const selector = pendingSettingsPanel;
+  if (!selector) return;
+  pendingSettingsPanel = null;
+  const target = app && app.querySelector(selector);
+  if (!target) return;
+  /* .settings-view 自己是滚动容器（styles.css .settings-view overflow-y:auto），
+     block:"start" 让面板标题落在容器顶部；topbar 在另一 grid 行不会遮挡。 */
+  target.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+/* S3：延迟格的数据来源。优先本会话刚测的结果；没有就退回后端落库的最近一次
+ * 成功测试（last_test_status/last_test_latency_ms）——删掉进页面自动探针后，
+ * 这里不能再为了填一格而真实调一次 LLM，但刷新页面也不该永远显示「—」。 */
+function settingsLatency(node, lastTest) {
+  if (lastTest && lastTest.ok && lastTest.latency_ms != null) {
+    return lastTest.latency_ms;
+  }
+  if (node && node.last_test_status === "ok") {
+    const persisted = Number(node.last_test_latency_ms);
+    if (Number.isFinite(persisted) && persisted >= 0) return persisted;
+  }
+  return null;
+}
+
+/* S4：设置页头部状态行统一读 state.settingsStatus（请求失败时是
+ * {_degraded:true}）。抽成函数，让降级条的「重试」能就地刷新这一行，
+ * 而不必重渲染整页（避免冲掉用户还没保存的表单输入）。 */
+function settingsStatusLineHtml() {
+  const configured = Boolean(
+    state.settingsStatus && state.settingsStatus.api_key_configured,
+  );
+  return `<span class="dot ${configured ? "dot-success" : "dot-warn"}" aria-hidden="true"></span>${configured ? "LLM 已配置" : "LLM 未配置"}`;
+}
+
+/* S1：简单模式只有「连接 AI 助手」一张卡，而顶栏副标题承诺了「自动化规则 /
+ * 本地摄入 Token」，用户在这一页找不到任何入口（审计 S1）。补三行摘要 +
+ * 「查看」：数据全部来自 renderSettingsView 已经取回的 state，不再发请求；
+ * 点击切专家模式并滚到对应面板（settings-more-open → 上面的 pending 锚点）。
+ * 每行都给出「当前状态」，让用户不进专家模式也能判断要不要进去。 */
+function settingsMoreListHtml(settingsLoadFailed) {
+  const rules = Array.isArray(state.automationRules)
+    ? state.automationRules
+    : [];
+  const enabledRules = rules.filter((rule) => rule && rule.enabled).length;
+  const rulesText = rules.length
+    ? `已配置 ${rules.length} 条拦截规则${
+        enabledRules === rules.length
+          ? "（全部启用）"
+          : enabledRules
+            ? `（${enabledRules} 条启用）`
+            : "（全部停用）"
+      }`
+    : "还没有规则，可按公司 / 最低薪资拦截不适合的岗位";
+
+  const token = state.settings && state.settings.local_ingest_token;
+  const tokenText = settingsLoadFailed
+    ? "设置读取失败，暂时看不到 Token 状态"
+    : token
+      ? "已生成，浏览器插件可直接入库"
+      : "尚未生成，首次入库时自动创建";
+
+  const roles =
+    state.roleBindings && Array.isArray(state.roleBindings.roles)
+      ? state.roleBindings.roles
+      : [];
+  const bindings =
+    state.roleBindings && state.roleBindings.bindings
+      ? state.roleBindings.bindings
+      : {};
+  const boundRoles = roles.filter((role) => bindings[role]).length;
+  const bindingsText = !state.roleBindings
+    ? "分工状态加载失败，可进专家模式重试"
+    : boundRoles
+      ? `${boundRoles} / ${roles.length} 个角色绑定了独立节点，其余跟随主节点`
+      : "全部角色跟随主节点";
+
+  const row = (panel, title, text, ariaLabel) => `
+      <div class="settings-more__row">
+        <div class="settings-more__row-main">
+          <strong>${title}</strong>
+          <p>${text}</p>
+        </div>
+        <button class="btn btn-outline btn-sm" type="button" data-action="settings-more-open" data-panel="${panel}" aria-label="${ariaLabel}">查看</button>
+      </div>`;
+  return `
+    <div class="settings-more" data-settings-more>
+      ${row("automation", "自动化规则", rulesText, "查看自动化规则")}
+      ${row("local-ingest", "本地摄入 Token", tokenText, "查看本地摄入 Token")}
+      ${row("role-bindings", "节点分工", bindingsText, "查看节点分工")}
+    </div>`;
+}
+
 async function renderSettingsView(app) {
   const [settings, status, nodes, rules, roleBindings] = await Promise.all([
     api("/api/settings").catch(() => null),
@@ -639,20 +787,29 @@ async function renderSettingsView(app) {
   ]);
   /* Module 7: partition degradation. If /api/settings/status fails, the
    * main body still renders (node list derives status); the bento shows
-   * an error bar with retry. */
-  state.settings = settings || {};
-  state.settingsStatus = status || { _degraded: true };
+   * an error bar with retry.
+   *
+   * S4：这两个请求失败时返回 null，原实现随后 `settings.classification_vocabulary`
+   * 与 `status.api_key_configured` 直接解引用 → TypeError，整页停在「加载中」，
+   * 与上面「主体仍渲染」的承诺相反。请求处先归一化成对象：
+   * - settings 失败 → {}，主体表单按空白默认值渲染；
+   * - status 失败 → {_degraded:true}，bento 走已有的「加载失败 + 重试」分支。
+   * 模板里的状态一律读 state.settingsStatus，避免两套兜底口径再次分叉。 */
+  const settingsLoadFailed = !(settings && typeof settings === "object");
+  state.settings = settingsLoadFailed ? {} : settings;
+  state.settingsStatus =
+    status && typeof status === "object" ? status : { _degraded: true };
   state.llmNodes = Array.isArray(nodes) ? nodes : [];
   state.automationRules = Array.isArray(rules) ? rules : [];
   state.roleBindings =
     roleBindings && typeof roleBindings === "object" ? roleBindings : null;
-  const vocabulary = settings.classification_vocabulary;
+  const vocabulary = state.settings.classification_vocabulary;
   state.vocabulary = normalizeVocabulary(vocabulary);
   const activeNode = state.llmNodes.find((node) => node.is_active) || null;
   const activeLastTest = activeNode
     ? (state.llmNodeTests || {})[activeNode.node_id]
     : null;
-  const latency = activeLastTest && activeLastTest.ok ? activeLastTest.latency_ms : null;
+  const latency = settingsLatency(activeNode, activeLastTest);
   const nodeCards = state.llmNodes
     .map((node) => llmNodeCardHtml(node, (state.llmNodeTests || {})[node.node_id]))
     .join("");
@@ -662,8 +819,13 @@ async function renderSettingsView(app) {
   const settingsMode = readSettingsMode();
   const modeSwitchHtml = settingsModeSwitchHtml(settingsMode);
   const simpleSetupNode = activeNode || state.llmNodes[0] || null;
+  /* S4：/api/settings 失败时 Token 面板不能继续显示「生成中…」（会一直等），
+   * 如实说明读取失败。 */
+  const localIngestTokenText = settingsLoadFailed
+    ? "读取失败，请刷新重试"
+    : state.settings.local_ingest_token || "生成中…";
   const expertPanelsHtml = `
-      ${settingsBentoHtml(activeNode, latency, status)}
+      ${settingsBentoHtml(activeNode, latency, state.settingsStatus)}
       ${roleBindingsPanelHtml(
         (state.roleBindings && state.roleBindings.roles) || [],
         state.llmNodes,
@@ -679,7 +841,7 @@ async function renderSettingsView(app) {
         </div>
         <div class="panel-body">
           <div class="token-row">
-            <code class="token-value" data-local-ingest-token>${esc(settings.local_ingest_token || "生成中…")}</code>
+            <code class="token-value" data-local-ingest-token>${esc(localIngestTokenText)}</code>
             <button class="btn btn-secondary btn-sm" type="button" data-action="copy-local-ingest-token">复制</button>
           </div>
           <p class="small muted">首次启动自动生成；重置后旧 Token 立即失效，需同步更新油猴脚本配置。</p>
@@ -703,7 +865,7 @@ async function renderSettingsView(app) {
             </div>
             <form data-form="settings-eval-default" class="llm-eval-default">
               <label class="check-line">
-                <input type="checkbox" name="eval_default" ${settings.eval_default ? "checked" : ""}>
+                <input type="checkbox" name="eval_default" ${state.settings.eval_default ? "checked" : ""}>
                 运行对齐时默认开启评估（幻觉检测 / AI 对齐匹配分）
               </label>
               <div class="small muted">每任务额外一次 LLM 调用；工作台可按次覆盖。</div>
@@ -731,43 +893,24 @@ async function renderSettingsView(app) {
           <p>连接 AI 助手、配置节点与自动化规则${settingsMode === "expert" ? "（专家模式）" : ""}</p>
         </div>
         <div class="settings-head-actions">
-          <span class="status-line"><span class="dot ${status.api_key_configured ? "dot-success" : "dot-warn"}" aria-hidden="true"></span>${status.api_key_configured ? "LLM 已配置" : "LLM 未配置"}</span>
+          <span class="status-line" data-settings-status-line>${settingsStatusLineHtml()}</span>
           ${modeSwitchHtml}
-          <button class="btn btn-outline btn-sm" type="button" data-action="reset-settings">恢复默认设置</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-action="reset-settings" title="把 AI 连接配置与分类词表恢复为默认值（不会动 LLM 节点与本地摄入 Token）">恢复默认设置</button>
         </div>
       </div>
       ${settingsMode === "expert" ? expertPanelsHtml : simpleLlmSetupHtml(simpleSetupNode, simpleSetupNode ? (state.llmNodeTests || {})[simpleSetupNode.node_id] : null)}
+      ${settingsMode === "expert" ? "" : settingsMoreListHtml(settingsLoadFailed)}
     </div>`;
 
-  if (
-    activeNode &&
-    !activeLastTest &&
-    !(state.llmNodeTestInflight || {})[activeNode.node_id]
-  ) {
-    state.llmNodeTestInflight = {
-      ...(state.llmNodeTestInflight || {}),
-      [activeNode.node_id]: true,
-    };
-    api(`/api/llm/nodes/${encodeURIComponent(activeNode.node_id)}/test`, {
-      method: "POST",
-    })
-      .then((result) => {
-        state.llmNodeTests = {
-          ...(state.llmNodeTests || {}),
-          [activeNode.node_id]: result,
-        };
-        updateSettingsBento($("#app-router-view"));
-      })
-      .catch(() => {
-        /* keep the latency cell at — until the user tests explicitly */
-      })
-      .finally(() => {
-        state.llmNodeTestInflight = {
-          ...(state.llmNodeTestInflight || {}),
-          [activeNode.node_id]: false,
-        };
-      });
-  }
+  /* S3：原来这里会在进设置页时自动 POST /api/llm/nodes/{id}/test 给「API 延迟」
+   * 格补数据——每次进页面都对真实 provider 发一次最小请求（最长约 10s，结果还
+   * 落库），用户既没同意也看不见。延迟改由用户点节点卡「测试连通性」
+   * （llm-node-test → updateSettingsBento）或用下面 settingsLatency 读的持久化
+   * last_test_* 结果来填。
+   *
+   * S1 的跳转锚点也只能在这里补：目标面板仅专家模式渲染，所以「查看」先切模式
+   * 再重渲染，滚动必须等新 DOM 落地后执行。 */
+  scrollToPendingSettingsPanel(app);
 }
 
 function updateSettingsBento(app = $("#app-router-view")) {
@@ -778,7 +921,7 @@ function updateSettingsBento(app = $("#app-router-view")) {
   const lastTest = activeNode
     ? (state.llmNodeTests || {})[activeNode.node_id]
     : null;
-  const latency = lastTest && lastTest.ok ? lastTest.latency_ms : null;
+  const latency = settingsLatency(activeNode, lastTest);
   mount.outerHTML = settingsBentoHtml(activeNode, latency, state.settingsStatus);
 }
 
@@ -1986,10 +2129,63 @@ const actions = {
   "back-to-jobs": () => navigate("jobs"),
   "go-resumes": () => navigate("resume"),
   "go-jobs": () => navigate("jobs"),
-  "reset-settings": async () => {
+  /* S5：「恢复默认设置」原来点一下就直接 POST，误触即丢 AI 连接配置与分类词表；
+   * 而且用户会误以为 LLM 节点也一起被清空（后端只 update_settings(default_settings())，
+   * 保留 local_ingest_token，从不碰 llm_nodes）。改成二次确认，正文列清会/不会
+   * 重置的范围；确认按钮用 danger，取消是默认 ghost。 */
+  "reset-settings": () => {
+    showModal(
+      "恢复默认设置",
+      `<p>这会把以下设置还原为出厂默认：</p>
+       <ul class="small muted">
+         <li>AI 连接配置（服务商 / 模型 / API Key / Base URL）</li>
+         <li>分类词表（岗位状态、职能、级别）</li>
+         <li>评估默认开关、提醒与岗位表自动同步配置</li>
+       </ul>
+       <p class="small muted">不会重置：LLM 节点列表、本地摄入 Token。已导入的岗位、简历与投递记录也不受影响。</p>
+       <div class="actions">
+         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+         <button class="btn btn-danger" type="button" data-action="confirm-reset-settings">确认恢复</button>
+       </div>`,
+    );
+  },
+  "confirm-reset-settings": async () => {
+    closeModal();
     await api("/api/settings/reset", { method: "POST" });
-    toast("已恢复默认设置", "success");
+    /* 成功 toast 写明影响项，避免把「恢复默认」当成全部清空。 */
+    toast(
+      "已恢复默认：AI 连接配置与分类词表回到默认值（LLM 节点与本地摄入 Token 未改动）",
+      "success",
+    );
     render();
+  },
+  /* S1：简单模式「更多设置」行 → 切专家模式并滚到对应面板。render() 会整页
+   * 重建，锚点用 pendingSettingsPanel 传递（见 scrollToPendingSettingsPanel）。 */
+  "settings-more-open": async (button) => {
+    const selector = SETTINGS_MORE_TARGETS[button.dataset.panel];
+    if (typeof selector !== "string") return;
+    writeSettingsMode("expert");
+    pendingSettingsPanel = selector;
+    await render();
+  },
+  /* S4：bento 降级条上的「重试」此前没有 handler（点了没反应）。只重取
+   * /api/settings/status 并就地刷新头部状态行 + bento，失败则保留降级条。 */
+  "retry-settings-status": async () => {
+    let next;
+    try {
+      next = await api("/api/settings/status");
+    } catch {
+      state.settingsStatus = { _degraded: true };
+      updateSettingsBento($("#app-router-view"));
+      toast("系统状态仍不可用，请稍后重试", "error");
+      return;
+    }
+    state.settingsStatus =
+      next && typeof next === "object" ? next : { _degraded: true };
+    const statusLine = $("[data-settings-status-line]");
+    if (statusLine) statusLine.innerHTML = settingsStatusLineHtml();
+    updateSettingsBento($("#app-router-view"));
+    toast("系统状态已更新", "success");
   },
   "copy-local-ingest-token": () => {
     const token = state.settings && state.settings.local_ingest_token;
@@ -2271,7 +2467,16 @@ const actions = {
   },
   "open-optimizer": (button) => navigate("workspace", button.dataset.id),
   /* Phase E: 看板卡片单岗对齐。idle/failed/零 diff succeeded 由卡片按钮触发，
-   * 使用最近创建的主简历 + medium 粒度，与工作台默认一致。 */
+   * 使用最近创建的主简历 + medium 粒度，与工作台默认一致。
+   *
+   * J4（审计 2026-10-22）：这一步原来点下去就直接 POST —— 一次真实的 LLM 调用
+   * （1–3 分钟、按次计费）就这么花掉了，而「开始对齐」恰恰是新手在卡片上最
+   * 容易点到的那个按钮，用的还是系统替他挑的「最近一份简历」。所以拆成两步：
+   * 先弹确认，写清「用哪份简历 / 什么粒度 / 大概多久 / 会花一次模型调用」；
+   * 用户点「开始对齐」才真正排队，点「取消」只关弹窗、不发任何请求。
+   * 「取消」刻意排在动作区第一个：showModal 的 focusInitial 聚焦第一个可
+   * 聚焦元素，回车/空格不会顺手把钱花掉。
+   * 这是额度与信任问题，不是样式问题：误触必须零成本。 */
   "align-job": async (button) => {
     const jobId = button && button.dataset.id;
     if (!jobId) return;
@@ -2282,8 +2487,30 @@ const actions = {
       return;
     }
     const resumeId = resume.resume_id || resume.id;
-    const target = button;
-    if (target) target.disabled = true;
+    const resumeTitle = esc(resume.title || "主简历");
+    const resumeVersion = resume.current_version == null ? "—" : esc(resume.current_version);
+    showModal(
+      "确认开始对齐",
+      `<p>将用「<b>${resumeTitle}</b>」（v${resumeVersion}）对这个岗位运行一次对齐：</p>
+       <ul class="small muted">
+         <li>粒度：重构（medium）——在事实范围内调整措辞与结构</li>
+         <li>预计耗时：1–3 分钟（后台排队，完成后回到岗位库刷新即可）</li>
+         <li>成本：会消耗一次模型调用</li>
+       </ul>
+       <p class="small muted">想换另一份简历，请到工作台右侧「优化设置」里选择后再运行。</p>
+       <div class="actions">
+         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+         <button class="btn btn-primary" type="button" data-action="confirm-align-job" data-id="${esc(jobId)}" data-resume-id="${esc(resumeId)}">开始对齐</button>
+       </div>`,
+    );
+  },
+  /* J4 第二步：确认后才真正排队。先关弹窗再发请求 —— 按钮节点随弹窗销毁，
+   * 天然挡住连点（连点会花两次钱）。 */
+  "confirm-align-job": async (button) => {
+    const jobId = button && button.dataset.id;
+    const resumeId = button && button.dataset.resumeId;
+    if (!jobId || !resumeId) return;
+    closeModal();
     try {
       await api(`/api/jobs/${encodeURIComponent(jobId)}/workbench`, {
         method: "POST",
@@ -2296,7 +2523,6 @@ const actions = {
     } catch (error) {
       toast(error.message || "对齐排队失败", "error");
     } finally {
-      if (target) target.disabled = false;
       setTimeout(() => renderKanban($("#app-router-view")), 1200);
     }
   },

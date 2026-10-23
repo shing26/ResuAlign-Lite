@@ -12,6 +12,8 @@ import {
   STAGE_LABELS,
   alignmentStatusLabel,
   atsHealthCardHtml,
+  atsHealthScoreLevel,
+  atsHealthTone,
   buildDiagnosisMarkdownFrom,
   esc,
   formatElapsed,
@@ -430,6 +432,88 @@ function syncResumeBandStatus(text) {
   if (node) node.textContent = text;
 }
 
+/* RS-02（2026-10-22 审计）：全页只保留页头一个诊断主 CTA。
+ * 诊断卡、结果行、失败区都不再各自生成「诊断/重新诊断」按钮，避免同一屏
+ * 出现两三个同名付费动作（用户不知道该点哪个，误触还要花模型调用）。
+ * 因此这里统一改页头按钮文案与可用态；找不到节点时静默跳过，
+ * 不做任何 panel 内已删除节点的查询。 */
+function syncBandDiagnoseCta(label, busy) {
+  const cta = $("[data-action='diagnose-resume']");
+  if (!cta) return;
+  cta.disabled = Boolean(busy);
+  cta.textContent = label;
+  cta.classList.toggle("is-loading", Boolean(busy));
+}
+
+/* 无诊断时给一行「先点哪里」的提示；有结果/进度中则不显示。 */
+function syncDiagnosisHint(visible) {
+  const hint = $("[data-diagnosis-hint]");
+  if (hint) hint.hidden = !visible;
+}
+
+/* 诊断报告导出（MD / PDF）收在页头「导出」下拉菜单里：没有诊断结果时隐藏，
+ * 避免菜单里出现点了没反应的空入口。 */
+function setBandDiagnosisExportsHidden(hidden) {
+  $$(
+    ".resume-band [data-action='export-diagnosis'], .resume-band [data-action='export-diagnosis-md']",
+  ).forEach((node) => {
+    node.hidden = hidden;
+  });
+}
+
+/* RS-03（移动端 ATS 摘要）：≤900px 时首屏要能看到「能不能投」。
+ * 摘要卡 markup 由本模块产出、resume-center.js 复用同一函数；显示/隐藏
+ * 完全交给 CSS（桌面隐藏、窄屏显示），这里不写任何媒体查询。
+ * 与 atsHealthCardHtml 同口径：有 issues 用 issues，否则回退 suggestions。
+ * 没有诊断结果时整卡带 hidden：此时卡内只有「尚未诊断」占位，留着反而和上面
+ * 那行「还没有诊断，点右上角…」重复；诊断完成后由 syncAtsSummary 换掉。 */
+export function atsSummaryHtml(diagnosis) {
+  const data = diagnosis && typeof diagnosis === "object" ? diagnosis : {};
+  const rawScore = Number(data.score);
+  const score = Number.isFinite(rawScore)
+    ? Math.max(0, Math.min(100, rawScore))
+    : null;
+  const toList = (value) =>
+    Array.isArray(value)
+      ? value.map((item) => String(item ?? "")).filter(Boolean)
+      : [];
+  const issues = toList(data.issues);
+  const suggestions = toList(data.suggestions);
+  const improvements = (issues.length ? issues : suggestions).slice(0, 2);
+  const level = score == null ? "尚未诊断" : atsHealthScoreLevel(score);
+  return `
+    <div class="resume-ats-summary" data-ats-summary${score == null ? " hidden" : ""}>
+      <div class="resume-ats-summary__head">
+        <span class="resume-ats-summary__score" data-ats-summary-score>${score ?? "—"}</span>
+        <span class="resume-ats-summary__label" data-ats-summary-level>${esc(level)} · ATS 健康度</span>
+      </div>
+      ${
+        improvements.length
+          ? `<ul class="resume-ats-summary__list" data-ats-summary-improvements>${improvements
+              .map((item) => `<li>${esc(item)}</li>`)
+              .join("")}</ul>`
+          : `<p class="small muted" data-ats-summary-hint>${
+              score == null
+                ? "诊断后这里显示 ATS 分数与 2 条改进建议"
+                : "本次诊断未给出改进建议"
+            }</p>`
+      }
+      ${
+        score == null
+          ? ""
+          : '<button class="btn btn-ghost btn-sm" type="button" data-action="ats-summary-jump">查看完整 ATS 建议</button>'
+      }
+    </div>`;
+}
+
+/* 诊断完成/失败后整块重渲染摘要卡，保证移动端摘要与右栏 ATS 卡同源。
+ * 用 outerHTML 替换整卡：innerHTML 会把新卡嵌进旧卡里，移动端出现双层边框。 */
+function syncAtsSummary(diagnosis) {
+  const root = $("[data-ats-summary]");
+  if (!root) return;
+  root.outerHTML = atsSummaryHtml(diagnosis);
+}
+
 export function startDiagnosisPolling(jobId, resumeId) {
   stopDiagnosisPolling();
   state.diagnosisResumeId = resumeId || state.diagnosisResumeId;
@@ -476,6 +560,11 @@ export function renderDiagnosisIdle() {
   const panel = $("[data-diagnosis-panel]");
   if (!panel) return;
   syncResumeBandStatus("最近诊断：尚未诊断");
+  /* 无诊断：页头 CTA 回到「诊断简历」，卡内给一行「先点哪里」提示。 */
+  syncBandDiagnoseCta("诊断简历", false);
+  syncDiagnosisHint(true);
+  syncAtsSummary(null);
+  setBandDiagnosisExportsHidden(true);
   const meta = $("[data-diagnosis-meta]", panel);
   if (meta) meta.textContent = "尚未诊断";
   const progress = $("[data-diagnosis-progress]", panel);
@@ -490,20 +579,6 @@ export function renderDiagnosisIdle() {
     error.hidden = true;
     error.innerHTML = "";
   }
-  $$("[data-action='export-diagnosis'], [data-action='export-diagnosis-md']", panel).forEach(
-    (node) => {
-      node.hidden = true;
-    },
-  );
-  const bandExportHide = $$(".resume-band [data-action='export-diagnosis'], .resume-band [data-action='export-diagnosis-md']");
-  bandExportHide.forEach((node) => {
-    node.hidden = true;
-  });
-  const diagnoseBtn = $("[data-action='diagnose-resume']", panel);
-  if (diagnoseBtn) {
-    diagnoseBtn.disabled = false;
-    diagnoseBtn.textContent = "诊断简历";
-  }
   /* Sprint 4 T3: 空闲态把右侧 ATS 卡重置为占位。 */
   const atsNode = $("[data-ats-health-mount]");
   if (atsNode) atsNode.innerHTML = atsHealthCardHtml(null);
@@ -512,6 +587,9 @@ export function renderDiagnosisIdle() {
 export function renderDiagnosisProgress(snapshot) {
   const panel = $("[data-diagnosis-panel]");
   if (!panel) return;
+  /* 诊断中：页头 CTA 置灰并显示进度文案（重载恢复轮询时也保持同一状态）。 */
+  syncBandDiagnoseCta("诊断中...", true);
+  syncDiagnosisHint(false);
   const progress = $("[data-diagnosis-progress]", panel);
   if (progress) progress.hidden = false;
   const result = $("[data-diagnosis-result]", panel);
@@ -545,12 +623,6 @@ export function renderDiagnosisProgress(snapshot) {
     cancel.hidden =
       snapshot.status !== "queued" && snapshot.status !== "running";
   }
-  const diagnoseBtn = $("[data-action='diagnose-resume']", panel);
-  if (diagnoseBtn) {
-    diagnoseBtn.disabled = true;
-    diagnoseBtn.textContent = "诊断中...";
-    diagnoseBtn.classList.add("is-loading");
-  }
 }
 
 export function renderDiagnosisResult(snapshot) {
@@ -560,9 +632,11 @@ export function renderDiagnosisResult(snapshot) {
   const diagnosis = result.diagnosis || result;
   const score = Math.max(0, Math.min(100, Number(diagnosis.score) || 0));
   syncResumeBandStatus(`最近诊断：${score} 分`);
-  const skills = diagnosis.skills || [];
-  const issues = diagnosis.issues || [];
-  const suggestions = diagnosis.suggestions || [];
+  /* 完成态：页头 CTA 变成「重新诊断」，卡内提示收起。 */
+  syncBandDiagnoseCta("重新诊断", false);
+  syncDiagnosisHint(false);
+  syncAtsSummary(diagnosis);
+  setBandDiagnosisExportsHidden(false);
   const meta = $("[data-diagnosis-meta]", panel);
   if (meta) {
     meta.textContent = `最近诊断 · 用时 ${snapshot.elapsed_seconds || 0}s · 模型 ${diagnosis.model || "未知"}`;
@@ -574,39 +648,27 @@ export function renderDiagnosisResult(snapshot) {
     error.hidden = true;
     error.innerHTML = "";
   }
-  $$("[data-action='export-diagnosis'], [data-action='export-diagnosis-md']", panel).forEach(
-    (node) => {
-      node.hidden = false;
-    },
-  );
-  // 导出按钮已收敛到 resume-band（PM 评审去重）：诊断成功时同步点亮
-  // PDF 与 MD 两个诊断导出按钮。
-  $$(".resume-band [data-action='export-diagnosis'], .resume-band [data-action='export-diagnosis-md']").forEach(
-    (node) => {
-      node.hidden = false;
-    },
-  );
   const target = $("[data-diagnosis-result]", panel);
-  if (!target) return;
-  target.hidden = false;
-  const verdictClass =
-    score >= 80 ? "badge-green" : score >= 60 ? "badge-amber" : "badge-red";
-  const verdict = score >= 80 ? "优秀" : score >= 60 ? "建议优化" : "需重点优化";
-  target.innerHTML = `
+  if (target) {
+    target.hidden = false;
+    /* 结果行不再重复大分数，也不再放第二个「重新诊断」：
+     * ① 分数已经在页头状态行 + 右栏 ATS 卡大字各出现一次，这里再写一遍就是
+     *    审计里「85 分说了六遍」的那类重复；
+     * ② 诊断入口全页只有一个（页头），同屏两个同名付费 CTA 会让人无从下手。
+     * 等级与右栏共用 atsHealthScoreLevel / atsHealthTone，避免 80 vs 85
+     * 两套阈值在同一屏给出互相矛盾的结论。 */
+    const level = atsHealthScoreLevel(score);
+    const tone = atsHealthTone(score);
+    const levelClass =
+      tone === "high" ? "badge-green" : tone === "mid" ? "badge-amber" : "badge-red";
+    target.innerHTML = `
     <div class="diagnosis-banner__result">
-      <span class="diagnosis-banner__score">${score}</span>
-      <span class="badge ${verdictClass}">${verdict}</span>
-      <span class="small muted">诊断分 ${score} / 100 · 详情见右侧 ATS 健康度</span>
+      <span class="badge ${levelClass}">${esc(level)}</span>
+      <span class="small muted">诊断完成 · 改进建议见 ATS 健康度</span>
       <span class="diagnosis-banner__actions">
         <button class="btn btn-outline btn-sm" data-action="diagnosis-to-align" data-id="${state.diagnosisResumeId || ""}">去对齐</button>
-        <button class="btn btn-ghost btn-sm" data-action="rerun-diagnosis" data-id="${state.diagnosisResumeId || ""}">重新诊断</button>
       </span>
     </div>`;
-  const diagnoseBtn = $("[data-action='diagnose-resume']", panel);
-  if (diagnoseBtn) {
-    diagnoseBtn.disabled = false;
-    diagnoseBtn.textContent = "诊断简历";
-    diagnoseBtn.classList.remove("is-loading");
   }
   /* Sprint 4 T3: 诊断完成同步刷新右侧 ATS 健康度卡。 */
   const atsNode = $("[data-ats-health-mount]");
@@ -619,6 +681,11 @@ export function renderDiagnosisError(snapshot) {
   syncResumeBandStatus(
     `最近诊断：${snapshot.status === "canceled" ? "已取消" : "失败"}`,
   );
+  /* 失败态不留第二个重试按钮：重试就是页头那个唯一的「重新诊断」。 */
+  syncBandDiagnoseCta("重新诊断", false);
+  syncDiagnosisHint(true);
+  syncAtsSummary(null);
+  setBandDiagnosisExportsHidden(true);
   const meta = $("[data-diagnosis-meta]", panel);
   if (meta) meta.textContent = "最近一次诊断失败";
   const progress = $("[data-diagnosis-progress]", panel);
@@ -634,24 +701,7 @@ export function renderDiagnosisError(snapshot) {
     error.setAttribute("role", "alert");
     error.innerHTML = `
       <div><strong>${snapshot.status === "canceled" ? "诊断已取消" : "诊断失败"}</strong>：${esc(snapshot.error || "诊断任务暂时失败，请重试")}</div>
-      <div class="row" style="margin-top:10px">
-        <button class="btn btn-primary btn-sm" data-action="rerun-diagnosis" data-id="${state.diagnosisResumeId || ""}">重新诊断</button>
-      </div>`;
-  }
-  $$("[data-action='export-diagnosis'], [data-action='export-diagnosis-md']", panel).forEach(
-    (node) => {
-      node.hidden = true;
-    },
-  );
-  const bandExportHide = $$(".resume-band [data-action='export-diagnosis'], .resume-band [data-action='export-diagnosis-md']");
-  bandExportHide.forEach((node) => {
-    node.hidden = true;
-  });
-  const diagnoseBtn = $("[data-action='diagnose-resume']", panel);
-  if (diagnoseBtn) {
-    diagnoseBtn.disabled = false;
-    diagnoseBtn.textContent = "诊断简历";
-    diagnoseBtn.classList.remove("is-loading");
+      <div class="small muted" style="margin-top:6px">可点右上角「重新诊断」重试。</div>`;
   }
   /* Sprint 4 T3: 失败态清空右侧 ATS 卡，避免展示过期结果。 */
   const atsNode = $("[data-ats-health-mount]");

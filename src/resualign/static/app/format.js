@@ -163,20 +163,156 @@ export function inlineMarkdown(text) {
     .replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
-export function renderMarkdown(text) {
+/* RS-01（2026-10-23，审计 RS-01）：真实主简历往往是「一段刚硬换行的纯文本」——
+ * 3,287 字里 h1/h2/h3 = 0 个，章节名（教育经历 / 专业技能清单 / 核心项目经历）
+ * 要么独占一行、要么被硬换行粘在上一行末尾，于是预览看起来像日志而不像文档。
+ * 这里给纯文本文档加一层保守的结构识别：只在「长文本 + 完全没有 markdown 标题」
+ * 时启用，且只对非 markdown 行生效——短文本与标准 markdown 渲染完全不变。 */
+const DOC_SECTION_KEYWORDS = [
+  "核心项目经历",
+  "工作方式与个人特点",
+  "专业技能清单",
+  "教育经历",
+  "实习经历",
+  "工作经历",
+  "项目经历",
+  "校园经历",
+  "科研经历",
+  "开源贡献",
+  "荣誉奖项",
+  "自我评价",
+  "个人优势",
+  "专业技能",
+  "技能清单",
+];
+
+const DOC_FIELD_LABELS = [
+  "主修",
+  "技术栈",
+  "情境",
+  "任务",
+  "结果",
+  "职责",
+  "成果",
+  "背景",
+  "目标",
+  "方案",
+  "影响",
+];
+
+const DOC_CONTACT_RE =
+  /(@|https?:\/\/|github\.com|1[3-9]\d{9}|\d{3}-\d{4}-\d{4})/;
+const DOC_PROJECT_TITLE_RE = /^[^\s].{2,80}?\s[—–-]\s/;
+const DOC_HEADING_BAN_RE = /[。；，、！？：:]/;
+
+function looksLikeDocHeading(text) {
+  const value = String(text || "").trim();
+  if (value.length < 2 || value.length > 14) return false;
+  if (DOC_HEADING_BAN_RE.test(value)) return false;
+  if (/^[-*•#>|\d]/.test(value)) return false;
+  if (/\*\*|`/.test(value)) return false;
+  return (value.match(/[\u4e00-\u9fa5]/g) || []).length >= 2;
+}
+
+/* 一行里可能同时有「正文 + 章节名 + 项目名」（硬换行把章节名粘在行尾），
+ * 按最早出现、且优先最长关键词切段。 */
+function splitDocLine(line) {
+  let best = null;
+  for (const keyword of DOC_SECTION_KEYWORDS) {
+    const index = line.indexOf(keyword);
+    if (index === -1) continue;
+    if (!best || index < best.index || (index === best.index && keyword.length > best.keyword.length)) {
+      best = { keyword, index };
+    }
+  }
+  if (!best) return [{ type: "text", text: line }];
+  const segments = [];
+  const before = line.slice(0, best.index).trim();
+  if (before) segments.push({ type: "text", text: before });
+  segments.push({ type: "heading", text: best.keyword });
+  const after = line.slice(best.index + best.keyword.length).trim();
+  if (after) {
+    const isProject =
+      DOC_PROJECT_TITLE_RE.test(after) &&
+      (/·/.test(after) || /github\.com/.test(after));
+    segments.push({ type: isProject ? "project" : "text", text: after });
+  }
+  return segments;
+}
+
+/* 一行里可能塞了多个字段（「技术栈：… 情境：…」），按标签位置切开分别渲染，
+ * 否则第二个标签会淹没在正文里。 */
+function splitDocFieldLine(text) {
+  const pattern = new RegExp(`(${DOC_FIELD_LABELS.join("|")})[：:]`, "g");
+  const matches = [...text.matchAll(pattern)];
+  if (!matches.length || matches[0].index !== 0) return null;
+  return matches.map((match, index) => {
+    const start = match.index + match[0].length;
+    const end = index + 1 < matches.length ? matches[index + 1].index : text.length;
+    return { label: match[1], body: text.slice(start, end).trim() };
+  });
+}
+
+export function renderMarkdown(text, options = {}) {
+  const source = String(text || "");
+  /* 文档模式是「猜」的结构，必须足够保守：短文本与带 markdown 标题的文本一律
+   * 走原逻辑，避免改动既有渲染契约（markdown.test.mjs 逐条锁着）。 */
+  const documentMode =
+    options.document === true ||
+    (source.length > 400 && !/^#{1,6}\s/m.test(source));
   const html = [];
   let listOpen = false;
+  let lastBlock = null; /* { type: "li" | "p", index } 用于硬换行续行 */
+  let docHeaderDone = false;
   const closeList = () => {
     if (listOpen) {
       html.push("</ul>");
       listOpen = false;
     }
   };
-  for (const raw of String(text || "").split("\n")) {
-    const line = esc(raw);
-    const trimmed = line.trim();
+  const pushParagraph = (inner, className = "") => {
+    html.push(className ? `<p class="${className}">${inner}</p>` : `<p>${inner}</p>`);
+    lastBlock = { type: "p", index: html.length - 1 };
+  };
+  const pushHeading = (inner, className = "") => {
+    html.push(
+      className
+        ? `<h3 class="${className}">${inlineMarkdown(inner)}</h3>`
+        : `<h3>${inlineMarkdown(inner)}</h3>`,
+    );
+    /* 标题后面紧跟的硬换行正文不应被当成续行拼回标题。 */
+    lastBlock = { type: "heading", index: html.length - 1 };
+  };
+
+  const emitDocSegment = (segment) => {
+    const inner = esc(segment.text);
+    if (segment.type === "heading") {
+      pushHeading(inner, "resume-doc__section");
+      return;
+    }
+    if (segment.type === "project") {
+      pushHeading(inner, "resume-doc__project");
+      return;
+    }
+    const fieldSegments = splitDocFieldLine(segment.text);
+    if (fieldSegments) {
+      for (const field of fieldSegments) {
+        pushParagraph(
+          `<strong>${esc(field.label)}：</strong>${inlineMarkdown(esc(field.body))}`,
+          "resume-doc__field",
+        );
+      }
+      return;
+    }
+    pushParagraph(inlineMarkdown(inner));
+  };
+
+  for (const rawLine of source.split("\n")) {
+    const trimmedRaw = rawLine.trim();
+    const trimmed = esc(trimmedRaw);
     if (!trimmed) {
       closeList();
+      lastBlock = null;
       continue;
     }
     const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
@@ -184,6 +320,7 @@ export function renderMarkdown(text) {
       closeList();
       const level = heading[1].length;
       html.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
+      lastBlock = { type: "p", index: html.length - 1 };
       continue;
     }
     const listItem = trimmed.match(/^[-*•]\s+(.*)$/);
@@ -193,10 +330,75 @@ export function renderMarkdown(text) {
         listOpen = true;
       }
       html.push(`<li>${inlineMarkdown(listItem[1])}</li>`);
+      lastBlock = { type: "li", index: html.length - 1 };
       continue;
     }
+    if (documentMode) {
+      if (!docHeaderDone) {
+        docHeaderDone = true;
+        closeList();
+        html.push(`<h1 class="resume-doc__name">${inlineMarkdown(trimmed)}</h1>`);
+        lastBlock = { type: "heading", index: html.length - 1 };
+        continue;
+      }
+      if (
+        !html.some((chunk) => chunk.startsWith("<p")) &&
+        DOC_CONTACT_RE.test(trimmedRaw) &&
+        trimmedRaw.length < 180
+      ) {
+        closeList();
+        pushParagraph(inlineMarkdown(trimmed), "resume-doc__contact");
+        continue;
+      }
+      const segments = splitDocLine(trimmedRaw);
+      const hasStructure = segments.some((seg) => seg.type !== "text");
+      if (hasStructure) {
+        closeList();
+        for (const segment of segments) emitDocSegment(segment);
+        continue;
+      }
+      const fieldSegments = splitDocFieldLine(trimmedRaw);
+      if (fieldSegments) {
+        closeList();
+        for (const field of fieldSegments) {
+          pushParagraph(
+            `<strong>${esc(field.label)}：</strong>${inlineMarkdown(esc(field.body))}`,
+            "resume-doc__field",
+          );
+        }
+        continue;
+      }
+      const isProjectTitle =
+        DOC_PROJECT_TITLE_RE.test(trimmedRaw) &&
+        (/·/.test(trimmedRaw) || /github\.com/.test(trimmedRaw));
+      if (isProjectTitle) {
+        closeList();
+        pushHeading(trimmed, "resume-doc__project");
+        continue;
+      }
+      if (looksLikeDocHeading(trimmedRaw)) {
+        closeList();
+        pushHeading(trimmed, "resume-doc__section");
+        continue;
+      }
+      /* 硬换行续行：上一块是列表项或段落时接回去，避免一句经历被切成两段。 */
+      if (lastBlock && lastBlock.type === "li") {
+        html[lastBlock.index] = html[lastBlock.index].replace(
+          /<\/li>$/,
+          ` ${inlineMarkdown(trimmed)}</li>`,
+        );
+        continue;
+      }
+      if (lastBlock && lastBlock.type === "p") {
+        html[lastBlock.index] = html[lastBlock.index].replace(
+          /<\/p>$/,
+          ` ${inlineMarkdown(trimmed)}</p>`,
+        );
+        continue;
+      }
+    }
     closeList();
-    html.push(`<p>${inlineMarkdown(trimmed)}</p>`);
+    pushParagraph(inlineMarkdown(trimmed));
   }
   closeList();
   return html.join("");
@@ -632,6 +834,9 @@ export function workbenchProgressPipelineHtml(session) {
     : [];
   const missingGaps = (gap.gap_report && gap.gap_report.missing_keywords) || [];
   const diffs = alignment.diffs || [];
+  const invalidCount = Array.isArray(alignment.invalid_diffs)
+    ? alignment.invalid_diffs.length
+    : 0;
 
   const alignmentRunning = ["queued", "running"].includes(alignment.status);
   /* B4（2026-09-06 走查 #81）：失败必须有终态——「未开始/未完成：原因」，
@@ -655,6 +860,9 @@ export function workbenchProgressPipelineHtml(session) {
   const gapNote = gapFailed
     ? llmFailureSummary(gap.code, gap.error || "差距分析未完成")
     : "";
+  /* W1（2026-10-22，审计 W1）：失败原因在横幅里已经完整给过一次，右栏不再
+   * 复制整句；这里只保留「失败 + 被拦截条数」的摘要，完整原因放 title。 */
+  const failureFullText = `任务失败：${alignmentNote}`;
   const liveMessage = alignmentRunning
     ? alignment.message || ""
     : alignment.status === "succeeded"
@@ -664,7 +872,9 @@ export function workbenchProgressPipelineHtml(session) {
       : alignmentFailed
         ? noSafeRewrite
           ? `无安全改写：${alignmentNote}`
-          : `任务失败：${alignmentNote}`
+          : invalidCount
+            ? `任务失败 · ${invalidCount} 条建议被门禁拦截`
+            : "任务失败 · 见上方失败横幅"
         : jdNote
           ? `分析未完成：${jdNote}`
           : gapNote
@@ -714,7 +924,7 @@ export function workbenchProgressPipelineHtml(session) {
 
   return `
     <div class="workbench-live-progress" data-workbench-live-progress aria-live="polite">
-      ${liveMessage ? `<div class="workbench-live-progress__message" data-workbench-live-progress-message>${esc(liveMessage)}</div>` : ""}
+      ${liveMessage ? `<div class="workbench-live-progress__message" data-workbench-live-progress-message${alignmentFailed && !noSafeRewrite ? ` title="${esc(failureFullText)}"` : ""}>${esc(liveMessage)}</div>` : ""}
       ${steps
         .map(
           (step) => `
@@ -722,7 +932,7 @@ export function workbenchProgressPipelineHtml(session) {
           <span class="workbench-live-progress__dot" aria-hidden="true">${step.done ? ICON_PROGRESS_CHECK : step.failed ? ICON_PROGRESS_X : step.active ? ICON_PROGRESS_ACTIVE : ICON_PROGRESS_IDLE}</span>
           <div class="workbench-live-progress__copy">
             <span class="workbench-live-progress__label">${esc(step.label)}</span>
-            ${step.detail ? `<span class="workbench-live-progress__detail">${esc(step.detail)}</span>` : step.failed ? `<span class="workbench-live-progress__detail">未完成：${esc(step.note || "请重试")}</span>` : step.idle ? `<span class="workbench-live-progress__detail">未开始</span>` : ""}
+            ${step.detail ? `<span class="workbench-live-progress__detail">${esc(step.detail)}</span>` : step.failed ? `<span class="workbench-live-progress__detail">未完成：见上方失败横幅</span>` : step.idle ? `<span class="workbench-live-progress__detail">未开始</span>` : ""}
           </div>
         </div>`,
         )
@@ -867,6 +1077,12 @@ export function diffCard(diff, index, jobId) {
         ? "该条为无来源新增，已作为硬门禁拦截；没有可定位的原文锚点，暂不能单条重试。"
         : "缺少来源，已作为硬门禁拦截；没有可定位的原文锚点，暂不能单条重试。"
     : "";
+  /* W1（2026-10-22）：后端把「本轮整体失败」的同一句话写进了每条 diff 的
+   * reason，导致一句话在页面里出现 6 次。终态句由横幅统一负责，逐条 reason
+   * 只保留这条建议自己的问题。 */
+  const reasonText = invalid
+    ? String(diff.reason || "").split("；真实性评估判定")[0].trim()
+    : String(diff.reason || "");
   const typeLabel = { modify: "改写", add: "新增", remove: "删除" }[type] || "改写";
   /* #17: modify diffs get character-level marks inside the card's 原文/优化
    * blocks (diff-char-del on the original side, diff-char-ins on the
@@ -886,7 +1102,7 @@ export function diffCard(diff, index, jobId) {
         <div class="diff-card__type">
           <span class="badge ${invalid ? "badge-amber" : "badge-blue"}">${esc(typeLabel)}</span>
           ${diffSectionBadge(diff)}
-          ${diff.confidence && CONFIDENCE_LABELS[diff.confidence]
+          ${!invalid && diff.confidence && CONFIDENCE_LABELS[diff.confidence]
             ? `<span class="badge ${CONFIDENCE_BADGE_CLASS[diff.confidence]}" data-confidence-badge="${esc(diff.confidence)}">${CONFIDENCE_LABELS[diff.confidence]}</span>`
             : ""}
         </div>
@@ -902,7 +1118,7 @@ export function diffCard(diff, index, jobId) {
           <div class="diff-card__text" data-diff-proposed>${proposedHtml}</div>
         </div>
       </div>
-      ${diff.reason ? `<div class="diff-card__reason" data-diff-reason>${esc(diff.reason)}</div>` : ""}
+      ${reasonText ? `<div class="diff-card__reason" data-diff-reason>${esc(reasonText)}</div>` : ""}
       ${provenance ? `<div class="provenance-quote">${esc(provenance)}</div>` : ""}
       ${invalidWarning ? `<div class="diff-card__warning" role="alert">${esc(invalidWarning)}</div>` : ""}
       <div class="diff-card__actions" data-diff-actions>
@@ -918,6 +1134,28 @@ export function diffList(session, jobId) {
   const alignment = (session && session.alignment) || {};
   const diffs = alignment.diffs || [];
   const invalid = alignment.invalid_diffs || [];
+  /* W4（2026-10-22，审计 W4）：失败态原来把 3 张 465px 的「被拦截建议卡」
+   * 直接铺在主区，与头部「0 条建议」互相打脸。终态失败且没有可用建议时，
+   * 主区只给一张失败摘要 + 可展开的被拦截列表，默认不占三屏。 */
+  const terminalFailure =
+    alignment.status === "failed" || alignment.status === "canceled";
+  if (terminalFailure && !diffs.length && invalid.length) {
+    const blockedCards = invalid
+      .map((diff, index) => diffCard(diff, index, jobId))
+      .join("");
+    return `<div class="diff-card-list" data-diff-list>
+      <div class="wb-blocked" data-wb-blocked>
+        <div class="wb-blocked__head">
+          <strong>${invalid.length} 条建议被门禁拦截</strong>
+          <p>这些改写缺少原文依据，已被拦下、不会进入定稿。失败原因见上方横幅；展开可逐条查看或重试。</p>
+        </div>
+        <details class="wb-blocked__details">
+          <summary class="btn btn-outline btn-sm" data-wb-blocked-toggle>展开 ${invalid.length} 条被拦截建议</summary>
+          <div class="wb-blocked__list">${blockedCards}</div>
+        </details>
+      </div>
+    </div>`;
+  }
   const cards = [...diffs, ...invalid]
     .map((diff, index) => diffCard(diff, index, jobId))
     .join("");
@@ -1057,10 +1295,16 @@ export function exportDock(jobId, job = {}) {
 
 function boardMoreMenu(job) {
   const id = esc(job.job_id);
+  /* B2（2026-10-22，审计 J4）：卡片上原本平铺 14 个可交互目标，「去投递 / 工作台」
+   * 与标题重复。现在卡片只留「对齐 + 状态」两个动作，其余收进 kebab；kebab 里
+   * 的「去投递」仍用同一套 open-source-url 动作，行为不变。 */
   return `
     <details class="board-more" aria-label="更多操作">
       <summary class="board-more__trigger" aria-label="更多操作" title="更多操作">${icon("more-horizontal", 20)}</summary>
       <div class="board-more__menu">
+        <button class="btn btn-ghost btn-sm" type="button" data-action="open-optimizer" data-id="${id}">打开工作台</button>
+        ${jobApplyLinkHtml(job)}
+        <div class="board-more__sep" aria-hidden="true"></div>
         <button class="btn btn-ghost btn-sm" type="button" data-action="open-job-followup" data-id="${id}">安排跟进</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="open-job-timeline" data-id="${id}">详情</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="edit-job" data-id="${id}">编辑</button>
@@ -1229,6 +1473,26 @@ function boardMatchBlock(job) {
   return `<div class="board-match" data-match-block>${parts.join("")}</div>`;
 }
 
+/* 岗位卡折叠态的「工作状态」徽标（2026-10-22，审计 J3）。
+ * 背景：alignmentBadgeHtml 只在展开区渲染，于是 318 条里 209 条对齐失败、
+ * 22 条已对齐在列表上一格都看不见，用户只能逐张点开才知道该处理谁。
+ * 这里给折叠态一个统一入口：终态复用 alignmentBadgeHtml 的语义分级，
+ * 未跑过的补「待分析」灰徽标，运行中的补「排队中/对齐中」。
+ * 注意：本轮只做展示，不引入新状态机。 */
+function boardAlignmentChip(job) {
+  const terminal = alignmentBadgeHtml(job);
+  if (terminal) return terminal;
+  const status = String(job.alignment_status || "idle");
+  if (status === "queued") return '<span class="badge badge-blue">排队中</span>';
+  if (status === "running") return '<span class="badge badge-blue">对齐中</span>';
+  if (status === "canceled" || status === "expired") {
+    return '<span class="badge badge-amber" title="上次对齐未跑完，可重新运行">未完成</span>';
+  }
+  const hasProfile = Boolean(job.jd_profile);
+  if (!hasProfile) return "";
+  return '<span class="badge badge-gray" title="已画像，尚未运行对齐">待对齐</span>';
+}
+
 export function boardCard(job, statuses = null) {
   const canonical = canonicalJobStatus(job.status);
   const optionsHtml = jobStatusOptionsHtml(statuses, canonical);
@@ -1236,16 +1500,32 @@ export function boardCard(job, statuses = null) {
   /* #F10/#82: 徽章 title 披露分数口径（AI 评估 vs 规则四维）。 */
   const matchTitle =
     match != null ? `匹配度 · ${jobMatchSource(job)}` : "尚未分析";
+  const workChip = boardAlignmentChip(job);
+  /* 匹配未知时，工作状态徽标顶到匹配位（避免同一行出现两个「待分析」）；
+   * 匹配已知时，工作状态单独占一行（失败/已对齐必须在折叠态可见）。 */
+  const metaLeadBadge =
+    match != null
+      ? `<span class="match-badge ${matchTone(match)}" data-match-total title="${matchTitle}">${match}</span>`
+      : workChip ||
+        '<span class="match-badge match-badge--empty" title="尚未分析">待分析</span>';
+  const statusLine = match != null && workChip ? workChip : "";
+  /* 卡片解剖 v2（2026-10-22）：220px 宽的看板列里，旧结构把复选框、匹配
+   * 徽标、标题、展开箭头、更多菜单五个控件挤在同一行，标题被压到 25px 宽
+   * ——中文逐字换行成 293px 高的竖排字。现在顶行只留「复选框 + 标题 +
+   * 更多」，标题两行截断；匹配度与展开箭头下移到元信息行。 */
   return `
     <article class="board-card copilot-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}" draggable="true" data-board-drag>
       <div class="board-card__top">
         <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
-        ${match != null ? `<span class="match-badge ${matchTone(match)}" data-match-total title="${matchTitle}">${match}</span>` : `<span class="match-badge match-badge--empty" title="${matchTitle}">待分析</span>`}
-        <button type="button" class="board-card__title" data-action="open-optimizer" data-id="${job.job_id}">${esc(job.title)}</button>
-        <button type="button" class="board-card__reveal-toggle" data-action="toggle-card-reveal" data-id="${esc(job.job_id)}" aria-expanded="false" aria-label="展开详情" title="展开详情">${icon("chevron-down", 16)}</button>
+        <button type="button" class="board-card__title" data-action="open-optimizer" data-id="${job.job_id}" title="${esc(job.title)}">${esc(job.title)}</button>
         ${boardMoreMenu(job)}
       </div>
-      <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
+      <div class="board-card__meta">
+        ${metaLeadBadge}
+        <span class="board-card__meta-text" title="${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</span>
+        <button type="button" class="board-card__reveal-toggle" data-action="toggle-card-reveal" data-id="${esc(job.job_id)}" aria-expanded="false" aria-label="展开详情" title="展开详情">${icon("chevron-down", 16)}</button>
+      </div>
+      ${statusLine ? `<div class="board-card__statusline">${statusLine}</div>` : ""}
       <div class="board-card__reveal">
         ${jdTechStackHtml(job)}
         ${boardMatchBlock(job)}
@@ -1263,14 +1543,63 @@ export function boardCard(job, statuses = null) {
           ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
         </div>
       </div>
-      ${jobSourceUrl(job) ? `<div class="board-card__links">${jobApplyLinkHtml(job)}</div>` : ""}
       <div class="row board-card__actions">
         ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
-        <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
         ${boardAlignButton(job)}
-        <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-optimizer" data-id="${job.job_id}">工作台</button>
+        <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
       </div>
     </article>`;
+}
+
+/* 岗位列表视图的一行（B2，审计 J2）：318 条数据在看板里要滚 121 屏，列表让
+ * 用户一屏扫 8–10 条并按工作状态筛选。行内保留「工作状态」徽标、投递状态、
+ * 更新时间与主操作（打开工作台），对齐仍在行内（额度确认在 main.js 里做）。 */
+export function jobListRow(job, statuses = null) {
+  const canonical = canonicalJobStatus(job.status);
+  const optionsHtml = jobStatusOptionsHtml(statuses, canonical);
+  const statusTone =
+    canonical === "offer"
+      ? "success"
+      : canonical === "interview"
+        ? "info"
+        : canonical === "withdrawn"
+          ? "danger"
+          : canonical === "applied"
+            ? "accent"
+            : "neutral";
+  const match = job.match_score != null ? Math.round(job.match_score) : null;
+  const matchTitle =
+    match != null ? `匹配度 · ${jobMatchSource(job)}` : "尚未分析";
+  const workChip = boardAlignmentChip(job);
+  /* 列表有独立的「匹配」和「工作状态」两列，不能像卡片那样用工作状态顶替
+   * 匹配位：匹配未知显示「—」，工作状态单独一列（否则 87 条待分析会整列空白）。 */
+  const leadBadge =
+    match != null
+      ? `<span class="match-badge ${matchTone(match)}" title="${matchTitle}">${match}</span>`
+      : '<span class="small muted">—</span>';
+  const workCell =
+    workChip || '<span class="badge badge-gray" title="尚未预分析">待分析</span>';
+  const applyLabel = jobSourceUrl(job) ? "去投递" : "补链接";
+  return `
+    <div class="job-row" data-job-id="${job.job_id}" data-job-row>
+      <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
+      <div class="job-row__main">
+        <button type="button" class="job-row__title" data-action="open-optimizer" data-id="${job.job_id}" title="${esc(job.title)}">${esc(job.title)}</button>
+        <span class="job-row__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${esc(formatSalary(job))}</span>
+      </div>
+      <div class="job-row__cell job-row__match">${leadBadge}</div>
+      <div class="job-row__cell job-row__work">${workCell}</div>
+      <div class="job-row__cell job-row__status">
+        <span class="badge pill-neutral"><span class="dot metric-dot metric-dot--${statusTone}" aria-hidden="true"></span>${esc(jobStatusLabel(job.status))}</span>
+      </div>
+      <div class="job-row__cell job-row__time muted small">${esc(formatDate(job.updated_at))}</div>
+      <div class="job-row__actions">
+        ${job.classification_pending ? `<span class="badge badge-amber" title="分类待定：请重新分类">分类待定</span>` : ""}
+        <select class="board-status-select board-status-select--row" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
+        <button class="btn btn-outline btn-sm" type="button" data-action="open-optimizer" data-id="${job.job_id}">打开</button>
+        ${boardMoreMenu(job)}
+      </div>
+    </div>`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2870,8 +3199,8 @@ export function skillGapHtml(gaps, onSkillGapUrl, options = {}) {
             <td class="cell-strong">${esc(skill)}</td>
             <td class="is-num">${esc(count)}</td>
             <td>
-              <span class="meter-cell ${strength}">
-                <span class="meter meter--sm" aria-hidden="true"><span class="meter__fill" style="width:${width}%"></span></span>
+              <span class="meter-cell">
+                <span class="meter meter--sm ${strength}" aria-hidden="true"><span class="meter__fill" style="width:${width}%"></span></span>
               </span>
             </td>
             <td class="is-num">
@@ -3769,7 +4098,9 @@ export function simpleLlmSetupHtml(node, lastTest) {
           </div>
         </form>
         <div data-llm-node-test-result>${testResult}</div>
-    ${isEdit ? "" : '<p class="small muted">保存后第一个节点自动启用。备用节点、角色分工（本地分析 + 云端写作）与自动化规则在「专家模式」中配置。</p>'}
+    ${/* S1（2026-10-22，审计 S1）：这句原本被 isEdit 条件吞掉 —— 已配置节点的
+        * 用户恰恰最需要知道「其余能力在专家模式里」，所以对所有人渲染。 */ ""}
+    <p class="small muted">保存后第一个节点自动启用。备用节点、角色分工（本地分析 + 云端写作）与自动化规则在「专家模式」中配置，也可在上方「更多设置」直达。</p>
       </div>
     </section>`;
 }

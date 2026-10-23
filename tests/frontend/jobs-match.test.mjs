@@ -103,7 +103,13 @@ test("boardCard keeps analysis details in an explicit reveal and action controls
     /\.board-card:hover \.board-card__reveal/,
     "hover 展开会把同列下方卡片整体下推，指针目标在移动中跳动",
   );
-  assert.match(styles, /@media \(hover: none\)[\s\S]*\.board-card__reveal/);
+  /* B4（2026-10-23，审计 J9）：触屏不再强制展开 reveal。旧规则让卡片永久
+   * 展开 505–820px、展开箭头变成死按钮；现在触屏也走 [data-revealed]。 */
+  assert.doesNotMatch(
+    styles,
+    /@media \(hover: none\)\s*\{\s*\.board-card__reveal\s*\{[^}]*display:\s*flex/,
+    "触屏不应再强制展开 reveal",
+  );
 });
 
 test("classification-pending action stays outside the hover reveal layer", () => {
