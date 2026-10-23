@@ -87,12 +87,20 @@ const breakpoints = [...mediaCounts.entries()].sort(
 );
 
 /* token：定义 vs 引用（CSS 的 var() + JS 里出现的 --token 字符串）。 */
+/* 只认「行首的自定义属性声明」：`.dashboard-kpi--teal::before` 这类修饰类名
+ * 里的 `--teal::` 不是 token 定义（之前用宽松正则会把它们算进 token 总数）。 */
 const definedTokens = new Set(
-  [...cssBody.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]),
+  [...cssBody.matchAll(/^[ \t]*(--[\w-]+)[ \t]*:/gm)].map((m) => m[1]),
 );
+/* 「被引用」只认真正的消费点：CSS var()、JS/HTML 里的 var()、以及运行时
+ * getPropertyValue/setProperty。裸的 `--token` 字样（注释、文档字符串）不算，
+ * 否则一个只在注释里被提到的 token 会假装「有人用」，与 G6 的口径也不一致。 */
 const referencedTokens = new Set([
   ...[...cssBody.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]),
-  ...[...jsText.matchAll(/--[\w-]+/g)].map((m) => m[0]),
+  ...[...jsText.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]),
+  ...[...jsText.matchAll(/getPropertyValue\(\s*["'`](--[\w-]+)/g)].map((m) => m[1]),
+  ...[...jsText.matchAll(/setProperty\(\s*["'`](--[\w-]+)/g)].map((m) => m[1]),
+  ...[...html.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]),
 ]);
 const zeroRefTokens = [...definedTokens]
   .filter((name) => !referencedTokens.has(name))

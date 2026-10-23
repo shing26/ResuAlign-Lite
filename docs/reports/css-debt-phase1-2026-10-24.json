@@ -1,0 +1,195 @@
+{
+  "generatedAt": "2026-10-23T18:50:46.446Z",
+  "files": {
+    "stylesCssBytes": 306120,
+    "stylesCssGzipBytes": 63783,
+    "appJsFiles": 15
+  },
+  "css": {
+    "ruleBlocks": 1879,
+    "atRuleBlocks": 170,
+    "selectorCount": 1499,
+    "duplicateSelectorCount": 773,
+    "duplicateSelectorGroups": 404,
+    "duplicateSelectorsTop20": [
+      [
+        ".topbar",
+        17
+      ],
+      [
+        ".app-shell",
+        14
+      ],
+      [
+        "select",
+        13
+      ],
+      [
+        ".app-rail",
+        11
+      ],
+      [
+        ".card",
+        11
+      ],
+      [
+        ".app-main",
+        10
+      ],
+      [
+        ".tabs--rail button",
+        10
+      ],
+      [
+        "textarea",
+        10
+      ],
+      [
+        ".rail-foot",
+        8
+      ],
+      [
+        ".tabs--rail",
+        8
+      ],
+      [
+        ":root",
+        7
+      ],
+      [
+        ".btn",
+        7
+      ],
+      [
+        "*",
+        7
+      ],
+      [
+        "body",
+        7
+      ],
+      [
+        ".llm-node-card",
+        6
+      ],
+      [
+        ".panel",
+        6
+      ],
+      [
+        ".pre",
+        6
+      ],
+      [
+        ".rail-brand",
+        6
+      ],
+      [
+        ".tabs--rail button.nav-btn",
+        6
+      ],
+      [
+        ".tabs--rail button[aria-selected=\"true\"]",
+        6
+      ]
+    ],
+    "topbarDefinitions": 17,
+    "importantCount": 1,
+    "breakpointCount": 17,
+    "breakpoints": [
+      [
+        "(max-width: 900px)",
+        23
+      ],
+      [
+        "(max-width: 640px)",
+        22
+      ],
+      [
+        "(prefers-reduced-motion: reduce)",
+        7
+      ],
+      [
+        "print",
+        4
+      ],
+      [
+        "(max-width: 360px)",
+        2
+      ],
+      [
+        "(max-width: 390px)",
+        2
+      ],
+      [
+        "(min-width: 901px)",
+        2
+      ],
+      [
+        "(hover: none)",
+        1
+      ],
+      [
+        "(max-width: 1023px)",
+        1
+      ],
+      [
+        "(max-width: 1100px)",
+        1
+      ],
+      [
+        "(max-width: 480px)",
+        1
+      ],
+      [
+        "(max-width: 520px)",
+        1
+      ],
+      [
+        "(max-width: 600px)",
+        1
+      ],
+      [
+        "(max-width: 700px)",
+        1
+      ],
+      [
+        "(min-width: 1024px)",
+        1
+      ],
+      [
+        "(min-width: 640px)",
+        1
+      ],
+      [
+        "(pointer: coarse)",
+        1
+      ]
+    ]
+  },
+  "tokens": {
+    "definedCount": 155,
+    "referencedCount": 160,
+    "zeroRefCount": 0,
+    "zeroRefTokens": []
+  },
+  "js": {
+    "inlineStyleAttrs": 45,
+    "inlineStyleWrites": 17,
+    "colorLiterals": 20,
+    "tailwindUtilityClasses": [
+      "bg-appbg",
+      "flex-1",
+      "flex-col",
+      "flex-wrap",
+      "h-screen",
+      "items-center",
+      "justify-between",
+      "overflow-hidden",
+      "select-none",
+      "space-x-3",
+      "text-white/90"
+    ],
+    "tailwindUtilityClassCount": 11
+  }
+}
