@@ -31,118 +31,33 @@ const RUNTIME_INJECTED_TOKENS = new Set([
 /* Zero-reference token API frozen at the B7 cutover. These names remain
  * intentionally available to component layers; adding another dormant token
  * must fail G6 so dead contract surface cannot keep growing silently. */
-const DECLARED_ZERO_REF_API = new Set(
-  `
---accent-faint
---board-col-max
---board-col-min
---btn-danger-bg
---btn-danger-fg
---btn-fs
---btn-fw
---btn-ghost-bg-hover
---btn-ghost-fg
---btn-h-lg
---btn-h-md
---btn-h-sm
---btn-primary-bg
---btn-primary-bg-active
---btn-primary-bg-hover
---btn-primary-fg
---btn-radius
---btn-secondary-bg
---btn-secondary-fg
---btn-secondary-line
---card-bg
---card-line
---card-line-hover
---card-pad
---card-radius
---col-gap
---col-gap-wide
---content-max
---control-h-xs
---drawer-w
---dur-instant
---empty-body-fg
---empty-drop-line
---empty-min-h
---empty-pad
---empty-title-fg
---field-bg
---field-bg-disabled
---field-fg
---field-h-sm
---field-help-fg
---field-help-fs
---field-label-fg
---field-label-fs
---field-line
---field-line-error
---field-line-hover
---field-placeholder
---field-radius
---font-cjk
---font-num
---form-max
---fw-read
---glow-soft
---glyph-check
---glyph-chevron-down
---glyph-search
---gutter
---gutter-wide
---gutter-xwide
---hit-expand
---ic-2xs
---ic-gap
---ic-lg
---ic-md
---ic-stroke
---info-line
---inspector-w
---kanban-gap
---kanban-head-h
---lead-hero
---lead-normal
---lead-relaxed
---lead-tight
---modal-w-lg
---modal-w-md
---num-weight-bump
---overlay-bg
---overlay-line
---overlay-radius
---rail-w-compact
---scrim
---sheet-max
---skeleton-bg
---skeleton-hi
---space-0
---surface-active
---table-row-h-dense
---tag-fs
---tag-h
---tag-pad-x
---tag-radius
---text-disabled
---toast-w
---warn-line
-  `.trim().split(/\s+/),
-);
+/* Phase 1（2026-10-24）：零引用 token 已清零，冻结表随之清空。
+ * 以后任何新增的休眠 token 都会被 G6 直接拦下（不再有「登记豁免」）。 */
+const DECLARED_ZERO_REF_API = new Set();
 
 function customPropertyNames(text) {
+  /* 只认行首的声明：`.dashboard-kpi--teal::before` 里的 `--teal::` 是类名后缀，
+   * 不是自定义属性定义（宽松正则会把它们算成 token，污染 G6 的零引用集合）。 */
   return [
     ...text
       .replace(/\/\*[\s\S]*?\*\//g, "")
-      .matchAll(/(--[\w-]+)\s*:/g),
+      .matchAll(/^[ \t]*(--[\w-]+)[ \t]*:/gm),
   ].map((match) => match[1]);
 }
 
 function variableReferences(text) {
-  return [...text.matchAll(/\bvar\(\s*(--[\w-]+)/g)].map(
-    (match) => match[1],
-  );
+  /* Phase 1（2026-10-24）：除了 CSS var()，运行时通过 getPropertyValue /
+   * setProperty 消费的 token 也算「被引用」（--ic-stroke 就是这种：样式值由
+   * icons.js 读取后写进 svg 属性）。 */
+  return [
+    ...[...text.matchAll(/\bvar\(\s*(--[\w-]+)/g)].map((match) => match[1]),
+    ...[...text.matchAll(/getPropertyValue\(\s*["'`](--[\w-]+)/g)].map(
+      (match) => match[1],
+    ),
+    ...[...text.matchAll(/setProperty\(\s*["'`](--[\w-]+)/g)].map(
+      (match) => match[1],
+    ),
+  ];
 }
 
 function indexesOf(regex) {

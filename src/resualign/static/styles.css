@@ -70,8 +70,6 @@
      禁止：把 --font-ui 直接写成 sans-serif 或 system-ui 了事（等同无品牌字体决策）。 */
   --font-ui: "Inter Variable", "Inter", "PingFang SC", "HarmonyOS Sans SC", "MiSans",
              "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  --font-cjk: "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI",
-              "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --font-mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Mono", Consolas,
                "Liberation Mono", monospace;
   /* 数字专用栈：分数 / 计数 / 金额 / 日期。tabular-nums 必须与 --font-mono 同时启用。 */
@@ -94,14 +92,9 @@
   --text-3xl: 1.5rem;    /* 24px  KPI 数值 / 主分数（上限） */
 
   /* ---- 行高 A1-structure（随字号反比） ---- */
-  --lead-hero:     1.2;   /* 24px 以上数值/标题 */
-  --lead-tight:    1.3;   /* 18–20px 标题 */
   --lead-snug:     1.45;  /* 13–14px UI 正文 */
-  --lead-normal:   1.55;  /* 16px READ 区正文（CJK 需要更松） */
-  --lead-relaxed:  1.7;   /* 长文本 / 简历段落 */
 
   /* ---- 字重 A1-structure（三级：Read / Emphasize / Announce） ---- */
-  --fw-read:     400; /* 正文、说明、描述 */
   --fw-emphasize:500; /* 按钮文字、表头、字段标签、小标题 */
   --fw-announce: 600; /* 页面标题、面板标题、KPI 数值 */
 
@@ -116,7 +109,6 @@
   /* ---- 间距阶 A1-structure（4px 基准网格；仅允许下列值） ----
      现状：styles.css 已有 --space-1..--space-12 定义但零引用。本次重新裁定刻度
      并要求新代码真的使用；同时禁止 5/7/9/11/13/15/22/30 等非标值。 */
-  --space-0:  0;
   --space-1:  4px;   /* 图标与文字、徽标内边距 */
   --space-2:  8px;   /* 同组元素（按钮组、chip 组） */
   --space-3:  12px;  /* 表单元素之间、卡片内块间距 */
@@ -140,7 +132,6 @@
   --radius-pill: 999px;  /* 仅：胶囊标签、头像、开关、计数徽标 */
 
   /* ---- 动效 A1-structure（禁止弹跳 / 弹性缓动） ---- */
-  --dur-instant: 80ms;   /* 按钮按下、开关切换 */
   --dur-fast:   120ms;   /* hover / focus / 选中态 */
   --dur-base:   160ms;   /* 下拉展开、Toast 进入、抽屉滑入（收敛值 150–200ms） */
   --dur-slow:   240ms;   /* 跨区布局变化、看板列折叠 */
@@ -171,29 +162,14 @@
                                 16px 内容宽。实测现状生效值为 230px（v3.1 层）；
                                 alignment-gap.test.mjs:121 锁定的 240px 命中的是被覆盖定义。
                                 该测试须改为断言 .app-rail 必须引用 --rail-w。 */
-  --rail-w-compact:   64px;  /* 1024–1279 仅图标模式 */
-  --content-max:      1560px;/* 主内容最大宽度；超过此值内容居中，不再拉宽 */
-  --gutter:           16px;  /* <1280 */
-  --gutter-wide:      20px;  /* >=1280 */
-  --gutter-xwide:     24px;  /* >=1440 */
-  --col-gap:          16px;  /* 12 列栅格列间距 */
-  --col-gap-wide:     20px;  /* >=1440 */
-  --board-col-min:    228px; /* 看板列最小宽（1440 下 5×228+4×16=1204 可容纳） */
-  --board-col-max:    320px;
-  --sheet-max:        794px; /* A4 @96dpi 精确宽度，简历预览不再随视口拉宽 */
-  --inspector-w:      320px; /* 工作台 / 简历中心右侧检查器固定宽 */
-  --form-max:         880px; /* 设置页字段行最大宽（超出即失控） */
 
   /* ---- 控件高度 A1-structure ----
      现状按钮并存 36/38/40/44 四种高度 → 裁到 4 档（24/28/32/36）。 */
-  --control-h-xs: 24px; /* 表格行内图标按钮、看板卡片右上角动作 */
-  --control-h-sm: 28px; /* 工具栏、次级按钮、紧凑输入框 */
   --control-h-md: 32px; /* 默认按钮 / 输入框 / select */
   --control-h-lg: 36px; /* 页面级主操作（每屏至多一个） */
 
   /* ---- 命中区 A2（触摸最小 44×44；视觉可小于此，用 padding 或 ::after 扩大） ---- */
   --hit-min: 44px;
-  --hit-expand: 8px; /* 视觉 28px 控件向四周扩展 8px 达到 44px 的做法 */
 
   /* ---- 焦点环 A1-identity（现状 7 处 outline:none 造成键盘焦点丢失） ----
      【与架构方案对齐】采用 `outline` 而非 `box-shadow`（02_架构方案_CSS.md §2.4-I）。
@@ -209,12 +185,8 @@
   /* ---- 图标 A1-structure ----
      尺寸三档（16 / 20 / 24）+ 一个受限例外 12px（仅 meter / 徽标内部）。
      描边统一 1.75（24 网格基准），随 viewBox 等比缩放；fill: none; currentColor。 */
-  --ic-2xs: 12px; /* 受限：仅进度条内对勾、徽标内警示 */
   --ic-sm:  16px; /* 行内：与 13–14px 文字并排、表格单元格内 */
-  --ic-md:  20px; /* 按钮内、导航项、字段前缀 */
-  --ic-lg:  24px; /* 独立图标位、空态、页头动作 */
   --ic-stroke: 1.75;
-  --ic-gap: var(--space-1); /* 图标与文字的间距 */
 
   /* ---- 主题无关的「纸面」语义（C-extension） ----
      A4 简历预览、打印根、导出 PDF 的预览面。纸张恒为白纸黑字，
@@ -237,11 +209,9 @@
   --surface-1:     #FFFFFF;
   --surface-2:     #F7F8FA;
   --surface-3:     #FFFFFF;
-  --surface-4:     #F2F3F6;
   --surface-inset: #F4F5F8;
   --surface-rail:  #F0F1F4;
   --surface-hover:  rgba(15, 18, 22, 0.038);
-  --surface-active: rgba(15, 18, 22, 0.068);
 
   /* 描边阶 */
   --line-faint:  #EDEFF3;
@@ -255,7 +225,6 @@
   --text-secondary: #4C5561;
   --text-tertiary:  #6A7381;
   --text-faint:     #99A1AC;
-  --text-disabled:  #B6BCC5;
   --text-on-accent: #FFFFFF;
   --text-on-solid:  #FFFFFF;
 
@@ -265,9 +234,7 @@
   --accent-active: #0A5F6E;
   --accent-text:   #0B6C7D;
   --accent-soft:   #E2F3F6;
-  --accent-faint:  #F0F9FB;
   --accent-line:   #8CCBD6;
-  --accent-on:     #FFFFFF;
 
   /* 状态色：为浅底重新取值（深色主题的那组在浅底上对比度不足） */
   --success:      #1A7F4B;
@@ -275,13 +242,11 @@
   --success-line: #A8D9BC;
   --warn:         #96650C;
   --warn-soft:    #FBF2DF;
-  --warn-line:    #E3C684;
   --danger:       #C0392F;
   --danger-soft:  #FCEBE9;
   --danger-line:  #EDB7B2;
   --info:         #1F6FB8;
   --info-soft:    #E7F1FA;
-  --info-line:    #A9CBEA;
 
   /* 序数色阶：hue 顺序与语义完全不变，只调 lightness 以适配白底 */
   --ord-1: #C4393F;
@@ -293,8 +258,6 @@
   --match-soft: var(--ord-track); /* 匹配徽标软底；浅色主题同步 */
 
   /* 效果色 */
-  --scrim:     rgba(15, 18, 22, 0.32);
-  --glow-soft: rgba(14, 124, 143, 0.10);
 
   /* 阴影阶：浅底阴影用低透明度、更紧的扩散 */
   --shadow-none:    none;
@@ -304,9 +267,6 @@
   --shadow-drag:    0 12px 28px -8px rgba(15, 18, 22, 0.20);
 
   /* 图形：浅底上的下箭头与搜索图标需要更深的描边色 */
-  --glyph-chevron-down: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236A7381' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6.25 8 10.25l4-4'/%3E%3C/svg%3E");
-  --glyph-check: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23FFFFFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.5 8.5 3 3 6-6.5'/%3E%3C/svg%3E");
-  --glyph-search: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236A7381' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='7' cy='7' r='4.25'/%3E%3Cpath d='m10.5 10.5 3 3'/%3E%3C/svg%3E");
 
   /* 焦点与动效的补充语义：均已由 B1a 兼容层验证，B7 迁入唯一命名空间。 */
   --focus-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
@@ -331,13 +291,11 @@
   --surface-1:     #161B22; /* 一级表面：卡片、面板、看板列托盘 */
   --surface-2:     #1D232C; /* 二级表面：卡内嵌块、表头、行 hover 的静态底 */
   --surface-3:     #242B35; /* 三级表面：浮层底（popover / dropdown / modal / drawer / toast） */
-  --surface-4:     #2B323D; /* 四级表面：浮层内部控件底、listbox 选中项 */
   --surface-inset: #090B0F; /* 凹陷面：JD 原文、代码块、A4 纸面外槽 */
   --surface-rail:  #07090C; /* 左侧导航栏底（比 canvas 更暗，压出层级） */
   /* 仅有的两个透明叠加色：只允许作为「瞬态交互叠加层」，铺在某个 surface 之上，
      禁止作为元素的基础填充色。现状 19 处 rgba(255,255,255,.08) 等一并收敛至此。 */
   --surface-hover:  rgba(255, 255, 255, 0.055); /* hover 底 */
-  --surface-active: rgba(255, 255, 255, 0.090); /* pressed 底 */
 
   /* ---- 描边阶 A1-identity（承担全部层级职责） ---- */
   --line-faint:  #1E242D; /* 区内行分隔：表格行、列表项、字段行 */
@@ -351,7 +309,6 @@
   --text-secondary: #9BA5B4; /* 次级文字、字段标签、表头 */
   --text-tertiary:  #7E8894; /* 三级：辅助说明、时间戳、计数单位（对 surface-1 对比度 5.15:1） */
   --text-faint:     #5A626C; /* 仅：分隔符、图标描边、装饰。不作正文（对比度 3.0:1） */
-  --text-disabled:  #454C56; /* 禁用态文字 */
   --text-on-accent: #04242B; /* 强调色实底上的前景（深色主题下为深色，保障 5.8:1） */
   --text-on-solid:  #08090B; /* 亮色实底（如序数色实底）上的前景 */
 
@@ -364,9 +321,7 @@
   --accent-active: #178EA0;
   --accent-text:   #4FC3D4; /* 深底上作为「文字色」使用（比实底更亮，保证 >=4.5:1） */
   --accent-soft:   #0B333B; /* 淡底：选中行、active 导航项背景 */
-  --accent-faint:  #072127; /* 更淡：hover 预填、行内高亮 */
   --accent-line:   #1F7F90; /* 强调描边 */
-  --accent-on:     #04242B; /* 强调实底上的前景（= --text-on-accent 语义别名） */
 
   /* ---- 状态色 A2（离散状态专用） ----
      只渲染为三种语法：6px 圆点 / 1px 描边徽标 / 细边框着色。
@@ -376,13 +331,11 @@
   --success-line: #1E5B31;
   --warn:         #D9A43C; /* 警告、待处理、临期 */
   --warn-soft:    #2B2210;
-  --warn-line:    #6B511C;
   --danger:       #F0555C; /* 错误、失败、删除、超期 */
   --danger-soft:  #2E1417;
   --danger-line:  #6E2226;
   --info:         #4E9BF0; /* 中性提示（与 --accent 明确区分：info 是蓝，accent 是青） */
   --info-soft:    #10233B;
-  --info-line:    #23496F;
 
   /* ---- 序数色阶 C-extension（数值即语义） ----
      统一服务所有「0–100 连续数值」：简历匹配分、ATS 分、技能覆盖率、
@@ -398,8 +351,6 @@
   --match-soft: var(--ord-track); /* 匹配徽标软底；不新增色相，作为 C-extension 组件别名 */
 
   /* ---- 效果色 A2（<1% 表面积） ---- */
-  --scrim:      rgba(0, 0, 0, 0.55);   /* 模态/抽屉遮罩 */
-  --glow-soft:  rgba(31, 168, 188, 0.10); /* 唯一允许的光晕：聚焦/选中底纹，<=10% */
 
   /* ---- 阴影阶 A2（Linear 式：极度克制） ----
      允许使用场景（穷举，不得扩用）：
@@ -416,13 +367,9 @@
   --shadow-drag:    0 12px 28px -8px rgba(0, 0, 0, 0.60);
 
   /* ---- 字体：数字栈在深色下需升一档字重（暗底亮字感知重量下降） ---- */
-  --num-weight-bump: 0; /* 深色主题不需字重补偿（对比度足够） */
 
   /* ---- 自绘控件图形（data URI 是色值字面量的合法居所，本文件内） ----
      select 下箭头：覆盖原生控件外观的关键一步 */
-  --glyph-chevron-down: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%237E8894' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6.25 8 10.25l4-4'/%3E%3C/svg%3E");
-  --glyph-check: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23080B0C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.5 8.5 3 3 6-6.5'/%3E%3C/svg%3E");
-  --glyph-search: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%237E8894' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='7' cy='7' r='4.25'/%3E%3Cpath d='m10.5 10.5 3 3'/%3E%3C/svg%3E");
   --select-chevron: var(--select-chevron-dark);
 }
 
@@ -441,91 +388,34 @@
   --topbar-line:   var(--line-faint);
 
   /* 按钮 */
-  --btn-h-sm:      var(--control-h-sm);
-  --btn-h-md:      var(--control-h-md);
-  --btn-h-lg:      var(--control-h-lg);
-  --btn-radius:    var(--radius-md);
-  --btn-fs:        var(--text-sm);
-  --btn-fw:        var(--fw-emphasize);
-  --btn-primary-bg:      var(--accent);
-  --btn-primary-fg:      var(--accent-on);
-  --btn-primary-bg-hover:var(--accent-hover);
-  --btn-primary-bg-active:var(--accent-active);
-  --btn-secondary-bg:      var(--surface-2);
-  --btn-secondary-fg:      var(--text-primary);
-  --btn-secondary-line:    var(--line);
-  --btn-ghost-fg:          var(--text-secondary);
-  --btn-ghost-bg-hover:    var(--surface-hover);
-  --btn-danger-bg:         var(--danger-soft);
-  --btn-danger-fg:         var(--danger);
 
   /* 输入 / 自绘 select */
-  --field-h-sm:     var(--control-h-sm);
   --field-h-md:     var(--control-h-md);
-  --field-radius:   var(--radius-md);
-  --field-bg:       var(--surface-1);
-  --field-bg-disabled: var(--surface-2);
-  --field-fg:       var(--text-primary);
-  --field-placeholder: var(--text-faint);
-  --field-line:     var(--line);
-  --field-line-hover:  var(--line-strong);
   --field-line-focus:  var(--accent-line);
-  --field-line-error:  var(--danger);
-  --field-label-fs: var(--text-xs);
-  --field-label-fg: var(--text-secondary);
-  --field-help-fs:  var(--text-xs);
-  --field-help-fg:  var(--text-tertiary);
 
   /* 卡片 / 面板 */
-  --card-bg:        var(--surface-1);
-  --card-line:      var(--line);
-  --card-line-hover:var(--line-strong);
-  --card-radius:    var(--radius-lg);
-  --card-pad:       var(--space-4);
   --panel-head-h:   40px;
   --panel-head-line:var(--line-faint);
 
   /* 徽标 / 标签 */
-  --tag-h:      20px;
-  --tag-radius: var(--radius-sm);
-  --tag-fs:     var(--text-2xs);
-  --tag-pad-x:  var(--space-2);
 
   /* 表格 */
   --table-head-h:   32px;
   --table-row-h:    36px;
-  --table-row-h-dense: 32px;
   --table-head-fg:  var(--text-tertiary);
   --table-row-line: var(--line-faint);
 
   /* 看板 */
-  --kanban-head-h:  36px;
-  --kanban-gap:     var(--space-3);
 
   /* 空态 */
-  --empty-min-h:   160px;
-  --empty-pad:     var(--space-8);
-  --empty-title-fg:var(--text-secondary);
-  --empty-body-fg: var(--text-tertiary);
-  --empty-drop-line: var(--line-subtle);
 
   /* 加载 */
-  --skeleton-bg:  var(--surface-2);
-  --skeleton-hi:  var(--surface-4);
 
   /* 浮层 */
-  --overlay-bg:   var(--surface-3);
-  --overlay-line: var(--line);
-  --overlay-radius: var(--radius-xl);
-  --drawer-w:     400px;
-  --modal-w-md:   520px;
-  --modal-w-lg:   680px;
-  --toast-w:      320px;
 }
 
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --dur-instant: 1ms;
     --dur-fast: 1ms;
     --dur-base: 1ms;
     --dur-slow: 1ms;
@@ -7152,7 +7042,9 @@ html {
   min-width: 0;
   margin-top: var(--space-2);
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  /* --font-num = JetBrains Mono + Inter 兜底：数字等宽，CJK/符号落回 UI 字体。
+     Phase 1 把它从「零引用 token」变成真正参与渲染的 token。 */
+  font-family: var(--font-num);
   font-size: var(--text-3xl);
   font-weight: 700;
   line-height: 1;
@@ -13579,7 +13471,6 @@ select,
     top: 0;
     z-index: var(--z-sticky);
   }
-
 
 }
 }

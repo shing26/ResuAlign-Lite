@@ -114,6 +114,14 @@ node scripts/css_budget.mjs                         # 棘轮门禁（任何指�
 
 ## 6. 实现记录
 
+### Phase 1（2026-10-24，已落地）
+- 修正 token 度量口径：定义只认「行首声明」（此前 `.dashboard-kpi--teal::before` 里的 `--teal::` 被误当成定义，虚增 token 数并制造假零引用）；「被引用」只认 `var()` / `getPropertyValue` / `setProperty`（注释里提到的字样不算）
+- 删除 94 个零引用 token（明/暗两处重复定义的按出现次数逐条删），冻结表 `DECLARED_ZERO_REF_API` 清空
+- `--font-num`（被 fonts 测试断言存在）接线到 `.metric-value`；`--ic-stroke`（原来只被 JS 注释提到）改成 `icons.js` 读取该 token 生成 `stroke-width`，让图标描边在 token 层单一来源
+- 结果：**零引用 token 97 → 0**；token 定义 257 → 155；CSS 312,491 → 306,120 B（gzip 65,303 → 63,783 B，−1,520 B）
+- 验证：589 测试 + e2e 7 全绿；`scripts/css_budget.mjs` 11 项全 ok；视觉基线 20/20 张 **ratio 0.0**（纯清理，零视觉变化）
+- 新增基线快照：`docs/reports/css-debt-phase1-2026-10-24.json`
+
 ### Phase 0（2026-10-24，已落地）
 - `scripts/css_audit.mjs`：规则块/选择器重复度/断点/token 定义与引用/内联样式/颜色字面量/Tailwind 类/gzip 体积
 - `docs/reports/css-debt-baseline-2026-10-24.json`：基线快照

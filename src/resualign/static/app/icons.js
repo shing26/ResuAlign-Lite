@@ -52,6 +52,26 @@ function sizeClass(size) {
   return size === 13 ? "ic--sm" : `ic--${size}`;
 }
 
+/* Phase 1（2026-10-24，结构债）：描边宽度改由 CSS token `--ic-stroke` 提供，
+ * 让「图标描边」在 token 层只有一个来源；Node 测试/SSR 没有 CSSOM 时回退
+ * 1.75（与 token 的默认值一致），输出不变。缓存一次，避免每个图标都读样式。 */
+let cachedStrokeWidth = null;
+function iconStrokeWidth() {
+  if (cachedStrokeWidth) return cachedStrokeWidth;
+  let value = "";
+  try {
+    if (typeof document !== "undefined" && typeof getComputedStyle === "function") {
+      value = getComputedStyle(document.documentElement)
+        .getPropertyValue("--ic-stroke")
+        .trim();
+    }
+  } catch {
+    value = "";
+  }
+  cachedStrokeWidth = value || "1.75";
+  return cachedStrokeWidth;
+}
+
 export function icon(name, size = 16, className = "") {
   const body = ICON_PATHS[name];
   if (!body) throw new Error(`Unknown icon: ${name}`);
@@ -59,5 +79,5 @@ export function icon(name, size = 16, className = "") {
     throw new Error(`Unsupported icon size: ${size}`);
   }
   const classes = ["ic", sizeClass(size), className].filter(Boolean).join(" ");
-  return `<svg class="${classes}" data-icon="${name}" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
+  return `<svg class="${classes}" data-icon="${name}" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="${iconStrokeWidth()}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
 }
