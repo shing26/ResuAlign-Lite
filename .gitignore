@@ -81,3 +81,5 @@ docs/demo/
 .mimosa/
 # GUI 测试截图
 /gui-test-screenshots/
+# 结构债视觉基线截图（生成物，不入库；manifest/报告入库）
+tests/visual/**/*.png
