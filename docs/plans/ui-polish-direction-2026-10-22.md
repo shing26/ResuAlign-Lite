@@ -153,6 +153,24 @@
 
 ---
 
+## 0.12 B8 小项收尾执行记录（2026-10-24，已完成）
+
+> B7 之后剩下 3 个 P2 体验项；至此 B1 审计的 57 条问题里，标为 P0/P1/P2 的体验项全部落地（结构债另立项，见 §3 B5）。
+
+| 条目 | 落地内容 | 实测 |
+|---|---|---|
+| **RS-05** 桌面双层滚动条 | 简历详情改为**页面级滚动**：`.resume-doc` / `.resume-rail` 取消内部滚动，滚动交给 `#app-router-view`；页头 `.resume-band` 吸顶。`#app-router-view > .view` 的 `height:100%`（特异性 1,1,0）必须用同等选择器压掉，否则 sticky 没有活动余量 | `.resume-doc` client=scroll=2594（无内部滚动）；滚动容器 848/3019 单滚动条；滚 900px 后页头仍吸在 y=52 |
+| **SH-09** 对话框可达性 | `showModal` 打开时给 `#app-router-view` / `.app-rail` / `.topbar` 加 `inert`（不支持则 `aria-hidden`，关闭精确还原）；焦点恢复延后一拍、触发元素失效时回退到路由容器；初始焦点 `[autofocus]` → 首个可交互；Esc / 遮罩 / 滚动锁契约不变 | 背景 inert ×3；Tab/Shift+Tab 各 8 次不逃逸；Esc 关闭焦点回触发按钮；触发被隐藏时回退 `#app-router-view` 且 `activeElement≠body`；aria-hidden 降级分支实测通过 |
+| **W5** 失败态 LLM 入口 | 终态失败时「优化设置」面板里与顶栏等价的 submit 换成一句说明（用 `replaceWith` 连回车隐式提交一起断掉） | 1440 内容门禁失败：可见 LLM 入口 **1**（顶栏，开面板后仍 1）；390：**1 个 LLM**（底栏重新对齐）+ 1 个非 LLM CTA（查看被拦截建议）；点击唯一入口恰好 1 次 POST（abort 验证） |
+| 顺带 | placeholder 对比度：装饰级 `--text-faint` → `--text-secondary`（白底 2.61:1 → 7.56:1，`opacity:1` 抵消 Firefox 默认降对比） | — |
+
+**遗留（明确不做/留待后续）**：模型失败类（非内容门禁）横幅仍保留「换节点重试」，与顶栏「重新运行」是两种不同动作，1440 下为 2 个入口；要收成「1 主 + 下拉」需新组件。idle 态仍有 3 个入口（顶栏 / 首跑引导卡 / 优化设置），属「设参数→运行」的自然闭环。Ctrl+K 命令面板是自写焦点陷阱，未纳入本次 showModal 改造，建议后续同款处理。
+
+**验证**：前端全量 **589 passed / 0 failed**；e2e **7/7 passed**；Playwright（390/1440）0 console error；缓存 `?v=70`。
+**改动文件**：`static/styles.css`、`static/app/{events.js,split-canvas.js}`、`static/index.html`、`tests/frontend/adr0033.test.mjs`。
+
+---
+
 ## 1. 诊断：57 条问题，其实只有 5 个系统性问题
 
 审计产出 57 条（驾驶舱/复盘/设置 20、岗位库/工作台 21、简历中心/全局壳 18），但去掉重复后，用户感知到的只有下面 5 件事。
