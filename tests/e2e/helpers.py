@@ -16,6 +16,15 @@ def expect(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
+def use_board_view(page) -> None:
+    """B2（2026-10-22）起岗位库默认是「列表」视图；依赖看板卡片交互的
+    冒烟用例需要显式把视图固定回看板，否则 #job-board .board-card 永远为空。"""
+    page.add_init_script(
+        "try { localStorage.setItem('resualign.jobs.view', 'board'); } "
+        "catch (error) { /* storage disabled: view falls back to list */ }"
+    )
+
+
 def capture_errors(page):
     """Return the console/page-error capture dict for a fixture page.
 

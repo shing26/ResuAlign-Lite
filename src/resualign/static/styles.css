@@ -13440,3 +13440,13 @@ select,
   }
 }
 }
+
+@layer components {
+/* B6 fix（2026-10-23）：卡片 kebab 菜单展开后会伸出卡片下沿，下一张卡片的
+ * .board-card__top（position: relative）会盖在菜单上、拦截点击（E2E 实测：
+ * 点「详情」被下一张卡拦截）。给展开菜单的那张卡一个更高的层叠上下文。 */
+.board-card:has(.board-more[open]) {
+  position: relative;
+  z-index: var(--z-dropdown);
+}
+}

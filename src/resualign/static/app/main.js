@@ -3377,6 +3377,12 @@ document.addEventListener("click", async (event) => {
   if (!button) return;
   const action = actions[button.dataset.action];
   if (!action) return;
+  /* B6 fix（2026-10-23）：看板 kebab 菜单里点完动作就收起菜单。否则 <details>
+     长期保持 open，卡片会为了菜单层级一直保持更高的层叠上下文
+     （.board-card:has(.board-more[open])），盖住下一张卡的 kebab，后续点击
+     被拦截（E2E 实测：同一页连开第二张卡的菜单会失败）。 */
+  const menu = button.closest("details.board-more");
+  if (menu) menu.open = false;
   try {
     await action(button, event);
   } catch (error) {
