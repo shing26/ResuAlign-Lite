@@ -1,0 +1,195 @@
+{
+  "generatedAt": "2026-10-23T20:07:33.928Z",
+  "files": {
+    "stylesCssBytes": 297380,
+    "stylesCssGzipBytes": 62959,
+    "appJsFiles": 15
+  },
+  "css": {
+    "ruleBlocks": 1795,
+    "atRuleBlocks": 166,
+    "selectorCount": 1376,
+    "duplicateSelectorCount": 141,
+    "duplicateSelectorGroups": 116,
+    "duplicateSelectorsTop20": [
+      [
+        ".topbar",
+        5
+      ],
+      [
+        ".app-shell",
+        4
+      ],
+      [
+        ".rule-item",
+        4
+      ],
+      [
+        ".tabs--rail button",
+        4
+      ],
+      [
+        ".app-main",
+        3
+      ],
+      [
+        ".app-main",
+        3
+      ],
+      [
+        ".btn",
+        3
+      ],
+      [
+        ".command-bar__trigger",
+        3
+      ],
+      [
+        ".diff-card",
+        3
+      ],
+      [
+        ".llm-node-card",
+        3
+      ],
+      [
+        ".rail-brand",
+        3
+      ],
+      [
+        ".rail-foot",
+        3
+      ],
+      [
+        ".rail-foot__status",
+        3
+      ],
+      [
+        ".settings-bento__value",
+        3
+      ],
+      [
+        ".toast",
+        3
+      ],
+      [
+        ".topbar",
+        3
+      ],
+      [
+        "*, *::before, *::after",
+        3
+      ],
+      [
+        "#app-router-view",
+        3
+      ],
+      [
+        "body",
+        3
+      ],
+      [
+        "input[type=\"text\"], input[type=\"url\"], input[type=\"number\"], input[type=\"email\"], input[type=\"password\"], input[type=\"search\"], textarea, select",
+        3
+      ]
+    ],
+    "topbarDefinitions": 11,
+    "importantCount": 1,
+    "breakpointCount": 17,
+    "breakpoints": [
+      [
+        "(max-width: 640px)",
+        22
+      ],
+      [
+        "(max-width: 900px)",
+        21
+      ],
+      [
+        "(prefers-reduced-motion: reduce)",
+        6
+      ],
+      [
+        "print",
+        4
+      ],
+      [
+        "(max-width: 390px)",
+        2
+      ],
+      [
+        "(min-width: 901px)",
+        2
+      ],
+      [
+        "(hover: none)",
+        1
+      ],
+      [
+        "(max-width: 1023px)",
+        1
+      ],
+      [
+        "(max-width: 1100px)",
+        1
+      ],
+      [
+        "(max-width: 360px)",
+        1
+      ],
+      [
+        "(max-width: 480px)",
+        1
+      ],
+      [
+        "(max-width: 520px)",
+        1
+      ],
+      [
+        "(max-width: 600px)",
+        1
+      ],
+      [
+        "(max-width: 700px)",
+        1
+      ],
+      [
+        "(min-width: 1024px)",
+        1
+      ],
+      [
+        "(min-width: 640px)",
+        1
+      ],
+      [
+        "(pointer: coarse)",
+        1
+      ]
+    ]
+  },
+  "tokens": {
+    "definedCount": 155,
+    "referencedCount": 160,
+    "zeroRefCount": 0,
+    "zeroRefTokens": []
+  },
+  "js": {
+    "inlineStyleAttrs": 45,
+    "inlineStyleWrites": 17,
+    "colorLiterals": 20,
+    "tailwindUtilityClasses": [
+      "bg-appbg",
+      "flex-1",
+      "flex-col",
+      "flex-wrap",
+      "h-screen",
+      "items-center",
+      "justify-between",
+      "overflow-hidden",
+      "select-none",
+      "space-x-3",
+      "text-white/90"
+    ],
+    "tailwindUtilityClassCount": 11
+  }
+}

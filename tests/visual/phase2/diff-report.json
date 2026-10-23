@@ -1,0 +1,151 @@
+{
+  "compared": [
+    {
+      "shot": "dark-desktop-dashboard.png",
+      "ratio": 0.0015
+    },
+    {
+      "shot": "dark-desktop-jobs.png",
+      "ratio": 0.00167
+    },
+    {
+      "shot": "dark-desktop-resume-list.png",
+      "ratio": 0.00251
+    },
+    {
+      "shot": "dark-desktop-review.png",
+      "ratio": 0.0021
+    },
+    {
+      "shot": "dark-desktop-settings.png",
+      "ratio": 0.00222
+    },
+    {
+      "shot": "dark-mobile-dashboard.png",
+      "ratio": 0.26496
+    },
+    {
+      "shot": "dark-mobile-jobs.png",
+      "ratio": 0.39953
+    },
+    {
+      "shot": "dark-mobile-resume-list.png",
+      "ratio": 0.40998
+    },
+    {
+      "shot": "dark-mobile-review.png",
+      "ratio": 0.30522
+    },
+    {
+      "shot": "dark-mobile-settings.png",
+      "ratio": 0.41825
+    },
+    {
+      "shot": "light-desktop-dashboard.png",
+      "ratio": 0.00153
+    },
+    {
+      "shot": "light-desktop-jobs.png",
+      "ratio": 0.00172
+    },
+    {
+      "shot": "light-desktop-resume-list.png",
+      "ratio": 0.00253
+    },
+    {
+      "shot": "light-desktop-review.png",
+      "ratio": 0.00212
+    },
+    {
+      "shot": "light-desktop-settings.png",
+      "ratio": 0.00224
+    },
+    {
+      "shot": "light-mobile-dashboard.png",
+      "ratio": 0.13982
+    },
+    {
+      "shot": "light-mobile-jobs.png",
+      "ratio": 0.21034
+    },
+    {
+      "shot": "light-mobile-resume-list.png",
+      "ratio": 0.27836
+    },
+    {
+      "shot": "light-mobile-review.png",
+      "ratio": 0.16792
+    },
+    {
+      "shot": "light-mobile-settings.png",
+      "ratio": 0.31938
+    }
+  ],
+  "changed": [
+    {
+      "shot": "dark-desktop-resume-list.png",
+      "ratio": 0.00251
+    },
+    {
+      "shot": "dark-desktop-review.png",
+      "ratio": 0.0021
+    },
+    {
+      "shot": "dark-desktop-settings.png",
+      "ratio": 0.00222
+    },
+    {
+      "shot": "dark-mobile-dashboard.png",
+      "ratio": 0.26496
+    },
+    {
+      "shot": "dark-mobile-jobs.png",
+      "ratio": 0.39953
+    },
+    {
+      "shot": "dark-mobile-resume-list.png",
+      "ratio": 0.40998
+    },
+    {
+      "shot": "dark-mobile-review.png",
+      "ratio": 0.30522
+    },
+    {
+      "shot": "dark-mobile-settings.png",
+      "ratio": 0.41825
+    },
+    {
+      "shot": "light-desktop-resume-list.png",
+      "ratio": 0.00253
+    },
+    {
+      "shot": "light-desktop-review.png",
+      "ratio": 0.00212
+    },
+    {
+      "shot": "light-desktop-settings.png",
+      "ratio": 0.00224
+    },
+    {
+      "shot": "light-mobile-dashboard.png",
+      "ratio": 0.13982
+    },
+    {
+      "shot": "light-mobile-jobs.png",
+      "ratio": 0.21034
+    },
+    {
+      "shot": "light-mobile-resume-list.png",
+      "ratio": 0.27836
+    },
+    {
+      "shot": "light-mobile-review.png",
+      "ratio": 0.16792
+    },
+    {
+      "shot": "light-mobile-settings.png",
+      "ratio": 0.31938
+    }
+  ],
+  "missing": []
+}
