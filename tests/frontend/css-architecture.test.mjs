@@ -128,7 +128,6 @@ const DECLARED_ZERO_REF_API = new Set(
 --tag-radius
 --text-disabled
 --toast-w
---track-caps
 --warn-line
   `.trim().split(/\s+/),
 );

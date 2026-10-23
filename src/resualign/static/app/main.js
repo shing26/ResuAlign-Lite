@@ -360,7 +360,17 @@ async function render() {
   const app = $("#app-router-view");
   const printNode = $("#print-root");
   if (printNode) printNode.innerHTML = "";
-  app.innerHTML = `<div class="skeleton is-shimmer">加载中...</div>`;
+  /* SH-10（2026-10-23）：加载态从一句「加载中...」改为版式骨架——标题条 +
+     三张卡，用与真实页面接近的高度和位置，避免切页时整块空白再突然跳变。 */
+  app.innerHTML = `<div class="view-skeleton" data-view-skeleton aria-busy="true" aria-label="正在加载页面">
+    <div class="skeleton is-shimmer view-skeleton__bar"></div>
+    <div class="view-skeleton__row">
+      <div class="skeleton is-shimmer view-skeleton__card"></div>
+      <div class="skeleton is-shimmer view-skeleton__card"></div>
+      <div class="skeleton is-shimmer view-skeleton__card"></div>
+    </div>
+    <p class="view-skeleton__hint">正在加载…</p>
+  </div>`;
   /* T2: 每次路由渲染同步 Header 岗位快速选择器（异步填充 + 立即同步值）。 */
   refreshHeaderJobSelect();
   syncHeaderJobSelect();
@@ -384,8 +394,29 @@ async function render() {
       navigate("dashboard");
       return;
     }
-    app.innerHTML = `<div class="panel"><h3>出错了</h3><p class="muted">${esc(error.message)}</p>
-      <div class="row" style="margin-top:12px"><button class="btn btn-primary" data-action="reload">重试</button></div></div>`;
+    /* SH-10（2026-10-23）：错误态不再是一块英文 message panel——中文标题 + 原因
+       + 顶层 request_id（后端 #100 契约，排查时可直接检索日志）+ 重试 / 返回驾驶舱。
+       文案只描述「页面没加载出来」，不臆测原因；具体原因原样展示，便于定位。 */
+    const requestId =
+      (error && (error.requestId || (error.data && error.data.request_id))) || "";
+    const rawMessage = error && error.message ? String(error.message) : "未知错误";
+    /* 浏览器原生网络错误是英文（Failed to fetch / NetworkError），对本地工具来说
+       最可能的真实原因是「服务没起来」，直接换成可照做的中文说明。 */
+    const reason = /Failed to fetch|NetworkError|Load failed/i.test(rawMessage)
+      ? "网络请求失败：确认本地服务仍运行在 127.0.0.1:8000，然后点「重试」；若刚启动服务，等几秒再试。"
+      : rawMessage;
+    app.innerHTML = `<div class="view-error" data-view-error role="alert">
+      <div class="view-error__icon" aria-hidden="true">!</div>
+      <div class="view-error__body">
+        <h2>这个页面没能加载</h2>
+        <p>${esc(reason)}</p>
+        ${requestId ? `<p class="view-error__meta">请求 ID：<code>${esc(requestId)}</code>（排查日志时使用）</p>` : ""}
+        <div class="row">
+          <button class="btn btn-primary btn-sm" type="button" data-action="reload">重试</button>
+          <a class="btn btn-ghost btn-sm" href="#/dashboard">返回驾驶舱</a>
+        </div>
+      </div>
+    </div>`;
   }
 }
 

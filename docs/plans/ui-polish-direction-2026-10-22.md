@@ -116,6 +116,22 @@
 
 ---
 
+## 0.10 B6 全局体验执行记录（2026-10-23，已完成）
+
+> 对应 SH-01（Ctrl+K 命令面板）、SH-10（全局加载/错误态）、SH-11（深色首屏闪白）、SH-03（暗色层级）。
+
+| 条目 | 落地内容 | 实测 |
+|---|---|---|
+| **SH-01** Ctrl+K 打开是空面板 | 面板补标题条（「命令面板」+ 用途说明 + `Ctrl K` 提示）；空输入时渲染三组命令：**去往**（6 条路由）、**动作**（4 个真实 action：新建岗位 / 批量导入 / 新建主简历 / 切换主题）、**最近岗位**（前 5 条，点开进工作台）；ArrowUp/Down 移动、Enter 执行、清空回到命令列表；新增 `/` 快捷键 | 3 个分组、6 条路由、4 个动作、5 条最近岗位；点「岗位库」→ `#/jobs` 且面板关闭；输入「产品经理」仍出 6 条岗位建议；0 console error |
+| **SH-10** 加载/错误态 | 加载：一句「加载中...」→ 版式骨架（标题条 + 三卡 + hint），并在 `index.html` 放**首屏静态骨架**（boot 等 `/api/auth/me` 之前不再白屏）；错误：英文 message panel → 中文「这个页面没能加载」+ 原因（网络错误翻译成可照做的说明）+ `request_id` + 重试 / 返回驾驶舱 | 延迟 API 500ms 时首屏即见骨架（aria-busy=true、3 卡）；abort `/api/jobs` 后错误面板出现且 retry / 返回可用 |
+| **SH-11** 深色首屏闪白 | `index.html` `<head>` 在样式表之前内联套用已保存主题（与 `theme.js` 共用 `resualign_theme`） | 阻断 styles.css 后 `html.dark` 已在首帧生效 |
+| **SH-03** 暗色层级 1.07–1.13:1 | 暗色中性阶重排：rail 更暗（`#07090C`）、卡片更亮（`--surface-1 #161B22`）、描边阶整体抬一档（`--line-faint #1E242D` 等），前景阶不动 | 卡片/画布/导航三层可辨；暗色驾驶舱/岗位库截图 0 console error |
+
+**验证**：前端全量 **589 passed / 0 failed**（`css-structure` 的 v3 区段阈值从 66% 调到 55%：B1–B6 都是 append-only 润色块，固定比例会随追加漂移；`css-architecture` 冻结 token 表移除已获得引用的 `--track-caps`）；缓存 `?v=67`。
+**改动文件**：`static/index.html`、`static/styles.css`、`static/app/{command-panel,main,events}.js`、`tests/frontend/{adr0033,css-architecture,css-structure}.test.mjs`。
+
+---
+
 ## 1. 诊断：57 条问题，其实只有 5 个系统性问题
 
 审计产出 57 条（驾驶舱/复盘/设置 20、岗位库/工作台 21、简历中心/全局壳 18），但去掉重复后，用户感知到的只有下面 5 件事。

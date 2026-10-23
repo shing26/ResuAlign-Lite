@@ -254,6 +254,14 @@ export async function api(path, options = {}) {
     const error = new Error(message);
     error.status = response.status;
     if (detail && typeof detail === "object") error.data = detail;
+    /* SH-10（2026-10-23）：#100 错误契约在 body 顶层带 request_id，这里透传到
+     * Error 上，全局错误面板才能显示「请求 ID」供日志排查。 */
+    try {
+      const body = await response.clone().json();
+      if (body && body.request_id) error.requestId = String(body.request_id);
+    } catch {
+      /* 非 JSON 错误体（网关等）忽略 */
+    }
     throw error;
   }
   if (response.status === 204) return null;

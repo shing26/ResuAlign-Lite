@@ -328,22 +328,22 @@
      带极微量冷色偏移（趋向强调色 hue），避免死灰。每一阶只有一个用途。 */
   --bg-app:        #08090B; /* 应用最底层（rail 与画布之外的窗口底） */
   --bg-canvas:     #0B0D11; /* 视图滚动区底色 = 页面背景。所有 content 的基准面 */
-  --surface-1:     #101317; /* 一级表面：卡片、面板、看板列托盘 */
-  --surface-2:     #15181E; /* 二级表面：卡内嵌块、表头、行 hover 的静态底 */
-  --surface-3:     #1A1E25; /* 三级表面：浮层底（popover / dropdown / modal / drawer / toast） */
-  --surface-4:     #20242C; /* 四级表面：浮层内部控件底、listbox 选中项 */
-  --surface-inset: #0C0E12; /* 凹陷面：JD 原文、代码块、A4 纸面外槽 */
-  --surface-rail:  #0A0C0F; /* 左侧导航栏底（比 canvas 更暗，压出层级） */
+  --surface-1:     #161B22; /* 一级表面：卡片、面板、看板列托盘 */
+  --surface-2:     #1D232C; /* 二级表面：卡内嵌块、表头、行 hover 的静态底 */
+  --surface-3:     #242B35; /* 三级表面：浮层底（popover / dropdown / modal / drawer / toast） */
+  --surface-4:     #2B323D; /* 四级表面：浮层内部控件底、listbox 选中项 */
+  --surface-inset: #090B0F; /* 凹陷面：JD 原文、代码块、A4 纸面外槽 */
+  --surface-rail:  #07090C; /* 左侧导航栏底（比 canvas 更暗，压出层级） */
   /* 仅有的两个透明叠加色：只允许作为「瞬态交互叠加层」，铺在某个 surface 之上，
      禁止作为元素的基础填充色。现状 19 处 rgba(255,255,255,.08) 等一并收敛至此。 */
-  --surface-hover:  rgba(255, 255, 255, 0.040); /* hover 底 */
-  --surface-active: rgba(255, 255, 255, 0.070); /* pressed 底 */
+  --surface-hover:  rgba(255, 255, 255, 0.055); /* hover 底 */
+  --surface-active: rgba(255, 255, 255, 0.090); /* pressed 底 */
 
   /* ---- 描边阶 A1-identity（承担全部层级职责） ---- */
-  --line-faint:  #14171C; /* 区内行分隔：表格行、列表项、字段行 */
-  --line-subtle: #1C2027; /* 卡内嵌块边框、虚线落区 */
-  --line:        #252A32; /* 默认描边：卡片 / 面板 / 输入框 / 看板列 */
-  --line-strong: #333944; /* 强调描边：hover 边框、分组下沿 */
+  --line-faint:  #1E242D; /* 区内行分隔：表格行、列表项、字段行 */
+  --line-subtle: #272F3A; /* 卡内嵌块边框、虚线落区 */
+  --line:        #2E3641; /* 默认描边：卡片 / 面板 / 输入框 / 看板列 */
+  --line-strong: #3D4653; /* 强调描边：hover 边框、分组下沿 */
   --line-accent: #1F7F90; /* 选中/激活的 1px 环（替代发光边框） */
 
   /* ---- 前景阶 A1-identity ---- */
@@ -13199,5 +13199,244 @@ select,
   color: var(--text-secondary);
   font-size: var(--text-xs);
   line-height: 1.6;
+}
+}
+
+@layer components {
+/* =====================================================================
+ * B6（2026-10-23）：命令面板（SH-01）+ 全局加载/错误态（SH-10）
+ * 暗色层级（SH-03）改在 tokens 层，见 :root[data-theme] 块。
+ * ===================================================================== */
+
+/* ---- SH-01：命令面板标题条 ----------------------------------------
+ * 之前 Ctrl+K 打开只有一个输入框和「确认」按钮，没有任何标题或命令列表；
+ * 现在顶部固定一条标题 + 用途说明，下面由 command-panel.js 渲染命令列表。 */
+.command-palette__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line-faint);
+}
+
+.command-palette__title {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: var(--track-tight);
+}
+
+.command-palette__hint {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-palette__kbd {
+  margin-left: auto;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+/* 命令列表容器：最多占 52vh，超出滚动，避免长列表把输入框顶出视口 */
+.command-palette__suggestions {
+  max-height: min(52vh, var(--space-16) * 13);
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+
+.command-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.command-group__title {
+  padding: 0 var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+}
+
+.command-group__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-hairline);
+}
+
+.command-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 34px;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.command-row:hover,
+.command-row:focus-visible,
+.command-row[aria-selected="true"] {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.command-row__icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--text-tertiary);
+}
+
+.command-row__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-row__meta {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+}
+
+.command-row__hint {
+  flex: 0 0 auto;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+/* ---- SH-10：全局加载态 ---------------------------------------------
+ * 之前所有路由共用一句「加载中...」；现在给出版式骨架（标题条 + 三卡），
+ * 用同一套 .skeleton shimmer 底，滚动位置与内容高度更接近真实页。 */
+.view-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.view-skeleton__bar {
+  height: var(--space-6);
+  width: min(calc(var(--space-16) * 15), 50%);
+  border-radius: var(--radius-md);
+}
+
+.view-skeleton__row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.view-skeleton__card {
+  height: calc(var(--space-16) * 11);
+  border-radius: var(--radius-lg);
+}
+
+.view-skeleton__hint {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+/* ---- SH-10：全局错误态 ---------------------------------------------
+ * 之前是英文 message + 一个「重试」，看不出是哪个请求失败、能做什么。
+ * 现在：中文标题 + 原因 + 请求 ID（可排查）+ 重试 / 返回驾驶舱。 */
+.view-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  max-width: calc(var(--space-16) * 23);
+  margin: var(--space-6) auto;
+  padding: var(--space-5);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+
+.view-error__icon {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: var(--space-8);
+  height: var(--space-8);
+  border-radius: var(--radius-pill);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.view-error__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.view-error h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-base);
+}
+
+.view-error p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--lead-snug);
+  overflow-wrap: anywhere;
+}
+
+.view-error__meta {
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+}
+
+.view-error__meta code {
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+.view-error .row {
+  margin-top: var(--space-1);
+}
+
+@media (max-width: 640px) {
+  .view-skeleton__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .view-error {
+    margin: var(--space-4) var(--space-3);
+    padding: var(--space-4);
+  }
 }
 }

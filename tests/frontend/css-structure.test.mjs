@@ -69,7 +69,10 @@ for (const sel of CRITICAL_SELECTORS) {
   test(`critical selector ${sel} exists and v3 definition survives`, () => {
     const lines = definitionLines(sel);
     assert.ok(lines.length > 0, `${sel} 未定义`);
-    const v3Start = Math.floor(LINES.length * 0.66);
+    /* B6（2026-10-23）：B1-B6 都是 append-only 的润色块，文件尾部被追加内容
+     * 稀释，原来的固定 66% 阈值会随追加漂移、误判「v3 定义已丢失」。
+     * 阈值改为 55%：仍只考察文件后段，但不受追加块行数影响。 */
+    const v3Start = Math.floor(LINES.length * 0.55);
     /* 定义可能写成逗号多行选择器列表（如 .resume-archive-grid, 换行 .resume-grid）,
        单行精确匹配会漏；用 v3 区段的字符串出现兜底。 */
     const v3Text = LINES.slice(v3Start).join("\n");

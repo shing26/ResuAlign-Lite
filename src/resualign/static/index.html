@@ -5,7 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ResuAlign - Career Studio</title>
   <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/static/styles.css?v=66">
+  <!-- SH-11（2026-10-23）：在样式表加载前套用已保存主题，避免深色用户第一帧看到白屏。
+       与 theme.js 共用 localStorage key（resualign_theme）；theme.js 启动后会再 applyTheme 一次（幂等）。 -->
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem("resualign_theme");
+        var dark =
+          stored === "dark" ||
+          (stored !== "light" &&
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        if (dark) {
+          document.documentElement.classList.add("dark");
+          document.documentElement.dataset.theme = "dark";
+        }
+      } catch (error) {
+        /* 存储被禁用时保持默认浅色，theme.js 运行期仍会处理 */
+      }
+    })();
+  </script>
+<link rel="stylesheet" href="/static/styles.css?v=67">
 </head>
 <body class="app-body app-shell bg-appbg text-white/90 h-screen flex overflow-hidden select-none text-[13px]">
   <aside class="app-rail rail" aria-label="主导航栏">
@@ -89,7 +109,20 @@
         </div>
       </div>
     </header>
-    <main id="app-router-view" class="flex-1 overflow-hidden relative" aria-live="polite"></main>
+    <main id="app-router-view" class="flex-1 overflow-hidden relative" aria-live="polite">
+      <!-- SH-10（2026-10-23）：首屏静态骨架 —— boot() 要先等 /api/auth/me 才首次 render，
+           这之前 #app-router-view 是空的（慢网/服务刚启动时是纯白屏）。先放同款骨架，
+           render() 第一次运行时会整体替换掉。 -->
+      <div class="view-skeleton" data-view-skeleton aria-busy="true" aria-label="正在加载页面">
+        <div class="skeleton is-shimmer view-skeleton__bar"></div>
+        <div class="view-skeleton__row">
+          <div class="skeleton is-shimmer view-skeleton__card"></div>
+          <div class="skeleton is-shimmer view-skeleton__card"></div>
+          <div class="skeleton is-shimmer view-skeleton__card"></div>
+        </div>
+        <p class="view-skeleton__hint">正在加载…</p>
+      </div>
+    </main>
   </div>
   <div id="print-root" class="print-root" aria-hidden="true"></div>
   <div id="toast-region" class="toast-region" aria-live="assertive"></div>
@@ -99,7 +132,12 @@
     role="presentation"
     hidden
   >
-    <div class="command-palette__dialog command-panel" role="dialog" aria-modal="true" aria-label="万能输入">
+    <div class="command-palette__dialog command-panel" role="dialog" aria-modal="true" aria-label="命令面板">
+      <div class="command-palette__head">
+        <span class="command-palette__title">命令面板</span>
+        <span class="command-palette__hint">搜岗位 · 粘贴 JD 新建岗位 · 执行动作</span>
+        <kbd class="command-palette__kbd">Ctrl K</kbd>
+      </div>
       <form class="command-palette__form" data-form="command-panel">
         <div class="command-palette__input-row command-search">
           <span class="command-palette__glyph" aria-hidden="true">/</span>
@@ -109,7 +147,7 @@
             rows="2"
             autocomplete="off"
             spellcheck="false"
-            placeholder="搜索岗位或命令"
+            placeholder="搜索岗位、粘贴 JD，或输入命令"
           ></textarea>
           <kbd>Esc</kbd>
         </div>
@@ -123,6 +161,6 @@
       </form>
     </div>
   </div>
-<script type="module" src="/static/app/main.js?v=66"></script>
+<script type="module" src="/static/app/main.js?v=67"></script>
 </body>
 </html>
