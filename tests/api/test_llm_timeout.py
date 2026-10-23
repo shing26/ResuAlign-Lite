@@ -481,7 +481,7 @@ def test_workbench_api_key_only_mentioned_for_auth_failures():
 def test_timeout_defaults_bound_request_hangs():
     """LLM request timeouts must be tight enough that a stuck provider
     cannot hang the frontend for minutes: transport errors fail after one
-    attempt (role timeouts now span 30-90s), retries are reserved for
+    attempt (role timeouts now span 30-150s), retries are reserved for
     5xx/schema failures (2 attempts total), and connect has a short window."""
     assert OpenAIClient.DEFAULT_TIMEOUT == 120.0
     assert OpenAIClient.DEFAULT_CONNECT_TIMEOUT == 30.0

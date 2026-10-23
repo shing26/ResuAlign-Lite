@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
+from resualign.contracts.errors import LlmFailureCode
+from resualign.engine.llm import LLMResponseError
 from resualign.jobs import JobRegistry
 from resualign.models import GapReport, JDProfile, ResuAlignConfig
 from resualign.settings_store import SettingsStore
@@ -412,6 +414,172 @@ def test_session_pipeline_emits_gap_ready():
     assert stored.get("match_score") is not None
 
 
+def _session_events(session_id: str) -> list[dict]:
+    session = api_module._session_store.get(session_id)
+    return list((session or {}).get("events") or [])
+
+
+def _events_named(session_id: str, name: str) -> list[dict]:
+    return [e["data"] for e in _session_events(session_id) if e["event"] == name]
+
+
+def _wait_for_pipeline(session_id: str, predicate) -> dict:
+    deadline = time.time() + 10
+    final = None
+    while time.time() < deadline:
+        final = client.get(
+            f"/api/workbench/session/{session_id}",
+            headers=_auth_headers(),
+        ).json()
+        if predicate(final):
+            break
+        time.sleep(0.05)
+    return final
+
+
+def test_gap_degradation_carries_code_on_gap_ready_event():
+    """SSE contract: a degraded gap stage must reach the live UI with the
+    stable failure code, not only land in the polled state."""
+    resume = _create_resume()
+    profile = JDProfile(
+        must_have_skills=["Python"], business_scenarios=["backend"]
+    )
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api._classify_job",
+        return_value={
+            "job_function": "后端",
+            "seniority": "中级",
+            "tech_tags": ["Python"],
+        },
+    ), patch("resualign.api.profile_jd", return_value=profile), patch(
+        "resualign.api.analyze_gaps",
+        side_effect=LLMResponseError("node busy", LlmFailureCode.TIMEOUT),
+    ):
+        state = client.post(
+            "/api/workbench/session/init",
+            json={
+                "raw_jd": "Backend engineer with Redis caching.",
+                "master_resume_id": resume["resume_id"],
+            },
+            headers=_auth_headers(),
+        ).json()
+        _wait_for_pipeline(
+            state["session_id"],
+            lambda body: body["jd"].get("profile") is not None
+            or body["status"] == "failed",
+        )
+
+    gap_events = _events_named(state["session_id"], "job.gap_ready")
+    assert gap_events, "expected a job.gap_ready event"
+    last = gap_events[-1]
+    assert last["gap_report"] is None
+    assert last["status"] == "blocked"
+    assert last["code"] == "timeout"
+    assert "缺口分析未完成" in last["error"]
+
+
+def test_job_error_event_carries_stable_code():
+    """SSE contract: job.error exposes the LlmFailureCode so the UI can look
+    up copy instead of regex-scraping the message."""
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api._classify_job",
+        return_value={
+            "job_function": "后端",
+            "seniority": "中级",
+            "tech_tags": ["Python"],
+        },
+    ), patch(
+        "resualign.api.profile_jd",
+        side_effect=LLMResponseError("no key", LlmFailureCode.AUTH),
+    ):
+        state = client.post(
+            "/api/workbench/session/init",
+            json={"raw_jd": "Backend engineer with Redis caching."},
+            headers=_auth_headers(),
+        ).json()
+        _wait_for_pipeline(
+            state["session_id"], lambda body: body["status"] == "failed"
+        )
+
+    errors = _events_named(state["session_id"], "job.error")
+    assert errors, "expected a job.error event"
+    assert errors[-1]["code"] == "auth"
+    assert errors[-1]["stage"] == "jd_analysis"
+
+
+def test_gap_only_retry_reruns_gap_without_rerunning_profile():
+    """The session's analyze endpoint used to short-circuit on
+    ``jd.profile is not None``, sealing a gap-failed session shut."""
+    resume = _create_resume()
+    profile = JDProfile(
+        must_have_skills=["Python"], business_scenarios=["backend"]
+    )
+    gap = GapReport(missing_keywords=["Redis"], strength_matches=["Python"])
+    profile_calls = {"n": 0}
+    gap_calls = {"n": 0}
+
+    def fake_profile(*args, **kwargs):
+        profile_calls["n"] += 1
+        return profile
+
+    def fake_gap(*args, **kwargs):
+        gap_calls["n"] += 1
+        if gap_calls["n"] == 1:
+            raise LLMResponseError("node busy", LlmFailureCode.TIMEOUT)
+        return gap
+
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api._classify_job",
+        return_value={
+            "job_function": "后端",
+            "seniority": "中级",
+            "tech_tags": ["Python"],
+        },
+    ), patch(
+        "resualign.api.profile_jd", side_effect=fake_profile
+    ), patch("resualign.api.analyze_gaps", side_effect=fake_gap):
+        state = client.post(
+            "/api/workbench/session/init",
+            json={
+                "raw_jd": "Backend engineer with Redis caching.",
+                "master_resume_id": resume["resume_id"],
+            },
+            headers=_auth_headers(),
+        ).json()
+        _wait_for_pipeline(
+            state["session_id"],
+            lambda body: body["jd"].get("profile") is not None,
+        )
+        first = client.get(
+            f"/api/workbench/session/{state['session_id']}",
+            headers=_auth_headers(),
+        ).json()
+        assert first["gap"]["gap_report"] is None
+        first_profile_calls = profile_calls["n"]
+
+        # Retry: the gap stage alone must re-run, the profile must not.
+        retry = client.post(
+            f"/api/workbench/session/{state['session_id']}/analyze",
+            headers=_auth_headers(),
+        )
+        assert retry.status_code == 200
+        _wait_for_pipeline(
+            state["session_id"],
+            lambda body: (body["gap"].get("gap_report") or None) is not None,
+        )
+
+    final = client.get(
+        f"/api/workbench/session/{state['session_id']}",
+        headers=_auth_headers(),
+    ).json()
+    assert final["gap"]["gap_report"]["missing_keywords"] == ["Redis"]
+    assert final["gap"]["error"] is None
+    assert final["jd"]["profile"]["must_have_skills"] == ["Python"]
+    # Profile ran in the first pass only; the retry paid for the gap stage.
+    assert profile_calls["n"] == first_profile_calls
+    assert gap_calls["n"] >= 2
+
+
 def test_session_pipeline_jd_only_sets_blocked_gap():
     """JD-only session init must not crash when no resume is pinned."""
     profile = JDProfile(
@@ -451,3 +619,62 @@ def test_session_pipeline_jd_only_sets_blocked_gap():
     assert final["gap"]["status"] == "blocked"
     assert final["gap"]["gap_report"] is None
     assert final["gap"]["score"] is None
+
+
+def test_session_pipeline_gap_failure_keeps_profile_and_session_ready():
+    """A gap failure must not take the JD profile down with it.
+
+    The session used to flip to ``failed`` with ``jd.profile = None``, which
+    threw away a profile that had already been produced and left the user
+    with nothing to show for the run.
+    """
+    resume = _create_resume()
+    profile = JDProfile(
+        must_have_skills=["Python"],
+        nice_to_have_skills=["Redis"],
+        business_scenarios=["backend"],
+    )
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api._classify_job",
+        return_value={
+            "job_function": "后端",
+            "seniority": "中级",
+            "tech_tags": ["Python"],
+        },
+    ), patch("resualign.api.profile_jd", return_value=profile), patch(
+        "resualign.api.analyze_gaps",
+        side_effect=LLMResponseError("node busy", LlmFailureCode.TIMEOUT),
+    ):
+        state = client.post(
+            "/api/workbench/session/init",
+            json={
+                "raw_jd": "Backend engineer with Redis caching.",
+                "master_resume_id": resume["resume_id"],
+            },
+            headers=_auth_headers(),
+        ).json()
+
+        session_id = state["session_id"]
+        deadline = time.time() + 10
+        final = state
+        while time.time() < deadline:
+            final = client.get(
+                f"/api/workbench/session/{session_id}",
+                headers=_auth_headers(),
+            ).json()
+            if final["jd"].get("profile") is not None or final["status"] in (
+                "failed",
+            ):
+                break
+            time.sleep(0.05)
+    assert final["status"] == "ready"
+    assert final["jd"]["status"] == "ready"
+    assert final["jd"]["profile"]["must_have_skills"] == ["Python"]
+    assert final["gap"]["gap_report"] is None
+    assert "timeout" in (final["gap"].get("error") or "")
+
+    stored = api_module._jobs.get_job(
+        final["job"]["tenant_id"], final["job"]["job_id"]
+    )
+    assert (stored.get("jd_profile") or {}).get("must_have_skills") == ["Python"]
+    assert stored.get("gap_report") is None

@@ -183,7 +183,7 @@ test("recoverDiagnosis falls back to persisted snapshot when the job is gone", a
   );
 });
 
-test("workbench guide renders from a session-only draft", () => {
+test("session-only draft is not promoted to a saved final", () => {
   document.body.innerHTML = '<div id="app-router-view"></div>';
   const jobData = {
     job_id: "j1",
@@ -212,11 +212,11 @@ test("workbench guide renders from a session-only draft", () => {
     [jobData],
   );
   const guide = document.querySelector("[data-workbench-guide]");
-  assert.ok(guide, "guide renders when only the session carries a draft");
-  assert.equal(guide.getAttribute("data-guide-current"), "draft");
-  assert.match(guide.textContent, /已生成草稿/);
+  assert.equal(guide, null, "candidate draft must not unlock the final guide");
+  const finalPanel = document.querySelector("[data-final-draft-panel]");
+  assert.ok(!finalPanel || finalPanel.hidden);
   assert.equal(
-    guide.querySelector('[data-action="record-application"]'),
-    null,
+    document.querySelectorAll("[data-export-dock] button[disabled]").length,
+    3,
   );
 });

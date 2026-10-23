@@ -34,8 +34,11 @@
 | CSS 架构与主题 | [0043](docs/adr/0043-at-layer-single-file-css-architecture.md) · [0044](docs/adr/0044-token-single-namespace-convergence.md) · [0047](docs/adr/0047-supersede-adr0033-decision1-dark-default-teal-accent.md) |
 | 加固 / 评分实证 | [0052](docs/adr/0052-freeze-window-hardening-and-layering-ratchet.md) · [0054](docs/adr/0054-score-evidence-hardening.md) |
 | 岗位表同步 / 护栏面板 | [0055](docs/adr/0055-job-table-auto-sync-and-dedupe-precheck.md) · [0056](docs/adr/0056-drop-decorative-guardrails-panel.md) |
+| allowlist / JD 上下文边界 | [0060](docs/adr/0060-gap-report-keyword-split.md) · [0061](docs/adr/0061-jd-context-not-a-content-license.md) |
+| 编辑器墙钟 | [0062](docs/adr/0062-editor-wall-clock-150s.md) |
+| 工作台终态分型 | [0063](docs/adr/0063-workbench-terminal-outcomes.md) |
 
-> 全量决策见 `docs/adr/`（编号 0001–0058；**0029 有意缺号**，见 ADR-0036）。
+> 全量决策见 `docs/adr/`（编号 0001–0063；**0029 有意缺号**，见 ADR-0036）。
 > 历史轨迹见 [`CHANGELOG.md`](CHANGELOG.md)，交付状态见 [`docs/STATUS.md`](docs/STATUS.md)。
 
 ---
@@ -58,6 +61,16 @@ _Avoid_: 模板简历、多份主简历并行
 **Gap Report**
 主简历 vs JD Profile 的结构化对比：缺失关键词、错位强调、可保留的强匹配项。
 
+**Supported Keyword Evidence**
+偏差报告中每个 `supported_keywords` 方向的逐项原文锚点：键是候选改写方向，
+值是主简历中可逐字定位、且与该方向有共同实质术语的证据句。缺锚点或证据与
+方向无关时，该方向不得进入编辑素材。
+
+**JD Context**
+给编辑器看的一行岗位上下文摘要，只帮助措辞方向，不是候选人事实来源，
+**永不进入 allowlist**。app 由 `jd_context_summary()` 从结构化画像生成，
+不传 JD 原文；见 ADR-0061。
+
 **Tailored Resume**
 针对某个 JD 改写的主简历版本；每处改动都指回主简历原文，不新增事实。
 
@@ -71,7 +84,8 @@ modify/remove 中 `original` 与 `proposed` 逐字相同者，移入 `invalid_di
 
 **Alignment**
 「简历 vs JD → 建议改动」的过程。UI 中「已对齐」= 该岗位 final draft 的
-`alignment_status` 为 succeeded，**不是**第六种投递状态。
+`alignment_status` 为 succeeded 且 `usable_diffs>=1`，**不是**第六种投递
+状态；零可用产出必须再按 `alignment_reason` 区分无安全改写、模型失败与真无缺口。
 
 **Diagnosis**（最小版）
 不接 JD 的简历评估：0–100 分 + 技能 + 问题/建议。UI 中称「诊断分」。
@@ -136,6 +150,22 @@ _Avoid_: 硬编码下拉、每筛选一次请求一次设置
 **Single-Job Workspace**
 单岗位工作页：JD 分析 + 状态 + 从主简历版本生成对齐草稿。
 
+**三步工作台 (Three-step Workbench)**
+单岗主路径的产品形态：看差距 → 审改写 → 预览并导出。首步可内联补简历与
+JD；第二步逐条采纳或拒绝改写；第三步导出干净定稿或带依据版本。
+_Avoid_: 三栏工作台、Diff 画布
+
+**真实性检查 (Authenticity Check)**
+用户界面中对 provenance 与门禁结果的统一称谓。每条改写显示“依据原文”，
+被拦截的编造候选显示原因；内部代码、API 与 ADR 仍使用 provenance / gate。
+_Avoid_: 向用户暴露 Provenance、3-Gate、硬门禁
+
+**无安全改写 (No Safe Rewrite)**
+编辑器面对某个缺口时，简历原文没有足够事实支撑，因而正确地产出零条 diff。
+它不是模型失败，也不是允许编造的借口；内部机读终态仍按 ADR-0041 决定 5
+在有缺口且 `usable=0` 时呈现 `no_output`，用户文案另做映射。
+_Avoid_: 把零产出一律读成工具坏了；用“无安全改写”包装真实能力缺口
+
 **Final Draft**
 某个岗位已采纳对齐稿的持久副本；刷新与重开不丢，另存为主简历不改原稿。
 _Avoid_: 自动覆盖主简历、一次性草稿
@@ -179,11 +209,14 @@ _Avoid_: 与采纳率混用（一个量、一个率）
 **无建议（badge）**
 零可用产出对齐的终端语义，按证据分型（ADR-0041 决定 5 / #111）：新增
 `usable_diffs` 计数（noop 过滤与拦截后的有效 diff 数）。**有缺口 ∧ usable=0 →
-`failed` + reason `no_output`**（可重跑）；**无缺口 ∧ usable=0 → 保 `succeeded`**，
+`failed` + 原始 `last_alignment_error` 的 `no_output:` 机读前缀**；#167 起
+`alignment_reason` 持久区分 `no_safe_rewrite` / `model_failed` / `no_gap`，
+API 同时投影干净的 `alignment_error`。无缺口 ∧ usable=0 → 保 `succeeded`，
 徽章「无缺口 · 无需改写」，不得渲染为「已对齐」。驾驶舱「完成对齐」分子只数
 `usable_diffs≥1`，「100% 完成率」从制度上不可能出现。
 _Avoid_: 拿「跑完没报错」当「产出了价值」；把「无缺口」当可信结论
-（小模型摆烂与真无缺口同形，文案必须带换模型重跑引导）
+（文案只陈述当前 JD 未发现明确缺口，不把模型未产出包装成能力背书；
+重跑或换模型引导只属于 `model_failed`）
 
 **节点预检 (LLM pre-flight probe)**
 对齐排队前对实际服务节点做的 5s 最小连通 + 鉴权探测。确定性 HTTP 失败
@@ -344,6 +377,17 @@ Phase A 开工前三道灯（ADR-0040）：能力线 = Phase 0 过线；地基�
 采纳 ∧ ≥2 轮的触发原因是上一轮评测结论。第三条是因果链条款。狗食数据计入。
 _Avoid_: 拿「同一简历跑三次」凑数（缺采纳与因果链）
 
+**App 自用验证线 (App Self-use Line)**
+ADR-0059 的 app 验收线：3 份作者真实投递过的不同 JD，每份至少采纳 1 条建议
+并保存定稿，其中至少 2 份导出或记录投递。它独立于 ADR-0042 的 skill 自用线
+JSONL 取证。
+_Avoid_: 与 skill 自用线互相顶替；合成例充当通过证据
+
+**双主线 (Dual Mainline)**
+app 与 skill 探针同为交付主线。探针阈值与取证口径不变；app 的真实自用
+验证在冲突时优先，但两条线各自独立判定。
+_Avoid_: 用探针状态冻结 app；用 app 使用量冒充探针首跑
+
 **授权档位 (Approval Tier)**
 agent 可用工具三档：读档自由；写档只能经既有入口排队；审批档（采纳 diff、
 定稿、覆盖主简历、导出、删除）只能提议，人确认后生效。
@@ -379,9 +423,14 @@ _Avoid_: 口头「我用过了」当首跑；agent 转述或重打摘要（必�
 锁定，改规则须先改上游再同步。
 
 **冻结令 (Freeze Order)**
-探针期内 app 一切新功能冻结（agent 化 Phase A/B、商业化 PRD、扩展期二、托管
-demo），只留地基修复 #110/#111 与探针包两类工作。解冻条件唯一：探针判据「过」。
-ADR-0042 决定 6e 明确自用线推进期间冻结令继续有效。
+ADR-0041 的历史状态：探针期内 app 一切新功能冻结。ADR-0059 已把 app 重开为
+双主线之一，冻结令不再作为默认排期门；`frozen` 标签只保留历史语义，具体票
+必须重新分诊。
+
+**演示工作区 (Demo Workspace)**
+使用确定性 Mock 模型和独立命名空间的免 Key 体验区。数据可跨重启保留、可一键
+重置；演示稿可导出但必须带“演示”标记，不得进入真实岗位、投递或指标。
+_Avoid_: 把 Mock 结果当真实模型质量证据；演示数据污染个人库
 
 **探针线 / 自用线 (Probe Line / Dogfood Line)**
 掉头期判据的两条**独立**线（ADR-0042 决定 3），各自取证、各自判定，不许互相

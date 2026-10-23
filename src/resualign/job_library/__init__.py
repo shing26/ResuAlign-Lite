@@ -8,11 +8,13 @@ import re
 import sqlite3
 import statistics
 import time
+import unicodedata
 import urllib.parse
 import uuid
 from datetime import datetime
 from typing import Any, Optional, Sequence
 
+from ..alignment_lifecycle import gap_report_has_gap
 from ..store_base import UserStoreError, _SqliteStore
 from .models import (
     JOB_FUNCTIONS,
@@ -25,11 +27,16 @@ from .models import (
     _effective_choices,
 )
 from .status_lifecycle import (
+    StatusTransitionError,
     _status_filter_values,
     _validate_status,
+    allowed_transition_targets,
+    can_transition_status,
     canonical_status,
+    is_terminal_status,
     status_label,
     status_lifecycle_fields,
+    validate_status_transition,
 )
 
 __all__ = [
@@ -44,11 +51,66 @@ __all__ = [
     "canonical_status",
     "status_label",
     "status_lifecycle_fields",
+    "validate_status_transition",
+    "can_transition_status",
+    "is_terminal_status",
+    "allowed_transition_targets",
+    "StatusTransitionError",
+    "normalize_import_date",
+    "validate_edit_date",
 ]
 
 # 投递结果归因枚举：记录"这份定稿投出去的结局"，用于验证对齐质量
 # （对齐 vs 未对齐简历的通过率）。空串清除（ADR-0027 clear-on-empty）。
 APPLICATION_RESULTS = ("screen_pass", "ats_reject", "no_response", "other")
+ALIGNMENT_REASONS = (
+    "no_gap",
+    "no_safe_rewrite",
+    "model_failed",
+)
+
+
+def _human_alignment_error(message: str | None) -> str | None:
+    """Return the user-facing error while preserving the stored machine form."""
+    text = str(message or "").strip()
+    if text.startswith("no_output:"):
+        text = text.split(":", 1)[1].strip()
+    return text or None
+
+
+def _parse_gap_report(value: Any) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(value) if value else None
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _derive_alignment_reason(
+    alignment_status: str | None,
+    alignment_reason: str | None,
+    usable_diffs: int,
+    gap_report: dict[str, Any] | None,
+) -> str | None:
+    """Derive the public terminal reason for persisted and legacy rows."""
+    stored_reason = alignment_reason or ""
+    if stored_reason in ALIGNMENT_REASONS:
+        return stored_reason
+    if alignment_status == "failed":
+        return "model_failed"
+    if alignment_status == "succeeded" and usable_diffs == 0:
+        return "model_failed" if gap_report_has_gap(gap_report) else "no_gap"
+    return None
+
+
+def _validate_alignment_reason(alignment_reason: str | None) -> None:
+    if (
+        alignment_reason is not None
+        and alignment_reason != ""
+        and alignment_reason not in ALIGNMENT_REASONS
+    ):
+        raise UserStoreError(f"Invalid alignment_reason: {alignment_reason}")
+
 
 _JOB_UPDATE_PARAMETERS = (
     "title",
@@ -84,6 +146,7 @@ _JOB_UPDATE_PARAMETERS = (
     "match_reason",
     "match_updated_at",
     "alignment_status",
+    "alignment_reason",
     "diffs",
     "invalid_diffs",
     "draft",
@@ -184,6 +247,72 @@ _JOB_UPDATE_JSON_FIELDS = (
     )),
 )
 
+_DATE_FIELDS = (
+    "posting_date",
+    "applied_at",
+    "offer_at",
+    "rejected_at",
+    "deadline",
+)
+
+
+def normalize_import_date(value: Any) -> tuple[str | None, str | None]:
+    """Normalize an imported date to YYYY-MM-DD.
+
+    Returns ``(normalized, error)``. Non-padded values like ``2026-8-14``
+    are normalized to ``2026-08-14``. Unparseable values return
+    ``(None, reason)`` so the caller can drop the field and list the error.
+    """
+    import re as _re
+
+    if value is None:
+        return None, None
+    text = str(value or "").strip()
+    if not text:
+        return None, None
+    # Accept ISO datetime and take its date prefix.
+    candidate = text[:10]
+    match = _re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", candidate)
+    if not match:
+        return None, f"invalid date: {text}"
+    year, month, day = (int(part) for part in match.groups())
+    try:
+        normalized = f"{year:04d}-{month:02d}-{day:02d}"
+        datetime.strptime(normalized, "%Y-%m-%d")
+    except ValueError:
+        return None, f"invalid date: {text}"
+    return normalized, None
+
+
+def validate_edit_date(field: str, value: Any) -> str:
+    """Validate a date from the direct edit path (PATCH).
+
+    Raises :class:`UserStoreError` with an actionable message on invalid
+    input. Empty string is allowed (clear-on-empty contract).
+
+    Accepts ISO datetime (e.g. ``2026-08-01T10:00:00Z``) and preserves it.
+    Non-padded dates (e.g. ``2026-8-14``) are normalized to ``YYYY-MM-DD``.
+    """
+    if value is None or value == "":
+        return ""
+    text = str(value or "").strip()
+    # Accept ISO datetime and preserve it.
+    if len(text) >= 10 and text[10:11] in ("T", " "):
+        candidate = text[:10]
+        try:
+            time.strptime(candidate, "%Y-%m-%d")
+        except ValueError:
+            raise UserStoreError(
+                f"Invalid {field}: use YYYY-MM-DD format (e.g. 2026-08-14)"
+            )
+        return text
+    normalized, error = normalize_import_date(text)
+    if error is not None:
+        raise UserStoreError(
+            f"Invalid {field}: use YYYY-MM-DD format (e.g. 2026-08-14)"
+        )
+    return normalized or ""
+
 _JOB_UPDATE_CLEARABLE_FIELDS = (
     ("applied_at", "applied_at"),
     ("next_step", "next_step"),
@@ -192,6 +321,7 @@ _JOB_UPDATE_CLEARABLE_FIELDS = (
     ("rejected_at", "rejected_at"),
     ("next_step_due_at", "next_step_due_at"),
     ("interview_stage", "interview_stage"),
+    ("alignment_reason", "alignment_reason"),
     ("application_result", "application_result"),
     ("deadline", "deadline"),
 )
@@ -212,6 +342,13 @@ def _validate_job_update(fields: dict[str, Any]) -> None:
         raise UserStoreError(f"Invalid seniority: {seniority}")
     if fields.get("status") is not None:
         fields["status"] = canonical_status(_validate_status(fields["status"]))
+    # Module 6: validate date fields on the direct edit path (PATCH).
+    # Invalid dates are rejected with 422 and an actionable message.
+    for date_field in _DATE_FIELDS:
+        if fields.get(date_field) is not None:
+            fields[date_field] = validate_edit_date(
+                date_field, fields[date_field]
+            )
     classification_pending = fields.get("classification_pending")
     if (
         classification_pending is not None
@@ -258,6 +395,7 @@ def _validate_job_update(fields: dict[str, Any]) -> None:
         "failed",
     ):
         raise UserStoreError(f"Invalid alignment_status: {alignment_status}")
+    _validate_alignment_reason(fields.get("alignment_reason"))
 
 
 def _resolve_job_update_lifecycle(
@@ -265,6 +403,8 @@ def _resolve_job_update_lifecycle(
     tenant_id: str,
     job_id: str,
     fields: dict[str, Any],
+    *,
+    revive: bool = False,
 ) -> tuple[bool, str | None, bool]:
     """Resolve status transitions and return ``(append_only, applied_at, found)``."""
     status = fields.get("status")
@@ -274,7 +414,8 @@ def _resolve_job_update_lifecycle(
     if current is None:
         return False, None, False
     if (
-        canonical_status(status) == "applied"
+        not revive
+        and canonical_status(status) == "applied"
         and canonical_status(current["status"]) != "draft"
     ):
         return (
@@ -284,6 +425,12 @@ def _resolve_job_update_lifecycle(
             or time.strftime("%Y-%m-%d"),
             True,
         )
+    # Validate the transition (forward/skip always OK; backward only via revive).
+    validate_status_transition(
+        current.get("status"),
+        status,
+        revive=revive,
+    )
     lifecycle = status_lifecycle_fields(
         current,
         status,
@@ -296,6 +443,11 @@ def _resolve_job_update_lifecycle(
             "interview_stage": fields.get("interview_stage"),
         },
     )
+    # On revive, preserve terminal timestamps (offer_at / rejected_at) so the
+    # history stays intact; only clear forward-looking follow-up fields.
+    if revive and is_terminal_status(current.get("status")):
+        lifecycle.pop("offer_at", None)
+        lifecycle.pop("rejected_at", None)
     for field, value in lifecycle.items():
         if field in fields:
             fields[field] = value
@@ -380,6 +532,7 @@ CREATE TABLE IF NOT EXISTS library_jobs (
     match_updated_at REAL,
     alignment_status TEXT NOT NULL DEFAULT 'idle',
     last_alignment_error TEXT,
+    alignment_reason TEXT,
     diffs_json TEXT NOT NULL DEFAULT '[]',
     invalid_diffs_json TEXT NOT NULL DEFAULT '[]',
     usable_diffs INTEGER NOT NULL DEFAULT 0,
@@ -489,10 +642,16 @@ def _normalize_source_url(url: str) -> str:
     posting shared with different tags still dedupes to one row. Stripping
     the query/fragment outright collapsed every posting on a site into a
     single key (2026-09-24 regression).
+
+    Copy-pasted URLs arrive with stray whitespace, NFC-divergent unicode,
+    and mixed percent-encoding (``%E4%B8%AD`` vs a raw 中); all three are
+    normalized so the same posting shared through different channels still
+    dedupes to one row. Default ports are dropped.
     """
     value = (url or "").strip()
     if not value:
         return ""
+    value = unicodedata.normalize("NFC", re.sub(r"\s+", "", value))
     try:
         parts = urllib.parse.urlsplit(value)
     except ValueError:
@@ -501,17 +660,36 @@ def _normalize_source_url(url: str) -> str:
     if "?" in fragment:
         frag_path, _, frag_query = fragment.partition("?")
         cleaned = _normalize_query(frag_query)
-        fragment = f"{frag_path}?{cleaned}" if cleaned else frag_path
+        fragment = f"{_normalize_percent_encoding(frag_path)}?{cleaned}" if cleaned else _normalize_percent_encoding(frag_path)
     rebuilt = urllib.parse.urlunsplit(
         (
             parts.scheme.lower(),
-            parts.netloc.lower(),
-            parts.path.rstrip("/"),
+            _normalize_netloc(parts.netloc, parts.scheme),
+            _normalize_percent_encoding(parts.path).rstrip("/"),
             _normalize_query(parts.query),
             fragment,
         )
     )
     return rebuilt.lower()
+
+
+def _normalize_percent_encoding(text: str) -> str:
+    """Decode then re-encode one URL component with a single convention."""
+    if not text:
+        return ""
+    return urllib.parse.quote(
+        urllib.parse.unquote(text),
+        safe="/-._~!$&'()*+,;=:@",
+    )
+
+
+def _normalize_netloc(netloc: str, scheme: str) -> str:
+    """Lowercase the host and drop the scheme's default port."""
+    lowered = (netloc or "").lower()
+    default_port = {"http": ":80", "https": ":443"}.get(scheme.lower())
+    if default_port and lowered.endswith(default_port):
+        lowered = lowered[: -len(default_port)]
+    return lowered
 
 
 _SALARY_UNIT_FACTORS = {"k": 1000, "千": 1000, "万": 10000}
@@ -585,6 +763,32 @@ def _dedupe_key_for(
     if normalized_url:
         return "url:" + normalized_url
     return _text_dedupe_key(text)
+
+
+def _dedupe_candidates(
+    source_url: str | None,
+    text: str | None,
+    company: str | None = None,
+    title: str | None = None,
+    location: str | None = None,
+) -> list[str]:
+    """Every key that can identify this posting, strongest first.
+
+    The same posting captured twice through different channels (a URL row
+    and a pasted row) must not create two library rows, so duplicate checks
+    test all candidates, not just the primary key. Identity joins the set
+    only when company and title are both present: bare pastes share an
+    empty identity and would collapse unrelated rows into one cluster.
+    """
+    candidates: list[str] = []
+    normalized_url = _normalize_source_url(source_url or "")
+    if normalized_url:
+        candidates.append("url:" + normalized_url)
+    if (text or "").strip():
+        candidates.append(_text_dedupe_key(text))
+    if (company or "").strip() and (title or "").strip():
+        candidates.append("identity:" + _job_identity_key(company, title, location))
+    return candidates
 
 
 def _job_identity_key(
@@ -767,6 +971,13 @@ class JobLibraryStore(_SqliteStore):
             "UPDATE library_jobs "
             "SET usable_diffs = json_array_length(diffs_json);",
         ),
+        # 46（#167）：持久化用户可理解的终态分类。alignment_status 仍只有
+        # succeeded/failed；no_output: 机读前缀也保持原契约，本列只区分
+        # no_safe_rewrite / model_failed / no_gap。
+        (
+            46,
+            "ALTER TABLE library_jobs ADD COLUMN alignment_reason TEXT",
+        ),
     )
 
     def validate_status(self, status: str) -> str:
@@ -847,6 +1058,7 @@ class JobLibraryStore(_SqliteStore):
         prompt_version: str | None = None,
         generated_at: float | None = None,
         dedupe_key: str | None = None,
+        prefer_identity: bool = False,
         allowed_job_functions: Sequence[str] | None = None,
         allowed_seniorities: Sequence[str] | None = None,
     ) -> dict[str, Any]:
@@ -887,6 +1099,24 @@ class JobLibraryStore(_SqliteStore):
             dedupe_key = _dedupe_key_for(source_type, source_url, text)
         else:
             dedupe_key = dedupe_key.strip()
+        # A posting captured twice through different channels (URL row plus
+        # pasted row, or a rewritten JD body under the same identity) must
+        # resolve to its first row, so every dedupe candidate is tested
+        # before the insert; the UNIQUE index below stays the last guard.
+        if (
+            self.find_duplicate(
+                tenant_id,
+                source_url=source_url,
+                text=text,
+                company=company,
+                title=title,
+                location=location,
+                extra_key=dedupe_key,
+                prefer_identity=prefer_identity,
+            )
+            is not None
+        ):
+            raise UserStoreError("Duplicate job already exists")
         job_id = uuid.uuid4().hex
         now = time.time()
         tags = self._normalize_tags(tech_tags)
@@ -996,6 +1226,71 @@ class JobLibraryStore(_SqliteStore):
                     (tenant_id, dedupe_key),
                 ).fetchone()
                 return self._row_to_library_job(row) if row else None
+
+    def find_duplicate(
+        self,
+        tenant_id: str,
+        *,
+        source_url: str | None,
+        text: str | None,
+        company: str | None = None,
+        title: str | None = None,
+        location: str | None = None,
+        extra_key: str | None = None,
+        prefer_identity: bool = False,
+    ) -> Optional[dict[str, Any]]:
+        """Return the oldest job matching any dedupe candidate, else None.
+
+        One scan tests the normalized-URL, JD-text, and guarded identity
+        candidates together, so a posting captured twice through different
+        channels still resolves to its first row. Row counts are personal
+        scale (hundreds to low thousands); the scan mirrors the existing
+        ``list_job_identity_keys`` / ``find_job_by_application_source``
+        full-scan precedent.
+        The text candidate hashes each stored body on the fly, so a row
+        stored under a URL key still catches an identical pasted body.
+        ``prefer_identity`` drops the URL candidate for shared employer
+        landing pages; the explicit job-table identity/text still dedupe a
+        genuine repeat without collapsing sibling postings.
+        """
+        url_key = (
+            ""
+            if prefer_identity
+            else "url:" + _normalize_source_url(source_url or "")
+        )
+        text_key = (
+            _text_dedupe_key(text) if (text or "").strip() else ""
+        )
+        identity = (
+            _job_identity_key(company, title, location)
+            if (company or "").strip() and (title or "").strip()
+            else None
+        )
+        if not (url_key != "url:" or text_key or identity or extra_key):
+            return None
+        candidate_keys = {key for key in (url_key, text_key, extra_key) if key}
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM library_jobs WHERE tenant_id = ? "
+                    "ORDER BY created_at ASC",
+                    (tenant_id,),
+                ).fetchall()
+        for row in rows:
+            if row["dedupe_key"] in candidate_keys:
+                return self._row_to_library_job(row)
+            if url_key != "url:" and row["source_url"] and (
+                _normalize_source_url(row["source_url"]) == url_key[4:]
+            ):
+                return self._row_to_library_job(row)
+            if text_key and _text_dedupe_key(row["jd_text"] or "") == text_key:
+                return self._row_to_library_job(row)
+            if identity and _job_identity_key(
+                row["company"], row["title"], row["location"]
+            ) == identity:
+                return self._row_to_library_job(row)
+        return None
 
     def list_job_identity_keys(self, tenant_id: str) -> set[str]:
         """Return normalized company/title/location keys for the tenant.
@@ -1274,14 +1569,19 @@ class JobLibraryStore(_SqliteStore):
             with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT job_id, title, company, status, jd_profile_json, "
-                    "alignment_status, applied_at, offer_at, "
+                    "gap_report_json, alignment_status, alignment_reason, "
+                    "last_alignment_error, usable_diffs, applied_at, offer_at, "
                     "next_step_due_at, updated_at "
                     "FROM library_jobs WHERE tenant_id = ? "
                     "ORDER BY updated_at DESC",
                     (tenant_id,),
                 ).fetchall()
-        return [
-            {
+        dashboard: list[dict[str, Any]] = []
+        for row in rows:
+            alignment_status = row["alignment_status"] or "idle"
+            usable_diffs = int(row["usable_diffs"] or 0)
+            gap_report = _parse_gap_report(row["gap_report_json"])
+            dashboard.append({
                 "job_id": row["job_id"],
                 "title": row["title"],
                 "company": row["company"],
@@ -1292,14 +1592,23 @@ class JobLibraryStore(_SqliteStore):
                     if row["jd_profile_json"]
                     else None
                 ),
-                "alignment_status": row["alignment_status"] or "idle",
+                "alignment_status": alignment_status,
+                "alignment_reason": _derive_alignment_reason(
+                    alignment_status,
+                    row["alignment_reason"],
+                    usable_diffs,
+                    gap_report,
+                ),
+                "alignment_error": _human_alignment_error(
+                    row["last_alignment_error"]
+                ),
+                "last_alignment_error": row["last_alignment_error"] or None,
                 "applied_at": row["applied_at"] or None,
                 "offer_at": row["offer_at"] or None,
                 "next_step_due_at": row["next_step_due_at"] or None,
                 "updated_at": row["updated_at"],
-            }
-            for row in rows
-        ]
+            })
+        return dashboard
     def update_job(
         self,
         tenant_id: str,
@@ -1337,6 +1646,7 @@ class JobLibraryStore(_SqliteStore):
         match_reason: str | None = None,
         match_updated_at: float | None = None,
         alignment_status: str | None = None,
+        alignment_reason: str | None = None,
         diffs: list[dict[str, Any]] | None = None,
         invalid_diffs: list[dict[str, Any]] | None = None,
         draft: str | None = None,
@@ -1354,6 +1664,7 @@ class JobLibraryStore(_SqliteStore):
         last_alignment_error: str | None = None,
         application_result: str | None = None,
         deadline: str | None = None,
+        revive: bool = False,
     ) -> Optional[dict[str, Any]]:
         """Update editable fields. None-valued fields are left unchanged.
 
@@ -1362,12 +1673,23 @@ class JobLibraryStore(_SqliteStore):
         ``interview_stage``) follow the clear-on-empty contract: an empty
         string clears the stored value to NULL (U10), while None leaves it
         untouched.
+
+        ``revive`` enables the explicit "重新打开" action: moving from a
+        terminal status (offer/withdrawn) back to a non-terminal one while
+        preserving terminal timestamps.
         """
         updates = _collect_job_update_fields(locals())
+        if updates.get("alignment_status") in ("queued", "running"):
+            updates["alignment_reason"] = ""
+        elif (
+            updates.get("alignment_status") == "failed"
+            and not updates.get("alignment_reason")
+        ):
+            updates["alignment_reason"] = "model_failed"
         _validate_job_update(updates)
         append_only_snapshot, snapshot_applied_at, lifecycle_found = (
             _resolve_job_update_lifecycle(
-                self, tenant_id, job_id, updates
+                self, tenant_id, job_id, updates, revive=revive
             )
         )
         if not lifecycle_found:
@@ -1660,6 +1982,7 @@ class JobLibraryStore(_SqliteStore):
         alignment_status: str = "succeeded",
         last_alignment_error: str | None = None,
         usable_diffs: int | None = None,
+        alignment_reason: str | None = None,
     ) -> Optional[dict[str, Any]]:
         """Persist a terminal alignment product for one library job.
 
@@ -1681,6 +2004,7 @@ class JobLibraryStore(_SqliteStore):
             "failed",
         ):
             raise UserStoreError(f"Invalid alignment_status: {alignment_status}")
+        _validate_alignment_reason(alignment_reason)
         usable = len(diffs or []) if usable_diffs is None else int(usable_diffs)
         now = time.time()
         with self._lock:
@@ -1699,6 +2023,7 @@ class JobLibraryStore(_SqliteStore):
                     "match_score = ?, match_score_detail_json = ?, "
                     "match_reason = ?, match_updated_at = ?, "
                     "alignment_status = ?, last_alignment_error = ?, "
+                    "alignment_reason = ?, "
                     "diffs_json = ?, invalid_diffs_json = ?, "
                     "usable_diffs = ?, draft = ?, "
                     "eval_score_json = ?, model = ?, prompt_version = ?, "
@@ -1725,6 +2050,7 @@ class JobLibraryStore(_SqliteStore):
                         match_updated_at,
                         alignment_status,
                         last_alignment_error,
+                        alignment_reason,
                         json.dumps(diffs or [], ensure_ascii=False),
                         json.dumps(invalid_diffs or [], ensure_ascii=False),
                         usable,
@@ -2070,31 +2396,19 @@ class JobLibraryStore(_SqliteStore):
             )
         except (TypeError, ValueError):
             match_score_detail = None
-        # #111 / ADR-0041 决定 5：usable_diffs 是持久列；has_gap 与
-        # alignment_reason 由投影派生（无新状态）——no_gap=无缺口零产出、
-        # no_output=有缺口零产出（后者终态即 failed，理由前缀在
-        # last_alignment_error）。前端徽章/驾驶舱分子据此分型，不再以
-        # alignment_status 单字段当「已对齐」绿灯。
+        # #111 / ADR-0041 决定 5 + #167：usable_diffs 和显式终态原因
+        # 都是持久列；旧行仍从 gap/error 派生兼容值。no_output 继续留在
+        # last_alignment_error 机读前缀里，用户文案由 reason 分流。
         usable_diffs = int(row["usable_diffs"] or 0)
-        try:
-            gap_report = (
-                json.loads(row["gap_report_json"])
-                if row["gap_report_json"]
-                else None
-            )
-        except (TypeError, ValueError):
-            gap_report = None
-        has_gap = bool(gap_report) and bool(
-            (gap_report.get("missing_keywords") or [])
-            or (gap_report.get("misaligned_emphasis") or [])
-        )
+        gap_report = _parse_gap_report(row["gap_report_json"])
+        has_gap = gap_report_has_gap(gap_report)
         last_error = row["last_alignment_error"] or ""
-        if alignment_status == "succeeded" and usable_diffs == 0 and not has_gap:
-            alignment_reason: str | None = "no_gap"
-        elif alignment_status == "failed" and last_error.startswith("no_output"):
-            alignment_reason = "no_output"
-        else:
-            alignment_reason = None
+        alignment_reason = _derive_alignment_reason(
+            alignment_status,
+            row["alignment_reason"],
+            usable_diffs,
+            gap_report,
+        )
         return {
             "job_id": row["job_id"],
             "tenant_id": row["tenant_id"],
@@ -2147,6 +2461,7 @@ class JobLibraryStore(_SqliteStore):
             "match_updated_at": row["match_updated_at"],
             "alignment_status": alignment_status,
             "last_alignment_error": row["last_alignment_error"] or None,
+            "alignment_error": _human_alignment_error(last_error),
             "diffs": json.loads(row["diffs_json"] or "[]"),
             "invalid_diffs": json.loads(row["invalid_diffs_json"] or "[]"),
             "usable_diffs": usable_diffs,

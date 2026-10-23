@@ -11,7 +11,7 @@ import urllib.parse
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Callable
 
 from ...alignment_lifecycle import transition_alignment
 from ...app.context import context
@@ -22,6 +22,7 @@ from ...job_library import (
     _normalize_source_url,
     _parse_salary_text,
     _text_dedupe_key,
+    normalize_import_date,
 )
 from ...llm_usage import llm_tenant_context, reset_llm_tenant, set_llm_tenant
 from ...observability import new_request_id, reset_request_id, set_request_id
@@ -541,6 +542,7 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
     payload['jd_text'] = jd_text
     source_type = payload.get('source_type') or ('url' if jd_url else 'paste')
     source_url = payload.get('source_url') or (jd_url or None)
+    prefer_identity = bool(payload.get('shared_portal_url'))
     dedupe_key = payload.get('dedupe_key') or _dedupe_key_for(
         source_type, source_url, jd_text
     )
@@ -548,9 +550,19 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
     # deterministic, while _classify_job costs a real LLM round-trip. Re-importing
     # an unchanged batch is a no-op for the library, so it must also be a no-op
     # for the LLM bill (2026-09-22: 47 duplicate rows burned 47 calls).
-    if context._jobs.find_by_dedupe_key(user['user_id'], dedupe_key) is not None:
-        raise context.UserStoreError('Duplicate job already exists')
     fields = _deterministic_job_fields(payload)
+    duplicate = context._jobs.find_duplicate(
+        user['user_id'],
+        source_url=source_url,
+        text=jd_text,
+        company=fields['company'],
+        title=fields['title'],
+        location=fields['location'],
+        extra_key=payload.get('dedupe_key'),
+        prefer_identity=prefer_identity,
+    )
+    if duplicate is not None:
+        raise context.UserStoreError('Duplicate job already exists')
     title = fields['title']
     company = fields['company']
     location = fields['location']
@@ -568,7 +580,7 @@ def _create_job_from_source(user: dict[str, Any], payload: dict[str, Any]) -> di
         classification_pending = 1
     job_function = payload.get('job_function') or classification.get('job_function')
     seniority = payload.get('seniority') or classification.get('seniority')
-    return context._jobs.create_job(tenant_id=user['user_id'], title=title, jd_text=jd_text, company=company, location=location, salary_min=salary_min, salary_max=salary_max, salary_currency=payload.get('salary_currency') or 'CNY', source_type=source_type, source_url=source_url, dedupe_key=dedupe_key, job_function=job_function, seniority=seniority, tech_tags=payload.get('tech_tags') or classification.get('tech_tags') or [], status=payload.get('status') or '未投递', classification_pending=classification_pending, posting_date=payload.get('posting_date'), applied_at=payload.get('applied_at'), next_step=payload.get('next_step'), notes=payload.get('notes'), offer_at=payload.get('offer_at'), rejected_at=payload.get('rejected_at'), allowed_job_functions=job_functions, allowed_seniorities=seniorities)
+    return context._jobs.create_job(tenant_id=user['user_id'], title=title, jd_text=jd_text, company=company, location=location, salary_min=salary_min, salary_max=salary_max, salary_currency=payload.get('salary_currency') or 'CNY', source_type=source_type, source_url=source_url, dedupe_key=dedupe_key, prefer_identity=prefer_identity, job_function=job_function, seniority=seniority, tech_tags=payload.get('tech_tags') or classification.get('tech_tags') or [], status=payload.get('status') or '未投递', classification_pending=classification_pending, posting_date=payload.get('posting_date'), applied_at=payload.get('applied_at'), next_step=payload.get('next_step'), notes=payload.get('notes'), offer_at=payload.get('offer_at'), rejected_at=payload.get('rejected_at'), allowed_job_functions=job_functions, allowed_seniorities=seniorities)
 
 
 def _local_ingest_job(
@@ -597,8 +609,16 @@ def _local_ingest_job(
             if normalized_url
             else _text_dedupe_key(jd_text)
         )
-    existing = context._jobs.find_by_dedupe_key(
-        user['user_id'], dedupe_key
+    # Cross-channel duplicate check: the stored key follows the site rule
+    # above, but a posting captured once by URL and once pasted must still
+    # resolve to its first row, so every dedupe candidate is tested.
+    existing = context._jobs.find_duplicate(
+        user['user_id'],
+        source_url=job_page_url,
+        text=jd_text,
+        company=fields['company'],
+        title=fields['title'],
+        location=fields['location'],
     )
     if existing is not None:
         return {
@@ -638,21 +658,44 @@ def _preanalyze_imported_job(
 
     A failing LLM must never fail the import: rows stay in the library as
     classification-pending and the reason is recorded on the batch.
+
+    Transient failures are retried by ``_preanalyze_row_with_retry``;
+    definitive failures still stop the whole sweep (Phase A1 probe
+    contract).
     """
     label = job.get('title') or 'Untitled'
     try:
-        result = preanalyze_job(user, job['job_id'])
+        result, failure, attempts = _preanalyze_row_with_retry(
+            user,
+            job['job_id'],
+            on_retry=lambda attempt, delay, exc: logger.info(
+                'Preanalyze transient failure for %s (%s), retrying in %.0fs'
+                ' (attempt %d)',
+                label,
+                exc,
+                delay,
+                attempt,
+            ),
+        )
     except PreanalyzeUnavailable as exc:
         batch['preanalyze'] = False
         batch.setdefault('analyze_errors', []).append(f'预分析已停止：{exc}')
         return
-    except Exception as exc:
-        batch.setdefault('analyze_errors', []).append(f'{label}: {exc}')
+    if failure is not None:
+        batch.setdefault('analyze_errors', []).append(
+            f'{label}: {failure}{_retry_suffix(attempts)}'
+        )
         return
     if result is None:
         return
     if result.get('jd_profile'):
         batch['analyzed'] = batch.get('analyzed', 0) + 1
+        if result.get('error'):
+            # The profile is in, only the gap stage failed - keep the row
+            # usable but say so instead of counting it as a clean success.
+            batch.setdefault('analyze_errors', []).append(
+                f"{label}: {result['error']}"
+            )
     else:
         batch.setdefault('analyze_errors', []).append(f'{label}: 预分析未产出画像')
 
@@ -670,6 +713,24 @@ def _run_import(import_id: str) -> None:
                 batch['skipped'] += 1
                 batch['errors'].append(f"{row.get('title') or 'Untitled'}: empty JD")
                 continue
+            # Module 6: normalize imported dates; drop invalid fields and
+            # list them in the import report instead of failing the whole row.
+            row_errors: list[str] = []
+            for date_field in (
+                'posting_date', 'applied_at', 'offer_at', 'rejected_at', 'deadline',
+            ):
+                if row.get(date_field) is None:
+                    continue
+                normalized, error = normalize_import_date(row[date_field])
+                if error is not None:
+                    row_errors.append(f"{date_field}: {error}")
+                    row[date_field] = None
+                else:
+                    row[date_field] = normalized
+            if row_errors:
+                batch['errors'].append(
+                    f"{row.get('title') or 'Untitled'}: {'; '.join(row_errors)}"
+                )
             try:
                 job = context._create_job_from_source(user, row)
             except (context.UserStoreError, context.LLMResponseError) as exc:
@@ -716,6 +777,109 @@ _DEFINITIVE_LLM_FAILURE_CODES = frozenset(
 )
 
 
+# Locked import-retry policy (grilling module 1, error-handling chain): only
+# transient failures are retried - a slow node or a rate-limited provider
+# usually clears on its own, while auth/quota/parse/schema/empty failures
+# are deterministic and retrying only multiplies the wait. Three retries with
+# fixed 1s/2s/4s backoff, per failed row, inline.
+_TRANSIENT_LLM_FAILURE_CODES = frozenset(
+    {
+        LlmFailureCode.TIMEOUT.value,
+        LlmFailureCode.HTTP.value,
+        LlmFailureCode.RATE_LIMIT.value,
+    }
+)
+_IMPORT_RETRY_DELAYS = (1.0, 2.0, 4.0)
+
+
+def _retry_suffix(attempts: int) -> str:
+    """Return the 'retried N times' note appended to a per-row error."""
+    return f'（重试 {attempts - 1} 次后仍失败）' if attempts > 1 else ''
+
+
+def _preanalyze_row_with_retry(
+    user: dict[str, Any],
+    job_id: str,
+    delays: list[float] | None = None,
+    on_retry: Callable[[int, float, BaseException], None] | None = None,
+) -> tuple[dict[str, Any] | None, BaseException | None, int]:
+    """Run one row of preanalysis, retrying only transient failures.
+
+    Shared by every preanalysis sweep (import auto-preanalyze and the
+    one-click "preanalyze all" batch) so both chains obey the same policy.
+
+    Returns ``(result, None, attempts)`` when the model answered - ``result``
+    itself may be None, which callers treat as "no profile produced" - and
+    ``(None, exc, attempts)`` when the row failed for good. ``PreanalyzeUnavailable``
+    is re-raised: it means the whole sweep must stop, not that one row lost.
+    """
+    delays = list(_IMPORT_RETRY_DELAYS if delays is None else delays)
+    attempts = 1
+    while True:
+        try:
+            return preanalyze_job(user, job_id), None, attempts
+        except PreanalyzeUnavailable:
+            raise
+        except Exception as exc:
+            if delays and getattr(exc, 'code', '') in _TRANSIENT_LLM_FAILURE_CODES:
+                delay = delays.pop(0)
+                attempts += 1
+                if on_retry is not None:
+                    on_retry(attempts, delay, exc)
+                time.sleep(delay)
+                continue
+            return None, exc, attempts
+
+
+def _run_gap_stage(
+    client: Any,
+    resume_text: str,
+    profile_dict: dict[str, Any],
+    user_id: str,
+) -> tuple[Any | None, str]:
+    """Run the gap stage without letting it take the JD profile down with it.
+
+    Returns ``(gap_report, failure_code)``: a report plus an empty code on
+    success, or ``None`` plus the stable ``LlmFailureCode`` value when the
+    stage could not produce one. The gap stage used to raise, which threw
+    away the profile that had already been produced and paid for, and it
+    re-raises today on auth/quota through ``PreanalyzeUnavailable`` - here
+    the caller decides what a failure means: the sweep chain stops on
+    auth/quota (Phase A1 contract), the workbench session keeps the profile
+    and marks the stage retryable.
+    """
+    profile_str = json.dumps(profile_dict, ensure_ascii=False)
+    code = ''
+    try:
+        gap, _ = call_with_role(
+            'gap_analyzer', context.analyze_gaps,
+            context._llm_nodes, user_id,
+            fn_kwargs={
+                'resume_text': resume_text,
+                'jd_profile_text': profile_str,
+            },
+        )
+        return gap, ''
+    except Exception as role_exc:
+        code = getattr(role_exc, 'code', '') or LlmFailureCode.OTHER.value
+        logger.info(
+            'Gap role call failed for %s (%s), trying the single client',
+            user_id,
+            code,
+        )
+    try:
+        return context.analyze_gaps(client, resume_text, profile_str), ''
+    except Exception as fallback_exc:
+        code = getattr(fallback_exc, 'code', '') or code
+        logger.warning('Gap stage failed for %s: %s', user_id, fallback_exc)
+        return None, code
+
+
+def _gap_stage_error_text(code: str) -> str:
+    """User-facing copy for a gap stage that did not produce a report."""
+    return f'缺口分析未完成（{code}），JD 画像已生成，可单独重试缺口分析'
+
+
 def _preanalyze_unavailable_from_llm(
     exc: BaseException,
 ) -> PreanalyzeUnavailable | None:
@@ -727,7 +891,18 @@ def _preanalyze_unavailable_from_llm(
     failure code (``quota`` for 402, ``auth`` for 401/403) is the stable
     contract, so branch on it instead of the message text.
     """
-    if getattr(exc, 'code', '') not in _DEFINITIVE_LLM_FAILURE_CODES:
+    return _preanalyze_unavailable_for_code(getattr(exc, 'code', '') or '')
+
+
+def _preanalyze_unavailable_for_code(
+    code: str,
+) -> PreanalyzeUnavailable | None:
+    """Map a definitive auth/quota failure code to an actionable error.
+
+    Same copy as ``_preanalyze_unavailable_from_llm``, callable from a stage
+    that already reduced an exception down to its code (the gap stage).
+    """
+    if code not in _DEFINITIVE_LLM_FAILURE_CODES:
         return None
     return PreanalyzeUnavailable(
         '模型服务不可用（鉴权失败或余额不足）',
@@ -807,7 +982,23 @@ def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
         'seniority': job.get('seniority'),
         'tech_tags': job.get('tech_tags') or [],
     }
-    if job.get('jd_profile') and not job.get('classification_pending'):
+    resume = None
+    if job.get('workbench_resume_id'):
+        resume = context._resumes.get_master_resume(
+            user['user_id'], job['workbench_resume_id']
+        )
+    resume_text = resume['content'] if resume else ''
+    resume_id = resume['resume_id'] if resume else None
+
+    # Stage-independence guard: a stored profile alone is not "done". A gap
+    # stage that failed earlier leaves the profile in place with no gap
+    # report, and the old guard short-circuited on the profile alone, so the
+    # row could never be retried into having a gap.
+    profile_ready = (
+        bool(job.get('jd_profile')) and not job.get('classification_pending')
+    )
+    gap_ready = (not resume_text.strip()) or bool(job.get('gap_report'))
+    if profile_ready and gap_ready:
         return {
             'job_id': job_id,
             'status': 'ready',
@@ -821,6 +1012,7 @@ def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
             'match_stale': _match_stale(user['user_id'], job),
             'classification': classification,
             'cache_hit': True,
+            'error': None,
         }
     job_functions, seniorities = context._settings_vocabulary(user['user_id'])
     try:
@@ -851,18 +1043,15 @@ def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
         )
     # P3: parallelize classification and profile (no dependency between them)
     # gap depends on profile, so it stays serial after profile completes.
-    resume = None
-    if job.get('workbench_resume_id'):
-        resume = context._resumes.get_master_resume(
-            user['user_id'], job['workbench_resume_id']
-        )
-    resume_text = resume['content'] if resume else ''
-    resume_id = resume['resume_id'] if resume else None
     cache_hit = _preanalyze_cache_hit(
         user['user_id'], config, resume_text, jd_text
     )
-    profile_dict = None
+    # A profile that is already stored is never re-run: the retry this guard
+    # exists for is a gap-only retry, and re-running the profile would spend
+    # wall clock and quota on a stage that already succeeded.
+    profile_dict = job.get('jd_profile') if profile_ready else None
     gap_dict = None
+    gap_error = ''
     try:
         with ThreadPoolExecutor(max_workers=2) as executor:
             # Submit classification task
@@ -920,38 +1109,29 @@ def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
                                 )
                             return context.jd_profile_to_dict(profile)
             
-            classification_future = executor.submit(_classify_task)
-            profile_future = executor.submit(_profile_task)
-            
-            # Wait for both to complete
-            classification = classification_future.result()
-            profile_dict = profile_future.result()
-        
-        # Now handle gap analysis (depends on profile_dict)
-        if profile_dict:
+            if not profile_ready:
+                classification_future = executor.submit(_classify_task)
+                profile_future = executor.submit(_profile_task)
+
+                # Wait for both to complete
+                classification = classification_future.result()
+                profile_dict = profile_future.result()
+        # Gap stage: independent of the profile, so a gap that fails leaves
+        # the profile intact and only marks the stage for a retry instead of
+        # throwing away work that already succeeded.
+        if profile_dict and resume_text.strip():
             with llm_tenant_context(user['user_id']):
                 with context.OpenAIClient(config, timeout=60.0) as client:
-                    _profile_str = json.dumps(
-                        profile_dict, ensure_ascii=False
+                    gap_report, gap_error = _run_gap_stage(
+                        client, resume_text, profile_dict, user['user_id']
                     )
-                    if resume_text.strip():
-                        try:
-                            gap, _ = call_with_role(
-                                'gap_analyzer', context.analyze_gaps,
-                                context._llm_nodes, user['user_id'],
-                                fn_kwargs={
-                                    'resume_text': resume_text,
-                                    'jd_profile_text': _profile_str,
-                                },
-                            )
-                        except Exception:
-                            gap = context.analyze_gaps(
-                                client, resume_text, _profile_str
-                            )
-                        gap_dict = asdict(gap)
-                    else:
-                        # No resume, no gap analysis
-                        pass
+                    if gap_error in _DEFINITIVE_LLM_FAILURE_CODES:
+                        unavailable = _preanalyze_unavailable_for_code(gap_error)
+                        if unavailable is not None:
+                            raise unavailable
+                    gap_dict = (
+                        asdict(gap_report) if gap_report is not None else None
+                    )
     except context.LLMResponseError as exc:
         unavailable = _preanalyze_unavailable_from_llm(exc)
         if unavailable is not None:
@@ -1029,6 +1209,7 @@ def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
         'match_stale': False,
         'classification': classification,
         'cache_hit': cache_hit,
+        'error': _gap_stage_error_text(gap_error) if gap_error else None,
     }
 
 
@@ -1090,21 +1271,27 @@ def _run_preanalyze_batch(batch_id: str) -> None:
                 batch['skipped'] += 1
                 continue
             try:
-                result = preanalyze_job(user, job_id)
+                result, failure, attempts = _preanalyze_row_with_retry(
+                    user, job_id
+                )
             except PreanalyzeUnavailable as exc:
                 batch['stopped'] = True
                 batch['errors'].append(f'预分析已停止：{exc}')
                 break
-            except Exception as exc:
+            label = job.get('title') or 'Untitled'
+            if failure is not None:
                 batch['errors'].append(
-                    f"{job.get('title') or 'Untitled'}: {exc}"
+                    f'{label}: {failure}{_retry_suffix(attempts)}'
                 )
-                continue
-            if result and result.get('jd_profile'):
+            elif result and result.get('jd_profile'):
                 batch['analyzed'] += 1
+                if result.get('error'):
+                    # Profile in, gap stage failed - the row is usable but the
+                    # reason belongs on the batch, not swallowed.
+                    batch['errors'].append(f"{label}: {result['error']}")
             else:
                 batch['errors'].append(
-                    f"{job.get('title') or 'Untitled'}: 预分析未产出画像"
+                    f'{label}: 预分析未产出画像'
                 )
     except Exception as exc:
         logger.exception('Preanalyze batch %s failed', batch_id)
@@ -1416,6 +1603,7 @@ def _fail_claimed_job(
                 library_job_id,
                 alignment_status='failed',
                 last_alignment_error=error,
+                alignment_reason='model_failed',
             )
         except Exception:
             logger.exception(
@@ -1468,25 +1656,28 @@ def _notify_alignment_outcome(
                 "tentative": True,
             },
         )
+    alignment_state = {
+        "status": outcome.alignment_status,
+        "stage": "done",
+        "reason": outcome.alignment_reason,
+        "error": outcome.alignment_user_error,
+        "code": None,
+        "diffs": result.get("diffs") or [],
+        "invalid_diffs": outcome.invalid_diffs,
+        "draft": outcome.draft,
+        "eval_score": outcome.eval_score,
+        "notice": context._alignment_notice(
+            result.get("diffs") or [],
+            outcome.invalid_diffs,
+            outcome.draft,
+            outcome.alignment_reason,
+        ),
+    }
     context._session_store.update(
         session["session_id"],
         {
             "job": context._jobs.get_job(tenant_id, library_job_id),
-            "alignment": {
-                "status": outcome.alignment_status,
-                "stage": "done",
-                "diffs": result.get("diffs") or [],
-                "invalid_diffs": outcome.invalid_diffs,
-                "draft": outcome.draft,
-                "eval_score": outcome.eval_score,
-                "notice": (
-                    context._alignment_notice(
-                        result.get("diffs") or [],
-                        outcome.invalid_diffs,
-                        outcome.draft,
-                    )
-                ),
-            },
+            "alignment": alignment_state,
         },
     )
     context._session_store.emit(
@@ -1494,6 +1685,7 @@ def _notify_alignment_outcome(
         "job.result",
         {
             "job_id": library_job_id,
+            "alignment": alignment_state,
             "result": result,
         },
     )

@@ -34,7 +34,6 @@ const RUNTIME_INJECTED_TOKENS = new Set([
 const DECLARED_ZERO_REF_API = new Set(
   `
 --accent-faint
---bg-app
 --board-col-max
 --board-col-min
 --btn-danger-bg
@@ -115,16 +114,12 @@ const DECLARED_ZERO_REF_API = new Set(
 --overlay-bg
 --overlay-line
 --overlay-radius
---paper-accent
---paper-grid
---paper-ink-2
 --rail-w-compact
 --scrim
 --sheet-max
 --skeleton-bg
 --skeleton-hi
 --space-0
---space-hairline
 --surface-active
 --table-row-h-dense
 --tag-fs
@@ -133,9 +128,7 @@ const DECLARED_ZERO_REF_API = new Set(
 --tag-radius
 --text-disabled
 --toast-w
---track-caps
 --warn-line
---z-drawer
   `.trim().split(/\s+/),
 );
 

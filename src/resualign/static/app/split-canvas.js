@@ -14,6 +14,7 @@ import {
 import {
   PROVENANCE_LABELS,
   alignProgressPercent,
+  alignmentOutcomeKind,
   alignmentControls,
   diffCard,
   diffList,
@@ -21,6 +22,8 @@ import {
   formatElapsed,
   highlightSkillGapHtml,
   jdProfileSummary,
+  llmFailureNotice,
+  gapNoticeHtml,
   jobApplyLinkHtml,
   jobCompletenessBadge,
   renderGap,
@@ -43,6 +46,11 @@ let fallbackPollTimer = 0;
 let fallbackEtag = "";
 let alignmentStartedAt = 0;
 let workbenchJobs = [];
+/* J10（审计 2026-10-22）：工作台岗位切换器的上限。原来是 limit=200，而库里
+ * 有 318 个岗位 —— 118 个岗位在下拉里根本不存在，用户想「从我已有的岗位切
+ * 过去」时找不到目标，会以为岗位丢了。提到 500 覆盖当前规模；真的顶到上限
+ * 时在切换器旁明确写「只载入了前 500 个」，不再假装下拉里就是全部。 */
+const WORKBENCH_JOBS_LIMIT = 500;
 let autoAnalyzedJd = false;
 /* #B4: once the alignment state has been reconciled against the real job
    (terminal status, expired job, or poll terminal), late replayed SSE
@@ -82,6 +90,7 @@ const ALIGN_FAILURE_KINDS = {
   empty: "返回为空",
   auth: "模型配置",
   ratelimit: "服务限流",
+  content_gate: "内容门禁拦截",
   expired: "任务已过期",
   canceled: "任务已取消",
   other: "任务失败",
@@ -96,6 +105,9 @@ function alignmentFailureKind(message, status) {
   if (/(empty|返回为空)/.test(text)) return "empty";
   if (/(429|rate limit|限流|繁忙)/.test(text)) return "ratelimit";
   if (/(401|403|api key|unauthorized|无效或缺少权限|无效或缺失)/.test(text)) return "auth";
+  /* 内容门禁（真实性评估 / 无依据内容）不是模型故障：换节点重试没有意义，
+   * 应该让用户去看被拦截的建议，而不是去换模型（W5）。 */
+  if (/(真实性|无依据|缺少来源|证据不足|已拦截)/.test(text)) return "content_gate";
   return "other";
 }
 
@@ -104,6 +116,7 @@ function alignmentFailureKind(message, status) {
 function workbenchAlignmentErrorBanner(alignment) {
   const status = alignment && alignment.status;
   if (!["failed", "canceled", "expired"].includes(status)) return "";
+  if (alignmentOutcomeKind(alignment) === "no_safe_rewrite") return "";
   const errorText = (alignment && alignment.error) || "对齐任务失败，请重新运行";
   const kind = alignmentFailureKind(errorText, status);
   const meta = [];
@@ -119,7 +132,36 @@ function workbenchAlignmentErrorBanner(alignment) {
     `<strong>对齐失败 · ${esc(ALIGN_FAILURE_KINDS[kind] || "任务失败")}</strong>` +
     `<span>${esc(errorText)}</span>` +
     (meta.length ? `<span class="align-error-meta">${esc(meta.join(" · "))}</span>` : "") +
-    `<button class="btn btn-outline btn-sm" type="button" data-action="show-node-picker">换节点重试</button>` +
+    /* 内容门禁失败时「换节点重试」是误诊：问题在被拦截的改写内容，不在模型
+     * 节点。这里不再给付费重试入口，改用下方主区的「被拦截建议」摘要卡。 */
+    (kind === "content_gate"
+      ? ""
+      : `<button class="btn btn-outline btn-sm" type="button" data-action="show-node-picker">换节点重试</button>`) +
+    `</div>`
+  );
+}
+
+function workbenchNoSafeRewriteBanner(alignment, gap) {
+  if (alignmentOutcomeKind(alignment) !== "no_safe_rewrite") return "";
+  const report = (gap && gap.gap_report) || {};
+  const missing = (report.missing_keywords || [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  const rejected = (report.misaligned_emphasis || [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  const detail = String(alignment.error || "");
+  return (
+    `<div class="align-error-banner align-notice-banner" role="status" data-align-no-safe-banner>` +
+    `<strong>无安全改写 · 原文依据不足</strong>` +
+    `<span>${esc(detail || "岗位存在缺口，但简历原文没有足够依据，系统未生成改写。")}</span>` +
+    (missing.length
+      ? `<span class="align-error-meta">无原文依据：${esc(missing.join("、"))}</span>`
+      : "") +
+    (rejected.length
+      ? `<span class="align-error-meta">未改写方向：${esc(rejected.join("、"))}</span>`
+      : "") +
+    `<button class="btn btn-outline btn-sm" type="button" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector">查看证据缺口</button>` +
     `</div>`
   );
 }
@@ -130,9 +172,12 @@ function workbenchAlignmentErrorBanner(alignment) {
 function workbenchAlignmentNoticeBanner(alignment) {
   const notice = alignment && alignment.notice;
   if (!notice) return "";
+  const kind = alignmentOutcomeKind(alignment);
+  if (kind === "no_safe_rewrite") return "";
+  const title = kind === "no_gap" ? "无需改写" : "对齐完成 · 无可用建议";
   return (
     `<div class="align-error-banner align-notice-banner" role="status" data-align-notice-banner>` +
-    `<strong>对齐完成 · 无可用建议</strong>` +
+    `<strong>${esc(title)}</strong>` +
     `<span>${esc(notice)}</span>` +
     `</div>`
   );
@@ -158,13 +203,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
         version: job.final_draft_version || 1,
         updated_at: job.final_draft_updated_at,
       }
-    : sessionDraft
-      ? {
-          draft: sessionDraft,
-          version: job.final_draft_version || 1,
-          updated_at: job.final_draft_updated_at,
-        }
-      : null;
+    : null;
   const previous = {
     resumeId: $("[data-form='split-align'] [name='master_resume_id']")?.value,
     granularity: $("[data-form='split-align'] [name='granularity']")?.value,
@@ -183,8 +222,10 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
     (session && session.alignment && session.alignment.draft) ||
     null;
   const alignment = (session && session.alignment) || {};
+  const alignmentKind = alignmentOutcomeKind(alignment);
   const alignmentRunning =
     alignment.status === "running" || alignment.status === "queued";
+  const alignmentFailed = alignment.status === "failed";
   const diffs = Array.isArray(alignment.diffs) ? alignment.diffs : [];
   if (jobId) {
     const persistedAccepted = (Array.isArray(job.diffs) ? job.diffs : [])
@@ -205,6 +246,10 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
     (diff) =>
       acceptedIds.has(diff.diff_id) || diff.provenance_state === "accepted",
   ).length;
+  /* J10：返回条数顶到 limit 时，说明列表被截断了 —— 下拉里不是全部岗位，
+   * 必须明说（否则用户会以为「库里就这么多」）。没顶到就是全量，不打扰。 */
+  const jobsCapped =
+    Array.isArray(jobs) && jobs.length >= WORKBENCH_JOBS_LIMIT;
   const pendingCount = Math.max(0, diffs.length - acceptedCount);
   /* UX 走查 2026-08-28：provenance 硬门禁拦截的建议卡（invalid_diffs）也会
      渲染在建议面板里，但头部计数此前只统计有效 diffs——出现「0 条改写建议」
@@ -229,10 +274,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const livesheetActive = activeAuxPane === "livesheet" || state.wbMobilePane === "diff";
   const suggestActive = activeAuxPane === "suggest";
   const controlsActive = activeAuxPane === "controls";
-  const hasGuideDraft = Boolean(
-    job.final_draft ||
-      (session && session.alignment && session.alignment.draft),
-  );
+  const hasGuideDraft = Boolean(job.final_draft);
   /* 默认落在「对照编辑」：定稿预览是核验态，不该默认占掉主区，
    * 更不能把用户挡在逐条采纳的操作面之外。 */
   if (state.wbViewMode !== "a4" && state.wbViewMode !== "diff") {
@@ -259,16 +301,17 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <div class="wb-context-title">
             <span class="context-kicker">目标岗位</span>
             <h2>${esc(job.title || "岗位工作台")}</h2>
-            ${alignment.status === "succeeded" ? '<span class="pill pill-success">已对齐</span>' : ""}
+            ${alignment.status === "succeeded" && diffs.length ? '<span class="pill pill-success">已对齐</span>' : alignmentKind === "no_gap" ? '<span class="badge badge-amber">无需改写</span>' : alignmentKind === "no_safe_rewrite" ? '<span class="badge badge-amber">无安全改写</span>' : ""}
           </div>
           <div class="wb-context-meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)} · ${esc(jobStatusLabel(job.status))} · 匹配 ${matchScore == null ? "—" : `${esc(matchScore)} / 100`}</div>
           <div class="wb-tags">${tagItems.map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}</div>
         </div>
         <div class="wb-context-actions">
-          <span class="status-line"><span class="dot dot-success" aria-hidden="true"></span>${esc(diffs.length)} 条改写建议${invalidCount ? ` · ${esc(invalidCount)} 条建议复核` : ""} · ${esc(acceptedCount)} 已采纳 · ${esc(pendingCount)} 待采纳</span>
+          <span class="status-line">${alignment.status === "succeeded" && diffs.length ? '<span class="dot dot-success" aria-hidden="true"></span>' : ""}${alignmentFailed ? `${esc(invalidCount)} 条建议被门禁拦截 · 0 条可用建议` : `${esc(diffs.length)} 条改写建议${invalidCount ? ` · ${esc(invalidCount)} 条建议复核` : ""} · ${esc(acceptedCount)} 已采纳 · ${esc(pendingCount)} 待采纳`}</span>
           <select class="input input-sm" data-job-switcher aria-label="切换岗位">
             ${jobs.map((item) => `<option value="${esc(item.job_id)}" ${item.job_id === jobId ? "selected" : ""}>${esc(item.title)}${item.company ? ` · ${esc(item.company)}` : ""}</option>`).join("")}
           </select>
+          ${jobsCapped ? `<span class="small muted" data-job-switcher-cap>已载入前 ${WORKBENCH_JOBS_LIMIT} 个岗位，更多岗位请到岗位库筛选</span>` : ""}
           <div class="row">
             ${jobApplyLinkHtml(job)}
             <button class="btn btn-secondary" type="button" data-action="record-application" data-id="${esc(jobId)}">记录投递</button>
@@ -277,6 +320,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
         </div>
       </div>
       ${workbenchAlignmentErrorBanner(alignment)}
+      ${workbenchNoSafeRewriteBanner(alignment, gap)}
       <div data-wb-node-picker></div>
       ${workbenchAlignmentNoticeBanner(alignment)}
       ${workbenchGuideHtml(job, hasGuideDraft)}
@@ -299,17 +343,21 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           </div>
           <div class="align-summary">
             <div><span class="summary-score">${matchScore == null ? "—" : esc(matchScore)}</span><span class="summary-unit">/ 100</span></div>
-            <div class="align-metrics">
+            ${alignmentFailed
+              ? `<div class="align-metrics align-metrics--failed">
+                   <span class="align-metrics__failed-note">本轮没有可用建议：${esc(invalidCount)} 条被门禁拦截，原因见上方横幅</span>
+                 </div>`
+              : `<div class="align-metrics">
               <div class="align-metric"><b>${esc(diffs.length)}</b><span>改写建议</span></div>
               <div class="align-metric"><b>${esc(acceptedCount)}</b><span>已采纳</span></div>
               <div class="align-metric"><b>${esc(pendingCount)}</b><span>待采纳</span></div>
               <div class="align-metric"><b>${alignment.eval_score && alignment.eval_score.hallucination_detected === false ? "通过" : alignment.eval_score && alignment.eval_score.hallucination_detected === true ? "风险" : "—"}</b><span>幻觉检测</span></div>
-            </div>
+            </div>`}
           </div>
           <div class="panel panel--success final-draft-panel" data-final-draft-panel hidden></div>
           ${viewMode === "a4" ? `<div class="a4-wrap" data-a4-wrap>${renderA4PaperHtml(liveSheetDraft)}</div>` : `<div class="diff-list">${diffList(session, jobId)}</div>`}
         </section>
-        <aside class="wb-aux">
+        <aside class="wb-aux ${state.wbMobilePane === "diff" ? "" : "is-active"}" data-wb-pane="controls">
           ${workbenchProgressPipelineHtml(session)}
           <div class="wb-tabs" role="tablist" aria-label="工作台辅助信息">
             ${viewMode === "a4" ? `<button type="button" class="wb-tab ${suggestActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="suggest" aria-selected="${suggestActive}">建议</button>` : ""}
@@ -332,6 +380,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
             </section>
             <section class="pane-section workbench-gap">
               <h3>技能缺口</h3>
+              ${gapNoticeHtml(gap) || ""}
               ${pendingSkillFocus ? (highlightSkillGapHtml(gap.gap_report || gap, pendingSkillFocus) || "") : (renderGap(gap.gap_report || gap) || "")}
             </section>
             <details class="raw-jd" data-raw-jd>
@@ -679,8 +728,17 @@ function renderFinalDraftPanel(app) {
 
 /* Rehydrate a minimal three-pane session from a persisted library job
    (no live workbench session exists for API/import-created jobs). */
-function buildSessionFromJob(job) {
+export function buildSessionFromJob(job) {
   const profile = job.jd_profile || null;
+  const persistedStatus = job.alignment_status || "idle";
+  const alignmentStatus =
+    persistedStatus === "succeeded"
+      ? "succeeded"
+      : persistedStatus === "failed"
+        ? "failed"
+        : "idle";
+  const alignmentReason = job.alignment_reason || null;
+  const alignmentError = job.alignment_error || null;
   return {
     job,
     jd: {
@@ -691,10 +749,15 @@ function buildSessionFromJob(job) {
     },
     gap: job.gap_report || {},
     alignment: {
-      status:
-        job.alignment_status === "succeeded" ? "succeeded" : "idle",
-      stage: job.alignment_status === "succeeded" ? "done" : "",
-      error: null,
+      status: alignmentStatus,
+      stage: alignmentStatus === "succeeded" ? "done" : "",
+      reason: alignmentReason,
+      error:
+        alignmentStatus === "failed" ? alignmentError || null : null,
+      notice:
+        alignmentReason === "no_gap"
+          ? "当前岗位没有需要补足的明确缺口，简历无需改写。"
+          : null,
       diffs: job.diffs || [],
       invalid_diffs: job.invalid_diffs || [],
       draft: job.draft || job.final_draft || null,
@@ -704,9 +767,60 @@ function buildSessionFromJob(job) {
   };
 }
 
+export function applyJobResultToSession(session, data) {
+  if (!session || !data) return session;
+  if (data.job_id) {
+    session.job = { ...(session.job || {}), job_id: data.job_id };
+  }
+  const terminal = data.alignment && typeof data.alignment === "object"
+    ? data.alignment
+    : null;
+  if (terminal) {
+    session.alignment = {
+      ...(session.alignment || {}),
+      ...terminal,
+      status: terminal.status || data.status || "failed",
+      reason: terminal.reason || null,
+      error: terminal.error || null,
+      notice: terminal.notice || null,
+      diffs: terminal.diffs || (data.result && data.result.diffs) || [],
+      invalid_diffs:
+        terminal.invalid_diffs ||
+        (data.result && data.result.invalid_diffs) ||
+        [],
+      draft:
+        terminal.draft ??
+        (data.result && data.result.draft) ??
+        session.alignment?.draft ??
+        null,
+      eval_score:
+        terminal.eval_score ??
+        (data.result && data.result.eval_score) ??
+        null,
+    };
+  } else if (data.result) {
+    session.alignment = {
+      ...(session.alignment || {}),
+      status: data.status || "succeeded",
+      stage: "done",
+      reason: data.reason || null,
+      error: data.error || null,
+      notice: data.notice || null,
+      diffs: data.result.diffs || [],
+      invalid_diffs: data.result.invalid_diffs || [],
+      draft: data.result.draft || session.alignment?.draft || null,
+      eval_score: data.result.eval_score || null,
+    };
+  }
+  return session;
+}
+
 async function reconcileAlignmentFailure(session) {
   const job = (session && session.job) || {};
   if (!job || job.alignment_status === "succeeded") return session;
+  if (job.alignment_status === "failed" && session.alignment?.reason) {
+    return session;
+  }
   const workbenchJobId = job.workbench_job_id;
   if (!workbenchJobId) return session;
   try {
@@ -747,7 +861,7 @@ export async function renderOptimizerCanvas(app, jobId) {
    * tryFocusSkill 在 Inspector 差距区高亮定位。 */
   pendingSkillFocus = parseSkillFromHash(window.location.hash);
   autoAnalyzedJd = false;
-  workbenchJobs = await api("/api/jobs?limit=200");
+  workbenchJobs = await api(`/api/jobs?limit=${WORKBENCH_JOBS_LIMIT}`);
   if (!jobId) {    if (workbenchJobs.length) {
       const targetId = workbenchJobs[0].job_id;
       const resumeId = state.route && state.route.resumeId;
@@ -1057,28 +1171,40 @@ function handleEvent(eventName, data) {
         ...(activeSession.jd || {}),
         status: "queued",
         error: null,
+        code: null,
       };
       activeSession.gap = {
         ...(activeSession.gap || {}),
         status: "queued",
         error: null,
+        code: null,
       };
+      /* 新一轮开始：上一轮的失败态作废，否则错误横幅会挂在一次成功的运行上。 */
+      activeSession.status = "running";
+      activeSession.error = null;
+      activeSession.errorCode = null;
+      activeSession.errorAction = null;
+      activeSession.errorStage = null;
     }
   } else if (eventName === "job.gap_ready") {
     if (data.job_id) {
       activeSession.job = { ...(activeSession.job || {}), job_id: data.job_id };
     }
+    /* gap 降级也意味着画像已经拿到：JD 侧无论如何都是 ready，顺手清掉上一轮
+     * 遗留的错，别让两张面板同时报错（连坐显示）。 */
     activeSession.jd = {
       profile: data.jd_profile || null,
       status: "ready",
       error: null,
+      code: null,
     };
     activeSession.gap = {
       status: data.status === "blocked" ? "blocked" : "ready",
       score: data.gap_report ? null : null,
       gap_report: data.gap_report || null,
       cache_hit: Boolean(data.cache_hit),
-      error: null,
+      error: data.error || null,
+      code: data.code || null,
     };
     if (data.gap_report) {
       const missing = (data.gap_report.missing_keywords || []).length;
@@ -1087,20 +1213,20 @@ function handleEvent(eventName, data) {
   } else if (eventName === "job.error") {
     activeSession.status = "failed";
     activeSession.error = data.error;
+    activeSession.errorCode = data.code || null;
+    activeSession.errorStage = data.stage || null;
+    const notice = llmFailureNotice(
+      data.code,
+      data.error || "分析失败，请重试",
+    );
+    activeSession.errorAction = notice.action;
+    /* 有码就用「标签 + 行动」，没码退回后端人话；都要不着才用兜底。 */
+    toast(
+      data.code ? `${notice.label}：${notice.action}` : notice.label,
+      "error",
+    );
   } else if (eventName === "job.result") {
-    if (data.job_id) {
-      activeSession.job = { ...(activeSession.job || {}), job_id: data.job_id };
-    }
-    if (data.result) {
-      activeSession.alignment = {
-        status: "succeeded",
-        stage: "done",
-        diffs: data.result.diffs || [],
-        invalid_diffs: data.result.invalid_diffs || [],
-        draft: data.result.draft || activeSession.alignment?.draft || null,
-        eval_score: data.result.eval_score || null,
-      };
-    }
+    applyJobResultToSession(activeSession, data);
   }
   const app = $("#app-router-view");
   if (app) {

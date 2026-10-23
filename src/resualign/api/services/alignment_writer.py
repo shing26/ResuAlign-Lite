@@ -20,7 +20,11 @@ from ...engine.tailor import TAILOR_PROMPT_VERSION
 from ...evaluator import EVALUATOR_PROMPT_VERSION
 from ...gap_analyzer import GAP_ANALYZER_PROMPT_VERSION
 from ...jd_profiler import JD_PROFILER_PROMPT_VERSION
-from .alignment_rules import resolve_alignment_outcome, split_verified_diffs
+from .alignment_rules import (
+    humanize_alignment_error,
+    resolve_alignment_outcome,
+    split_verified_diffs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +35,9 @@ class AlignmentOutcome:
 
     library_job_id: str
     alignment_status: str
-    alignment_error: str | None
+    alignment_machine_error: str | None
+    alignment_user_error: str | None
+    alignment_reason: str | None
     kept_diffs: list[dict[str, Any]]
     invalid_diffs: list[dict[str, Any]]
     draft: str | None
@@ -113,18 +119,28 @@ def persist_alignment(
         isinstance(eval_score, dict)
         and eval_score.get("hallucination_detected")
     )
+    eval_hallucinated_diff_ids = (
+        list(eval_score.get("hallucinated_diff_ids") or [])
+        if isinstance(eval_score, dict)
+        else []
+    )
     kept_diffs, invalid_diffs = split_verified_diffs(
         list(result.get("diffs") or []),
         list(tailored.get("invalid_diffs") or []),
         eval_hallucinated=eval_hallucinated,
+        eval_hallucinated_diff_ids=eval_hallucinated_diff_ids,
         job_label=library_job_id,
     )
     result["diffs"] = kept_diffs
-    alignment_status, alignment_error = resolve_alignment_outcome(
+    alignment_status, alignment_error, alignment_reason = resolve_alignment_outcome(
         kept_diffs=kept_diffs,
         gap_report=result.get("gap_report"),
         tailor_degraded=bool(result.get("tailor_degraded")),
         eval_hallucinated=eval_hallucinated,
+        no_safe_rewrite=bool(result.get("no_safe_rewrite")),
+        no_safe_rewrite_reason=str(
+            result.get("no_safe_rewrite_reason") or ""
+        ),
     )
     try:
         context._jobs.save_alignment(
@@ -151,6 +167,7 @@ def persist_alignment(
             alignment_status=alignment_status,
             usable_diffs=len(kept_diffs),
             last_alignment_error=alignment_error,
+            alignment_reason=alignment_reason,
         )
     except Exception:
         logger.exception(
@@ -165,7 +182,9 @@ def persist_alignment(
     return AlignmentOutcome(
         library_job_id=library_job_id,
         alignment_status=alignment_status,
-        alignment_error=alignment_error,
+        alignment_machine_error=alignment_error,
+        alignment_user_error=humanize_alignment_error(alignment_error),
+        alignment_reason=alignment_reason,
         kept_diffs=kept_diffs,
         invalid_diffs=invalid_diffs,
         draft=draft,

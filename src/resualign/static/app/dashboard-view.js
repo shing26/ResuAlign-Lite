@@ -2,6 +2,7 @@
    All values are derived from the live API, never hard-coded. */
 import { alignmentStatusLabel, esc, formatDate, jobStatusLabel, state } from "./events.js";
 import {
+  alignmentOutcomeKind,
   atsHealthScoreLevel,
   atsHealthTone,
   dashboardEmptyGuideHtml,
@@ -128,6 +129,21 @@ export async function renderDashboard(container) {
     : "";
 
   const quality = payload.quality || null;
+  /* D4（2026-10-22 审计）：「已完成对齐」是全量口径、「已优化条目」是近 7 天口径，
+   * 原来只有后者标了时间窗，两个数字并排像自相矛盾（22 对齐却 0 产出）。
+   * 这里把两个口径都写明；quality.diffs_total===0 时不再输出「采纳 0/0 条建议」
+   * 这种除零文案（读起来像 bug），改成「近 N 天暂无建议记录」。 */
+  const qualityHint = (() => {
+    if (!quality) return "";
+    const days = toNumber(quality.window_days) || 7;
+    const saves = toNumber(quality.saves);
+    const total = toNumber(quality.diffs_total);
+    if (total === 0) {
+      return `近 ${days} 天暂无建议记录${saves ? ` · 定稿 ${saves} 次` : ""}`;
+    }
+    const accepted = toNumber(quality.diffs_accepted);
+    return `近 ${days} 天 · 定稿 ${saves} 次 · 采纳 ${accepted}/${total} 条建议`;
+  })();
   const atsTone = scoreTone(atsScore);
   const atsLabel = atsScore == null ? "未诊断" : atsHealthScoreLevel(atsScore);
   const atsMeter = atsScore == null
@@ -158,7 +174,7 @@ export async function renderDashboard(container) {
     <div class="metric-cell" data-kpi="aligned">
       <div class="metric-label">已完成对齐</div>
       <div class="metric-value">${escAttr(alignedCount)} <span>/ ${escAttr(jobsTotal)}</span></div>
-      <div class="metric-hint">完成率 ${escAttr(completionRate)}%${noGapCount ? ` · 无缺口 ${escAttr(noGapCount)}` : ""}</div>
+      <div class="metric-hint">全量口径 · 完成率 ${escAttr(completionRate)}%<br>有可用改写的岗位 / 全部岗位${noGapCount ? ` · 无缺口 ${escAttr(noGapCount)}` : ""}</div>
     </div>
     <div class="metric-cell" data-kpi="ats">
       <div class="metric-label">主简历 ATS</div>
@@ -169,7 +185,7 @@ export async function renderDashboard(container) {
     <div class="metric-cell" data-kpi="quality" ${quality ? "" : "hidden"}>
       <div class="metric-label">已优化条目</div>
       <div class="metric-value">${quality && quality.diffs_accepted != null ? `${escAttr(quality.diffs_accepted)}<span> 条</span>` : "—"}</div>
-      <div class="metric-hint">${quality ? `近 ${escAttr(quality.window_days)} 天 · 定稿 ${escAttr(quality.saves)} 次 · 采纳 ${escAttr(quality.diffs_accepted)}/${escAttr(quality.diffs_total)} 条建议` : ""}</div>
+      <div class="metric-hint">${qualityHint}</div>
     </div>`;
 
   const quick = payload.quick_continue || null;
@@ -179,18 +195,39 @@ export async function renderDashboard(container) {
    * 蓝主按钮（点进去才撞红横幅）。 */
   const qFailed = ["failed", "canceled", "expired"].includes(qStatus);
   const qBusy = ["running", "queued"].includes(qStatus);
+  const qKind = quick ? alignmentOutcomeKind(quick) : "";
+  const qStatusLabel =
+    qKind === "no_safe_rewrite"
+      ? "无安全改写"
+      : qKind === "no_gap"
+        ? "无需改写"
+        : alignmentStatusLabel(qStatus);
   let quickRowClass = "";
   let quickBadgeClass = "pill-warn";
   let quickBadgeLabel = alignmentStatusLabel(qStatus);
   let quickBtnClass = "btn btn-primary btn-sm";
   let quickBtnLabel = "继续";
   let quickBtnExtra = "";
-  if (qFailed) {
+  if (qFailed && qKind === "no_safe_rewrite") {
+    quickBadgeClass = "badge badge-amber";
+    quickBadgeLabel = "无安全改写 · 查看证据";
+    quickBtnClass = "btn btn-outline btn-sm";
+    quickBtnLabel = "查看证据";
+  } else if (qFailed) {
     quickRowClass = " quick-row--failed";
     quickBadgeClass = "badge badge-red";
     quickBadgeLabel = "上次失败 · 重新运行";
     quickBtnClass = "btn btn-danger-solid btn-sm";
     quickBtnLabel = "重新运行";
+    /* Module 5: show failure_detail (with code) when available. */
+    if (quick.failure_detail) {
+      quickBadgeLabel = `上次失败 · 对齐未完成`;
+    }
+  } else if (qStatus === "succeeded" && qKind === "no_gap") {
+    quickBadgeClass = "badge badge-amber";
+    quickBadgeLabel = "无需改写";
+    quickBtnClass = "btn btn-outline btn-sm";
+    quickBtnLabel = "查看";
   } else if (qStatus === "succeeded") {
     quickBadgeClass = "badge badge-green";
     quickBadgeLabel = "已对齐";
@@ -211,7 +248,7 @@ export async function renderDashboard(container) {
       <div class="quick-row${quickRowClass}" data-quick-continue>
         <div class="quick-main">
           <div class="quick-title">${escAttr(quick.title || "未命名岗位")}</div>
-          <div class="quick-meta">${escAttr(quick.company || "未知公司")} · ${escAttr(alignmentStatusLabel(quick.alignment_status))}</div>
+          <div class="quick-meta">${escAttr(quick.company || "未知公司")} · ${escAttr(qStatusLabel)}</div>
         </div>
         <div class="quick-right">
           <span class="${quickBadgeClass}">${escAttr(quickBadgeLabel)}</span>
@@ -235,6 +272,19 @@ export async function renderDashboard(container) {
     skill: shortenGapPhrase(gap.skill || "未命名技能"),
   }));
   const gapHtml = skillGapHtml(normalizedGaps, undefined, { variant: "table" });
+  /* D6（2026-10-22 审计）：原「技能缺口」只给全库需求频次，既不说「我缺什么」
+   * 也不给下一步（接口契约只有 {skill,count}，前端拿不到 covered 字段）。
+   * 短期纯前端方案：改叫「岗位高频技能」（数据确实来自全库岗位画像），
+   * 底部给一条主 CTA，把「看数字」接到工作台的「拿主简历对比」动作上。 */
+  const skillCtaHref =
+    quick && quick.job_id
+      ? `#/workspace/${encodeURIComponent(quick.job_id)}`
+      : "#/workspace";
+  /* gapHtml 自带 data-skill-gaps，外层保留同名容器（事件委托/测试都认它）。
+   * 无数据时 format.js 返回纯文本空态，用非 flush 的 panel-body 才有内边距。 */
+  const gapPanelClass = normalizedGaps.length
+    ? "panel-body panel-body--flush skill-gap-panel"
+    : "panel-body skill-gap-panel";
 
   const recentJobs = jobs
     .filter((job) => job && job.job_id)
@@ -244,13 +294,15 @@ export async function renderDashboard(container) {
       (a, b) =>
         (Number(b.updated_at) || 0) - (Number(a.updated_at) || 0),
     )
-    .slice(0, 3);
+    /* 2026-10-22（审计 D3/D8）：原来固定 3 条，左卡底部空 135px 且没有
+     * 「看全部」出口；改为 5 条 + 表头出口，把空白变成内容。 */
+    .slice(0, 5);
   const recentHtml = recentJobs.length
     ? recentJobs
         .map(
           (job) => `
             <tr>
-              <td><a class="recent-job__title" href="#/workspace/${encodeURIComponent(job.job_id)}">${escAttr(job.title || "未命名岗位")}</a></td>
+              <td class="recent-job__cell"><a class="recent-job__title" href="#/workspace/${encodeURIComponent(job.job_id)}" title="${escAttr(job.title || "未命名岗位")}">${escAttr(job.title || "未命名岗位")}</a></td>
               <td><span class="badge pill-neutral"><span class="dot metric-dot metric-dot--${jobStatusTone(job.status)}" aria-hidden="true"></span>${escAttr(jobStatusLabel(job.status))}</span></td>
               <td class="is-num cell-muted">${escAttr(formatDate(job.updated_at))}</td>
               <td class="is-num"><a class="icon-btn recent-job__open" href="#/workspace/${encodeURIComponent(job.job_id)}" aria-label="打开 ${escAttr(job.title || "未命名岗位")} 的工作台">${icon("chevron-right", 16)}</a></td>
@@ -279,10 +331,16 @@ export async function renderDashboard(container) {
             <div class="recent-jobs">
               <div class="recent-jobs__head">
                 <h3>最近岗位动态</h3>
-                <span class="small muted">最近 3 条 · 投递快照</span>
+                <a class="link" href="#/jobs">查看全部 ${escAttr(kpi.jobs || 0)} 个岗位 →</a>
               </div>
               <div class="recent-jobs__list" data-dashboard-recent>
                 <table class="data-table recent-table">
+                  <colgroup>
+                    <col>
+                    <col class="recent-table__col-status">
+                    <col class="recent-table__col-time">
+                    <col class="recent-table__col-action">
+                  </colgroup>
                   <thead>
                     <tr>
                       <th scope="col">岗位</th>
@@ -300,11 +358,14 @@ export async function renderDashboard(container) {
         <aside class="panel dashboard-panel aux-pane">
           <div class="panel-head">
             <div>
-              <h2>技能缺口</h2>
-              <p>目标岗位高频硬技能</p>
+              <h2>岗位高频技能</h2>
+              <p>${escAttr(jobsTotal)} 个岗位里被要求最多的硬技能</p>
             </div>
           </div>
-          <div class="panel-body panel-body--flush skill-gap-panel" data-skill-gaps>${gapHtml}</div>
+          <div class="${gapPanelClass}" data-skill-gaps>${gapHtml}</div>
+          <div class="panel-body">
+            <a class="btn btn-secondary btn-sm" href="${escAttr(skillCtaHref)}" data-skill-gap-cta>拿主简历对比一次 →</a>
+          </div>
         </aside>
       </div>
     </div>`;

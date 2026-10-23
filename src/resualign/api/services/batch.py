@@ -11,6 +11,7 @@ import threading
 import time
 from typing import Any, Optional
 
+from ...alignment_lifecycle import transition_alignment
 from ...app.context import context
 from ...batch import (
     BatchAlignRequest,
@@ -209,6 +210,22 @@ def queue_batch_align(
         analysis_job_id = context._queue_job(user, payload, workbench=True)
         context._batch_store.set_analysis_job(
             batch_id, tenant_id, job['job_id'], analysis_job_id
+        )
+        # Mirror the single-job workbench path (routers/jobs.run_workbench):
+        # flip the library job to `queued` before the worker claims it. Without
+        # this the claim logged "Illegal alignment transition 'idle' ->
+        # 'running'" and the kanban badge stayed on the previous state for the
+        # whole batch, even though the analysis job itself ran to completion.
+        transition_alignment(
+            context._jobs,
+            tenant_id,
+            job['job_id'],
+            'queued',
+            workbench_job_id=analysis_job_id,
+            workbench_resume_id=master_resume_id,
+            tailor_granularity=request.granularity,
+            tailor_focus=request.prompt_focus,
+            custom_prompt=request.custom_prompt,
         )
 
     threading.Thread(

@@ -187,6 +187,8 @@ def test_role_router_clamps_max_tokens_and_deadline():
     assert profiler["timeout"] == 75.0  # #116 甲案：30→75（muse p95 43.9s 实测，用户 2026-09-16 裁决）
     assert editor["max_tokens"] == 3072
     assert editor["retry_transport"] is False  # 长生成角色不重试 transport
+    assert editor["timeout"] == 150.0  # #165：Reolink 90s 2/3 + 腾讯 81.9s
+    assert editor["deadline"] == 150.0
     assert evaluator["max_tokens"] == 384
     # 护栏数值 = AIE 原表 + #116 授权的两处调整（profiler 75 / gap_analyzer 60，
     # 依据 #115 归因与 #116 延迟表）；其余数值仍为 AIE 决策域回归断言。
@@ -194,7 +196,7 @@ def test_role_router_clamps_max_tokens_and_deadline():
         "diagnose": 45.0,
         "profiler": 75.0,
         "gap_analyzer": 60.0,
-        "editor": 90.0,
+        "editor": 150.0,
         "evaluator": 60.0,
     }
 

@@ -1,295 +1,308 @@
-# ResuAlign 求职工作台
+<div align="center">
 
-ResuAlign 是一个**本地优先**的求职工作台：把简历诊断、岗位库管理、单岗位
-对齐精修和投递闭环放进一个 FastAPI + Web UI。核心引擎与前端解耦——
-CLI 和 Web 共用同一套流水线；所有数据落在本地 SQLite，不依赖外部服务。
+# ResuAlign-Lite
+
+### 隐私优先 · 防幻觉受控的本地求职工程化工作台
+
+**Local-First Career Workbench with a Fail-Closed Resume Tailoring Gate**
+
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue?style=flat-square)](./CHANGELOG.md)
+[![ADR](https://img.shields.io/badge/ADR-0001--0058-orange?style=flat-square)](./docs/adr/)
+[![Security](https://img.shields.io/badge/Security-encrypted_at_rest-success?style=flat-square)](#-隐私与安全边界)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](#-质量保证与测试体系)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
+
+[项目概述](#-项目概述) ·
+[效果对照](#-效果对照) ·
+[核心特性](#-核心特性) ·
+[系统架构](#-系统架构) ·
+[快速开始](#-快速开始) ·
+[浏览器工具](#-采集与回填两个浏览器工具) ·
+[基准与评测](#-基准测试与防幻觉评测) ·
+[配置](#-配置) ·
+[隐私与边界](#-隐私与安全边界) ·
+[质量保证](#-质量保证与测试体系) ·
+[文档](#-文档导航)
+
+</div>
+
+---
+
+## 📌 项目概述
+
+求职流程里有三个反复踩坑的环节：**简历和目标 JD 之间存在说不清的隐性断层**；**通用大模型"润色"简历时随手捏造经历**；**多渠道投递的版本越攒越乱，履历数据还散落在各家商业平台上**。
+
+ResuAlign-Lite 把这件事当工程问题做：一个跑在本机的 FastAPI + 原生前端工作台，数据全部落在本地 SQLite，不依赖外部服务。它的核心主张只有一条——**模型只能改写、重排、强调简历里已有的事实**。每条建议都携带指向主简历原文的 provenance，过不了门禁的改写会被拦截并标记「建议复核」，永远不会静默混进定稿。
+
+门禁规则也不是本仓自说自话：`src/resualign/gate.py` 是 skill 仓 [true-tailor](https://github.com/shing26/truetailor) 的字节级 vendor 副本（同一套规则同时跑在 Claude Code / Codex 里），双方用哈希清单和双向对拍测试锁定——想改规则，必须上游优先。
 
 核心闭环：**岗位库 → 工作台对齐 → 记录投递 → 每周复盘**。
 
-防编造是硬约束：每条改写建议都携带指向主简历原文的 provenance；模型只能
-改写/重排/强调已有事实，缺来源的建议会被 provenance 硬门禁拦截并标记
-「建议复核」，永远不会静默混入定稿。
+> **只想先试 30 秒版？** skill 仓 [true-tailor](https://github.com/shing26/truetailor)
+> 是同一套门禁的零安装形态：一个 `SKILL.md` + 一个 stdlib 门禁脚本，直接跑在
+> Claude Code / Codex 里。本仓是它背后的持久化工作台（岗位库、版本历史、投递
+> 闭环）；门禁规则与它字节级同步，改规则一律从上游开始。
 
-> **只想先试 30 秒版？** skill 仓
-> **[true-tailor](https://github.com/shing26/truetailor)** 是一个 SKILL.md +
-> 一个 stdlib 门禁脚本，零安装、零服务，直接跑在 Claude Code / Codex 里；
-> 本仓是它背后的持久化 app（岗位库、版本历史、投递闭环）。
-> 两者共用同一套门禁规则：`src/resualign/gate.py` 与黄金 fixtures 是那边的
-> vendor 副本，**改规则先改上游**
-> （`tests/fixtures/gate/VENDOR.json` + `tests/platform/test_skill_vendor_lock.py`）。
+## 🖼️ 效果对照
 
-## 功能总览
+![诊断前后对照：原始简历输入 → 本地规则打标缺口 → 反幻觉约束重写结果](docs/assets/gate-before-after.svg)
 
-- **驾驶舱**：KPI 总览（简历/岗位/对齐进度/建议采纳率）、技能缺口排行
-  （来自真实岗位 JD 聚合）、快速继续最近任务。
-- **简历中心**：主简历列表与单份档案；独立诊断（评分/技能/问题/建议）、
-  版本历史、导出 Markdown；**网申档案**——LLM 抽取姓名/教育/经历等
-  原子字段，供回填扩展使用，可手动编辑，简历变更后自动标记过期。
-- **岗位库**：万能输入（Ctrl+K 粘贴 JD / 链接）、油猴插件一键摄入
-  （local-ingest：任意招聘页面识别到 JD 就弹悬浮窗，也可直接划词）、
-  自动分类与薪资提取；解析失败可降级为粘贴 JD 并保留来源；看板五列跟踪
-  投递状态（未投递 → 已投递 → 面试中 → Offer → 放弃），卡片带截止日期
-  提醒与投递结果归因。
-- **岗位表自动同步**：在**岗位库 →「数据」→「批量导入」**对话框里，把 WorkBuddy
-  每日追加的那张 CSV 路径（及 JD 正文目录）填进去，后台按间隔重读、只补没导入
-  过的行；**去重判定在分类之前完成**，重复行 0 次 LLM 调用。同一官网的多个岗位
-  按 URL 查询串/fragment 区分，不会被折叠成一行（ADR-0055 / ADR-0057）。
-- **一键预分析**：看板按钮把库里没分析过的岗位批量跑 JD 画像 + 差距，
-  已分析的自动跳过；导入对话框可勾选「导入后自动预分析」，也可对单岗位
-  点「AI 预分析」。
-- **工作台**：单岗位对齐调优。对照编辑（逐条 Diff）与 A4 纸预览双视图；
-  Live Sheet 定稿实时预览；建议卡带 provenance 徽标与置信度，支持
-  采纳/跳过/单条润色/手工编辑；保存定稿、刷新恢复、另存为主简历；
-  导出 Markdown / JSON / PDF。
-- **投递复盘**：近 7 天投递节奏、阶段分布、三条规则化行动清单
-  （逾期跟进 / 临近截止 / 停滞岗位），以及**对齐有效性对比**——
-  对齐 vs 未对齐简历的过筛率（样本不足时只报计数，不展示误导性比率）。
-- **快速评估**：Ctrl+K 粘贴 JD → 纯规则秒出匹配分与缺口 top3，
-  不建岗位先判断值不值得投；值得投则一键入库并对齐。
-- **网申回填扩展**（`extension/`）：Chrome MV3 扩展读取本地结构化档案，
-  在任意网申页面逐字段点击填充——对齐的成果直接填进网申表单，
-  数据全程本地零上传。
-- **设置**：LLM 多节点管理（主节点 + 备用节点、连通性测试与健康徽标）、
-  自动化规则、本地摄入 Token；专家模式还暴露按角色的
-  模型分工。岗位表自动同步的配置在岗位库的「批量导入」对话框里，不在本页。
-  Bento 概览里的超时/并发是**后端真值**
-  （`GET /api/settings/status` 回传），不是 UI 旋钮——要调走环境变量
-  （`RESUALIGN_ROLE_TIMEOUT_<ROLE>`、`RESUALIGN_WORKER_CONCURRENCY`）。
-  成本护栏是**后端执行路径**（每日调用上限，达限返回 429，
-  同任务连续失败 3 次熔断），按 ADR-0056 不设设置页开关。
-- **主题**：默认浅色（Slate + Indigo），支持明暗切换；移动端完整适配
-  （底部导航、触控尺寸、抽屉交互）。
+*输入用例与判定都来自仓库，不是示意图：简历取 `benchmarks/cases/adversarial_hallucination_claims.json` 的合成对抗用例；中间栏是 `rule_diagnose.diagnose_resume_local` 与 `match_scorer.keyword_coverage_score` 的真实输出；右栏「通过」与「拦截」是 `gate.py` 的实际判定（`blocked · reason=fabricated`）。*
 
-## 可靠性设计
+![幻觉发生率对比：门禁前 8/8 编造断言到达交付面，门禁后 0/8](docs/assets/hallucination-rate.svg)
 
-- **梯度降级**：改写阶段失败不丢任务——token 预算自动翻倍重试 →
-  降级宽松 JSON mode → 最坏情况产出「诊断完成 · 改写未产出」的部分
-  成功并给一键重试；配额/鉴权类失败仍硬失败。
-- **状态机收口**：看板徽标（idle/queued/running/succeeded/failed）由
-  独立状态机单写点维护，与 worker 注册表实时同步，不再依赖重启兜底。
-- **节点健康**：LLM 节点连通性测试结果持久化，设置页徽标可见；
-  对齐失败横幅可一键切换健康节点重跑。
+*口径：n=8 是**构造注入**（2 例合成对抗用例 × 4 条 `must_not_contain`），只报计数、不做统计推断——LLM-as-a-Judge（`evaluator/v3`）那一栏因此不出数，它需要真实模型节点，且 2 例样本支持不了比率。复现：`python benchmarks/run_benchmark.py --offline` 与 `python -m benchmarks.agent.harness.probes`；图由 `python scripts/make_readme_figures.py` 生成（`--check` 会抓出人手改图）。*
 
-## 快速开始（本地）
+## ✨ 核心特性
 
-```powershell
-# Windows
-.\start.ps1
-```
+| 模块 | 做什么 | 实现要点 |
+|:--|:--|:--|
+| **防幻觉门禁** | 每条改写必须能映射回原文 | `gate.py`：provenance 解析 → 内容检查 → noop 过滤，fail-closed；纯 stdlib、无网络；与 true-tailor skill 字节级锁定 |
+| **JD 画像与差距分析** | 结构化岗位画像 + 差距度量 | `jd_profiler`（画像）与 `gap_analyzer`（深度缺口报告）走 LLM；Ctrl+K 走零 LLM 的 `/api/quick-eval`——`local_fallback` 规则抽取 + `match_scorer` 秒出匹配分与缺口 top3，不建岗位 |
+| **分角色模型路由** | 五个角色分工调度 LLM | `role_router.py`：diagnose / profiler / gap_analyzer / editor / evaluator 各有超时与 token 预算；多活节点故障转移、连续失败熔断、进程内冷却 |
+| **单岗位工作台** | 对照编辑 + A4 预览双视图 | 建议卡带 provenance 徽标与置信度；SSE 流式推进并透出 LLM 失败码；采纳 / 跳过 / 单条润色 / 手工编辑；导出 md / json / pdf |
+| **岗位库与投递看板** | 五列状态机 + 批量导入/预分析 | 未投递 → 已投递 → 面试中 → Offer → 放弃；在「岗位库 → 数据 → 批量导入」填 CSV 与 JD 正文目录，后台增量同步且去重预检在分类之前（重复行 0 次 LLM 调用）；看板可一键预分析未分析岗位，也可在导入后自动预分析 |
+| **驾驶舱与复盘** | KPI、技能缺口、有效性对比 | 技能缺口排行来自真实岗位 JD 聚合；对齐 vs 未对齐简历的过筛率对比（样本不足只报计数，不给误导性比率） |
+| **网申回填扩展** | Chrome MV3 逐字段填充 | 读取本地结构化档案填网申表单，React/Vue 受控表单兼容，数据全程不出本机 |
+| **隐私与静态加密** | 数据不离机，密钥落盘加密 | SQLite WAL；API Key 以 Fernet 加密存储（ADR-0035，密钥独立文件——文档自陈这是"硬化而非沙箱"） |
 
-```bash
-# macOS / Linux
-./start.sh
-```
-
-然后打开 <http://127.0.0.1:8000>。默认个人模式，无需登录；模型 API Key
-通过 `.env` 提供（复制 `.env.example` 为 `.env` 并填写）。
-
-手动启动：
-
-```powershell
-$env:PYTHONPATH = "D:\ResuAlign-Lite\src"
-python -m uvicorn resualign.api:app --reload
-```
-
-## Docker（可选）
-
-```bash
-docker compose up --build
-```
-
-容器把 `./data` 挂载为数据卷（`RESUALIGN_DATA_DIR=/app/data`），`.env`
-通过 `env_file` 注入；镜像以非 root 用户（UID 1000）运行，带 HEALTHCHECK
-（`GET /health`，每 30s 探测），`stop_grace_period: 30s` 留给分析任务收尾。
-
-> Linux 宿主机需保证挂载目录对容器用户可写：
-> `sudo chown -R 1000:1000 ./data`（Docker Desktop 自动映射，无需处理）。
-
-把服务暴露到局域网/公网前，务必阅读
-[docs/deployment-security.md](docs/deployment-security.md)
-（个人模式匿名访问风险、反向代理 Basic Auth、单进程约束等）。
-
-## 网申回填扩展
+## 🏗️ 系统架构
 
 ```text
-extension/   ← Chrome MV3 扩展，零构建
+                  ┌──────────────────────────────────────────────────────────────┐
+                  │ 采集层  Tampermonkey 脚本 / 万能输入 / CSV 同步              │
+                  └──────────────────────────────────────────────────────────────┘
+                                                  ▼
+                  ┌──────────────────────────────────────────────────────────────┐
+                  │ 解析与画像  parser(PDF/DOCX/TXT) → jd_profiler（LLM）        │
+                  └──────────────────────────────────────────────────────────────┘
+                                                  ▼
+                                 ┌────────────────┴────────────────┐
+                                 ▼                                 ▼
+                  ┌────────────────────────────┐    ┌────────────────────────────┐
+                  │ 快速评估（零 LLM）         │    │ 角色路由 RoleRouter        │
+                  │ local_fallback             │    │ diagnose · profiler        │
+                  │ + match_scorer             │    │ gap_analyzer · editor      │
+                  │ → 匹配分与缺口 top3        │    │ evaluator                  │
+                  └────────────────────────────┘    └────────────────────────────┘
+                                 └────────────────┬────────────────┘
+                                                  ▼
+                  ┌──────────────────────────────────────────────────────────────┐
+                  │ 受控改写  tailor.py（逐条 Diff，每条带 provenance）          │
+                  └──────────────────────────────────────────────────────────────┘
+                                                  ▼
+                  ┌──────────────────────────────────────────────────────────────┐
+                  │ 防幻觉门禁  gate.py（fail-closed，纯 stdlib）                │
+                  │ ① provenance 解析  ② 内容检查  ③ noop 过滤                   │
+                  └──────────────────────────────────────────────────────────────┘
+                                                  ▼
+                  ┌──────────────────────────────────────────────────────────────┐
+                  │ 交付层  工作台双栏 / 投递看板 / 驾驶舱 / 导出 md·json·pdf    │
+                  │ MV3 回填扩展 → 网申表单（数据不出本机）                      │
+                  └──────────────────────────────────────────────────────────────┘
+
+ 横切护栏：cost_guard（每日调用上限 → 429，同任务连续失败 3 次熔断）·
+            llm_nodes（节点熔断 RESUALIGN_BREAKER_THRESHOLD 默认 3 + 冷却 + 多活转移）·
+            watchdog（任务墙钟 RESUALIGN_JOB_MAX_RUNTIME_S 默认 1800s）·
+            secret_box（Fernet 静态加密）
 ```
 
-1. Chrome 打开 `chrome://extensions/`，开启「开发者模式」
-2. 「加载已解压的扩展程序」→ 选择本 `extension/` 目录
-3. 在简历中心为目标简历「生成档案」
-4. 打开任意网申页面，点右下角「回填」：先点击网页输入框，再点侧边栏
-   字段自动填入（React/Vue 受控表单兼容）
+分层说明：
 
-数据流：扩展 → background → 本机 ResuAlign 服务，全程不过第三方服务器。
-详见 [extension/README.md](extension/README.md)。
+- **Engine（`src/resualign/engine/`）**：LLM 提供商抽象与多节点存储（`llm.py` / `llm_nodes.py` / `llm_providers.py`）、角色路由（`role_router.py`）、受控定制（`tailor.py`）。门禁 `gate.py` 在包根目录、与引擎平级——它是可独立发布的规则核心，不是引擎的一个内部步骤。
+- **API & Service（`src/resualign/api/`）**：FastAPI 路由与服务层；成本护栏（`services/cost_guard.py`）与看门狗（`services/watchdog.py`）都在这一层执行。
+- **Storage**：SQLite WAL（`jobs.db` / `content.db` / `content-cache.db`），密钥经 `secret_box.py` 加密。
+- **UI（`src/resualign/static/`）**：原生 JS 单页 + `@layer` 单文件 CSS，默认浅色、可切暗色，teal 强调色；移动端完整适配（≤900px 顶部横向导航 + 抽屉交互，320 宽自动只留文字标签）。
 
-## 命令行
+模块归属不靠目录直觉，而是由 `src/resualign/tools/modgraph.py` 的 `LAYERS` 声明定义，CI Stage 1 的 `modgraph --check` 用集合差棘轮只允许分层违规减少——顶层平铺模块是刻意的，不是待整理的堆积。原始 LLM 报文归档在 `src/resualign/archive/`（ADR-0052「归档层」，`RESUALIGN_LLM_TRACE=1` 才落盘），它是在用模块，不是死代码。
 
-```powershell
-# 仅诊断
-python run.py resume.pdf
+## 🚀 快速开始
 
-# 诊断 + 完整对齐流水线
-python run.py resume.pdf --jd "Java backend engineer, Spring Boot"
+### Docker（推荐）
 
-# 从文件读取 JD
-python run.py resume.pdf --jd-file jd.txt
-
-# 其他选项
-python run.py resume.pdf --jd "..." --model deepseek-v4-flash --output-dir reports --quiet
+```bash
+git clone https://github.com/shing26/ResuAlign-Lite.git
+cd ResuAlign-Lite
+cp .env.example .env        # 填入 LLM API Key
+docker compose up --build
+# 打开 http://localhost:8000
 ```
 
-CLI 会打印分数、技能、问题、Diff 建议、耗时与模型，并把 JSON 报告写入
-`resualign-report-{timestamp}.json`。注：`--jd-url` 已随后端爬虫退役而
-废弃，岗位链接请通过 Web 端油猴插件或粘贴 JD 录入。
+镜像以非 root 用户（UID 1000）运行，自带 HEALTHCHECK；`./data` 挂载为数据卷。Linux 宿主机需 `sudo chown -R 1000:1000 ./data`（Docker Desktop 在 Windows/macOS 上自动处理）。
 
-## 流水线
+### 本地运行
 
-1. **诊断简历**：分数、技能、问题清单。
-2. **JD 画像**：结构化萃取必会/加分技能、软技能、业务场景。
-3. **差距分析**：简历画像 vs JD 画像，输出缺口/错位/匹配项。
-4. **对齐改写**：基于差距逐条改写，每条 Diff 带溯源；provenance 硬门禁
-   拦截无来源建议。
-5. **评估（可选）**：LLM 裁判对改写结果打分（`eval_score.jd_match_score`）。
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt    # 跑测试另需 pip install -e ".[dev]"
+cp .env.example .env
 
-多节点模式下调用经角色路由（diagnose / profiler / gap_analyzer / editor /
-evaluator 分级超时与 token 预算），节点失败自动回退默认节点；缓存按
-租户/模型/提示词版本/内容哈希四级键命中，过期条目自动清理。
+./start.sh                         # Windows: .\start.ps1
+# 或手动：python -m uvicorn resualign.api:app --app-dir src
+```
 
-## 配置
+服务默认监听 `127.0.0.1:8000`；个人模式无需登录（`RESUALIGN_PERSONAL_MODE=0` 时每个 API 请求需 `Authorization: Bearer <token>`）。**单进程约束**：分析任务队列与导入状态在进程内存中，切勿加 `--workers > 1`。
 
-复制 `.env.example` 为 `.env` 并设置：
+启动后：工作台 `http://127.0.0.1:8000/` · Swagger `/docs` · OpenAPI `/openapi.json`（契约快照另存于 `contracts/openapi-current.json`）。
+
+### 命令行
+
+```bash
+python run.py resume.pdf                                # 仅诊断
+python run.py resume.pdf --jd "Java backend engineer"   # 诊断 + 完整对齐流水线
+python run.py resume.pdf --jd-file jd.txt               # 从文件读 JD
+```
+
+### 数据与备份
+
+所有数据都在 SQLite 文件里（目录可用 `RESUALIGN_DATA_DIR` 覆盖）。备份走在线一致性 API，**不要直接拷贝 .db 文件**：
+
+```bash
+./scripts/backup.sh                # Windows: powershell -File scripts\backup.ps1
+```
+
+日备份保留 7 天、每月 1 号的 weekly 备份保留 30 天。恢复演练与缓存清理见 [docs/backup-restore.md](docs/backup-restore.md) · [docs/operations.md](docs/operations.md)。把服务暴露到局域网/公网之前，务必先读 [docs/deployment-security.md](docs/deployment-security.md)。
+
+## 🧩 采集与回填：两个浏览器工具
+
+仓库里有两个独立的浏览器组件，分工不同，别混用：
+
+**JD 采集 —— Tampermonkey 脚本**（根目录 `resualign-collector.user.js`）：浏览招聘页面时识别到 JD 即弹悬浮窗，也可划词选取，一键同步到本地岗位库；解析失败可降级为粘贴 JD 并保留来源。安装说明见 [docs/resualign-collector-install.md](docs/resualign-collector-install.md)。
+
+**网申回填 —— Chrome MV3 扩展**（`extension/`）：读取本地结构化档案（在简历中心「生成档案」，由 LLM 抽取姓名/教育/经历等原子字段），在任意网申页面逐字段点击填充、跳转下一个空框；React/Vue 受控表单已兼容，「一键全填」为实验特性。加载方式：`chrome://extensions/` → 开启开发者模式 → 加载已解压的扩展程序 → 选择本仓 `extension/` 目录。数据流：扩展 → 本机 ResuAlign 服务，全程不过第三方服务器。
+
+## 🧪 基准测试与防幻觉评测
+
+```bash
+python benchmarks/run_benchmark.py --offline    # 15 个确定性用例，无网络无凭据
+python benchmarks/run_benchmark.py --online     # 真实 LLM（读取 .env 凭据）
+python benchmarks/cold_start_benchmark.py       # 分层冷启动门禁
+python benchmarks/capacity_benchmark.py         # 容量曲线基线
+python benchmarks/degradation_benchmark.py      # 降级故障注入
+python benchmarks/role_latency_benchmark.py     # 角色时延校准
+```
+
+- **对抗性幻觉用例**：`benchmarks/cases/adversarial_hallucination_claims.json`（对抗性夸大凭据）与 `adversarial_hallucination_projects.json`（跨专业虚构项目），验证编造断言进不了输出——`must_not_contain` 命中即断言失败。
+- **Agent 评测床**（`benchmarks/agent/`）：actor / judge / runner 组成的回放测试 harness，配黄金 fixtures。
+
+## ⚙️ 配置
+
+复制 `.env.example` 为 `.env`：
 
 ```dotenv
+# LLM 提供方（内置 deepseek / openrouter / ollama 默认端点）
 LLM_PROVIDER=deepseek
-DEEPSEEK_API_KEY=sk-xxx
+DEEPSEEK_API_KEY=sk-your-key-here
 DEEPSEEK_MODEL=deepseek-chat
 
-RESUALIGN_PERSONAL_MODE=1
+# 应用运行时（均可选）
+RESUALIGN_PERSONAL_MODE=1        # 1=个人模式免登录；0=每请求需 Bearer token
+RESUALIGN_DATA_DIR=data
 RESUALIGN_JOB_DB=data/jobs.db
+RESUALIGN_WORKER_CONCURRENCY=1   # 并行分析任务数（1..4）
 RESUALIGN_HOST=127.0.0.1
 RESUALIGN_PORT=8000
 ```
 
-优先级：CLI 参数 > `.env` > 环境变量。内置 `deepseek`、`openrouter`、
-`ollama` 的默认端点；其余 OpenAI 兼容服务商（NVIDIA NIM、硅基流动、智谱、
-百炼、火山、Groq 等）在设置页填 **Base URL** 即可——后端按主机识别服务商，
-`POST /api/llm/models` 拉该端点的模型列表供选择，不必手敲模型名（ADR-0051）。
-`RESUALIGN_PERSONAL_MODE=0` 时每个 API 请求都需要 `Authorization: Bearer <token>`。
+- **其他 OpenAI 兼容服务商**（NVIDIA NIM、硅基流动、智谱、百炼、火山、Groq 等）：设置页填 Base URL 即可，后端按主机识别服务商并拉取该端点模型列表，不必手敲模型名（ADR-0051）。
+- **成本护栏是后端执行路径**：每日调用上限（settings `daily_llm_cap`）达限返回 429 `llm_daily_cap_reached`；同任务连续失败 3 次熔断。按 ADR-0056 刻意不设设置页开关。
+- **超时/并发是后端真值**：`RESUALIGN_ROLE_TIMEOUT_<ROLE>`、`RESUALIGN_WORKER_CONCURRENCY`、`RESUALIGN_JOB_MAX_RUNTIME_S`、`RESUALIGN_BREAKER_THRESHOLD` 均走环境变量，设置页只读展示。
+- 优先级：CLI 参数 > `.env` > 环境变量。
 
-## 数据备份与重置
+## 📂 仓库结构
 
-所有数据（用户、简历、岗位、投递记录、设置、任务）都在 SQLite 文件
-`data/jobs.db`（另有按需创建的 `data/content.db` 与 `data/content-cache.db`）
-中，数据目录可用 `RESUALIGN_DATA_DIR` 覆盖。
-
-```powershell
-# 备份（在线一致性备份，服务可保持运行；不要直接 Copy-Item .db 文件）
-powershell -File scripts\backup.ps1
+```text
+ResuAlign-Lite/
+├── src/resualign/              # 核心包
+│   ├── engine/                 # LLM 抽象、多节点存储、角色路由、受控定制
+│   ├── api/                    # FastAPI 路由与服务层（cost_guard / watchdog 在此）
+│   ├── static/                 # 工作台前端（原生 JS + @layer 单文件 CSS）
+│   ├── job_library/            # 岗位库聚合与生命周期状态机
+│   ├── tools/                  # 分层声明（modgraph LAYERS）与仓库工具
+│   ├── archive/                # 原始 LLM 报文归档（RESUALIGN_LLM_TRACE，ADR-0052）
+│   ├── gate.py                 # 防幻觉门禁（stdlib，与 true-tailor vendor 锁定）
+│   ├── secret_box.py           # API Key 静态加密（Fernet）
+│   ├── rules.py                # 离线规则集与诊断断言
+│   └── cli.py                  # 命令行入口（run.py 是它的薄封装）
+├── extension/                  # Chrome MV3 网申回填扩展（零构建）
+├── resualign-collector.user.js # Tampermonkey JD 采集脚本
+├── benchmarks/                 # 压测、角色时延校准、agent 评测床、对抗幻觉用例
+├── contracts/                  # OpenAPI 契约快照与增量演进规范
+├── docs/adr/                   # 57 篇架构决策记录（0001–0058，0029 有意缺号）
+├── docs/assets/                # README 效果对照图（由 scripts/make_readme_figures.py 生成）
+├── tests/                      # pytest 主套件 + frontend/extension node 测试 + e2e
+├── scripts/                    # 备份/恢复、Kill-9 演练、探针视频、README 图表生成
+├── compose.yaml · Dockerfile · requirements.txt
+├── start.sh · start.ps1 · run.py
+└── CHANGELOG.md · CONTEXT.md · AGENTS.md
 ```
+
+## 🔐 隐私与安全边界
+
+- **数据不离机**：简历、岗位、投递记录与 LLM 报文都落在本地 SQLite（WAL），默认 `data/`（`RESUALIGN_DATA_DIR` 可改）；除你配置的 LLM 端点外，没有第三方服务参与数据流。
+- **密钥静态加密**：API Key 经 `secret_box.py` 以 Fernet 加密存储，主密钥放在独立文件（ADR-0035）。
+- **备份走一致性 API**：`./scripts/backup.sh`（Windows `scripts\backup.ps1`）用 sqlite3 在线 `.backup()`，不要直接拷贝 `.db` 文件。日备份保留 7 天，每月 1 号的 weekly 备份保留 30 天。
+- **个人模式是匿名的**：`RESUALIGN_PERSONAL_MODE=1` 下不校验身份，把服务暴露到局域网或公网之前先读 [docs/deployment-security.md](docs/deployment-security.md)。
+
+**已知边界**（不粉饰）：
+
+- **单机单进程**：`--workers > 1` 会打破任务队列与导入状态的前提，不承诺多实例部署或生产规模。
+- **加密是硬化而非沙箱**（ADR-0035 自陈）：能防落盘的明文密钥，不能防同一台机器上的高权限攻击者。
+- **真实改写质量取决于所配模型**：Ollama `qwen2.5:7b` 是已知能力地板；9 月真实对齐 4/5 零产出的归因见 issue #110 / #115，未达标红线列在 [docs/STATUS.md](docs/STATUS.md)。
+- **抓取已退役**：岗位来源只有油猴脚本、粘贴与 CSV 同步，不承诺任意站点抓取（`--jd-url` 已移除）。
+- **探针未收口**：ADR-0041 冻结令仍有效，app 侧新功能冻结，总闸见 issue #114；解冻条件与例外流程见 [docs/STATUS.md](docs/STATUS.md) 与 [docs/probe-window-plan-2026-09-16.md](docs/probe-window-plan-2026-09-16.md)。
+
+## 🛡️ 质量保证与测试体系
 
 ```bash
-# macOS / Linux
-./scripts/backup.sh
-```
+# 后端单元/契约测试（tests/e2e 会被收集但默认跳过）
+python -m pytest tests/
 
-备份输出到 `data/backups/`，日备份保留 7 天、每月 1 号的 weekly 备份保留
-30 天。恢复演练见 [docs/backup-restore.md](docs/backup-restore.md)；缓存
-清理与数据维护建议见 [docs/operations.md](docs/operations.md)。
-
-## API 摘要
-
-- `GET /health`：存活检查（含 DB/缓存自检）。
-- `POST /api/auth/*`、`GET /api/auth/me`：账号与会话。
-- `POST /api/workbench/session/init`：万能输入建会话（粘贴 JD / 链接）。
-- `POST /api/jobs/local-ingest`：油猴插件本地摄入岗位。
-- `GET /api/jobs/job-table`、`POST /api/jobs/job-table/sync`：岗位表同步状态
-  与手动同步（只补库中没见过的行，重复行不烧 LLM）。
-- `POST /api/jobs/preanalyze-pending`（+ `GET .../{batch_id}` 查进度）：
-  批量预分析库里未分析的岗位；`POST /api/jobs/{id}/preanalyze` 单岗位预分析。
-- `GET /api/jobs/{id}`、`POST /api/analyze`：岗位详情与异步分析任务。
-- `POST /api/master-resumes`、`GET /api/master-resumes/{id}`：主简历 CRUD
-  与版本；`/profile`：结构化档案（抽取/查看/编辑）。
-- `POST /api/jobs/{id}/workbench`：对齐任务排队；`POST
-  /api/jobs/{job_id}/accept`：采纳建议；`POST /api/jobs/{job_id}/final-draft`：
-  保存定稿；`POST /api/jobs/{job_id}/exports`：导出（md/json/pdf）。
-- `POST /api/jobs/{id}/reclassify`：重新分类待定岗位；`POST
-  /api/jobs/{id}/cancel`：取消排队任务。
-- `GET /api/dashboard`：驾驶舱 KPI 与技能缺口聚合。
-- `GET /api/review`：投递复盘聚合（节奏/阶段分布/行动清单/归因对比）。
-- `POST /api/quick-eval`：粘贴 JD 纯规则快速评估（零 LLM）。
-- `GET/PUT /api/settings`、`/api/llm/nodes`：设置与 LLM 节点管理
-  （含 `test-all` 连通性探测）。
-- `POST /api/llm/models`：按 Base URL 识别服务商并返回模型 id 列表（只读）。
-
-完整契约见 `contracts/openapi-current.json`（或运行时 `/docs`）。
-
-## 测试与基准
-
-```powershell
-$env:PYTHONPATH = "D:\ResuAlign-Lite\src"
-python -m pytest tests/                                   # 全量单元/契约测试
-python -m pytest --cov=resualign --cov-report=term-missing tests/
-python -m pytest tests/e2e -v --e2e                       # Playwright e2e
+# 前端与扩展（先安装 happy-dom）
+cd tests/frontend && npm install
 node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs tests/extension/*.test.mjs
 
-# 离线确定性基准（无网络，15 用例）
-python benchmarks/run_benchmark.py --offline
-
-# 关键路径冒烟（假 LLM，独立端口自启自停，不烧额度）
-python tests/e2e/playwright_smoke.py
-
-# 真实 LLM 基准（使用 .env 凭据）
-python benchmarks/run_benchmark.py --online
+# 浏览器 E2E（需 Playwright + Chromium，由 CI Stage 3 门禁）
+python -m pytest tests/e2e --e2e
+python tests/e2e/playwright_smoke.py    # 假 LLM 冒烟：独立端口自启自停，不烧额度
 ```
 
-前端回归护栏集中在 `tests/frontend/`：`ux-regression.test.mjs`（导航对比度
-WCAG AA、路由矩阵、硬门禁建议卡渲染契约）与 `css-structure.test.mjs`
-（花括号平衡、关键布局选择器 v3 定义存活、简历网格行高约束）；
-`tests/extension/` 覆盖回填扩展的纯函数核心（档案平铺、字段匹配、
-受控组件赋值、空框跳转）。
-当前基线：**1179 个 pytest（7 skipped，89.17% 覆盖率）+ 553 个前端/扩展
-node 测试 + 7 个 E2E**（2026-09-29，`main@e37f816` 后实测；pytest 与
-覆盖率取串行全量，node 取 `--test` 汇总行）；CI JUnit/coverage artifact
-是持续事实源，本行是带日期与命令的历史快照。
+**测试基线**（2026-10-14 实测，`c2f1b31`，串行全量 `python -m pytest tests/`）：**1262 passed / 7 skipped**，另有 1 个已知偶发失败——`tests/storage/test_wal_concurrency.py::test_cold_start_schema_race_on_shared_db`（并发冷启动竞态下报 `attempt to write a readonly database`，隔离重跑通过）；前端与扩展 `node --test` **585 passed / 0 failed**；E2E 收集 7 个用例，运行需 Playwright + Chromium，由 CI Stage 3 门禁。覆盖率门槛 85%（`pyproject.toml` `fail_under`）。CI 的 JUnit / coverage artifact 是持续事实源，本行是带日期与命令的历史快照。
 
-## CI
+CI 四阶段（`.github/workflows/ci.yml`）：
 
-四阶段（GitHub Actions，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)）：
+1. **Stage 1**：ruff 门禁 + README 出图漂移检查（`scripts/make_readme_figures.py --check`）+ 分层 ratchet（modgraph）+ 单元/契约测试（85% 覆盖率门槛）+ 前端/扩展 node:test 全量 + ESM import 图检查；
+2. **Stage 2**：时延/调用次数基准门禁 + 离线基准套件（15 用例）+ 降级故障注入 + 容量曲线基线门禁；
+3. **Stage 3**：关键路径 Playwright 冒烟（假 LLM，桌面 + 移动双视口）+ e2e 套件，失败自动落盘诊断产物；
+4. **Stage 4**：分层冷启动门禁（原生进程 + `docker build --no-cache` + 空数据卷容器启动到 `/health`，断言 UID 1000）。
 
-1. **Stage 1**：ruff 门禁 + 单元/契约测试（并行，85% 覆盖率门槛）+
-   前端/扩展 node:test 全量 + ESM import 图检查。
-2. **Stage 2**：延迟/调用次数基准门禁 + 离线基准套件 + 降级故障注入 +
-   容量曲线基线门禁（`benchmarks/degradation_benchmark.py`、
-   `benchmarks/capacity_benchmark.py`）。
-3. **Stage 3**：Phase 20 关键路径 Playwright 冒烟（假 LLM，桌面 + 移动
-   双视口，失败自动落盘诊断产物）+ e2e 套件。
-4. **Stage 4**：分层冷启动门禁（原生进程 + `docker build --no-cache` +
-   空数据卷容器启动到 `/health`，断言 UID 1000；见
-   `benchmarks/cold_start_benchmark.py`）。
+## 🤝 参与贡献
 
-## 文档
+1. **架构决策先行**：重大调整在 `docs/adr/` 递增一篇 ADR（编号即索引，0029 是有意缺号）；
+2. **新逻辑补测试**：`pytest` 全绿是合并前提；
+3. **门禁规则上游优先**：`gate.py` 与 `tests/fixtures/gate/` 是 true-tailor 的 vendor 副本，改规则先改上游再 re-sync；漂移由字节级哈希（`VENDOR.json`）与双向对拍测试（`TestDriftLockParity`）锁定；
+4. **前端范式**：原生 JS + 单文件 `@layer` CSS，不引入打包器。
+5. **先看冻结窗口**：ADR-0041 冻结令期间 app 侧新功能停摆（总闸 #114）；例外须逐项引用 ADR-0042 决定 6e 登记后再施工。
+6. **改图改生成器**：`docs/assets/*.svg` 是 `scripts/make_readme_figures.py` 的产物，`--check` 会拦下手改；图里的数字必须能追到仓库命令或文件。
 
-- 交付状态：[docs/STATUS.md](docs/STATUS.md)（达标项 / 未达标红线 / 冻结策略）
-- 证据台账：[docs/EVIDENCE.md](docs/EVIDENCE.md)（每个数字一行：口径 + 复现命令）
-- 改版记录：[CHANGELOG.md](CHANGELOG.md)
-- 用户手册：[docs/user-guide.md](docs/user-guide.md)
-- 架构决策：[docs/adr/](docs/adr/)（编号 0001–0058，0029 有意缺号；如
-  ADR-0026 v3 shell、ADR-0027 投递生命周期单一事实源、ADR-0041/0042
-  探针主线与双线判据、ADR-0054 评分实证、ADR-0055 岗位表同步）
-- 领域词汇表：[CONTEXT.md](CONTEXT.md)
-- 部署安全：[docs/deployment-security.md](docs/deployment-security.md)
-- 备份恢复：[docs/backup-restore.md](docs/backup-restore.md) ·
-  运维：[docs/operations.md](docs/operations.md)
-- 代理说明：[AGENTS.md](AGENTS.md)
+## 📚 文档导航
 
-## 许可
+| 文档 | 内容 |
+|:--|:--|
+| [docs/STATUS.md](docs/STATUS.md) | 交付状态：达标项 / 未达标红线 / 冻结策略 |
+| [docs/EVIDENCE.md](docs/EVIDENCE.md) | 证据台账：每个数字一行（口径 + 复现命令） |
+| [CHANGELOG.md](CHANGELOG.md) | 迭代轨迹（ADR 编号 + Phase 名是主要索引） |
+| [docs/user-guide.md](docs/user-guide.md) | 用户手册 |
+| [docs/adr/](docs/adr/) | 57 篇架构决策记录（0001–0058） |
+| [docs/assets/](docs/assets/) | README 效果对照图与出图口径（数字来源 + 复现命令） |
+| [docs/README.md](docs/README.md) | 文档放哪：平铺层 = 活文档，`plans/` + `reports/` = 归档 |
+| [CONTEXT.md](CONTEXT.md) | 领域词汇表 |
+| [docs/deployment-security.md](docs/deployment-security.md) | 暴露到局域网/公网前必读 |
+| [AGENTS.md](AGENTS.md) | 仓库代理说明与本地怪癖 |
 
-[MIT](LICENSE)。
+## 📄 许可证
 
-`src/resualign/gate.py` 与 `tests/fixtures/gate/` 是 skill 仓
-[true-tailor](https://github.com/shing26/truetailor) 的 vendor 副本
-（上游同为 MIT，两仓同作者）。改门禁规则须**先改上游再 re-sync**，
-漂移由 `tests/platform/test_skill_vendor_lock.py` 的字节级 hash 与
-`TestDriftLockParity` 双向锁定。
+[MIT](LICENSE)。`src/resualign/gate.py` 与 `tests/fixtures/gate/` 为 skill 仓 [true-tailor](https://github.com/shing26/truetailor) 的 vendor 副本（上游同为 MIT，同作者）。

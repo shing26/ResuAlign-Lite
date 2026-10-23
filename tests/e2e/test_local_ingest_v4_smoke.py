@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from helpers import capture_errors, expect, wait_for_function
+from helpers import capture_errors, expect, use_board_view, wait_for_function
 
 pytestmark = pytest.mark.e2e
 
@@ -91,6 +91,7 @@ def test_job_drawer_shows_snapshots_and_legacy_fallback(
         "pre-migration applied job should have no immutable snapshots",
     )
 
+    use_board_view(page)
     page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")
     page.wait_for_selector(
         f"[data-job-id='{applied_job['job_id']}']", timeout=15000

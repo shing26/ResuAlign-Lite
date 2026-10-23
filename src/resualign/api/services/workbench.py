@@ -18,6 +18,8 @@ from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
 from resualign.llm_usage import reset_llm_tenant, set_llm_tenant
 
 from ...app.context import context
+from .alignment_rules import humanize_alignment_error
+from .jobs import _gap_stage_error_text, _run_gap_stage
 
 logger = logging.getLogger(__name__)
 SESSION_TTL_SECONDS = 30 * 60
@@ -240,7 +242,12 @@ class WorkstationSessionStore:
                 "tenant_id": tenant_id,
                 "status": "initializing",
                 "job": None,
-                "jd": {"profile": None, "status": "queued", "error": None},
+                "jd": {
+                    "profile": None,
+                    "status": "queued",
+                    "error": None,
+                    "code": None,
+                },
                 "resume": {
                     "selected_resume_id": None,
                     "available_resumes": [],
@@ -252,6 +259,7 @@ class WorkstationSessionStore:
                     "gap_report": None,
                     "cache_hit": False,
                     "error": None,
+                    "code": None,
                 },
                 "alignment": {
                     "status": "idle",
@@ -426,6 +434,38 @@ def _create_library_job_without_llm(
     )
 
 
+def find_library_job_duplicate(
+    user: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Resolve the library row a paste payload would duplicate, if any.
+
+    Mirrors the field derivation of ``_create_library_job_without_llm`` so a
+    rejected paste can still find the existing row that rejected it (the
+    store's duplicate check tests URL, text, and identity candidates).
+    """
+    jd_text = (payload.get("jd_text") or "").strip()
+    if not jd_text:
+        return None
+    title = (payload.get("title") or "").strip() or context._derive_title(jd_text)
+    company = (payload.get("company") or "").strip() or None
+    location = (payload.get("location") or "").strip() or None
+    if not company or not location:
+        extracted_company, extracted_location = (
+            context._extract_company_location(jd_text)
+        )
+        company = company or extracted_company
+        location = location or extracted_location
+    jd_url = (payload.get("jd_url") or "").strip()
+    return context._jobs.find_duplicate(
+        user["user_id"],
+        source_url=(payload.get("source_url") or (jd_url or None)),
+        text=jd_text,
+        company=company,
+        title=title,
+        location=location,
+    )
+
+
 def _library_dedupe_key(jd_text: str) -> str:
     """Mirror the text dedupe key used by JobLibraryStore.create_job."""
     import hashlib as _hashlib
@@ -447,7 +487,10 @@ def _gap_score(gap_report: Any) -> Optional[float]:
 
 
 def alignment_notice(
-    diffs: Any, invalid_diffs: Any, draft: Any = None
+    diffs: Any,
+    invalid_diffs: Any,
+    draft: Any = None,
+    reason: str | None = None,
 ) -> Optional[str]:
     """Banner text when an alignment "succeeded" with no actionable product.
 
@@ -464,6 +507,12 @@ def alignment_notice(
         return None
     if diff_count:
         return None
+    if reason == "no_safe_rewrite":
+        return None
+    if reason == "model_failed":
+        return None
+    if reason == "no_gap":
+        return "当前岗位没有需要补足的明确缺口，简历无需改写。"
     if invalid_count:
         return (
             f"{invalid_count} 条改写建议因溯源未命中原文被硬门禁拦截："
@@ -487,6 +536,10 @@ def _session_sections_from_job(
     persisted jd/gap/alignment sections instead of empty placeholders (B6).
     """
     alignment_status = job.get("alignment_status") or "idle"
+    alignment_reason = job.get("alignment_reason")
+    alignment_error = job.get("alignment_error") or humanize_alignment_error(
+        job.get("last_alignment_error")
+    )
     return {
         "jd": {
             "profile": job.get("jd_profile"),
@@ -495,6 +548,7 @@ def _session_sections_from_job(
             # yet (the analyze endpoint re-queues from this state).
             "status": "ready",
             "error": None,
+            "code": None,
         },
         "gap": {
             "status": (
@@ -504,12 +558,16 @@ def _session_sections_from_job(
             "gap_report": job.get("gap_report"),
             "cache_hit": False,
             "error": None,
+            "code": None,
         },
         "alignment": {
             "status": alignment_status,
             "stage": (
                 "done" if alignment_status == "succeeded" else ""
             ),
+            "reason": alignment_reason,
+            "error": alignment_error or None,
+            "code": None,
             "diffs": job.get("diffs") or [],
             "invalid_diffs": job.get("invalid_diffs") or [],
             "draft": job.get("draft"),
@@ -518,6 +576,7 @@ def _session_sections_from_job(
                 job.get("diffs"),
                 job.get("invalid_diffs"),
                 job.get("draft"),
+                alignment_reason,
             ),
         },
     }
@@ -537,11 +596,78 @@ def _profile_cache_hit(jd_text: str) -> bool:
         return False
 
 
+def session_resume_text(session: dict[str, Any]) -> str:
+    """Resolve the resume text a session's gap stage would analyse."""
+    master_resume_id = (
+        session.get("master_resume_id")
+        or (session.get("resume") or {}).get("selected_resume_id")
+    )
+    if master_resume_id:
+        resume = context._resumes.get_master_resume(
+            session["tenant_id"], master_resume_id
+        )
+        if resume:
+            return resume["content"] or ""
+    return session.get("resume_text") or ""
+
+
+def session_gap_stage_pending(session: dict[str, Any]) -> bool:
+    """Return True when the session still owes a gap analysis.
+
+    A profile on its own is not "done": a session whose profile landed but
+    whose gap stage failed must stay re-runnable, otherwise the user is
+    parked on a half-analysed job with no way forward. The same stage split
+    ``preanalyze_job`` applies to library rows.
+    """
+    jd = session.get("jd") or {}
+    gap = session.get("gap") or {}
+    if jd.get("profile") is None:
+        return True
+    if not session_resume_text(session).strip():
+        return False
+    if gap.get("gap_report") is not None:
+        return False
+    # The job row may already carry a gap from a library-level preanalyse;
+    # re-running it here would only spend quota on a settled stage.
+    job = session.get("job") or {}
+    return job.get("gap_report") is None
+
+
+def _run_profile_stage(
+    client: Any, job: dict[str, Any], tenant_id: str
+) -> dict[str, Any]:
+    """Run the JD profile stage: role-based first, single client as fallback."""
+    try:
+        profile, _meta_profile = call_with_role(
+            "profiler", context.profile_jd,
+            context._llm_nodes, tenant_id,
+            fn_kwargs={
+                "jd_text": job["jd_text"],
+                "cache": context._cache,
+                "tenant": tenant_id,
+            },
+        )
+        return context.jd_profile_to_dict(profile)
+    except Exception:
+        # Fallback to single client
+        profile = context.profile_jd(
+            client,
+            job["jd_text"],
+            cache=context._cache,
+            tenant=tenant_id,
+        )
+        return context.jd_profile_to_dict(profile)
+
+
 def _run_session_pipeline(session_id: str) -> None:
     """Run the session's background classify/profile pipeline.
 
     Emits job.stage, job.gap_ready, and job.error events into the in-memory
     event bus. Tailor/eval remain explicitly user-triggered.
+
+    Each stage is independent: a stored profile is reused rather than
+    re-run, and a failed gap stage degrades instead of failing the session
+    (``_run_gap_stage``).
     """
     session = context._session_store.get(session_id)
     if session is None:
@@ -554,7 +680,9 @@ def _run_session_pipeline(session_id: str) -> None:
             # Crawl retirement (2026-08-30): URL-only sessions are rejected
             # at session/init, so a jobless session here is an anomaly.
             context._session_store.emit(
-                session_id, "job.error", {"error": "Job could not be created"}
+                session_id,
+                "job.error",
+                {"error": "Job could not be created", "stage": "init", "code": None},
             )
             context._session_store.update(session_id, {"status": "failed"})
             return
@@ -565,118 +693,77 @@ def _run_session_pipeline(session_id: str) -> None:
             {"stage": "classifying", "message": "Classifying job"},
         )
         job_functions, seniorities = context._settings_vocabulary(tenant_id)
-        try:
-            classification = context._classify_job(
-                job["jd_text"], job_functions, seniorities
-            )
-            context._jobs.update_job(
-                tenant_id,
-                job["job_id"],
-                job_function=classification.get("job_function"),
-                seniority=classification.get("seniority"),
-                tech_tags=classification.get("tech_tags") or [],
-                classification_pending=0,
-                allowed_job_functions=job_functions,
-                allowed_seniorities=seniorities,
-            )
-        except context.LLMResponseError as exc:
-            context._session_store.emit(
-                session_id,
-                "job.stage",
-                {
-                    "stage": "classifying",
-                    "message": f"Classification pending: {exc}",
-                },
-            )
         job = context._jobs.get_job(tenant_id, job["job_id"]) or job
+        # Classification is skipped when the row already carries it: a
+        # gap-only retry must not spend an LLM call re-deriving a settled
+        # field (the same stage split preanalyze_job uses).
+        if not job.get("classification_pending"):
+            job_functions = job.get("allowed_job_functions") or job_functions
+            seniorities = job.get("allowed_seniorities") or seniorities
+        else:
+            try:
+                classification = context._classify_job(
+                    job["jd_text"], job_functions, seniorities
+                )
+                context._jobs.update_job(
+                    tenant_id,
+                    job["job_id"],
+                    job_function=classification.get("job_function"),
+                    seniority=classification.get("seniority"),
+                    tech_tags=classification.get("tech_tags") or [],
+                    classification_pending=0,
+                    allowed_job_functions=job_functions,
+                    allowed_seniorities=seniorities,
+                )
+            except context.LLMResponseError as exc:
+                context._session_store.emit(
+                    session_id,
+                    "job.stage",
+                    {
+                        "stage": "classifying",
+                        "message": f"Classification pending: {exc}",
+                    },
+                )
 
         context._session_store.emit(
             session_id,
             "job.stage",
             {"stage": "jd_analysis", "message": "Extracting JD profile"},
         )
-        resume = None
-        master_resume_id = (
-            session.get("master_resume_id")
-            or (session.get("resume") or {}).get("selected_resume_id")
-        )
-        if master_resume_id:
-            resume = context._resumes.get_master_resume(
-                tenant_id, master_resume_id
-            )
-        resume_text = session.get("resume_text") or (
-            resume["content"] if resume else ""
-        )
+        resume_text = session_resume_text(session)
         cache_hit = _profile_cache_hit(job["jd_text"])
         config = context.build_config()
-        profile_dict: Optional[dict[str, Any]] = None
+        # A stored profile is reused, not re-run: the retry this pipeline
+        # exists for is usually a gap-only retry, and re-profiling would burn
+        # quota on a stage that already succeeded.
+        profile_dict: Optional[dict[str, Any]] = job.get("jd_profile") or None
         gap_dict: Optional[dict[str, Any]] = None
         gap_score: Optional[float] = None
+        gap_error_text: Optional[str] = None
+        gap_code: Optional[str] = None
         with context.OpenAIClient(config, timeout=90.0) as client:
             if resume_text.strip():
                 # Role-based: JD profiler + gap analyst
                 # Use same client for both (simpler than parallel for SSE)
-                try:
-                    profile, meta_profile = call_with_role(
-                        "profiler", context.profile_jd,
-                        context._llm_nodes, tenant_id,
-                        fn_kwargs={
-                            "jd_text": job["jd_text"],
-                            "cache": context._cache,
-                            "tenant": tenant_id,
-                        },
-                    )
-                    profile_dict = context.jd_profile_to_dict(profile)
-                except Exception:
-                    # Fallback to single client
-                    profile = context.profile_jd(
-                        client,
-                        job["jd_text"],
-                        cache=context._cache,
-                        tenant=tenant_id,
-                    )
-                    profile_dict = context.jd_profile_to_dict(profile)
-                import json as _json
-                _profile_str = _json.dumps(profile_dict, ensure_ascii=False)
-                try:
-                    gap, meta_gap = call_with_role(
-                        "gap_analyzer", context.analyze_gaps,
-                        context._llm_nodes, tenant_id,
-                        fn_kwargs={
-                            "resume_text": resume_text,
-                            "jd_profile_text": _profile_str,
-                        },
-                    )
-                    gap_dict = asdict(gap)
-                except Exception:
-                    gap = context.analyze_gaps(
-                        client,
-                        resume_text,
-                        _profile_str,
-                    )
-                    gap_dict = asdict(gap)
-                gap_status = "ready"
-                gap_score = _gap_score(gap)
+                if profile_dict is None:
+                    profile_dict = _run_profile_stage(client, job, tenant_id)
+                # The gap stage must not take the profile down with it: a
+                # failed gap leaves the session ready with the profile and a
+                # retryable gap error, instead of failing the whole session.
+                gap_report, gap_code = _run_gap_stage(
+                    client, resume_text, profile_dict, tenant_id
+                )
+                gap_dict = (
+                    asdict(gap_report) if gap_report is not None else None
+                )
+                gap_error_text = (
+                    _gap_stage_error_text(gap_code) if gap_code else None
+                )
+                gap_status = "ready" if gap_dict else "blocked"
+                gap_score = _gap_score(gap_report)
             else:
-                try:
-                    profile, meta_profile = call_with_role(
-                        "profiler", context.profile_jd,
-                        context._llm_nodes, tenant_id,
-                        fn_kwargs={
-                            "jd_text": job["jd_text"],
-                            "cache": context._cache,
-                            "tenant": tenant_id,
-                        },
-                    )
-                    profile_dict = context.jd_profile_to_dict(profile)
-                except Exception:
-                    profile = context.profile_jd(
-                        client,
-                        job["jd_text"],
-                        cache=context._cache,
-                        tenant=tenant_id,
-                    )
-                    profile_dict = context.jd_profile_to_dict(profile)
+                if profile_dict is None:
+                    profile_dict = _run_profile_stage(client, job, tenant_id)
                 gap_status = "blocked"
 
         try:
@@ -707,7 +794,7 @@ def _run_session_pipeline(session_id: str) -> None:
                     "score": gap_score,
                     "gap_report": gap_dict,
                     "cache_hit": cache_hit,
-                    "error": None,
+                    "error": gap_error_text,
                 },
             },
         )
@@ -720,9 +807,12 @@ def _run_session_pipeline(session_id: str) -> None:
                 "gap_report": gap_dict,
                 "status": gap_status,
                 "cache_hit": cache_hit,
+                "error": gap_error_text,
+                "code": gap_code,
             },
         )
     except context.LLMResponseError as exc:
+        code = getattr(exc, "code", "") or ""
         context._session_store.update(
             session_id,
             {
@@ -731,23 +821,41 @@ def _run_session_pipeline(session_id: str) -> None:
                     "profile": None,
                     "status": "failed",
                     "error": str(exc),
+                    "code": code,
                 },
             },
         )
         context._session_store.emit(
             session_id,
             "job.error",
-            {"error": f"JD analysis failed: {exc}", "stage": "jd_analysis"},
+            {
+                "error": f"JD analysis failed: {exc}",
+                "stage": "jd_analysis",
+                "code": code,
+            },
         )
     except Exception as exc:
+        code = getattr(exc, "code", "") or ""
         context._session_store.update(
             session_id,
-            {"status": "failed", "jd": {"profile": None, "status": "failed", "error": str(exc)}},
+            {
+                "status": "failed",
+                "jd": {
+                    "profile": None,
+                    "status": "failed",
+                    "error": str(exc),
+                    "code": code,
+                },
+            },
         )
         context._session_store.emit(
             session_id,
             "job.error",
-            {"error": f"Session pipeline failed: {exc}", "stage": "pipeline"},
+            {
+                "error": f"Session pipeline failed: {exc}",
+                "stage": "pipeline",
+                "code": code,
+            },
         )
     finally:
         reset_llm_tenant(_llm_tenant_token)

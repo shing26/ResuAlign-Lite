@@ -12,6 +12,8 @@ from fastapi.testclient import TestClient
 import resualign.api as api_module
 from resualign.api import app
 from resualign.cache import ContentCache
+from resualign.contracts.errors import LlmFailureCode
+from resualign.engine.llm import LLMResponseError
 from resualign.engine.tailor import (
     parse_diff_with_provenance,
     tailor_resume,
@@ -405,12 +407,139 @@ def test_preanalyze_no_resume_profiles_only():
     assert body["jd_profile"]["business_scene"] == ["low latency"]
 
 
+def _bind_resume(job_id: str, resume_id: str) -> None:
+    api_module._jobs.update_job(
+        _auth_user_id(), job_id, workbench_resume_id=resume_id
+    )
+
+
+def _preanalyze_with_failing_gap(
+    job_id: str, code: LlmFailureCode
+):
+    """Run preanalyze with a profile that succeeds and a gap that fails."""
+    resume = _create_resume()
+    _bind_resume(job_id, resume["resume_id"])
+    profile = JDProfile(
+        must_have_skills=["Python"], business_scenarios=["low latency"]
+    )
+    calls = {"profile": 0}
+
+    def fake_profile(client, jd_text, **kwargs):
+        calls["profile"] += 1
+        return profile
+
+    def failing_gap(*args, **kwargs):
+        raise LLMResponseError("gap unavailable", code)
+
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api._classify_job",
+        return_value={"job_function": "后端", "seniority": "中级", "tech_tags": []},
+    ), patch(
+        "resualign.app.context.context.profile_jd", side_effect=fake_profile
+    ), patch(
+        "resualign.app.context.context.analyze_gaps", side_effect=failing_gap
+    ):
+        response = client.post(
+            f"/api/jobs/{job_id}/preanalyze", headers=_auth_headers()
+        )
+    return response, calls
+
+
+def test_preanalyze_gap_failure_keeps_profile_and_names_stage():
+    """A gap failure must not throw away the profile it depends on."""
+    job = _create_job()
+    response, calls = _preanalyze_with_failing_gap(
+        job["job_id"], LlmFailureCode.RATE_LIMIT
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["jd_profile"]["must_have_skills"] == ["Python"]
+    assert body["gap_report"] is None
+    assert "rate_limit" in body["error"]
+    assert "画像已生成" in body["error"]
+    assert calls["profile"] == 1
+
+    persisted = client.get(
+        f"/api/jobs/{job['job_id']}", headers=_auth_headers()
+    ).json()
+    assert persisted["jd_profile"]["must_have_skills"] == ["Python"]
+
+
+def test_preanalyze_gap_only_retry_is_not_blocked_by_stored_profile():
+    """The old `jd_profile is not None` early return sealed the row shut:
+    a row whose gap failed could never be retried into having a gap."""
+    job = _create_job()
+    first, _ = _preanalyze_with_failing_gap(
+        job["job_id"], LlmFailureCode.RATE_LIMIT
+    )
+    assert first.status_code == 200
+    assert first.json()["gap_report"] is None
+
+    # Second call: the row still has no gap, so it must actually attempt the
+    # gap stage instead of short-circuiting on the stored profile.
+    attempts = {"gap": 0}
+
+    def failing_gap(*args, **kwargs):
+        attempts["gap"] += 1
+        raise LLMResponseError("gap unavailable", LlmFailureCode.RATE_LIMIT)
+
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.app.context.context.analyze_gaps", side_effect=failing_gap
+    ):
+        second = client.post(
+            f"/api/jobs/{job['job_id']}/preanalyze", headers=_auth_headers()
+        )
+
+    assert second.status_code == 200
+    assert attempts["gap"] >= 1
+    assert second.json()["cache_hit"] is False
+    assert second.json()["gap_report"] is None
+
+    resume = _create_resume()
+    _bind_resume(job["job_id"], resume["resume_id"])
+    gap = GapReport(missing_keywords=["Redis"], strength_matches=["Python"])
+    with patch("resualign.api.build_config", return_value=_config()), patch(
+        "resualign.api._classify_job",
+        return_value={"job_function": "后端", "seniority": "中级", "tech_tags": []},
+    ), patch(
+        "resualign.app.context.context.analyze_gaps", return_value=gap
+    ):
+        third = client.post(
+            f"/api/jobs/{job['job_id']}/preanalyze", headers=_auth_headers()
+        )
+
+    assert third.status_code == 200
+    assert third.json()["gap_report"]["missing_keywords"] == ["Redis"]
+    assert third.json()["error"] is None
+
+
+def test_preanalyze_gap_auth_failure_still_stops_the_sweep():
+    """Phase A1 contract: a definitive auth/quota failure is not degraded."""
+    job = _create_job()
+    response, calls = _preanalyze_with_failing_gap(
+        job["job_id"], LlmFailureCode.QUOTA
+    )
+
+    assert response.status_code == 503
+    assert "模型节点" in response.json()["detail"]
+    assert calls["profile"] == 1
+
+
 def test_rewrite_bullet_endpoint_persists_replacement():
     job = _create_job()
     job_id = job["job_id"]
     api_module._jobs.update_job(
         _auth_user_id(),
         job_id,
+        jd_profile={
+            "must_have_skills": ["Java"],
+            "business_scenarios": ["trade settlement"],
+        },
+        gap_report={
+            "supported_keywords": ["Redis caching"],
+            "missing_keywords": ["Kubernetes"],
+        },
         diffs=[
             {
                 "diff_id": "diff-1",
@@ -450,6 +579,9 @@ def test_rewrite_bullet_endpoint_persists_replacement():
     args = rewrite_mock.call_args
     assert args[0][2] == "high_concurrency"
     assert args[1]["tenant"] == _auth_user_id()
+    assert "Java" in args[1]["jd_context"]
+    assert "Python backend engineer with Redis" not in args[1]["jd_context"]
+    assert "Kubernetes" not in args[1]["jd_context"]
 
     persisted = client.get(
         f"/api/jobs/{job_id}", headers=_auth_headers()

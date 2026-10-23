@@ -13,6 +13,71 @@ from .models import (
     JOB_STATUSES_CANONICAL,
 )
 
+# Delivery status transition matrix (ADR-0027 / module 3).
+# Single-direction funnel: draft → applied → interview → offer/withdrawn.
+# Skipping stages is allowed (draft → interview is valid for imported jobs).
+# Any backward move is rejected with 422; "revive" (重新打开) is an explicit
+# action that moves from a terminal status back to a non-terminal one while
+# preserving terminal timestamps (semantic: "曾经到过").
+DELIVERY_TRANSITIONS: dict[str, frozenset[str]] = {
+    "draft": frozenset({"draft", "applied", "interview", "offer", "withdrawn"}),
+    "applied": frozenset({"applied", "interview", "offer", "withdrawn"}),
+    "interview": frozenset({"interview", "offer", "withdrawn"}),
+    "offer": frozenset({"offer", "withdrawn"}),
+    "withdrawn": frozenset({"withdrawn"}),  # terminal; only "revive" can move out
+}
+
+TERMINAL_DELIVERY_STATUSES = frozenset({"offer", "withdrawn"})
+
+
+class StatusTransitionError(UserStoreError):
+    """Raised when a delivery status transition is not allowed."""
+
+
+def can_transition_status(prev: str | None, new: str) -> bool:
+    """Return True if prev → new is a valid forward/skip transition."""
+    prev = canonical_status(prev or "draft")
+    new = canonical_status(new)
+    return new in DELIVERY_TRANSITIONS.get(prev, frozenset())
+
+
+
+def is_terminal_status(status: str | None) -> bool:
+    """Return True if the status is a terminal delivery state."""
+    return canonical_status(status or "") in TERMINAL_DELIVERY_STATUSES
+
+
+def allowed_transition_targets(status: str | None) -> list[str]:
+    """Return the list of valid target statuses from the given status."""
+    status = canonical_status(status or "draft")
+    return sorted(DELIVERY_TRANSITIONS.get(status, frozenset()))
+
+
+def validate_status_transition(
+    current_status: str | None,
+    target_status: str,
+    *,
+    revive: bool = False,
+) -> None:
+    """Validate a delivery status transition.
+
+    Raises :class:`StatusTransitionError` on an illegal transition.
+    When ``revive`` is True, allow moving from a terminal status back to a
+    non-terminal one (the "重新打开" action); terminal timestamps are
+    preserved by the caller.
+    """
+    current = canonical_status(current_status or "draft")
+    target = canonical_status(target_status)
+    if can_transition_status(current, target):
+        return
+    if revive and is_terminal_status(current) and not is_terminal_status(target):
+        return
+    allowed = allowed_transition_targets(current)
+    raise StatusTransitionError(
+        f"Illegal status transition {current!r} -> {target!r}. "
+        f"Allowed targets from {current!r}: {allowed}"
+    )
+
 
 def canonical_status(status: str) -> str:
     """Return the canonical five-state key for a stored status value."""

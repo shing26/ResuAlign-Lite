@@ -33,7 +33,79 @@ def test_analyze_gaps_prompt_mentions_gap():
     mock = MockLLM()
     _ = analyze_gaps(mock, "Resume", "JD")
     # R4: 04b-PE §2.3 新提示词已中文化，首行版本标记作为稳定断言锚点。
-    assert "PROMPT_VERSION: gap_analyzer/v2" in mock.last_system
+    assert "PROMPT_VERSION: gap_analyzer/v4" in mock.last_system
+
+
+def test_analyze_gaps_returns_supported_keywords():
+    """#164: the analyzer must emit the evidenced bucket separately from the
+    true-gap bucket, or the allowlist has no legitimate JD terminology."""
+    mock = MockLLM({
+        "supported_keywords": ["Redis caching"],
+        "supported_keyword_evidence": {
+            "Redis caching": "使用 Redis 做缓存",
+        },
+        "missing_keywords": ["Kubernetes"],
+        "misaligned_emphasis": [],
+        "strength_matches": ["Java"],
+    })
+    report = analyze_gaps(mock, "使用 Redis 做缓存", "JD profile...")
+    assert report.supported_keywords == ["Redis caching"]
+    assert report.missing_keywords == ["Kubernetes"]
+
+
+def test_analyze_gaps_returns_supported_keyword_evidence():
+    mock = MockLLM({
+        "supported_keywords": ["Redis caching"],
+        "supported_keyword_evidence": {
+            "Redis caching": "基于 Redis 的缓存",
+        },
+        "missing_keywords": ["Kubernetes"],
+        "misaligned_emphasis": [],
+        "strength_matches": ["Java"],
+    })
+    report = analyze_gaps(
+        mock, "基于 Redis 的缓存", "JD profile asks for Redis caching"
+    )
+    assert report.supported_keyword_evidence == {
+        "Redis caching": "基于 Redis 的缓存"
+    }
+
+
+def test_analyze_gaps_drops_unlocatable_supported_evidence():
+    mock = MockLLM({
+        "supported_keywords": ["Redis caching", "Kubernetes"],
+        "supported_keyword_evidence": {
+            "Redis caching": "基于 Redis 的缓存",
+            "Kubernetes": "使用 Kubernetes 部署服务",
+        },
+        "missing_keywords": [],
+        "misaligned_emphasis": [],
+        "strength_matches": ["Java"],
+    })
+    report = analyze_gaps(
+        mock, "基于 Redis 的缓存", "JD profile asks for Redis and Kubernetes"
+    )
+    assert report.supported_keywords == ["Redis caching"]
+    assert report.supported_keyword_evidence == {
+        "Redis caching": "基于 Redis 的缓存"
+    }
+
+
+def test_analyze_gaps_drops_supported_keyword_with_unrelated_evidence():
+    mock = MockLLM({
+        "supported_keywords": ["Kubernetes"],
+        "supported_keyword_evidence": {
+            "Kubernetes": "使用 Java 与 Spring Boot 开发服务",
+        },
+        "missing_keywords": ["Kubernetes"],
+        "misaligned_emphasis": [],
+        "strength_matches": ["Java"],
+    })
+    report = analyze_gaps(
+        mock, "使用 Java 与 Spring Boot 开发服务", "JD asks for Kubernetes"
+    )
+    assert report.supported_keywords == []
+    assert report.supported_keyword_evidence == {}
 
 
 def test_analyze_gaps_cache_hit_skips_llm(tmp_path):

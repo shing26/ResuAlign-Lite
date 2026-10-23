@@ -274,7 +274,9 @@ def test_local_ingest_universal_dedupe_by_text_hash():
     assert body["status"] == "duplicate"
     assert body["job_id"] == first["job_id"]
 
-    # The same text through the specific site is deduped by URL, not text.
+    # The same posting through a specific site with a different URL still
+    # resolves to its first row: the duplicate check tests every candidate
+    # (URL, text, guarded identity), not just the site-specific primary key.
     specific = _ingest(
         {
             "title": "Python Intern",
@@ -285,7 +287,9 @@ def test_local_ingest_universal_dedupe_by_text_hash():
         token=token,
     )
     assert specific.status_code == 200
-    assert specific.json()["status"] == "created"
+    body = specific.json()
+    assert body["status"] == "duplicate"
+    assert body["job_id"] == first["job_id"]
 
 
 def test_apply_freezes_snapshot_and_reapply_appends_without_downgrade():
@@ -341,7 +345,8 @@ def test_apply_freezes_snapshot_and_reapply_appends_without_downgrade():
     assert snapshots[1]["final_draft"] == "# Draft v1"
 
 
-def test_reapplying_applied_from_interview_does_not_downgrade():
+def test_reapplying_applied_from_interview_appends_without_downgrade():
+    """ADR-0027: recording an application never downgrades a later stage."""
     store = api_module._jobs
     job = store.create_job(
         tenant_id="local",
@@ -357,19 +362,19 @@ def test_reapplying_applied_from_interview_does_not_downgrade():
     )
     assert store.list_application_snapshots("local", job["job_id"]) == []
 
-    again = store.update_job(
+    updated = store.update_job(
         "local",
         job["job_id"],
         status="已投递",
         applied_at="2026-08-03",
     )
-    assert again["status"] == "interview"
-    assert again["status_label"] == "面试中"
-    # Bug-02: explicit applied_at is written even on append-only re-record;
-    # only the status is pinned (no downgrade) per ADR-0028.
-    assert again["applied_at"] == "2026-08-03"
+    current = store.get_job("local", job["job_id"])
+    assert updated["status"] == "interview"
+    assert current["status"] == "interview"
+    assert current["applied_at"] == "2026-08-03"
     snapshots = store.list_application_snapshots("local", job["job_id"])
     assert len(snapshots) == 1
+    assert snapshots[0]["final_draft"] == "# Intern draft"
     assert snapshots[0]["applied_at"] == "2026-08-03"
 
 

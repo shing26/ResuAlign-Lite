@@ -11,8 +11,10 @@
 | 读数 | 口径 | 复现命令 | 判据 | 达标否 |
 | --- | --- | --- | --- | --- |
 | 1179 passed / 7 skipped | `main@7b17607` 全量 pytest（固定快照，2026-09-25） | `PYTHONPATH=src python -m pytest tests/ -q` | 退出码 0 | ✅ |
+| 1282 passed / 7 skipped | `codex/llm-tuning-2026-10-08@48e2eb3` 全量 pytest（2026-10-20） | `$env:PYTHONPATH='src'; python -m pytest tests/ -q` | 退出码 0 | ✅ |
 | 89.18% line coverage | `--cov=resualign` | `PYTHONPATH=src python -m pytest --cov=resualign --cov-fail-under=85 tests/` | ≥85% | ✅ |
 | 553 passed | 前端 + 扩展 node:test | `node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs tests/extension/*.test.mjs` | 退出码 0 | ✅ |
+| 562 passed | 前端 node:test（2026-10-20） | `node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs` | 退出码 0 | ✅ |
 | 7 passed | Playwright E2E（假 LLM，自启自停） | `PYTHONPATH=src python -m pytest tests/e2e -q --e2e` | 退出码 0 | ✅ |
 | 1186 collected | tests/ 分层后的收集数 | `PYTHONPATH=src python -m pytest tests/ --collect-only -q` | 与用例数一致 | ✅ |
 
@@ -43,7 +45,10 @@ breaker 状态，不进入 CI 门禁。
 | 读数 | 口径 | 复现命令 | 判据 | 达标否 |
 | --- | --- | --- | --- | --- |
 | 120B p95：diagnose 5.888 s / profiler 2.656 s / gap 4.104 s / editor 3.987 s / evaluator 2.632 s | `nvidia/nemotron-3-super-120b-a12b`，每角色 5 次，`d2f43fa` | `PYTHONPATH=src python benchmarks\role_latency_benchmark.py --samples 5 --json-out role-latency.json` | 5/5 成功且 p95 < 当前 timeout | ✅ |
-| 当前 timeout 保留：45/75/60/90/60 s | 120B 快，但本地 `qwen2.5:7b` 历史 p95=61.7 s；短输入是下界 | 同上 + `docs/reports/role-timeout-calibration-2026-10-09.md` | 不为单一快节点下调慢模型预算 | 记录值（决策） |
+| 当前 timeout：45/75/60/150/60 s | #165 / ADR-0062；editor 90→150，其余角色不变 | `PYTHONPATH=src python -m pytest tests/api/test_r4_aie_guardrails.py tests/api/test_settings_routes.py -q` | 与运行时 API 一致且 env 可覆盖 | ✅ |
+| 3×3：3/9 succeeded / 1/9 usable | `nvidia/nemotron-3-super-120b-a12b`，同一 3 份 JD，隔离数据目录 | `$env:P0_SAMPLES='3'; python .scratch\p0_159_samples.py` | 记录值（质量线未达标） | ❌（信号线） |
+| Reolink #3 整轮 193.9s，编辑器 170.4s / 2 POST | 同一轮隔离运行，`attempts=2` | 同上；原始 `.scratch/p0-159-samples/results.json` | 单 POST ≤150s 且 0 deadline | ✅（墙钟线） |
+| #165 后 0 次 infrastructure error / deadline | 3×3 真实样本，evaluator 仍可拦截产出 | 同上 | 0 次基础设施错误 | ✅ |
 
 ## 性能与容量（B6）
 

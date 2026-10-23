@@ -34,6 +34,10 @@ def _job_funnel_stage(job: dict[str, Any]) -> str:
     ADR-0027: the funnel stage is the peak of the current canonical status,
     ``applied_at`` evidence, and ``offer_at`` evidence. Withdrawn jobs keep
     their pre-abandon stage when a historical timestamp exists.
+
+    Module 3 invariant: timestamps are append-only (terminal timestamps are
+    preserved on revive). So ``offer_at`` > ``applied_at`` > current status
+    is always true when all three exist.
     """
     stages = ("draft", "applied", "interview", "offer")
     current = job.get("status_canonical", "draft")
@@ -103,7 +107,18 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
                 title=job["title"],
                 company=job["company"],
                 alignment_status=job["alignment_status"],
+                alignment_reason=job.get("alignment_reason"),
+                alignment_error=(
+                    job.get("alignment_error")
+                    if job["alignment_status"] == "failed"
+                    else None
+                ),
                 updated_at=job["updated_at"],
+                failure_detail=(
+                    job.get("alignment_error")
+                    if job["alignment_status"] == "failed"
+                    else None
+                ),
             )
             break
     if quick_continue is None and jobs:
@@ -113,7 +128,18 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
             title=first["title"],
             company=first["company"],
             alignment_status=first["alignment_status"],
+            alignment_reason=first.get("alignment_reason"),
+            alignment_error=(
+                first.get("alignment_error")
+                if first["alignment_status"] == "failed"
+                else None
+            ),
             updated_at=first["updated_at"],
+            failure_detail=(
+                first.get("alignment_error")
+                if first["alignment_status"] == "failed"
+                else None
+            ),
         )
 
     return DashboardResponse(

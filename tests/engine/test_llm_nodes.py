@@ -925,3 +925,137 @@ def test_p2_role_tier_node_preference():
         node = api_module._llm_nodes.resolve_node_for_role(tenant, "editor")
         assert node is not None
         assert node["node_id"] == local["node_id"]
+
+
+# ------------------------------------------------------------------ #
+# Module 8: process-local cooldown                                    #
+# ------------------------------------------------------------------ #
+
+def test_cooldown_skips_node_after_timeout_failure():
+    """Module 8: timeout failure puts node in cooldown for 60s."""
+    from resualign.engine import role_router
+
+    role_router.clear_node_cooldown()
+    tenant = "t1"
+    node_id = "n1"
+    role_router._cool_down_node(tenant, node_id)
+    assert role_router._is_node_cooled_down(tenant, node_id)
+    role_router.clear_node_cooldown()
+
+
+def test_cooldown_does_not_trigger_on_auth_failure():
+    """Module 8: auth/quota failures do NOT trigger cooldown."""
+    from resualign.engine import role_router
+
+    assert not role_router._should_cool_down("auth")
+    assert not role_router._should_cool_down("quota")
+
+
+def test_cooldown_does_not_trigger_on_parse_failure():
+    """Module 8: parse/schema/empty failures do NOT trigger cooldown."""
+    from resualign.engine import role_router
+
+    assert not role_router._should_cool_down("parse")
+    assert not role_router._should_cool_down("schema")
+    assert not role_router._should_cool_down("empty")
+
+
+def test_cooldown_triggers_on_timeout_only():
+    """Module 8: only timeout failures trigger cooldown (5xx/http do not)."""
+    from resualign.engine import role_router
+
+    assert role_router._should_cool_down("timeout")
+
+
+def test_cooldown_does_not_trigger_on_http_failure():
+    """Module 8: 5xx/http failures do NOT trigger cooldown — they are
+    instant responses, so the breaker tally must keep counting them."""
+    from resualign.engine import role_router
+
+    assert not role_router._should_cool_down("http")
+
+
+def test_cooldown_expires_after_duration():
+    """Module 8: cooldown expires after the configured duration."""
+    import time
+
+    from resualign.engine import role_router
+
+    role_router.clear_node_cooldown()
+    tenant = "t1"
+    node_id = "n1"
+    # Put node in cooldown with a very short duration for testing.
+    key = role_router._node_cooldown_key(tenant, node_id)
+    role_router._NODE_COOLDOWN[key] = time.monotonic() - 1.0  # already expired
+    assert not role_router._is_node_cooled_down(tenant, node_id)
+    role_router.clear_node_cooldown()
+
+
+def test_usable_active_node_skips_cooled_down_node():
+    """Module 8: usable_active_node returns None for cooled-down nodes."""
+    from resualign.engine import role_router
+
+    role_router.clear_node_cooldown()
+
+    class FakeStore:
+        def get_usable_node(self, tenant_id):
+            return {"node_id": "n1", "name": "Node 1"}
+
+    role_router._cool_down_node("t1", "n1")
+    result = role_router.usable_active_node(FakeStore(), "t1")
+    assert result is None
+    role_router.clear_node_cooldown()
+
+
+def test_usable_active_node_returns_node_when_not_cooled_down():
+    """Module 8: usable_active_node returns node when not in cooldown."""
+    from resualign.engine import role_router
+
+    role_router.clear_node_cooldown()
+
+    class FakeStore:
+        def get_usable_node(self, tenant_id):
+            return {"node_id": "n1", "name": "Node 1"}
+
+    result = role_router.usable_active_node(FakeStore(), "t1")
+    assert result is not None
+    assert result["node_id"] == "n1"
+
+
+def test_usable_active_node_skips_cooled_down_first_node():
+    """Module 8: usable_active_node returns the next healthy node when the
+    first is cooled down, instead of None while healthy nodes exist."""
+    from resualign.engine import role_router
+    role_router.clear_node_cooldown()
+
+    class FakeStore:
+        def get_usable_nodes(self, tenant_id):
+            return [
+                {"node_id": "n1", "name": "Node 1"},
+                {"node_id": "n2", "name": "Node 2"},
+            ]
+
+    role_router._cool_down_node("t1", "n1")
+    result = role_router.usable_active_node(FakeStore(), "t1")
+    assert result is not None
+    assert result["node_id"] == "n2"
+    role_router.clear_node_cooldown()
+
+
+def test_usable_active_node_returns_none_when_all_cooled_down():
+    """Module 8: usable_active_node returns None only when every usable
+    node is cooled down."""
+    from resualign.engine import role_router
+    role_router.clear_node_cooldown()
+
+    class FakeStore:
+        def get_usable_nodes(self, tenant_id):
+            return [
+                {"node_id": "n1", "name": "Node 1"},
+                {"node_id": "n2", "name": "Node 2"},
+            ]
+
+    role_router._cool_down_node("t1", "n1")
+    role_router._cool_down_node("t1", "n2")
+    assert role_router.usable_active_node(FakeStore(), "t1") is None
+    role_router.clear_node_cooldown()

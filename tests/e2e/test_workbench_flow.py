@@ -35,6 +35,7 @@ from helpers import (
     capture_errors,
     expect,
     poll_until,
+    use_board_view,
     wait_for_count,
     wait_for_function,
 )
@@ -147,6 +148,7 @@ def test_command_palette_preserves_multiline_jd(page, base_url, api_call):
 
 def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
     errors = capture_errors(page)
+    use_board_view(page)
     job_id = None
     resume_id = None
 
@@ -388,6 +390,9 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
         modal.locator("[data-form='job-detail-edit'] button[type='submit']").click()
         modal.wait_for(state="detached", timeout=10000)
 
+        # B2 起卡片的「去投递」收进 kebab；先展开菜单再取按钮（行为未变，
+        # 只是入口从平铺改为菜单）。
+        card.locator(".board-more summary").click()
         go_apply = card.locator(
             f'[data-action="open-source-url"][data-url="{SOURCE_URL}"]'
         )
@@ -463,6 +468,7 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
         )
         followup_page = fresh_context.new_page()
         followup_errors = capture_errors(followup_page)
+        use_board_view(followup_page)
         try:
             followup_page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")
             followup_page.wait_for_selector("#job-board", timeout=20000)

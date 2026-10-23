@@ -9,6 +9,8 @@ from resualign.job_library import (
     JOB_FUNCTIONS,
     SENIORITIES,
     JobLibraryStore,
+    normalize_import_date,
+    validate_edit_date,
 )
 from resualign.workspace import UserStoreError
 
@@ -442,6 +444,7 @@ _PATCH_EXPECTED = {
     "tailor_focus": "skills",
     "custom_prompt": "Keep it concise.",
     "last_alignment_error": "none",
+    "alignment_reason": "model_failed",
     "application_result": "screen_pass",
     "deadline": "2026-09-30",
 }
@@ -476,6 +479,7 @@ def test_update_whitelist_and_expected_payload_are_in_sync(db_path):
         "usable_diffs",
         "has_gap",
         "alignment_reason",
+        "alignment_error",
         "analysis_ready",
         "status_canonical",
         "status_label",
@@ -517,6 +521,8 @@ def test_update_job_patches_each_field_independently(db_path, field):
         derived_changes |= {"has_gap", "alignment_reason"}
     if field == "alignment_status":
         derived_changes |= {"alignment_reason", "analysis_ready"}
+    if field == "last_alignment_error":
+        derived_changes |= {"alignment_error"}
     for other in baseline:
         if other == field or other in derived_changes:
             continue
@@ -623,6 +629,126 @@ class TestSourceUrlNormalization:
         assert job_library._normalize_source_url("") == ""
         assert job_library._normalize_source_url(None) == ""
 
+    def test_percent_encoding_and_unicode_equivalence(self):
+        normalize = job_library._normalize_source_url
+        # Raw unicode and its percent-encoded form are the same posting.
+        assert (
+            normalize("https://campus.example.com/招聘/Java")
+            == normalize("https://campus.example.com/%E6%8B%9B%E8%81%98/Java")
+        )
+        # Stray whitespace from copy-paste does not fork the key.
+        assert (
+            normalize(" https://x.com/a \n b ")
+            == normalize("https://x.com/a b")
+        )
+        # NFC-divergent unicode (precomposed vs combining) collapses to one key.
+        assert normalize("https://x.com/caf\u00e9") == normalize(
+            "https://x.com/cafe\u0301"
+        )
+        # Default ports are dropped.
+        assert normalize("https://x.com:443/a") == normalize("https://x.com/a")
+        assert normalize("http://x.com:80/a") == normalize("http://x.com/a")
+        # A port that is default for another scheme is still identity-bearing.
+        assert normalize("https://x.com:80/a") != normalize("https://x.com/a")
+        assert normalize("http://x.com:443/a") != normalize("http://x.com/a")
+        # Identity-bearing query params survive alongside tracking noise.
+        assert (
+            normalize("https://x.com/detail?postId=99&utm_source=mail")
+            == "https://x.com/detail?postid=99"
+        )
+
+
+class TestDedupeCandidates:
+    """Cross-channel duplicate checks test every candidate, not one key."""
+
+    def test_candidates_cover_url_text_and_guarded_identity(self):
+        cands = job_library._dedupe_candidates(
+            "https://x.com/jobs/1",
+            "Some JD body",
+            company="Acme",
+            title="Engineer",
+            location="Shanghai",
+        )
+        assert cands[0] == "url:https://x.com/jobs/1"
+        assert cands[1].startswith("text:")
+        assert cands[2].startswith("identity:")
+
+    def test_identity_candidate_requires_company_and_title(self):
+        cands = job_library._dedupe_candidates(
+            "", "Bare paste without metadata", company=None, title=None
+        )
+        assert all(not c.startswith("identity:") for c in cands)
+        cands = job_library._dedupe_candidates(
+            "", "Bare paste", company="Acme", title=None
+        )
+        assert all(not c.startswith("identity:") for c in cands)
+
+    def test_find_duplicate_matches_across_channels(self, db_path):
+        store = _store(db_path)
+        url_row = store.create_job(
+            tenant_id="t",
+            title="Engineer",
+            jd_text="Python backend engineer. Salary 20-30K.",
+            company="Acme",
+            location="Shanghai",
+            source_type="url",
+            source_url="https://x.com/jobs/1",
+        )
+        # A pasted copy of the same posting (no URL, same identity) hits.
+        assert (
+            store.find_duplicate(
+                "t",
+                source_url=None,
+                text="Python backend engineer. Salary 20-30K.",
+                company="Acme",
+                title="Engineer",
+                location="Shanghai",
+            )["job_id"]
+            == url_row["job_id"]
+        )
+        # A URL variant under a different stored key hits by normalized URL.
+        assert (
+            store.find_duplicate(
+                "t",
+                source_url="https://x.com/jobs/1?utm_source=mail",
+                text="Different body entirely",
+            )["job_id"]
+            == url_row["job_id"]
+        )
+        # A genuinely different posting is not a duplicate.
+        assert (
+            store.find_duplicate(
+                "t",
+                source_url=None,
+                text="Frontend engineer. React. 25-40K.",
+                company="Acme",
+                title="Frontend Engineer",
+                location="Shanghai",
+            )
+            is None
+        )
+
+    def test_create_job_rejects_cross_channel_duplicate(self, db_path):
+        store = _store(db_path)
+        store.create_job(
+            tenant_id="t",
+            title="Engineer",
+            jd_text="Python backend engineer. Salary 20-30K.",
+            company="Acme",
+            location="Shanghai",
+            source_type="url",
+            source_url="https://x.com/jobs/1",
+        )
+        with pytest.raises(UserStoreError, match="Duplicate job"):
+            store.create_job(
+                tenant_id="t",
+                title="Engineer (pasted)",
+                jd_text="Python backend engineer. Salary 20-30K.",
+                company="Acme",
+                location="Shanghai",
+                source_type="paste",
+            )
+
 
 class TestSalaryTextParsing:
     def test_requires_a_magnitude_unit(self):
@@ -691,3 +817,73 @@ def test_reconcile_rekeys_legacy_over_stripped_url_rows(db_path):
         )
     )
     assert second["job_id"] != job["job_id"]
+
+# ------------------------------------------------------------------ #
+# Module 6: date normalization and validation                        #
+# ------------------------------------------------------------------ #
+
+def test_normalize_import_date_normalizes_non_padded():
+    normalized, error = normalize_import_date("2026-8-14")
+    assert error is None
+    assert normalized == "2026-08-14"
+
+
+def test_normalize_import_date_accepts_iso_datetime():
+    normalized, error = normalize_import_date("2026-08-14T10:30:00Z")
+    assert error is None
+    assert normalized == "2026-08-14"
+
+
+def test_normalize_import_date_rejects_invalid():
+    normalized, error = normalize_import_date("not-a-date")
+    assert normalized is None
+    assert error is not None
+
+
+def test_normalize_import_date_rejects_out_of_range():
+    normalized, error = normalize_import_date("2026-13-40")
+    assert normalized is None
+    assert error is not None
+
+
+def test_normalize_import_date_rejects_impossible_calendar_days():
+    for value in ("2026-02-30", "2026-04-31"):
+        normalized, error = normalize_import_date(value)
+        assert normalized is None
+        assert error is not None
+
+
+def test_normalize_import_date_none_and_empty():
+    assert normalize_import_date(None) == (None, None)
+    assert normalize_import_date("") == (None, None)
+
+
+def test_validate_edit_date_accepts_valid():
+    assert validate_edit_date("applied_at", "2026-08-14") == "2026-08-14"
+    assert validate_edit_date("applied_at", "2026-8-14") == "2026-08-14"
+
+
+def test_validate_edit_date_rejects_invalid():
+    import pytest
+    with pytest.raises(UserStoreError, match="YYYY-MM-DD"):
+        validate_edit_date("applied_at", "not-a-date")
+
+
+def test_validate_edit_date_allows_empty():
+    assert validate_edit_date("applied_at", "") == ""
+    assert validate_edit_date("applied_at", None) == ""
+
+
+def test_update_job_rejects_invalid_date(db_path):
+    store = _store(db_path)
+    job = store.create_job(
+        tenant_id="tenant-1",
+        title="Backend",
+        jd_text="Python backend engineer.",
+    )
+    import pytest
+    with pytest.raises(UserStoreError, match="YYYY-MM-DD"):
+        store.update_job(
+            "tenant-1", job["job_id"],
+            posting_date="not-a-date",
+        )

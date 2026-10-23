@@ -311,6 +311,10 @@ def _recover_stale_alignments() -> None:
             job['tenant_id'],
             job['job_id'],
             'failed',
+            last_alignment_error=(
+                '上次对齐任务中断或未保存结果，请重新运行对齐。'
+            ),
+            alignment_reason='model_failed',
         )
         logger.info(
             'Marked library job %s alignment failed: registry job %s is '

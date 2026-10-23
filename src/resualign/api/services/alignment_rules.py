@@ -12,7 +12,17 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ...alignment_lifecycle import gap_report_has_gap
+
 logger = logging.getLogger(__name__)
+
+
+def humanize_alignment_error(message: str | None) -> str | None:
+    """Strip the ADR-0041 machine prefix for user-facing projections."""
+    text = str(message or "").strip()
+    if text.startswith("no_output:"):
+        text = text.split(":", 1)[1].strip()
+    return text or None
 
 
 def is_noop_diff(diff: dict[str, Any]) -> bool:
@@ -32,17 +42,13 @@ def is_noop_diff(diff: dict[str, Any]) -> bool:
 
 
 def report_has_gap(gap_report: Any) -> bool:
-    """#111 / ADR-0041 决定 5 分型谓词：缺口证据 = missing/misaligned 非空。
+    """#111 / ADR-0041 决定 5 分型谓词：缺口证据 = 可行动方向非空。
 
     None/空报告一律视为「无缺口」——7B 摆烂与真无缺口数据同形，宁可保守
     （零产出但无证据时保 succeeded + 「无缺口 · 无需改写」徽章，由换模型
     引导兜底），也不凭猜把一轮 run 判成质量失败。
     """
-    if not isinstance(gap_report, dict):
-        return False
-    return bool(gap_report.get("missing_keywords")) or bool(
-        gap_report.get("misaligned_emphasis")
-    )
+    return gap_report_has_gap(gap_report)
 
 
 def split_verified_diffs(
@@ -50,17 +56,41 @@ def split_verified_diffs(
     invalid_diffs: list[dict[str, Any]],
     *,
     eval_hallucinated: bool,
+    eval_hallucinated_diff_ids: list[str] | None = None,
     job_label: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return ``(kept, invalid)`` after the zero-hallucination gate.
 
-    P0（2026-09-06 安全审查 #74）：evaluator 自评判定幻觉时硬阻断——本轮
-    diffs 不作为已验证建议保存，整体降级 invalid（ADR-0019 零幻觉硬门）。
-    Phase A2：否则剔除 no-op diffs 并把它们折进 invalid_diffs。
+    P0（2026-09-06 安全审查 #74）：evaluator 自评判定幻觉时不得冒充已验证
+    建议。2026-10-19 起若 evaluator 给出 `hallucinated_diff_ids`，只隔离被
+    指认的 diff；没有 id 映射时回退整轮硬阻断（ADR-0019 零幻觉硬门）。
+    Phase A2：剔除 no-op diffs 并把它们折进 invalid_diffs。
     """
     if eval_hallucinated and raw_diffs:
+        flagged_ids = {
+            str(diff_id)
+            for diff_id in (eval_hallucinated_diff_ids or [])
+            if str(diff_id)
+        }
+        if flagged_ids:
+            blocked_source = [
+                diff
+                for diff in raw_diffs
+                if str(diff.get("diff_id") or "") in flagged_ids
+            ]
+            kept_source = [
+                diff
+                for diff in raw_diffs
+                if str(diff.get("diff_id") or "") not in flagged_ids
+            ]
+            if not blocked_source:
+                blocked_source = list(raw_diffs)
+                kept_source = []
+        else:
+            blocked_source = list(raw_diffs)
+            kept_source = []
         blocked = []
-        for diff in raw_diffs:
+        for diff in blocked_source:
             diff = dict(diff)
             diff["provenance_state"] = "fabricated"
             reason = (diff.get("reason") or "").rstrip("；;。 ")
@@ -72,11 +102,14 @@ def split_verified_diffs(
             blocked.append(diff)
         logger.warning(
             "library job %s: evaluator flagged hallucination; "
-            "blocked %d diff(s) from verified advice",
+            "blocked %d of %d diff(s) from verified advice",
             job_label,
+            len(blocked_source),
             len(raw_diffs),
         )
-        return [], list(invalid_diffs) + blocked
+        noop_diffs = [diff for diff in kept_source if is_noop_diff(diff)]
+        kept = [diff for diff in kept_source if not is_noop_diff(diff)]
+        return kept, list(invalid_diffs) + noop_diffs + blocked
     noop_diffs = [diff for diff in raw_diffs if is_noop_diff(diff)]
     kept = [diff for diff in raw_diffs if not is_noop_diff(diff)]
     invalid = list(invalid_diffs)
@@ -97,8 +130,15 @@ def resolve_alignment_outcome(
     gap_report: Any,
     tailor_degraded: bool,
     eval_hallucinated: bool,
-) -> tuple[str, str | None]:
-    """Return ``(alignment_status, alignment_error)`` for a finished run."""
+    no_safe_rewrite: bool = False,
+    no_safe_rewrite_reason: str = "",
+) -> tuple[str, str | None, str | None]:
+    """Return ``(status, error, reason)`` for a finished alignment run.
+
+    ``alignment_error`` keeps the ADR-0041 ``no_output:`` machine prefix for
+    zero-output quality failures. ``reason`` adds the user-facing terminal
+    classification without changing that contract.
+    """
     if tailor_degraded:
         alignment_error: str | None = (
             "改写阶段多次失败，本轮只产出诊断与缺口分析；"
@@ -109,14 +149,26 @@ def resolve_alignment_outcome(
             "真实性评估判定本轮改写存在无依据内容，"
             "全部建议已拦截；请核对后重试对齐"
         )
+    elif no_safe_rewrite:
+        alignment_error = (
+            no_safe_rewrite_reason.strip()
+            or "岗位存在缺口，但简历原文没有足够依据，因此没有安全改写。"
+        )
     else:
         alignment_error = None
     # ADR-0041 决定 5 分型甲（#111）：有缺口 ∧ usable=0 = 质量失败——就该红、
     # 可重跑（旧语义「全 noop/全拦截仍 succeeded」废除）。「no_output: 」
-    # 前缀是机读契约，投影据此派生 alignment_reason；无缺口 ∧ usable=0 维持
-    # succeeded，由前端渲染「无缺口 · 无需改写」。
+    # 前缀是机读契约，投影据此派生 alignment_reason。无缺口 ∧ usable=0
+    # 且没有真实性拦截时维持 succeeded；但 evaluator 已判幻觉并拦空全部
+    # 建议时，必须失败，不能靠“缺口列表为空”留下假绿灯。
+    blocked_hallucination = eval_hallucinated and not kept_diffs
     alignment_status = "succeeded"
-    if not kept_diffs and report_has_gap(gap_report):
+    if not kept_diffs and (
+        report_has_gap(gap_report)
+        or blocked_hallucination
+        or no_safe_rewrite
+        or tailor_degraded
+    ):
         alignment_status = "failed"
         alignment_error = (
             "no_output: "
@@ -125,4 +177,13 @@ def resolve_alignment_outcome(
                 or "该岗位存在能力/经验缺口，但本轮未产出任何可用改写建议"
             )
         )
-    return alignment_status, alignment_error
+    if not kept_diffs:
+        if no_safe_rewrite:
+            alignment_reason: str | None = "no_safe_rewrite"
+        elif alignment_status == "failed":
+            alignment_reason = "model_failed"
+        else:
+            alignment_reason = "no_gap"
+    else:
+        alignment_reason = None
+    return alignment_status, alignment_error, alignment_reason

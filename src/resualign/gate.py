@@ -267,7 +267,16 @@ def _unsupported_content(proposed: str, *supported_texts: str) -> list[str]:
 
 def allowlist_corpus(payload: str) -> str:
     """Gap-report JSON allowlist extraction (port of tailor._gap_support_text);
-    plain text passes through unchanged."""
+    plain text passes through unchanged.
+
+    `supported_keywords` is the only keyword field that may widen the corpus:
+    it names JD terms the resume already evidences somewhere, so quoting them
+    is not a new claim. `missing_keywords` is deliberately absent — it names
+    genuine gaps (JD requirements the resume does NOT evidence), and letting
+    those through is exactly how "the JD said it" turned into "I did it"
+    (issue #164). `jd_context` is absent for the same reason: it is a
+    one-line summary *about* the employer, not evidence about the candidate,
+    so it stays prompt context and never licenses content (issue #165)."""
     try:
         data = json.loads(payload or "{}")
     except (ValueError, TypeError):
@@ -276,18 +285,21 @@ def allowlist_corpus(payload: str) -> str:
         return payload or ""
     parts: list[str] = []
     for key in (
-        "missing_keywords",
+        "supported_keywords",
         "misaligned_emphasis",
         "strength_matches",
         "business_scenarios",
-        "jd_context",
     ):
         value = data.get(key)
         if isinstance(value, str):
             parts.append(value)
         elif isinstance(value, list):
             parts.extend(str(item) for item in value)
-    return "\n".join(parts) if parts else (payload or "")
+    # A parsed gap-report object with none of the allowed keys must produce
+    # an empty corpus. Falling back to the original JSON here would put
+    # `jd_context` (and any other context-only field) back into the
+    # allowlist, defeating #165.
+    return "\n".join(parts)
 
 
 def _is_noop(diff_type: str, original: str, proposed: str) -> bool:

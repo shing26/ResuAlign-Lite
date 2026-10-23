@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import resualign.api as api_module
 from resualign.api import app
+from resualign.api.routers.review import _parse_date
 from resualign.jobs import JobRegistry
 from resualign.settings_store import SettingsStore
 from resualign.workspace import (
@@ -197,3 +198,33 @@ def test_deadline_patch_roundtrip_and_clear():
     )
     assert r.status_code == 200
     assert r.json()["deadline"] is None
+
+
+def test_parse_date_accepts_iso_datetime():
+    assert _parse_date("2026-08-14T10:30:00") == "2026-08-14"
+
+
+def test_parse_date_accepts_plain_date():
+    assert _parse_date("2026-08-14") == "2026-08-14"
+
+
+def test_parse_date_rejects_non_padded():
+    # Non-padded month/day is not a valid calendar date shape.
+    assert _parse_date("2026-8-14") is None
+
+
+def test_parse_date_rejects_invalid_format():
+    assert _parse_date("not-a-date") is None
+    assert _parse_date("2026/08/14") is None
+    assert _parse_date("14-08-2026") is None
+
+
+def test_parse_date_rejects_out_of_range():
+    assert _parse_date("2026-13-01") is None
+    assert _parse_date("2026-00-10") is None
+    assert _parse_date("2026-02-30") is None
+
+
+def test_parse_date_none_and_empty():
+    assert _parse_date(None) is None
+    assert _parse_date("") is None

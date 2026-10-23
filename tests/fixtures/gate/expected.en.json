@@ -12,7 +12,11 @@
     {"diff_id": "e6-allowlist-term", "verdict": "usable", "reason": "verified", "salvaged": false,
      "note": "usable only with the allowlist; without it SLO is an unsupported term"},
     {"diff_id": "e7-misquoted-salvage", "verdict": "usable", "reason": "verified", "salvaged": true,
-     "note": "quote remembered wrong ('and' for ';') — difflib salvage must land on the real line"}
+     "note": "quote remembered wrong ('and' for ';') — difflib salvage must land on the real line"},
+    {"diff_id": "e8-missing-keyword-not-a-rewrite-source", "verdict": "blocked", "reason": "fabricated", "salvaged": false,
+     "note": "Terraform is listed under missing_keywords: a genuine JD gap, so it must not enter the allowlist corpus (#164)"},
+    {"diff_id": "e9-jd-context-is-not-a-license", "verdict": "blocked", "reason": "fabricated", "salvaged": false,
+     "note": "Nomad appears only in jd_context: prompt context about the employer, not evidence about the candidate (#165)"}
   ],
-  "summary": {"diffs": 7, "usable": 5, "blocked": {"missing": 0, "fabricated": 2, "noop": 0}}
+  "summary": {"diffs": 9, "usable": 5, "blocked": {"missing": 0, "fabricated": 4, "noop": 0}}
 }

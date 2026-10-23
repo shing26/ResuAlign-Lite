@@ -3422,7 +3422,7 @@
     "/api/workbench/session/{session_id}/analyze": {
       "post": {
         "summary": "Analyze Workbench Session",
-        "description": "Run JD profiling/gap analysis for a library-job workstation session.\n\nThe first call queues the pipeline; subsequent calls return the current\nstate without spawning another worker.",
+        "description": "Run JD profiling/gap analysis for a library-job workstation session.\n\nThe first call queues the pipeline; subsequent calls return the current\nstate without spawning another worker. A session is only \"done\" when the\nprofile is in *and* the gap stage is settled, so a gap that failed stays\nre-runnable (``session_gap_stage_pending``).",
         "operationId": "analyze_workbench_session_api_workbench_session__session_id__analyze_post",
         "parameters": [
           {
@@ -4071,6 +4071,44 @@
             "type": "string",
             "title": "Alignment Status",
             "default": "idle"
+          },
+          "alignment_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "no_gap",
+                  "no_safe_rewrite",
+                  "model_failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alignment Reason"
+          },
+          "alignment_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alignment Error"
+          },
+          "failure_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Detail"
           },
           "updated_at": {
             "anyOf": [
@@ -5051,6 +5089,11 @@
               }
             ],
             "title": "Deadline"
+          },
+          "revive": {
+            "type": "boolean",
+            "title": "Revive",
+            "default": false
           }
         },
         "type": "object",
@@ -6769,6 +6812,71 @@
             "type": "string",
             "title": "Stage",
             "default": ""
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "no_gap",
+                  "no_safe_rewrite",
+                  "model_failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "elapsed_seconds": {
+            "type": "number",
+            "title": "Elapsed Seconds",
+            "default": 0.0
           },
           "diffs": {
             "items": {

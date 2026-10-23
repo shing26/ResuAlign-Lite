@@ -192,6 +192,45 @@ class TestDriftLockParity:
             assert "term" in got["detail"], diff_id
 
 
+def test_gap_support_text_excludes_gap_and_context_fields():
+    """#164/#165: only `supported_keywords` may widen the app corpus.
+
+    The app's gap analyzer uses `missing_keywords` for genuine JD gaps, so
+    feeding that key into the corpus is exactly how "the JD asked for it"
+    passed the content check as a claimed skill. `jd_context` is prompt
+    context too, not candidate evidence.
+    """
+    from resualign.engine.tailor import _gap_support_text
+
+    payload = json.dumps(
+        {
+            "supported_keywords": ["Kafka"],
+            "missing_keywords": ["Elasticsearch"],
+            "strength_matches": ["库存扣减"],
+            "jd_context": "需要 Kubernetes 经验",
+        },
+        ensure_ascii=False,
+    )
+    corpus = _gap_support_text(payload)
+    assert "Kafka" in corpus
+    assert "Elasticsearch" not in corpus
+    assert "Kubernetes" not in corpus
+    # The vendored standalone gate must agree with the app on the same payload.
+    assert gate.allowlist_corpus(payload) == corpus
+
+
+def test_context_only_json_never_becomes_free_text_allowlist():
+    """A JSON object with no allowlist keys is not raw free text."""
+    from resualign.engine.tailor import _gap_support_text
+
+    payload = json.dumps(
+        {"jd_context": "The employer runs Consul and Kubernetes."},
+        ensure_ascii=False,
+    )
+    assert gate.allowlist_corpus(payload) == ""
+    assert _gap_support_text(payload) == ""
+
+
 class TestCliContract:
     def test_summary_line_format(self, tmp_path, capsys):
         log = tmp_path / "run.jsonl"
@@ -210,7 +249,7 @@ class TestCliContract:
         summary = [line for line in out.splitlines() if line.startswith("GATE:")]
         assert len(summary) == 1
         assert re.fullmatch(
-            r"GATE: 10 diffs / 6 blocked \(missing=2, fabricated=3, noop=1\) "
+            r"GATE: 12 diffs / 8 blocked \(missing=2, fabricated=5, noop=1\) "
             r"/ resume-sha256=[0-9a-f]{12}",
             summary[0],
         ), summary[0]
@@ -218,7 +257,7 @@ class TestCliContract:
         assert entry["round"] == 2
         assert entry["trigger"] == "eval:round1"
         assert entry["usable"] == 4
-        assert entry["blocked"] == {"missing": 2, "fabricated": 3, "noop": 1}
+        assert entry["blocked"] == {"missing": 2, "fabricated": 5, "noop": 1}
         assert len(entry["resume_sha256"]) == 64
 
     def test_missing_file_exits_2(self, tmp_path, capsys):

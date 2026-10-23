@@ -47,7 +47,7 @@ test("settingsBentoHtml renders four bento cards with defaults when empty", () =
 
   assert.equal(body.querySelector("[data-bento-model] .settings-bento__value").textContent, "—");
   assert.equal(body.querySelector("[data-bento-arch] .settings-bento__value").textContent, "本地 SQLite");
-  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "45–90 秒");
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "45–150 秒");
   assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__hint").textContent, "按角色 · 并发: 1");
   assert.equal(body.querySelector("[data-bento-latency] .settings-bento__value").textContent, "—");
 });
@@ -59,16 +59,16 @@ test("settingsBentoHtml shows active node, timeout guardrails and latency", () =
     body.querySelector("[data-bento-model] .settings-bento__value").textContent,
     "deepseek · deepseek-chat",
   );
-  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "45–90 秒");
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "45–150 秒");
   assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__hint").textContent, "按角色 · 并发: 1");
   assert.equal(body.querySelector("[data-bento-latency] .settings-bento__value").textContent, "123 ms");
 });
 
 test("settingsBentoHtml tolerates missing / non-array-ish counts", () => {
   const body = bodyFrom(settingsBentoHtml(null, null));
-  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "45–90 秒");
+  assert.equal(body.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "45–150 秒");
   const body2 = bodyFrom(settingsBentoHtml(null, "abc"));
-  assert.equal(body2.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "45–90 秒");
+  assert.equal(body2.querySelector("[data-bento-timeout] .settings-bento__value").textContent, "45–150 秒");
   assert.equal(body2.querySelector("[data-bento-latency] .settings-bento__value").textContent, "—");
 });
 
@@ -83,10 +83,10 @@ test("settingsBentoHtml shows the runtime values the backend enforces", () => {
 });
 
 test("roleTimeoutSummary collapses a single value and rejects junk", () => {
-  assert.equal(roleTimeoutSummary({ editor: 90 }), "90 秒");
+  assert.equal(roleTimeoutSummary({ editor: 150 }), "150 秒");
   assert.equal(roleTimeoutSummary({}), "—");
   assert.equal(roleTimeoutSummary({ editor: "abc" }), "—");
-  assert.equal(roleTimeoutSummary(null), "45–90 秒");
+  assert.equal(roleTimeoutSummary(null), "45–150 秒");
 });
 
 test("settingsBentoHtml escapes model/provider values", () => {
@@ -650,7 +650,7 @@ test("main.js wires the llm-fetch-models action to POST /api/llm/models", () => 
 });
 
 /* 2026-09-24：设置页的「Guardrails」面板是写死展示（超时数字 40s 与后端
- * 实际 per-role 45–90s 不符），且「评估默认」勾选框没有 name / handler，
+ * 实际 per-role 45–150s 不符），且「评估默认」勾选框没有 name / handler，
  * 点了不生效。真正生效的评估开关在节点卡片下方，故整块删除。 */
 test("settings page no longer ships the decorative Guardrails panel", () => {
   const mainJs = readFileSync(join(HERE, "../../src/resualign/static/app/main.js"), "utf8");
@@ -666,4 +666,27 @@ test("settings page no longer ships the decorative Guardrails panel", () => {
   assert.match(mainJs, /<h2>自动化规则<\/h2>/);
   /* 真开关仍在（settings-eval-default 表单） */
   assert.match(mainJs, /data-form="settings-eval-default"/);
+});
+
+
+/* ------------------------------------------------------------------ */
+/* Module 7: settings status degradation                              */
+/* ------------------------------------------------------------------ */
+
+test("settingsBentoHtml shows error bar with retry when degraded", () => {
+  const body = bodyFrom(settingsBentoHtml(null, null, { _degraded: true }));
+  const errorBar = body.querySelector("[data-settings-degraded]");
+  assert.ok(errorBar, "error bar rendered when degraded");
+  assert.match(errorBar.textContent, /加载失败/);
+  const retryBtn = errorBar.querySelector('[data-action="retry-settings-status"]');
+  assert.ok(retryBtn, "retry button rendered");
+  assert.equal(retryBtn.textContent, "重试");
+  // Four cards still render (main body unaffected).
+  const cards = [...body.querySelectorAll(".settings-bento__card")];
+  assert.equal(cards.length, 4);
+});
+
+test("settingsBentoHtml hides error bar when not degraded", () => {
+  const body = bodyFrom(settingsBentoHtml(null, null, { worker_concurrency: 2 }));
+  assert.equal(body.querySelector("[data-settings-degraded]"), null);
 });

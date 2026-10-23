@@ -168,7 +168,7 @@ test("main.js: route meta, rail count and resume list route", () => {
   assert.match(src, /refreshHeaderMeta\(\)/, "header meta refreshed per route");
   assert.match(src, /refreshJobsRailCount\(/, "jobs rail count refresh");
   assert.match(src, /#\/resume\/list/, "explicit resume list route");
-  assert.match(src, /settingsBentoHtml\(activeNode, latency, status\)/, "settings runtime status bento");
+  assert.match(src, /settingsBentoHtml\(activeNode, latency, state\.settingsStatus\)/, "settings runtime status bento");
   assert.match(src, /data-llm-nodes-panel/, "settings LLM node panel");
   assert.match(src, /\.jobs-topbar"\) \|\| app\.querySelector\("\.page-header"\)/, "jobs strip hooks target the top bar");
   assert.doesNotMatch(src, /page-header--jobs \.row/, "old fetch-bar hook removed");

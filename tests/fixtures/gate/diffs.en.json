@@ -68,5 +68,25 @@
     "provenance": "Load testing with Locust and CI on GitHub Actions",
     "reason": "quote misremembered ('and' for ';'): salvage must locate the real line and correct original",
     "confidence": "medium"
+  },
+  {
+    "diff_id": "e8-missing-keyword-not-a-rewrite-source",
+    "type": "modify",
+    "section": "Experience",
+    "original": "Built ETL jobs that moved 2 million claim rows per night into the analytics warehouse.",
+    "proposed": "Built Terraform-managed ETL jobs that moved 2 million claim rows per night into the analytics warehouse.",
+    "provenance": "Built ETL jobs that moved 2 million claim rows per night into the analytics warehouse.",
+    "reason": "Terraform sits in missing_keywords (a real JD gap), so it must NOT widen the allowlist",
+    "confidence": "medium"
+  },
+  {
+    "diff_id": "e9-jd-context-is-not-a-license",
+    "type": "modify",
+    "section": "Experience",
+    "original": "Built ETL jobs that moved 2 million claim rows per night into the analytics warehouse.",
+    "proposed": "Built Nomad-scheduled ETL jobs that moved 2 million claim rows per night into the analytics warehouse.",
+    "provenance": "Built ETL jobs that moved 2 million claim rows per night into the analytics warehouse.",
+    "reason": "Nomad appears only in jd_context, which is prompt context, not evidence about the candidate",
+    "confidence": "medium"
   }
 ]

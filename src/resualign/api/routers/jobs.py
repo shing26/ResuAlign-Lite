@@ -1,5 +1,4 @@
 
-import json
 import logging
 import threading
 import time
@@ -10,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ...alignment_lifecycle import transition_alignment
 from ...app.context import context
+from ...jd_analysis import jd_context_summary
 from ...llm_usage import llm_tenant_context
 from ..deps import get_current_user, get_local_ingest_user
 from ..schemas import (
@@ -418,7 +418,7 @@ async def update_library_job(job_id: str, req: JobUpdateRequest, request: Reques
         for key, value in raw_timeline.items()
     }
     try:
-        job = context._jobs.update_job(user['user_id'], job_id, title=req.title, jd_text=req.jd_text, company=req.company, location=req.location, salary_min=req.salary_min, salary_max=req.salary_max, salary_currency=req.salary_currency, source_type=req.source_type, source_url=req.source_url, job_function=req.job_function, seniority=req.seniority, tech_tags=req.tech_tags, status=req.status, posting_date=req.posting_date, applied_at=timeline.get('applied_at'), next_step=timeline.get('next_step'), notes=timeline.get('notes'), offer_at=timeline.get('offer_at'), rejected_at=timeline.get('rejected_at'), next_step_due_at=timeline.get('next_step_due_at'), interview_stage=timeline.get('interview_stage'), application_result=req.application_result, deadline=req.deadline, tailor_granularity=req.tailor_granularity, tailor_focus=req.tailor_focus, custom_prompt=req.custom_prompt, allowed_job_functions=job_functions, allowed_seniorities=seniorities)
+        job = context._jobs.update_job(user['user_id'], job_id, title=req.title, jd_text=req.jd_text, company=req.company, location=req.location, salary_min=req.salary_min, salary_max=req.salary_max, salary_currency=req.salary_currency, source_type=req.source_type, source_url=req.source_url, job_function=req.job_function, seniority=req.seniority, tech_tags=req.tech_tags, status=req.status, posting_date=req.posting_date, applied_at=timeline.get('applied_at'), next_step=timeline.get('next_step'), notes=timeline.get('notes'), offer_at=timeline.get('offer_at'), rejected_at=timeline.get('rejected_at'), next_step_due_at=timeline.get('next_step_due_at'), interview_stage=timeline.get('interview_stage'), application_result=req.application_result, deadline=req.deadline, tailor_granularity=req.tailor_granularity, tailor_focus=req.tailor_focus, custom_prompt=req.custom_prompt, allowed_job_functions=job_functions, allowed_seniorities=seniorities, revive=req.revive)
     except context.UserStoreError as exc:
         if 'Duplicate job' in str(exc):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -654,13 +654,9 @@ def rewrite_workbench_bullet(
             detail='LLM 未配置。请设置 API Key（远程供应商）或激活 Ollama 本地节点。',
         )
     context.enforce_daily_llm_cap(user['user_id'])
-    jd_context = json.dumps(
-        {
-            'jd_profile': job.get('jd_profile'),
-            'gap_report': job.get('gap_report'),
-            'jd_text': (job.get('jd_text') or '')[:6000],
-        },
-        ensure_ascii=False,
+    jd_context = jd_context_summary(
+        job.get('jd_profile'),
+        job.get('gap_report'),
     )
     with llm_tenant_context(user['user_id']):
         with context.OpenAIClient(

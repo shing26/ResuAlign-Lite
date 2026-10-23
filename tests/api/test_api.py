@@ -325,6 +325,8 @@ def test_job_runs_to_succeeded_with_full_report_shape():
             "business_scene": ["Backend"],
         }
     assert result["gap_report"] == {
+        "supported_keywords": [],
+        "supported_keyword_evidence": {},
         "missing_keywords": ["Redis"],
         "misaligned_emphasis": ["Leadership"],
         "strength_matches": ["Python"],

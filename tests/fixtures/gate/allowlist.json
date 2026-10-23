@@ -1,7 +1,8 @@
 {
-  "missing_keywords": ["Kafka"],
+  "supported_keywords": ["Kafka"],
+  "missing_keywords": ["Elasticsearch"],
   "misaligned_emphasis": [],
   "strength_matches": ["库存扣减"],
   "business_scenarios": ["高并发场景"],
-  "jd_context": "电商交易方向，消息队列与削峰经验加分"
+  "jd_context": "电商交易方向，消息队列与削峰经验加分；团队用 Consul 做服务发现"
 }

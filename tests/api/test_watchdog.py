@@ -105,6 +105,7 @@ class TestLibraryMirror:
         assert watchdog.scan_once(now=1_011.0)
         refreshed = api_module._jobs.get_job("t1", lib["job_id"])
         assert refreshed["alignment_status"] == "failed"
+        assert refreshed["alignment_reason"] == "model_failed"
         assert "超时" in (refreshed["last_alignment_error"] or "")
 
     def test_watchdog_event_logged(self, caplog):

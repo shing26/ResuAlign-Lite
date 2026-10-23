@@ -163,20 +163,156 @@ export function inlineMarkdown(text) {
     .replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
-export function renderMarkdown(text) {
+/* RS-01（2026-10-23，审计 RS-01）：真实主简历往往是「一段刚硬换行的纯文本」——
+ * 3,287 字里 h1/h2/h3 = 0 个，章节名（教育经历 / 专业技能清单 / 核心项目经历）
+ * 要么独占一行、要么被硬换行粘在上一行末尾，于是预览看起来像日志而不像文档。
+ * 这里给纯文本文档加一层保守的结构识别：只在「长文本 + 完全没有 markdown 标题」
+ * 时启用，且只对非 markdown 行生效——短文本与标准 markdown 渲染完全不变。 */
+const DOC_SECTION_KEYWORDS = [
+  "核心项目经历",
+  "工作方式与个人特点",
+  "专业技能清单",
+  "教育经历",
+  "实习经历",
+  "工作经历",
+  "项目经历",
+  "校园经历",
+  "科研经历",
+  "开源贡献",
+  "荣誉奖项",
+  "自我评价",
+  "个人优势",
+  "专业技能",
+  "技能清单",
+];
+
+const DOC_FIELD_LABELS = [
+  "主修",
+  "技术栈",
+  "情境",
+  "任务",
+  "结果",
+  "职责",
+  "成果",
+  "背景",
+  "目标",
+  "方案",
+  "影响",
+];
+
+const DOC_CONTACT_RE =
+  /(@|https?:\/\/|github\.com|1[3-9]\d{9}|\d{3}-\d{4}-\d{4})/;
+const DOC_PROJECT_TITLE_RE = /^[^\s].{2,80}?\s[—–-]\s/;
+const DOC_HEADING_BAN_RE = /[。；，、！？：:]/;
+
+function looksLikeDocHeading(text) {
+  const value = String(text || "").trim();
+  if (value.length < 2 || value.length > 14) return false;
+  if (DOC_HEADING_BAN_RE.test(value)) return false;
+  if (/^[-*•#>|\d]/.test(value)) return false;
+  if (/\*\*|`/.test(value)) return false;
+  return (value.match(/[\u4e00-\u9fa5]/g) || []).length >= 2;
+}
+
+/* 一行里可能同时有「正文 + 章节名 + 项目名」（硬换行把章节名粘在行尾），
+ * 按最早出现、且优先最长关键词切段。 */
+function splitDocLine(line) {
+  let best = null;
+  for (const keyword of DOC_SECTION_KEYWORDS) {
+    const index = line.indexOf(keyword);
+    if (index === -1) continue;
+    if (!best || index < best.index || (index === best.index && keyword.length > best.keyword.length)) {
+      best = { keyword, index };
+    }
+  }
+  if (!best) return [{ type: "text", text: line }];
+  const segments = [];
+  const before = line.slice(0, best.index).trim();
+  if (before) segments.push({ type: "text", text: before });
+  segments.push({ type: "heading", text: best.keyword });
+  const after = line.slice(best.index + best.keyword.length).trim();
+  if (after) {
+    const isProject =
+      DOC_PROJECT_TITLE_RE.test(after) &&
+      (/·/.test(after) || /github\.com/.test(after));
+    segments.push({ type: isProject ? "project" : "text", text: after });
+  }
+  return segments;
+}
+
+/* 一行里可能塞了多个字段（「技术栈：… 情境：…」），按标签位置切开分别渲染，
+ * 否则第二个标签会淹没在正文里。 */
+function splitDocFieldLine(text) {
+  const pattern = new RegExp(`(${DOC_FIELD_LABELS.join("|")})[：:]`, "g");
+  const matches = [...text.matchAll(pattern)];
+  if (!matches.length || matches[0].index !== 0) return null;
+  return matches.map((match, index) => {
+    const start = match.index + match[0].length;
+    const end = index + 1 < matches.length ? matches[index + 1].index : text.length;
+    return { label: match[1], body: text.slice(start, end).trim() };
+  });
+}
+
+export function renderMarkdown(text, options = {}) {
+  const source = String(text || "");
+  /* 文档模式是「猜」的结构，必须足够保守：短文本与带 markdown 标题的文本一律
+   * 走原逻辑，避免改动既有渲染契约（markdown.test.mjs 逐条锁着）。 */
+  const documentMode =
+    options.document === true ||
+    (source.length > 400 && !/^#{1,6}\s/m.test(source));
   const html = [];
   let listOpen = false;
+  let lastBlock = null; /* { type: "li" | "p", index } 用于硬换行续行 */
+  let docHeaderDone = false;
   const closeList = () => {
     if (listOpen) {
       html.push("</ul>");
       listOpen = false;
     }
   };
-  for (const raw of String(text || "").split("\n")) {
-    const line = esc(raw);
-    const trimmed = line.trim();
+  const pushParagraph = (inner, className = "") => {
+    html.push(className ? `<p class="${className}">${inner}</p>` : `<p>${inner}</p>`);
+    lastBlock = { type: "p", index: html.length - 1 };
+  };
+  const pushHeading = (inner, className = "") => {
+    html.push(
+      className
+        ? `<h3 class="${className}">${inlineMarkdown(inner)}</h3>`
+        : `<h3>${inlineMarkdown(inner)}</h3>`,
+    );
+    /* 标题后面紧跟的硬换行正文不应被当成续行拼回标题。 */
+    lastBlock = { type: "heading", index: html.length - 1 };
+  };
+
+  const emitDocSegment = (segment) => {
+    const inner = esc(segment.text);
+    if (segment.type === "heading") {
+      pushHeading(inner, "resume-doc__section");
+      return;
+    }
+    if (segment.type === "project") {
+      pushHeading(inner, "resume-doc__project");
+      return;
+    }
+    const fieldSegments = splitDocFieldLine(segment.text);
+    if (fieldSegments) {
+      for (const field of fieldSegments) {
+        pushParagraph(
+          `<strong>${esc(field.label)}：</strong>${inlineMarkdown(esc(field.body))}`,
+          "resume-doc__field",
+        );
+      }
+      return;
+    }
+    pushParagraph(inlineMarkdown(inner));
+  };
+
+  for (const rawLine of source.split("\n")) {
+    const trimmedRaw = rawLine.trim();
+    const trimmed = esc(trimmedRaw);
     if (!trimmed) {
       closeList();
+      lastBlock = null;
       continue;
     }
     const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
@@ -184,6 +320,7 @@ export function renderMarkdown(text) {
       closeList();
       const level = heading[1].length;
       html.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
+      lastBlock = { type: "p", index: html.length - 1 };
       continue;
     }
     const listItem = trimmed.match(/^[-*•]\s+(.*)$/);
@@ -193,10 +330,75 @@ export function renderMarkdown(text) {
         listOpen = true;
       }
       html.push(`<li>${inlineMarkdown(listItem[1])}</li>`);
+      lastBlock = { type: "li", index: html.length - 1 };
       continue;
     }
+    if (documentMode) {
+      if (!docHeaderDone) {
+        docHeaderDone = true;
+        closeList();
+        html.push(`<h1 class="resume-doc__name">${inlineMarkdown(trimmed)}</h1>`);
+        lastBlock = { type: "heading", index: html.length - 1 };
+        continue;
+      }
+      if (
+        !html.some((chunk) => chunk.startsWith("<p")) &&
+        DOC_CONTACT_RE.test(trimmedRaw) &&
+        trimmedRaw.length < 180
+      ) {
+        closeList();
+        pushParagraph(inlineMarkdown(trimmed), "resume-doc__contact");
+        continue;
+      }
+      const segments = splitDocLine(trimmedRaw);
+      const hasStructure = segments.some((seg) => seg.type !== "text");
+      if (hasStructure) {
+        closeList();
+        for (const segment of segments) emitDocSegment(segment);
+        continue;
+      }
+      const fieldSegments = splitDocFieldLine(trimmedRaw);
+      if (fieldSegments) {
+        closeList();
+        for (const field of fieldSegments) {
+          pushParagraph(
+            `<strong>${esc(field.label)}：</strong>${inlineMarkdown(esc(field.body))}`,
+            "resume-doc__field",
+          );
+        }
+        continue;
+      }
+      const isProjectTitle =
+        DOC_PROJECT_TITLE_RE.test(trimmedRaw) &&
+        (/·/.test(trimmedRaw) || /github\.com/.test(trimmedRaw));
+      if (isProjectTitle) {
+        closeList();
+        pushHeading(trimmed, "resume-doc__project");
+        continue;
+      }
+      if (looksLikeDocHeading(trimmedRaw)) {
+        closeList();
+        pushHeading(trimmed, "resume-doc__section");
+        continue;
+      }
+      /* 硬换行续行：上一块是列表项或段落时接回去，避免一句经历被切成两段。 */
+      if (lastBlock && lastBlock.type === "li") {
+        html[lastBlock.index] = html[lastBlock.index].replace(
+          /<\/li>$/,
+          ` ${inlineMarkdown(trimmed)}</li>`,
+        );
+        continue;
+      }
+      if (lastBlock && lastBlock.type === "p") {
+        html[lastBlock.index] = html[lastBlock.index].replace(
+          /<\/p>$/,
+          ` ${inlineMarkdown(trimmed)}</p>`,
+        );
+        continue;
+      }
+    }
     closeList();
-    html.push(`<p>${inlineMarkdown(trimmed)}</p>`);
+    pushParagraph(inlineMarkdown(trimmed));
   }
   closeList();
   return html.join("");
@@ -438,6 +640,114 @@ export const CONFIDENCE_LABELS = {
   low: "低置信",
 };
 
+/* 模块 2（2026-10-11）：SSE `job.error` / `job.gap_ready` 透出稳定的
+ * LlmFailureCode（后端 contracts/errors.py），前端按码查文案，不再用正则从
+ * 英文报错里刮人话。取值与后端枚举一一对应，新增码必须两边同时补。 */
+export const LLM_FAILURE_COPY = {
+  auth: {
+    label: "模型节点鉴权失败",
+    action: "请到「系统设置 → 模型节点」检查 API Key",
+  },
+  quota: {
+    label: "模型额度不足",
+    action: "请到「系统设置 → 模型节点」充值或切换节点",
+  },
+  rate_limit: {
+    label: "模型请求被限流",
+    action: "限流通常几秒内恢复，可直接重试",
+  },
+  timeout: {
+    label: "模型响应超时",
+    action: "当前节点较慢，可重试或切换到更快的节点",
+  },
+  http: {
+    label: "模型服务连接异常",
+    action: "请检查网络与节点地址后重试",
+  },
+  parse: {
+    label: "模型返回无法解析",
+    action: "可重试；反复出现请更换节点",
+  },
+  schema: {
+    label: "模型返回结构不符",
+    action: "可重试；反复出现请更换节点",
+  },
+  empty: {
+    label: "模型返回为空",
+    action: "可重试；反复出现请更换节点",
+  },
+  other: {
+    label: "模型调用失败",
+    action: "可重试或到「系统设置 → 模型节点」切换节点",
+  },
+};
+
+export function llmFailureNotice(code, fallback = "") {
+  const entry = LLM_FAILURE_COPY[String(code || "")];
+  if (!entry) {
+    return { label: fallback || "分析失败", action: "请重试", code: null };
+  }
+  return { ...entry, code: String(code) };
+}
+
+/* 失败态的行动文案：有码查表，无码退回后端给的人话。 */
+export function failureActionText(code, fallback = "") {
+  const entry = LLM_FAILURE_COPY[String(code || "")];
+  if (entry) return entry.action;
+  return fallback || "请重试";
+}
+
+/* 单行失败摘要：有码时是「标签（行动）」，无码退回后端人话。进度管线的每个
+ * step 用它在「未完成：」后面接一句能直接照做的话。 */
+export function llmFailureSummary(code, fallback = "") {
+  const notice = llmFailureNotice(code, fallback);
+  if (!notice.code) return notice.label;
+  return `${notice.label}（${notice.action}）`;
+}
+
+/* 模块 2（2026-10-11）：gap 阶段降级后的展示位。原先这里直接渲染
+ * ``renderGap(gap.gap_report || gap)``，而无报告时 ``renderGap`` 返回 null——
+ * 画像已经拿到、缺口分析失败的情况下整个「技能缺口」区块是空的：用户看不到
+ * 原因，也没有重试入口。现在把失败原因和一次重试摆到明面上。
+ * 保持纯函数（只吃 gap 对象），便于 node:test 直接单测文案与码表。 */
+export function gapNoticeHtml(gap) {
+  if (!gap || !gap.error || gap.gap_report) return null;
+  const notice = llmFailureNotice(gap.code, gap.error || "差距分析未完成");
+  return `
+    <div class="gap-notice" data-gap-notice role="status">
+      <div class="gap-notice__head"><strong>${esc(notice.label)}</strong><span class="gap-notice__code">${esc(notice.code || "")}</span></div>
+      <div class="small muted">${esc(notice.action)}</div>
+      <button type="button" class="btn btn-outline btn-sm" data-action="retry-gap-stage">重试差距分析</button>
+    </div>`;
+}
+
+/* Module 4 (2026-10-12): diagnosis staleness three-state display.
+ * ``diagnosis_status`` comes from the backend (``_diagnosis_for_row``):
+ * ``valid`` → show score; ``stale`` → show score + expiry reason;
+ * ``missing`` → show 尚未诊断. */
+export function diagnosisStatusHtml(diagnosisStatus, diagnosis) {
+  const status = (diagnosisStatus && diagnosisStatus.status) || "missing";
+  if (status === "valid" && diagnosis && Number.isFinite(Number(diagnosis.score))) {
+    return `<span class="diagnosis-status diagnosis-status--valid">${esc(diagnosis.score)} 分</span>`;
+  }
+  if (status === "stale" && diagnosis && Number.isFinite(Number(diagnosis.score))) {
+    const reason = (diagnosisStatus && diagnosisStatus.reason) || "诊断已过期";
+    return `<span class="diagnosis-status diagnosis-status--stale" title="${esc(reason)}">${esc(diagnosis.score)} 分 · 已过期</span>`;
+  }
+  return `<span class="diagnosis-status diagnosis-status--missing">尚未诊断</span>`;
+}
+
+export function diagnosisStatusText(diagnosisStatus, diagnosis) {
+  const status = (diagnosisStatus && diagnosisStatus.status) || "missing";
+  if (status === "valid" && diagnosis && Number.isFinite(Number(diagnosis.score))) {
+    return `${diagnosis.score} 分`;
+  }
+  if (status === "stale" && diagnosis && Number.isFinite(Number(diagnosis.score))) {
+    return `${diagnosis.score} 分 · 已过期`;
+  }
+  return "尚未诊断";
+}
+
 export const CONFIDENCE_BADGE_CLASS = {
   high: "badge-green",
   medium: "badge-amber",
@@ -524,21 +834,52 @@ export function workbenchProgressPipelineHtml(session) {
     : [];
   const missingGaps = (gap.gap_report && gap.gap_report.missing_keywords) || [];
   const diffs = alignment.diffs || [];
+  const invalidCount = Array.isArray(alignment.invalid_diffs)
+    ? alignment.invalid_diffs.length
+    : 0;
 
   const alignmentRunning = ["queued", "running"].includes(alignment.status);
   /* B4（2026-09-06 走查 #81）：失败必须有终态——「未开始/未完成：原因」，
-   * 不能停在 pending 样式让用户无法判断该等还是该去设置。 */
+   * 不能停在 pending 样式让用户无法判断该等还是该去设置。
+   * 模块 2（2026-10-11）：jd / gap / 对齐三个 stage 各自独立判失败，不再让
+   * 对齐的失败把已经成功的 JD 画像一起染红（连坐显示）。 */
   const alignmentFailed = alignment.status === "failed";
-  const failureNote = alignmentFailed
-    ? alignment.error || "任务失败，请重试"
+  const alignmentKind = alignmentOutcomeKind(alignment);
+  const noSafeRewrite =
+    alignmentFailed && alignmentKind === "no_safe_rewrite";
+  const profileFailed = jd.status === "failed" && !jd.profile;
+  const gapFailed = Boolean(gap.error) && !gap.gap_report;
+  const alignmentNote = alignmentFailed
+    ? noSafeRewrite
+      ? String(alignment.error || "简历原文没有足够依据")
+      : llmFailureSummary(alignment.code, alignment.error || "任务失败，请重试")
     : "";
+  const jdNote = profileFailed
+    ? llmFailureSummary(jd.code, jd.error || "JD 画像提取失败")
+    : "";
+  const gapNote = gapFailed
+    ? llmFailureSummary(gap.code, gap.error || "差距分析未完成")
+    : "";
+  /* W1（2026-10-22，审计 W1）：失败原因在横幅里已经完整给过一次，右栏不再
+   * 复制整句；这里只保留「失败 + 被拦截条数」的摘要，完整原因放 title。 */
+  const failureFullText = `任务失败：${alignmentNote}`;
   const liveMessage = alignmentRunning
     ? alignment.message || ""
     : alignment.status === "succeeded"
-      ? "简历对齐已完成"
+      ? alignmentKind === "no_gap"
+        ? "岗位无需改写"
+        : "简历对齐已完成"
       : alignmentFailed
-        ? `任务失败：${failureNote}`
-        : "";
+        ? noSafeRewrite
+          ? `无安全改写：${alignmentNote}`
+          : invalidCount
+            ? `任务失败 · ${invalidCount} 条建议被门禁拦截`
+            : "任务失败 · 见上方失败横幅"
+        : jdNote
+          ? `分析未完成：${jdNote}`
+          : gapNote
+            ? `分析未完成：${gapNote}`
+            : "";
 
   const steps = [
     {
@@ -550,7 +891,8 @@ export function workbenchProgressPipelineHtml(session) {
           : "",
       done: jd.status === "ready" && Boolean(jd.profile),
       active: ["queued", "running"].includes(jd.status),
-      failed: alignmentFailed && !(jd.status === "ready" && Boolean(jd.profile)),
+      failed: profileFailed,
+      note: jdNote,
       idle: !alignmentRunning && !alignmentFailed && !jd.profile,
     },
     {
@@ -561,7 +903,8 @@ export function workbenchProgressPipelineHtml(session) {
         : "",
       done: ["ready", "blocked"].includes(gap.status),
       active: gap.status === "queued" || gap.status === "running",
-      failed: alignmentFailed && !["ready", "blocked"].includes(gap.status),
+      failed: gapFailed,
+      note: gapNote,
       idle:
         !alignmentRunning &&
         !alignmentFailed &&
@@ -574,13 +917,14 @@ export function workbenchProgressPipelineHtml(session) {
       done: alignment.status === "succeeded",
       active: ["queued", "running"].includes(alignment.status),
       failed: alignmentFailed,
+      note: alignmentNote,
       idle: !alignmentRunning && !alignmentFailed && !diffs.length,
     },
   ];
 
   return `
     <div class="workbench-live-progress" data-workbench-live-progress aria-live="polite">
-      ${liveMessage ? `<div class="workbench-live-progress__message" data-workbench-live-progress-message>${esc(liveMessage)}</div>` : ""}
+      ${liveMessage ? `<div class="workbench-live-progress__message" data-workbench-live-progress-message${alignmentFailed && !noSafeRewrite ? ` title="${esc(failureFullText)}"` : ""}>${esc(liveMessage)}</div>` : ""}
       ${steps
         .map(
           (step) => `
@@ -588,7 +932,7 @@ export function workbenchProgressPipelineHtml(session) {
           <span class="workbench-live-progress__dot" aria-hidden="true">${step.done ? ICON_PROGRESS_CHECK : step.failed ? ICON_PROGRESS_X : step.active ? ICON_PROGRESS_ACTIVE : ICON_PROGRESS_IDLE}</span>
           <div class="workbench-live-progress__copy">
             <span class="workbench-live-progress__label">${esc(step.label)}</span>
-            ${step.detail ? `<span class="workbench-live-progress__detail">${esc(step.detail)}</span>` : step.failed ? `<span class="workbench-live-progress__detail">未完成：${esc(failureNote)}</span>` : step.idle ? `<span class="workbench-live-progress__detail">未开始</span>` : ""}
+            ${step.detail ? `<span class="workbench-live-progress__detail">${esc(step.detail)}</span>` : step.failed ? `<span class="workbench-live-progress__detail">未完成：见上方失败横幅</span>` : step.idle ? `<span class="workbench-live-progress__detail">未开始</span>` : ""}
           </div>
         </div>`,
         )
@@ -719,17 +1063,27 @@ export function diffCard(diff, index, jobId) {
       : PROVENANCE_LABELS[stateKey] || "来源待核对";
   const label = PROVENANCE_LABELS[stateKey] || "来源待核对";
   const noProvenance = !String(provenance || "").trim();
-  const invalid =
-    stateKey === "missing" ||
-    (type === "add" && noProvenance && stateKey !== "verified");
-  const invalidWarning = invalid
-    ? type === "add" && noProvenance
-      ? "该条为无来源新增，已作为硬门禁拦截，待人工复核。"
-      : "缺少来源，已作为硬门禁拦截，待人工复核。"
-    : "";
-  const typeLabel = { modify: "改写", add: "新增", remove: "删除" }[type] || "改写";
   const originalText = diff.original || "";
   const proposedText = diff.proposed || "";
+  const invalid =
+    stateKey === "missing" ||
+    stateKey === "fabricated" ||
+    (type === "add" && noProvenance && stateKey !== "verified");
+  const retryable = invalid && Boolean(String(originalText || "").trim());
+  const invalidWarning = invalid
+    ? retryable
+      ? "缺少来源，已拦截；该条真实性检查未通过，可在原句锚点内重新生成。"
+      : type === "add" && noProvenance
+        ? "该条为无来源新增，已作为硬门禁拦截；没有可定位的原文锚点，暂不能单条重试。"
+        : "缺少来源，已作为硬门禁拦截；没有可定位的原文锚点，暂不能单条重试。"
+    : "";
+  /* W1（2026-10-22）：后端把「本轮整体失败」的同一句话写进了每条 diff 的
+   * reason，导致一句话在页面里出现 6 次。终态句由横幅统一负责，逐条 reason
+   * 只保留这条建议自己的问题。 */
+  const reasonText = invalid
+    ? String(diff.reason || "").split("；真实性评估判定")[0].trim()
+    : String(diff.reason || "");
+  const typeLabel = { modify: "改写", add: "新增", remove: "删除" }[type] || "改写";
   /* #17: modify diffs get character-level marks inside the card's 原文/优化
    * blocks (diff-char-del on the original side, diff-char-ins on the
    * proposed side); add/remove diffs have no counterpart so they stay plain.
@@ -748,7 +1102,7 @@ export function diffCard(diff, index, jobId) {
         <div class="diff-card__type">
           <span class="badge ${invalid ? "badge-amber" : "badge-blue"}">${esc(typeLabel)}</span>
           ${diffSectionBadge(diff)}
-          ${diff.confidence && CONFIDENCE_LABELS[diff.confidence]
+          ${!invalid && diff.confidence && CONFIDENCE_LABELS[diff.confidence]
             ? `<span class="badge ${CONFIDENCE_BADGE_CLASS[diff.confidence]}" data-confidence-badge="${esc(diff.confidence)}">${CONFIDENCE_LABELS[diff.confidence]}</span>`
             : ""}
         </div>
@@ -764,13 +1118,13 @@ export function diffCard(diff, index, jobId) {
           <div class="diff-card__text" data-diff-proposed>${proposedHtml}</div>
         </div>
       </div>
-      ${diff.reason ? `<div class="diff-card__reason" data-diff-reason>${esc(diff.reason)}</div>` : ""}
+      ${reasonText ? `<div class="diff-card__reason" data-diff-reason>${esc(reasonText)}</div>` : ""}
       ${provenance ? `<div class="provenance-quote">${esc(provenance)}</div>` : ""}
       ${invalidWarning ? `<div class="diff-card__warning" role="alert">${esc(invalidWarning)}</div>` : ""}
       <div class="diff-card__actions" data-diff-actions>
         ${invalid ? "" : `<button class="btn btn-primary btn-sm" data-action="accept-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_CHECK} 采纳</button>`}
         <button class="btn btn-ghost btn-sm" data-action="reject-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_X} 跳过</button>
-        <button class="btn btn-secondary btn-sm" data-action="polish-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}" data-instruction="quantified">${invalid ? `${icon("rotate-ccw", 16)} 重试此条` : "AI 润色"}</button>
+        ${!invalid || retryable ? `<button class="btn btn-secondary btn-sm" data-action="polish-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}" data-instruction="quantified">${invalid ? `${icon("rotate-ccw", 16)} 重试此条` : "AI 润色"}</button>` : ""}
         ${invalid ? "" : `<button class="btn btn-ghost btn-sm" data-action="toggle-bullet-edit" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${icon("pencil", 16)} 编辑</button>`}
       </div>
     </article>`;
@@ -780,10 +1134,47 @@ export function diffList(session, jobId) {
   const alignment = (session && session.alignment) || {};
   const diffs = alignment.diffs || [];
   const invalid = alignment.invalid_diffs || [];
+  /* W4（2026-10-22，审计 W4）：失败态原来把 3 张 465px 的「被拦截建议卡」
+   * 直接铺在主区，与头部「0 条建议」互相打脸。终态失败且没有可用建议时，
+   * 主区只给一张失败摘要 + 可展开的被拦截列表，默认不占三屏。 */
+  const terminalFailure =
+    alignment.status === "failed" || alignment.status === "canceled";
+  if (terminalFailure && !diffs.length && invalid.length) {
+    const blockedCards = invalid
+      .map((diff, index) => diffCard(diff, index, jobId))
+      .join("");
+    return `<div class="diff-card-list" data-diff-list>
+      <div class="wb-blocked" data-wb-blocked>
+        <div class="wb-blocked__head">
+          <strong>${invalid.length} 条建议被门禁拦截</strong>
+          <p>这些改写缺少原文依据，已被拦下、不会进入定稿。失败原因见上方横幅；展开可逐条查看或重试。</p>
+        </div>
+        <details class="wb-blocked__details">
+          <summary class="btn btn-outline btn-sm" data-wb-blocked-toggle>展开 ${invalid.length} 条被拦截建议</summary>
+          <div class="wb-blocked__list">${blockedCards}</div>
+        </details>
+      </div>
+    </div>`;
+  }
   const cards = [...diffs, ...invalid]
     .map((diff, index) => diffCard(diff, index, jobId))
     .join("");
   if (!cards) {
+    if (alignmentOutcomeKind(alignment) === "no_gap") {
+      return '<div class="diff-card-list" data-diff-list></div>';
+    }
+    /* B5（2026-10-23）：终态「对齐完成但无可用建议」时，横幅已经给出结论，
+     * 主区不该再显示「还没有对齐结果 / 点开始对齐」的首次引导（同屏自相矛盾）。
+     * 有 notice 的成功终态给一个轻量说明，不重复给「开始对齐」入口。 */
+    if (alignment.status === "succeeded" && alignment.notice) {
+      return `<div class="diff-card-list" data-diff-list>
+        <div class="wb-notice-empty" data-wb-notice-empty>
+          <strong>本轮没有可采纳的改写</strong>
+          <p>${esc(String(alignment.notice))}</p>
+          <p class="muted small">原始简历与定稿不受影响；需要更多改写时可以换更强的模型节点后重跑。</p>
+        </div>
+      </div>`;
+    }
     /* P0-2: 失败/取消/过期态不再渲染「还没有对齐结果」首次引导卡 —— 失败反馈
      * 收敛到顶部错误横幅 + 顶栏危险级「重新运行对齐」单入口，避免同屏 3 个
      * 对齐入口、2 套标签（2026-08-25 走查实测的失败态三入口问题）。 */
@@ -815,6 +1206,32 @@ export function alignmentControls(session, resumes, jobId) {
     .join("");
   const running = alignment.status === "running" || alignment.status === "queued";
   const failed = alignment.status === "failed";
+  const noSafeRewrite =
+    failed && alignmentOutcomeKind(alignment) === "no_safe_rewrite";
+  const noGap =
+    alignment.status === "succeeded" &&
+    alignmentOutcomeKind(alignment) === "no_gap";
+  const runLabel = running
+    ? "对齐运行中..."
+    : noGap
+      ? "无需改写"
+      : noSafeRewrite
+      ? "查看证据缺口"
+      : failed
+        ? "重新运行对齐"
+        : "一键生成对齐简历";
+  const statusText =
+    alignment.status === "succeeded"
+      ? alignmentOutcomeKind(alignment) === "no_gap"
+        ? "无需改写"
+        : "已生成对齐版本"
+      : noSafeRewrite
+        ? `无安全改写：${alignment.error || "简历原文没有足够依据"}`
+        : failed
+          ? `任务失败：${alignment.error || "请重试"}`
+          : alignment.status === "running" || alignment.status === "queued"
+            ? "正在生成..."
+            : "";
   return `
     <form class="align-form" data-form="split-align" novalidate>
       <input type="hidden" name="job_id" value="${esc(jobId)}">
@@ -844,9 +1261,9 @@ export function alignmentControls(session, resumes, jobId) {
         </label>
       </div>
       <div class="align-form__row">
-        <button class="btn btn-primary" type="submit" data-align-run ${running ? "disabled" : ""}>${running ? "对齐运行中..." : failed ? "重新运行对齐" : "一键生成对齐简历"}</button>
+        <button class="btn btn-primary" type="${noSafeRewrite || noGap ? "button" : "submit"}" ${noSafeRewrite ? 'data-action="set-wb-tab-v3" data-wb-tab-v3="inspector"' : noGap ? "" : "data-align-run"} ${running || noGap ? "disabled" : ""}>${runLabel}</button>
         <button class="btn btn-outline btn-sm" type="button" data-action="cancel-align-job" ${running ? "" : "hidden"}>${alignment.status === "queued" ? "取消任务" : "停止等待"}</button>
-        <span class="small muted" data-align-status>${alignment.status === "succeeded" ? "已生成对齐版本" : alignment.status === "failed" ? `任务失败：${esc(alignment.error || "请重试")}` : alignment.status === "running" || alignment.status === "queued" ? "正在生成..." : ""}</span>
+        <span class="small muted" data-align-status>${esc(statusText)}</span>
       </div>
       <label class="eval-option">
         <input type="checkbox" name="run_eval">
@@ -890,10 +1307,16 @@ export function exportDock(jobId, job = {}) {
 
 function boardMoreMenu(job) {
   const id = esc(job.job_id);
+  /* B2（2026-10-22，审计 J4）：卡片上原本平铺 14 个可交互目标，「去投递 / 工作台」
+   * 与标题重复。现在卡片只留「对齐 + 状态」两个动作，其余收进 kebab；kebab 里
+   * 的「去投递」仍用同一套 open-source-url 动作，行为不变。 */
   return `
     <details class="board-more" aria-label="更多操作">
       <summary class="board-more__trigger" aria-label="更多操作" title="更多操作">${icon("more-horizontal", 20)}</summary>
       <div class="board-more__menu">
+        <button class="btn btn-ghost btn-sm" type="button" data-action="open-optimizer" data-id="${id}">打开工作台</button>
+        ${jobApplyLinkHtml(job)}
+        <div class="board-more__sep" aria-hidden="true"></div>
         <button class="btn btn-ghost btn-sm" type="button" data-action="open-job-followup" data-id="${id}">安排跟进</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="open-job-timeline" data-id="${id}">详情</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="edit-job" data-id="${id}">编辑</button>
@@ -981,24 +1404,51 @@ export function alignmentBadgeHtml(job) {
       : (job.diffs || []).length;
   const hasGap =
     typeof job.has_gap === "boolean" ? job.has_gap : usable === 0;
-  const reason = job.alignment_reason;
+  const kind = alignmentOutcomeKind(job);
+  const tip = String(
+    job.alignment_error || "对齐失败，请到工作台重新运行",
+  );
+  if (kind === "no_safe_rewrite") {
+    return `<span class="badge badge-amber" title="${esc(tip)}">无安全改写</span>`;
+  }
   if (status === "failed") {
-    const tip = String(job.last_alignment_error || "对齐失败，请到工作台重新运行").replace(
-      /^no_output:\s*/,
-    );
-    const label = reason === "no_output" ? "对齐失败 · 未产出建议" : "对齐失败";
+    const label = kind === "model_failed" ? "模型失败 · 可重试" : "对齐失败";
     return `<span class="badge badge-red" title="${esc(tip)}">${label}</span>`;
   }
   if (status === "succeeded") {
     if (usable >= 1) return '<span class="badge badge-green">已对齐</span>';
-    if (reason === "no_gap" || !hasGap) {
+    if (kind === "no_gap" || !hasGap) {
       return '<span class="badge badge-amber" title="该岗位无缺口，无需改写">无缺口 · 无需改写</span>';
     }
     // 有缺口却零产出，正常应已被服务端判 failed；旧数据行（无分型字段）
     // 维持原「降级提示 vs 泛无建议」双色区分，防御性兜底。
-    return job.last_alignment_error
-      ? `<span class="badge badge-amber" title="${esc(String(job.last_alignment_error).replace(/^no_output:\s*/, ""))}">诊断完成 · 改写未产出</span>`
+    return job.alignment_error
+      ? `<span class="badge badge-amber" title="${esc(String(job.alignment_error))}">诊断完成 · 改写未产出</span>`
       : '<span class="badge badge-amber" title="本次对齐未产出修改建议，可到工作台重新运行">无建议</span>';
+  }
+  return "";
+}
+
+/** Normalize persisted and workstation alignment shapes for terminal display. */
+export function alignmentOutcomeKind(value = {}) {
+  const reason = value.alignment_reason || value.reason || "";
+  if (
+    reason === "no_gap" ||
+    reason === "no_safe_rewrite" ||
+    reason === "model_failed"
+  ) {
+    return reason;
+  }
+  const status = value.alignment_status || value.status;
+  if (status === "failed") return "model_failed";
+  if (status === "succeeded") {
+    const usable =
+      typeof value.usable_diffs === "number"
+        ? value.usable_diffs
+        : (value.diffs || []).length;
+    const hasGap =
+      typeof value.has_gap === "boolean" ? value.has_gap : usable === 0;
+    if (usable === 0 && !hasGap) return "no_gap";
   }
   return "";
 }
@@ -1035,6 +1485,26 @@ function boardMatchBlock(job) {
   return `<div class="board-match" data-match-block>${parts.join("")}</div>`;
 }
 
+/* 岗位卡折叠态的「工作状态」徽标（2026-10-22，审计 J3）。
+ * 背景：alignmentBadgeHtml 只在展开区渲染，于是 318 条里 209 条对齐失败、
+ * 22 条已对齐在列表上一格都看不见，用户只能逐张点开才知道该处理谁。
+ * 这里给折叠态一个统一入口：终态复用 alignmentBadgeHtml 的语义分级，
+ * 未跑过的补「待分析」灰徽标，运行中的补「排队中/对齐中」。
+ * 注意：本轮只做展示，不引入新状态机。 */
+function boardAlignmentChip(job) {
+  const terminal = alignmentBadgeHtml(job);
+  if (terminal) return terminal;
+  const status = String(job.alignment_status || "idle");
+  if (status === "queued") return '<span class="badge badge-blue">排队中</span>';
+  if (status === "running") return '<span class="badge badge-blue">对齐中</span>';
+  if (status === "canceled" || status === "expired") {
+    return '<span class="badge badge-amber" title="上次对齐未跑完，可重新运行">未完成</span>';
+  }
+  const hasProfile = Boolean(job.jd_profile);
+  if (!hasProfile) return "";
+  return '<span class="badge badge-gray" title="已画像，尚未运行对齐">待对齐</span>';
+}
+
 export function boardCard(job, statuses = null) {
   const canonical = canonicalJobStatus(job.status);
   const optionsHtml = jobStatusOptionsHtml(statuses, canonical);
@@ -1042,16 +1512,32 @@ export function boardCard(job, statuses = null) {
   /* #F10/#82: 徽章 title 披露分数口径（AI 评估 vs 规则四维）。 */
   const matchTitle =
     match != null ? `匹配度 · ${jobMatchSource(job)}` : "尚未分析";
+  const workChip = boardAlignmentChip(job);
+  /* 匹配未知时，工作状态徽标顶到匹配位（避免同一行出现两个「待分析」）；
+   * 匹配已知时，工作状态单独占一行（失败/已对齐必须在折叠态可见）。 */
+  const metaLeadBadge =
+    match != null
+      ? `<span class="match-badge ${matchTone(match)}" data-match-total title="${matchTitle}">${match}</span>`
+      : workChip ||
+        '<span class="match-badge match-badge--empty" title="尚未分析">待分析</span>';
+  const statusLine = match != null && workChip ? workChip : "";
+  /* 卡片解剖 v2（2026-10-22）：220px 宽的看板列里，旧结构把复选框、匹配
+   * 徽标、标题、展开箭头、更多菜单五个控件挤在同一行，标题被压到 25px 宽
+   * ——中文逐字换行成 293px 高的竖排字。现在顶行只留「复选框 + 标题 +
+   * 更多」，标题两行截断；匹配度与展开箭头下移到元信息行。 */
   return `
     <article class="board-card copilot-card ${job.classification_pending ? "board-card--pending" : ""}" data-job-id="${job.job_id}" draggable="true" data-board-drag>
       <div class="board-card__top">
         <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
-        ${match != null ? `<span class="match-badge ${matchTone(match)}" data-match-total title="${matchTitle}">${match}</span>` : `<span class="match-badge match-badge--empty" title="${matchTitle}">待分析</span>`}
-        <button type="button" class="board-card__title" data-action="open-optimizer" data-id="${job.job_id}">${esc(job.title)}</button>
-        <button type="button" class="board-card__reveal-toggle" data-action="toggle-card-reveal" data-id="${esc(job.job_id)}" aria-expanded="false" aria-label="展开详情" title="展开详情">${icon("chevron-down", 16)}</button>
+        <button type="button" class="board-card__title" data-action="open-optimizer" data-id="${job.job_id}" title="${esc(job.title)}">${esc(job.title)}</button>
         ${boardMoreMenu(job)}
       </div>
-      <div class="board-card__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</div>
+      <div class="board-card__meta">
+        ${metaLeadBadge}
+        <span class="board-card__meta-text" title="${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${formatSalary(job)}</span>
+        <button type="button" class="board-card__reveal-toggle" data-action="toggle-card-reveal" data-id="${esc(job.job_id)}" aria-expanded="false" aria-label="展开详情" title="展开详情">${icon("chevron-down", 16)}</button>
+      </div>
+      ${statusLine ? `<div class="board-card__statusline">${statusLine}</div>` : ""}
       <div class="board-card__reveal">
         ${jdTechStackHtml(job)}
         ${boardMatchBlock(job)}
@@ -1069,14 +1555,63 @@ export function boardCard(job, statuses = null) {
           ${job.next_step ? `<span class="small muted">下一步：${esc(job.next_step)}</span>` : ""}
         </div>
       </div>
-      ${jobSourceUrl(job) ? `<div class="board-card__links">${jobApplyLinkHtml(job)}</div>` : ""}
       <div class="row board-card__actions">
         ${job.classification_pending ? `<button type="button" class="badge badge-amber badge-pending" data-action="reclassify-job" data-id="${esc(job.job_id)}" aria-label="重新分类">分类待定</button>` : ""}
-        <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
         ${boardAlignButton(job)}
-        <button class="btn btn-ghost btn-sm board-card__primary" data-action="open-optimizer" data-id="${job.job_id}">工作台</button>
+        <select class="board-status-select" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
       </div>
     </article>`;
+}
+
+/* 岗位列表视图的一行（B2，审计 J2）：318 条数据在看板里要滚 121 屏，列表让
+ * 用户一屏扫 8–10 条并按工作状态筛选。行内保留「工作状态」徽标、投递状态、
+ * 更新时间与主操作（打开工作台），对齐仍在行内（额度确认在 main.js 里做）。 */
+export function jobListRow(job, statuses = null) {
+  const canonical = canonicalJobStatus(job.status);
+  const optionsHtml = jobStatusOptionsHtml(statuses, canonical);
+  const statusTone =
+    canonical === "offer"
+      ? "success"
+      : canonical === "interview"
+        ? "info"
+        : canonical === "withdrawn"
+          ? "danger"
+          : canonical === "applied"
+            ? "accent"
+            : "neutral";
+  const match = job.match_score != null ? Math.round(job.match_score) : null;
+  const matchTitle =
+    match != null ? `匹配度 · ${jobMatchSource(job)}` : "尚未分析";
+  const workChip = boardAlignmentChip(job);
+  /* 列表有独立的「匹配」和「工作状态」两列，不能像卡片那样用工作状态顶替
+   * 匹配位：匹配未知显示「—」，工作状态单独一列（否则 87 条待分析会整列空白）。 */
+  const leadBadge =
+    match != null
+      ? `<span class="match-badge ${matchTone(match)}" title="${matchTitle}">${match}</span>`
+      : '<span class="small muted">—</span>';
+  const workCell =
+    workChip || '<span class="badge badge-gray" title="尚未预分析">待分析</span>';
+  const applyLabel = jobSourceUrl(job) ? "去投递" : "补链接";
+  return `
+    <div class="job-row" data-job-id="${job.job_id}" data-job-row>
+      <label class="board-check"><input type="checkbox" data-board-check value="${job.job_id}" aria-label="选择 ${esc(job.title)}"><span></span></label>
+      <div class="job-row__main">
+        <button type="button" class="job-row__title" data-action="open-optimizer" data-id="${job.job_id}" title="${esc(job.title)}">${esc(job.title)}</button>
+        <span class="job-row__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${esc(formatSalary(job))}</span>
+      </div>
+      <div class="job-row__cell job-row__match">${leadBadge}</div>
+      <div class="job-row__cell job-row__work">${workCell}</div>
+      <div class="job-row__cell job-row__status">
+        <span class="badge pill-neutral"><span class="dot metric-dot metric-dot--${statusTone}" aria-hidden="true"></span>${esc(jobStatusLabel(job.status))}</span>
+      </div>
+      <div class="job-row__cell job-row__time muted small">${esc(formatDate(job.updated_at))}</div>
+      <div class="job-row__actions">
+        ${job.classification_pending ? `<span class="badge badge-amber" title="分类待定：请重新分类">分类待定</span>` : ""}
+        <select class="board-status-select board-status-select--row" data-board-status data-id="${job.job_id}" aria-label="移动状态">${optionsHtml}</select>
+        <button class="btn btn-outline btn-sm" type="button" data-action="open-optimizer" data-id="${job.job_id}">打开</button>
+        ${boardMoreMenu(job)}
+      </div>
+    </div>`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1088,6 +1623,12 @@ function boardAlignButton(job) {
   const zeroDiff = alignStatus === "succeeded" && !(job.diffs || []).length;
   if (alignStatus === "idle") {
     return `<button type="button" class="btn btn-outline btn-sm board-card__align" data-action="align-job" data-id="${esc(job.job_id)}">开始对齐</button>`;
+  }
+  if (alignmentOutcomeKind(job) === "no_safe_rewrite") {
+    return `<button type="button" class="btn btn-outline btn-sm board-card__align" data-action="open-optimizer" data-id="${esc(job.job_id)}">查看证据</button>`;
+  }
+  if (alignmentOutcomeKind(job) === "no_gap") {
+    return `<button type="button" class="btn btn-outline btn-sm board-card__align" data-action="open-optimizer" data-id="${esc(job.job_id)}">查看说明</button>`;
   }
   if (alignStatus === "failed" || zeroDiff) {
     return `<button type="button" class="btn btn-outline btn-sm board-card__align" data-action="align-job" data-id="${esc(job.job_id)}">重新对齐</button>`;
@@ -1887,6 +2428,11 @@ export function workbenchPrimaryButtonHtml(
   alignment = null,
 ) {
   const hasResumes = Array.isArray(resumes) && resumes.length > 0;
+  const alignmentKind = alignmentOutcomeKind(alignment || {});
+  if (hasResumes && alignmentKind === "no_safe_rewrite") {
+    return '<button class="btn btn-outline" type="button" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector">查看证据缺口</button>';
+  }
+  if (alignmentKind === "no_gap") return "";
   /* P0-2: 失败/取消/过期统一走危险级「重新运行对齐」单入口（顶栏）。 */
   const failed = Boolean(
     alignment &&
@@ -2665,8 +3211,8 @@ export function skillGapHtml(gaps, onSkillGapUrl, options = {}) {
             <td class="cell-strong">${esc(skill)}</td>
             <td class="is-num">${esc(count)}</td>
             <td>
-              <span class="meter-cell ${strength}">
-                <span class="meter meter--sm" aria-hidden="true"><span class="meter__fill" style="width:${width}%"></span></span>
+              <span class="meter-cell">
+                <span class="meter meter--sm ${strength}" aria-hidden="true"><span class="meter__fill" style="width:${width}%"></span></span>
               </span>
             </td>
             <td class="is-num">
@@ -2682,7 +3228,7 @@ export function skillGapHtml(gaps, onSkillGapUrl, options = {}) {
         <thead>
           <tr>
             <th scope="col">技能</th>
-            <th scope="col" class="is-num">需求岗位</th>
+            <th scope="col" class="is-num">要求岗位数</th>
             <th scope="col">需求强度</th>
             <th scope="col" aria-label="操作"></th>
           </tr>
@@ -3012,18 +3558,44 @@ export function versionChangeSummary(previous, version) {
   return text.length > 60 ? `${text.slice(0, 60)}…` : text;
 }
 
+/** 相邻版本的增删行数（RS-04：版本时间线显示「+N / −M 行」，
+ *  比截断 60 字的摘要更能说明「这版改了多少」）。 */
+export function versionChangeStats(previous, version) {
+  const rows = lineDiff(
+    previous ? previous.content : "",
+    version ? version.content : "",
+  );
+  const added = rows.filter((row) => row.type === "add").length;
+  const removed = rows.filter((row) => row.type !== "add").length;
+  return { added, removed };
+}
+
 /** 版本时间线（竖线）：每条 vN + 创建时间 + 变更摘要 + 当前标记；非当前版本
  *  提供「预览」（data-action=preview-version）与「回滚」（rollback-resume）。
- *  resumeId 用于回滚按钮的 data-id。 */
+ *  resumeId 用于回滚按钮的 data-id。
+ *  RS-04：单版本时折叠成一行（之前一条 v1 也占 108px 且没有操作）；
+ *  多版本在每行补「+N / −M 行」统计，摘要仍保留给逐行阅读。 */
 export function versionTimelineHtml(versions, currentVersion, resumeId = "") {
   const list = Array.isArray(versions) ? versions : [];
   if (!list.length) {
     return `<div class="version-timeline" data-version-timeline><div class="muted small">暂无版本</div></div>`;
   }
+  if (list.length === 1) {
+    const only = list[0];
+    return `<div class="version-timeline version-timeline--single" data-version-timeline>
+    <div class="version-timeline-item is-current" data-version-item data-version="${esc(only.version)}">
+      <span class="version-timeline__no">v${esc(only.version)}</span>
+      <span class="badge badge-green" data-version-current>当前</span>
+      <span class="small muted">${formatDate(only.created_at)}</span>
+      <span class="version-timeline__summary muted small" data-version-summary>初始版本</span>
+    </div>
+  </div>`;
+  }
   const items = list
     .map((version, index) => {
       const current = Number(version.version) === Number(currentVersion);
       const summary = versionChangeSummary(list[index - 1], version);
+      const stats = versionChangeStats(list[index - 1], version);
       return `
     <div class="version-timeline-item${current ? " is-current" : ""}" data-version-item data-version="${esc(version.version)}">
       <div class="version-timeline__dot" aria-hidden="true"></div>
@@ -3032,6 +3604,7 @@ export function versionTimelineHtml(versions, currentVersion, resumeId = "") {
           <span class="version-timeline__no">v${esc(version.version)}</span>
           ${current ? '<span class="badge badge-green" data-version-current>当前</span>' : ""}
           <span class="small muted">${formatDate(version.created_at)}</span>
+          ${index > 0 ? `<span class="version-timeline__stats" data-version-stats title="相对上一版：+${stats.added} 行 / −${stats.removed} 行">+${stats.added} / −${stats.removed}</span>` : ""}
         </div>
         <div class="version-timeline__summary" data-version-summary>${esc(summary)}</div>
         ${current ? "" : `
@@ -3295,7 +3868,7 @@ export const ROLE_TIMEOUT_FALLBACK_S = {
   diagnose: 45,
   profiler: 75,
   gap_analyzer: 60,
-  editor: 90,
+  editor: 150,
   evaluator: 60,
 };
 export const WORKER_CONCURRENCY_FALLBACK = 1;
@@ -3326,6 +3899,7 @@ export function settingsBentoHtml(activeNode, latency, runtime) {
   const provider = node && String(node.provider || "").trim() ? String(node.provider) : "";
   const activeLabel = provider ? `${provider} · ${model}` : model;
   const info = runtime && typeof runtime === "object" ? runtime : {};
+  const degraded = info._degraded === true;
   const concurrency = Number(info.worker_concurrency);
   const concurrencyText =
     Number.isFinite(concurrency) && concurrency > 0
@@ -3337,6 +3911,7 @@ export function settingsBentoHtml(activeNode, latency, runtime) {
   const latencyText = hasLatency ? `${Math.round(latencyNum)} ms` : "—";
   return `
     <section class="settings-bento metric-strip settings-status" data-settings-bento aria-label="系统概览">
+      ${degraded ? `<div class="settings-bento__error" data-settings-degraded role="alert">系统状态加载失败，节点列表仍可正常使用。<button type="button" class="btn btn-outline btn-sm" data-action="retry-settings-status">重试</button></div>` : ""}
       <div class="settings-bento__card metric-cell settings-bento__card--model" data-bento-model>
         <span class="settings-bento__label">活跃模型 ID</span>
         <strong class="settings-bento__value">${esc(activeLabel)}</strong>
@@ -3562,7 +4137,9 @@ export function simpleLlmSetupHtml(node, lastTest) {
           </div>
         </form>
         <div data-llm-node-test-result>${testResult}</div>
-    ${isEdit ? "" : '<p class="small muted">保存后第一个节点自动启用。备用节点、角色分工（本地分析 + 云端写作）与自动化规则在「专家模式」中配置。</p>'}
+    ${/* S1（2026-10-22，审计 S1）：这句原本被 isEdit 条件吞掉 —— 已配置节点的
+        * 用户恰恰最需要知道「其余能力在专家模式里」，所以对所有人渲染。 */ ""}
+    <p class="small muted">保存后第一个节点自动启用。备用节点、角色分工（本地分析 + 云端写作）与自动化规则在「专家模式」中配置，也可在上方「更多设置」直达。</p>
       </div>
     </section>`;
 }

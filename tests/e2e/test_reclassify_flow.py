@@ -16,7 +16,7 @@ fully end-to-end through the rendered board.
 from __future__ import annotations
 
 import pytest
-from helpers import assert_clean_page, capture_errors, expect
+from helpers import assert_clean_page, capture_errors, expect, use_board_view
 
 pytestmark = pytest.mark.e2e
 
@@ -45,6 +45,7 @@ def test_pending_badge_then_reclassify(
     page, base_url, api_call, llm_api_call
 ):
     errors = capture_errors(page)
+    use_board_view(page)
 
     # Make the fake LLM fail both classifier attempts carrying the marker
     # (the app retries each LLM call once), so POST /api/jobs stores the job

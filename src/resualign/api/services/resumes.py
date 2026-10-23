@@ -42,6 +42,14 @@ def _cached_diagnosis(resume: dict[str, Any], config: Any, tenant_id: str) -> Op
                 diag = stored_diag
     if not diag:
         return None
+    # Module 4: dual-key guard — content hash (checked per snapshot above),
+    # prompt version, and model. A diagnosis computed with an older
+    # DIAG_PROMPT_VERSION is stale even when the resume content is
+    # unchanged; reusing it would align against outdated skills.
+    from ...engine.llm import DIAG_PROMPT_VERSION
+    diag_version = diag.get('prompt_version') or ''
+    if diag_version and diag_version != DIAG_PROMPT_VERSION:
+        return None
     if diag.get('model') != config.model:
         return None
     return {'score': diag.get('score', 0), 'skills': diag.get('skills') or [], 'issues': diag.get('issues') or []}

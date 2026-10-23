@@ -222,6 +222,42 @@ def test_batch_align_accepts_five_jobs():
     assert r.json()["total"] == 5
 
 
+def test_batch_align_flips_library_jobs_to_queued():
+    """批量入队必须把岗位拉回 queued，与单岗位工作台路径一致。
+
+    回归（2026-10-09 实测）：批量路径只 `_queue_job` 而不写
+    alignment_status，worker 领取时状态机拒绝 `idle -> running`
+    （日志 "Illegal alignment transition"），岗位徽标整批停在旧状态。
+    """
+    resume = _create_resume()
+    job_ids = _create_library_jobs(2)
+    _set_alignment_status(job_ids[0], "succeeded")
+    _set_alignment_status(job_ids[1], "failed")
+
+    queued = []
+
+    def fake_queue_job(user, payload, workbench=False):
+        queued.append((payload, workbench))
+        return f"analysis-{len(queued)}"
+
+    with patch(
+        "resualign.api._queue_job", side_effect=fake_queue_job
+    ), patch("resualign.api.build_config", return_value=_config()):
+        r = client.post(
+            "/api/batch-align",
+            json=_queue_payloads(job_ids, resume["resume_id"]),
+            headers=_auth_headers(),
+        )
+    assert r.status_code == 202
+
+    rows = client.get("/api/jobs", headers=_auth_headers()).json()
+    rows = rows if isinstance(rows, list) else rows.get("jobs") or []
+    by_id = {row["job_id"]: row for row in rows}
+    for index, job_id in enumerate(job_ids, start=1):
+        assert by_id[job_id]["alignment_status"] == "queued"
+        assert by_id[job_id]["workbench_job_id"] == f"analysis-{index}"
+
+
 def test_create_response_is_superset_of_status_response():
     """创建响应必须含 summary/rows（#F1 根因钉死）。
 

@@ -38,11 +38,11 @@ E2E_CLASSIFY_FAILS_LEFT: int = 0
 #  - classifier    : session pipeline classification (PROMPT_VERSION: classifier/v2)
 #  - diagnose      : workbench diagnosis (PROMPT_VERSION: diagnose/v3)
 #  - jd_profiler   : standalone proactive JD profile (PROMPT_VERSION: jd_profiler/v2)
-#  - gap_analyzer  : gap analysis against the JD profile (PROMPT_VERSION: gap_analyzer/v2)
-#  - tailor        : tailoring (PROMPT_VERSION: tailor/v2)
-#  - evaluator     : evaluation (PROMPT_VERSION: evaluator/v2, run_eval=False in smoke,
+#  - gap_analyzer  : gap analysis against the JD profile (PROMPT_VERSION: gap_analyzer/v4)
+#  - tailor        : tailoring (PROMPT_VERSION: tailor/v5)
+#  - evaluator     : evaluation (PROMPT_VERSION: evaluator/v3, run_eval=False in smoke,
 #                    so not required)
-#  - tailor        : whole-document tailoring (PROMPT_VERSION: tailor/v2)
+#  - tailor        : whole-document tailoring (PROMPT_VERSION: tailor/v5)
 #                    NOT required since the map-reduce bullet editor
 #                    (bullet_rewrite/v2+) replaced it on medium granularity;
 #                    smoke asserts bullet_rewrite hits instead.
@@ -119,7 +119,7 @@ def fake_llm_response(system: str, user: str) -> dict | None:
             "skills": ["Python", "FastAPI"],
             "issues": ["Add quantified results."],
         }
-    if "PROMPT_VERSION: jd_analysis/v3" in system:
+    if "PROMPT_VERSION: jd_analysis/v5" in system:
         STAGE_HITS["jd_analysis"] += 1
         return {
             "jd_profile": {
@@ -131,6 +131,8 @@ def fake_llm_response(system: str, user: str) -> dict | None:
                 "education_requirements": [],
             },
             "gap_report": {
+                "supported_keywords": ["Python"],
+                "supported_keyword_evidence": {"Python": "Python"},
                 "missing_keywords": [
                     "FastAPI async endpoints",
                     "Redis caching for high concurrency",
@@ -149,9 +151,11 @@ def fake_llm_response(system: str, user: str) -> dict | None:
             "min_years_experience": 5,
             "education_requirements": [],
         }
-    if "PROMPT_VERSION: gap_analyzer/v2" in system:
+    if "PROMPT_VERSION: gap_analyzer/v4" in system:
         STAGE_HITS["gap_analyzer"] += 1
         return {
+            "supported_keywords": ["Python"],
+            "supported_keyword_evidence": {"Python": "Python"},
             "missing_keywords": [
                 "FastAPI async endpoints",
                 "Redis caching for high concurrency",
@@ -162,7 +166,7 @@ def fake_llm_response(system: str, user: str) -> dict | None:
     bullet = _bullet_rewrite_response(system, user)
     if bullet is not None:
         return bullet
-    if "PROMPT_VERSION: tailor/v2" in system:
+    if "PROMPT_VERSION: tailor/v5" in system:
         STAGE_HITS["tailor"] += 1
         resume = _resume_from_user(user)
         original = _first_bullet(resume)
@@ -179,13 +183,14 @@ def fake_llm_response(system: str, user: str) -> dict | None:
                 "provenance": original,
             }],
         }
-    if "PROMPT_VERSION: evaluator/v2" in system:
+    if "PROMPT_VERSION: evaluator/v3" in system:
         STAGE_HITS["evaluator"] += 1
         return {
             "jd_match_score": 88,
             "improvement": 12,
             "hallucination_detected": False,
             "hallucination_details": [],
+            "hallucinated_diff_ids": [],
             "gap_coverage": 0.9,
         }
     STAGE_HITS["unknown"] += 1
@@ -263,9 +268,9 @@ async def chat_completions(request: Request) -> dict:
                 "system": system[:200],
             },
         )
-    if schema_retry and "PROMPT_VERSION: tailor/v2" in system:
+    if schema_retry and "PROMPT_VERSION: tailor/v5" in system:
         payload = {"broken": "schema"}
-    if invalid_provenance and "PROMPT_VERSION: tailor/v2" in system:
+    if invalid_provenance and "PROMPT_VERSION: tailor/v5" in system:
         payload["diffs"] = [{
             "type": "add",
             "original": "",

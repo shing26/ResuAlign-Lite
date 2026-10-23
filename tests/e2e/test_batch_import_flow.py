@@ -12,6 +12,7 @@ from helpers import (
     assert_clean_page,
     capture_errors,
     expect,
+    use_board_view,
     wait_for_count,
 )
 
@@ -29,6 +30,7 @@ IMPORT_CSV = "\n".join([
 
 def test_batch_import_five_jobs(page, base_url, api_call, artifacts_dir):
     errors = capture_errors(page)
+    use_board_view(page)
 
     # Board starts empty on a fresh temp DB.
     page.goto(f"{base_url}/#/jobs", wait_until="domcontentloaded")

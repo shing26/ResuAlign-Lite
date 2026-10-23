@@ -381,8 +381,8 @@ def test_fabricated_org_in_chinese_proposed_is_blocked():
     assert "20" in blocked.reason
 
 
-def test_jd_context_terminology_in_proposed_passes():
-    """JD 语料（gap_report jd_context）允许术语复述，不算编造。"""
+def test_jd_context_terminology_is_not_a_content_license():
+    """JD context may steer phrasing, but cannot turn a new term into a fact."""
     resume = "项目经历\n- 搭建 Redis 缓存层"
     gap = json.dumps(
         {
@@ -413,9 +413,11 @@ def test_jd_context_terminology_in_proposed_passes():
         ]
     )
     result = tailor_resume(client, resume, gap)
-    assert len(result.diffs) == 1
-    assert result.diffs[0].provenance_state == "verified"
-    assert result.invalid_diffs == []
+    assert result.diffs == []
+    assert len(result.invalid_diffs) == 1
+    blocked = result.invalid_diffs[0]
+    assert blocked.provenance_state == "fabricated"
+    assert "Kubernetes" in blocked.reason
 
 
 def test_metric_placeholder_is_exempt_from_support_check():

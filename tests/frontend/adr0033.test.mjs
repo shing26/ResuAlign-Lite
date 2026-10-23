@@ -98,8 +98,8 @@ test("UI templates no longer ship emoji glyphs (warning/check/cross)", () => {
 /* 静态缓存版本                                                        */
 /* ------------------------------------------------------------------ */
 
-test("index.html bumps static cache version to v=59", () => {
+test("index.html bumps static cache version to v=68", () => {
   const html = readStatic("index.html");
-  assert.match(html, /\/static\/styles\.css\?v=59/);
-  assert.match(html, /\/static\/app\/main\.js\?v=59/);
+  assert.match(html, /\/static\/styles\.css\?v=68/);
+  assert.match(html, /\/static\/app\/main\.js\?v=68/);
 });

@@ -101,14 +101,97 @@ ADR-0042 对 ADR-0041 决定 4/9/10 做了**限定性修正**（数值未改，�
 - **项目级归档 = 探针线证伪 ∧ 自用线 = 0**。探针线单独证伪只触发
   「skill 线冻结、回 app-only」，不终结项目。
 - 护栏：两线阈值均不得中途重谈（要改须新开 ADR 并回答「为什么现在改」）；
-  自用线推进期间 **app 冻结令继续有效**，例外须逐项引用 ADR-0042 决定 6e。
-- **冻结期派单防护（标签口径 2026-09-28 复核）**：功能票已全部改挂 `frozen`
-  （**32 张**，总闸 = #114）。语义变成：**`frozen` = 冻结令管辖，别排期；
-  `ready-for-agent` = 现在就能领**。`ready-for-agent` 只剩 **2 张** ADR-0042
-  决定 6e 例外（#98 安装文档 F1 类、#115 归因），另有 3 张功能票停在
-  `needs-triage`（**可评估、不可实现**）。冻结期内唯一可动的代码是 ADR-0042
-  决定 6e 例外与 F1/F2 首跑摩擦修复。执行计划见
-  `docs/probe-window-plan-2026-09-16.md`。
+  两线的数值与取证口径仍不得中途重谈。
+
+### 双主线与 app 自用验证 (2026-10-19, ADR-0059)
+
+ADR-0059 已取代 ADR-0041 的 app 冻结总闸。执行 app 相关动作前先读
+`docs/adr/0059-dual-mainline-app-self-use-first.md`：
+
+- app 与 skill 探针是双主线；探针阈值/取证不变，冲突时 app 的真实自用
+  验证优先。探针不能再冻结 app，app 使用量也不能冒充探针首跑。
+- app 顺序：P0 真实 JD 可靠性验证 → P1 ADR/票/feature flag → P2 三步工作台
+  与文案 → P3 演示/BYOK/指标 → P4 展示型优化。首页样例与导航爆改不得插队。
+- app 通过线 = 3 份作者真实投递过的不同 JD，每份至少采纳 1 条并保存定稿，
+  至少 2 份导出或记录投递。不过线则新工作台默认关闭，回旧版。
+- `frozen` 只保留 ADR-0041 历史语义；具体票必须重新分诊，不能继续当
+  自动拒绝。旧票 #72/#26 等按 ADR-0059 的 P2/P3 顺序重排。
+
+### 编辑器产出约束：技能清单禁止增长 (2026-10-19, #163 P0)
+
+`tailor/v3` 起有两道防线，别拆：
+
+- `TAILOR_PROMPT` 规则 5/8：缺口只覆盖原文有事实支撑的部分；技能清单类
+  章节（`技能|skill`）只能改写已有条目。
+- `_apply_editor_output_contract`（`engine/tailor.py`）：`modify`/`add` 命中
+  技能章节且 `proposed` 条目数多于 `original` → 降级 `fabricated` 进
+  `invalid_diffs`。整卷编辑器与逐条编辑器都过它。
+
+为什么在 app 侧而不在 `gate_diff_items`：gap report 的 `missing_keywords`
+是上游 gate 的放行术语来源（`tests/fixtures/gate` 的 d8/e6 锁着），所以
+「把 JD 缺口词写进技能清单」会**假通过**内容级校验（2026-10-19 腾讯用例
+实证 usable=2）。改语料语义属上游 truetailor 规则变更，须先上游后同步；
+本约束按**条目数**判定，与 allowlist 语义解耦，且不触碰 parity 锁。
+背景与重跑证据见 `docs/reports/app-self-use-reliability-2026-10-19.md`。
+
+### 缺口术语兜底与逐条 evaluator 隔离 (2026-10-19, P0)
+
+两条后续防线，改编辑器/评测前先读：
+
+- **缺口术语兜底**：`_missing_keyword_violation`（`engine/tailor.py`）在
+  `modify`/`add` 的 `proposed` 中发现 gap report 的 `missing_keywords` 词，
+  但简历原文没有任何依据时，降级 `fabricated`。整卷编辑器与 map-reduce
+  都在写回 `sections` 前过这条，避免中文术语绕过 `_unsupported_content`。
+  这是 app 侧临时 guard；根因是 app 的 `missing_keywords` 语义与上游
+  truetailor 不一致（见下一条）。
+- **evaluator 逐条隔离**：`evaluator/v3` 输出 `hallucinated_diff_ids`；
+  `split_verified_diffs` 只隔离被指认的 diff，其余保留。若 evaluator 报幻觉
+  但没有可映射的 diff id，或确定性 provenance 校验发现无 id 的坏 diff，
+  回退整轮硬阻断（ADR-0019 零幻觉硬门不变）。`EvalScore` 与
+  `EvalScoreSchema` 都带该字段。
+
+**allowlist 语义拆分（已决，ADR-0060 / #164）**：allowlist 只认
+`supported_keywords`（JD 要、简历**有依据但没写明**）；`missing_keywords`
+固定为「JD 要、简历**没有依据**」的真缺口，**永不进 allowlist**。上游
+`gate.py::allowlist_corpus` 与 app `tailor.py::_gap_support_text` 键列表
+一致（`supported_keywords / misaligned_emphasis / strength_matches /
+business_scenarios`）。`jd_context` 仅作提示词上下文，永不进入 allowlist
+（ADR-0061 / #165）。改动顺序固定：**先上游 truetailor
+（gate + fixtures + SKILL/README/contract）→ 再同步 vendor
+（`src/resualign/gate.py` + `tests/fixtures/gate/` + `VENDOR.json`）→ 再重跑
+parity**（`tests/engine/test_gate.py::TestDriftLockParity` 与
+`tests/platform/test_skill_vendor_lock.py`）。ADR-0041 决定 11 漂移锁不变。
+黄金场景现为 **21** 个（`d11-` / `e8-missing-keyword-not-a-rewrite-source`
+锁住 #164，`d12-` / `e9-jd-context-is-not-a-license` 锁住 #165）。app 侧
+`gap_analyzer/v3`、`jd-analysis-v4`、`tailor/v4`。
+
+**guard 后实测（2026-10-19，别把它当「已解决」）**：3 份真实 JD × 3
+（`nvidia/nemotron-3-super-120b-a12b`）= **0/9 可用**，前一轮是 3/9。前一轮
+那 3 个「可用」正是被 allowlist 放行的编造项，guard 已把它们改判
+`fabricated`——**guard 修的是假通过，不是「编辑器产不出真建议」**。同一轮
+Reolink 编辑器调用 90s 超时 2/3。字段拆分（ADR-0060）落地后复测
+**2/9 可用、0 次基础设施错误**（腾讯 1/3、Dida 1/3、Reolink 0/3）。原始
+数据见 `.scratch/p0-159-samples/results{,-post-guard,-pre-guard}.json`。
+
+**#165 处置（已拍，ADR-0061 / 0062）**：
+
+1. **`jd_context` 已从内容许可链移除**。上游 `allowlist_corpus` 不再接收
+   该键，而且 context-only JSON 不再回退返回原文；app 主流程和工作台
+   单条重试统一传 `jd_context_summary()` 生成的结构化摘要（≤300 字），
+   不传 JD 原文，不传 `missing_keywords`。`rewrite_bullet` 的事实校验只认
+   原 bullet。
+2. **编辑器墙钟已放宽到 150s，但仍是每次 POST 的硬截止**。
+   `_WallClockDeadlineExceeded` 在 TransportError 分支不重试，首发 >150s
+   仍会硬失败。150s 的依据是 Reolink 上一轮 2/3 撞 90s、腾讯单发 81.9s；
+   最坏单发估算 `45+75+150=270s`，远低于 watchdog 1800s。该值由
+   `tests/api/test_r4_aie_guardrails.py` 锁定，改值先拍新 ADR。
+
+**#165 后实测（2026-10-20，`48e2eb3`）**：同节点 3×3，隔离目录
+`nvidia/nemotron-3-super-120b-a12b` = **3/9 succeeded、1/9 usable、
+0 次基础设施错误、0 次 deadline**。Reolink #3 整轮 193.9s，编辑器
+调用 170.4s / 2 次 POST，单次均未过 150s。结论：暂不继续放宽墙钟；
+剩余瓶颈是编辑器证据化与产出质量，app 自用线仍为 0/3。详见
+`docs/reports/app-self-use-post-165-2026-10-20.md`。
 
 ### 模块布局是刻意的：平铺 + 层表，别顺手分包 (2026-09-28)
 
@@ -164,12 +247,15 @@ ADR-0042 对 ADR-0041 决定 4/9/10 做了**限定性修正**（数值未改，�
   adds `usable_diffs` (backfilled from `diffs_json` length; first MIGRATIONS
   script with an UPDATE). Terminal typing happens at the workbench SAVE site
   (`services/jobs.py`, before `save_alignment`) — 有缺口 ∧ usable=0 →
-  `failed` + `last_alignment_error` prefix `no_output: ` (machine contract;
-  projection derives `alignment_reason`, never re-parse in UI); 无缺口 ∧
-  usable=0 → stays `succeeded`, badge 「无缺口 · 无需改写」. `analysis_ready`
-  unchanged. Dashboard 完成对齐 numerator counts `usable_diffs>=1` only;
-  legacy rows (no typing fields) keep the old 无建议/诊断完成 badges via the
-  fallback in `alignmentBadgeHtml`.
+  `failed` + `last_alignment_error` prefix `no_output: ` (machine contract);
+  无缺口 ∧ usable=0 → stays `succeeded`, badge 「无缺口 · 无需改写」。
+  #167 / migration 46 persists the user-facing terminal class in
+  `alignment_reason` (`no_safe_rewrite` / `model_failed` / `no_gap`); keep the
+  raw `no_output:` form only in `last_alignment_error`, expose the cleaned
+  `alignment_error` through API projections, and never parse the prefix in
+  UI. `analysis_ready` unchanged. Dashboard 完成对齐 numerator counts
+  `usable_diffs>=1` only; legacy rows (no typing fields) keep the old
+  无建议/诊断完成 badges via the fallback in `alignmentBadgeHtml`.
 - **#117 test-log isolation**: `tests/conftest.py` top-level
   `setdefault(RESUALIGN_LOG_DIR, <tmp>/resualign-pytest-logs)` before any
   `resualign.api` import — real `data/logs/app.log` stays clean (verified

@@ -121,6 +121,10 @@ def local_gap_report(resume_text, jd_text) -> dict:
             missing_keywords.append(keyword)
 
     return {
+        # The rule-based path cannot spot a JD term the resume evidences
+        # without stating it: present terms are already strength_matches and
+        # absent ones are true gaps, so nothing lands in the allowlist bucket.
+        "supported_keywords": [],
         "missing_keywords": missing_keywords,
         "misaligned_emphasis": [],
         "strength_matches": strength_matches,

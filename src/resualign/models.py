@@ -54,6 +54,8 @@ class JDProfile:
 
 @dataclass
 class GapReport:
+    supported_keywords: list[str] = field(default_factory=list)
+    supported_keyword_evidence: dict[str, str] = field(default_factory=dict)
     missing_keywords: list[str] = field(default_factory=list)
     misaligned_emphasis: list[str] = field(default_factory=list)
     strength_matches: list[str] = field(default_factory=list)
@@ -65,6 +67,7 @@ class EvalScore:
     improvement: int = 0
     hallucination_detected: bool = False
     hallucination_details: list[str] = field(default_factory=list)
+    hallucinated_diff_ids: list[str] = field(default_factory=list)
     gap_coverage: float = 0.0
 
 
@@ -73,6 +76,8 @@ class TailoredResume:
     sections: dict[str, str] = field(default_factory=dict)
     diffs: list[DiffItem] = field(default_factory=list)
     invalid_diffs: list[DiffItem] = field(default_factory=list)
+    no_safe_rewrite: bool = False
+    no_safe_rewrite_reason: str = ""
 
 
 @dataclass
@@ -98,6 +103,10 @@ class Report:
     # 保存（重试改写有 precomputed_diagnosis + profiler 缓存兜底），任务
     # succeeded 而非 failed；随 asdict(report) 流入 API 结果（落库标记）。
     tailor_degraded: bool = False
+    # editor 没有可在简历原文中定位的证据方向时，如实返回“无安全改写”，
+    # 而不是调用模型硬凑 diff。字段随 asdict(report) 进入 API 结果。
+    no_safe_rewrite: bool = False
+    no_safe_rewrite_reason: str = ""
 
 
 @dataclass

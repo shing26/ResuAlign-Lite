@@ -240,12 +240,43 @@ function refreshHeaderMeta() {
   if (subtitleNode) subtitleNode.textContent = subtitle;
 }
 
+/* J10（审计 2026-10-22）：侧栏「岗位库」徽标此前写的是「这一次列表请求返回了
+ * 几行」。列表接口按 limit 截断（header 选择器只拉前 100 条），库里 318 条时
+ * 徽标显示 100，而同一屏的驾驶舱/看板写 318 —— 两个数字互相矛盾，用户会以为
+ * 岗位丢了。徽标的语义必须是「库里有几个岗位」，不是「这次拿到几行」。 */
+const JOBS_RAIL_TOTAL_CAP = 500;
+
 function refreshJobsRailCount(count) {
   const badge = $("[data-jobs-rail-count]");
   if (!badge) return;
   const total = Math.max(0, Number(count) || 0);
   badge.hidden = total === 0;
-  badge.textContent = total;
+  /* ≥500 只报「500+」：到了这个量级，精确到个位的数字对导航没有价值；而且
+   * 岗位库/看板本身也只拉前 500 条（审计 J7），徽标再大就会和列表对不上，
+   * 反而制造新的口径矛盾。 */
+  badge.textContent =
+    total >= JOBS_RAIL_TOTAL_CAP ? `${JOBS_RAIL_TOTAL_CAP}+` : String(total);
+  badge.title = `岗位库共 ${total} 个岗位`;
+}
+
+let jobsRailTotalFetch = null;
+
+/* J10：总数的唯一来源 = /api/dashboard 的 kpi.jobs（后端对整库计数，一次只读
+ * 请求）。刻意不为了这个数字把 header 选择器的列表拉到 500 条：那会让每次路由
+ * 切换都多下载约 5 倍 JSON，而选择器只需要「最近 100 个岗位」就够用。
+ * 拿不到总数时退回列表长度 —— 宁可显示一个下限，也不要显示一个看起来精确的
+ * 错数；请求失败不弹 toast：侧栏数字不该在别的页面上抢错误提示的位置。 */
+function refreshJobsRailTotal(fallbackCount) {
+  if (jobsRailTotalFetch) return;
+  jobsRailTotalFetch = api("/api/dashboard")
+    .then((data) => {
+      const total = Number(data && data.kpi && data.kpi.jobs);
+      refreshJobsRailCount(Number.isFinite(total) ? total : fallbackCount);
+    })
+    .catch(() => refreshJobsRailCount(fallbackCount))
+    .finally(() => {
+      jobsRailTotalFetch = null;
+    });
 }
 
 /* 蓝图路由收口：hash → 视图分发的唯一入口。route 名直接来自 hash
@@ -329,7 +360,17 @@ async function render() {
   const app = $("#app-router-view");
   const printNode = $("#print-root");
   if (printNode) printNode.innerHTML = "";
-  app.innerHTML = `<div class="skeleton is-shimmer">加载中...</div>`;
+  /* SH-10（2026-10-23）：加载态从一句「加载中...」改为版式骨架——标题条 +
+     三张卡，用与真实页面接近的高度和位置，避免切页时整块空白再突然跳变。 */
+  app.innerHTML = `<div class="view-skeleton" data-view-skeleton aria-busy="true" aria-label="正在加载页面">
+    <div class="skeleton is-shimmer view-skeleton__bar"></div>
+    <div class="view-skeleton__row">
+      <div class="skeleton is-shimmer view-skeleton__card"></div>
+      <div class="skeleton is-shimmer view-skeleton__card"></div>
+      <div class="skeleton is-shimmer view-skeleton__card"></div>
+    </div>
+    <p class="view-skeleton__hint">正在加载…</p>
+  </div>`;
   /* T2: 每次路由渲染同步 Header 岗位快速选择器（异步填充 + 立即同步值）。 */
   refreshHeaderJobSelect();
   syncHeaderJobSelect();
@@ -353,8 +394,29 @@ async function render() {
       navigate("dashboard");
       return;
     }
-    app.innerHTML = `<div class="panel"><h3>出错了</h3><p class="muted">${esc(error.message)}</p>
-      <div class="row" style="margin-top:12px"><button class="btn btn-primary" data-action="reload">重试</button></div></div>`;
+    /* SH-10（2026-10-23）：错误态不再是一块英文 message panel——中文标题 + 原因
+       + 顶层 request_id（后端 #100 契约，排查时可直接检索日志）+ 重试 / 返回驾驶舱。
+       文案只描述「页面没加载出来」，不臆测原因；具体原因原样展示，便于定位。 */
+    const requestId =
+      (error && (error.requestId || (error.data && error.data.request_id))) || "";
+    const rawMessage = error && error.message ? String(error.message) : "未知错误";
+    /* 浏览器原生网络错误是英文（Failed to fetch / NetworkError），对本地工具来说
+       最可能的真实原因是「服务没起来」，直接换成可照做的中文说明。 */
+    const reason = /Failed to fetch|NetworkError|Load failed/i.test(rawMessage)
+      ? "网络请求失败：确认本地服务仍运行在 127.0.0.1:8000，然后点「重试」；若刚启动服务，等几秒再试。"
+      : rawMessage;
+    app.innerHTML = `<div class="view-error" data-view-error role="alert">
+      <div class="view-error__icon" aria-hidden="true">!</div>
+      <div class="view-error__body">
+        <h2>这个页面没能加载</h2>
+        <p>${esc(reason)}</p>
+        ${requestId ? `<p class="view-error__meta">请求 ID：<code>${esc(requestId)}</code>（排查日志时使用）</p>` : ""}
+        <div class="row">
+          <button class="btn btn-primary btn-sm" type="button" data-action="reload">重试</button>
+          <a class="btn btn-ghost btn-sm" href="#/dashboard">返回驾驶舱</a>
+        </div>
+      </div>
+    </div>`;
   }
 }
 
@@ -389,18 +451,29 @@ function renderApiKeyGuide(app) {
 
 let headerJobsCache = null;
 let headerJobsFetch = null;
+/* header 岗位快速选择器只保留「最近 100 个」，不跟着 J10 一起拉 500 条：
+ * 这是导航辅助，不是岗位库列表。 */
+const HEADER_JOBS_LIMIT = 100;
 
 function refreshHeaderJobSelect() {
   if (headerJobsFetch) return;
-  headerJobsFetch = api("/api/jobs?limit=100")
+  headerJobsFetch = api(`/api/jobs?limit=${HEADER_JOBS_LIMIT}`)
     .then((jobs) => {
       headerJobsCache = Array.isArray(jobs) ? jobs : [];
       populateHeaderJobSelect(headerJobsCache);
-      refreshJobsRailCount(headerJobsCache.length);
+      /* J10：只有「这次没被 limit 截断」时，列表长度才等于真总数，可以立刻
+       * 上屏（小库/新库不会先闪一个错数）；被截断时不用它冒充总数，交给
+       * refreshJobsRailTotal 从 kpi.jobs 取真值，避免出现「100」再跳「318」。 */
+      if (headerJobsCache.length < HEADER_JOBS_LIMIT) {
+        refreshJobsRailCount(headerJobsCache.length);
+      }
+      refreshJobsRailTotal(headerJobsCache.length);
       return headerJobsCache;
     })
     .catch(() => {
       headerJobsCache = headerJobsCache || [];
+      /* 列表拉失败也别让徽标停在旧值：总数接口是另一条路径，拿得到就先用它。 */
+      refreshJobsRailTotal(headerJobsCache.length);
       return headerJobsCache;
     })
     .finally(() => {
@@ -629,27 +702,145 @@ function writeSettingsMode(mode) {
   }
 }
 
+/* S1：简单模式「更多设置」三行各自对应专家模式里的哪个面板。用固定映射
+ * 而不是把选择器写进模板的 data 属性——模板只负责说「看哪一格」，DOM 结构
+ * 变了只改这里。 */
+const SETTINGS_MORE_TARGETS = {
+  automation: "[data-automation-panel]",
+  "local-ingest": "[data-local-ingest-panel]",
+  "role-bindings": "[data-role-bindings-panel]",
+};
+
+/* 「查看」被点击时目标面板还不存在（简单模式不渲染专家面板），所以先把
+ * 选择器暂存，等 renderSettingsView 重建完 DOM 再消费。 */
+let pendingSettingsPanel = null;
+
+function scrollToPendingSettingsPanel(app) {
+  const selector = pendingSettingsPanel;
+  if (!selector) return;
+  pendingSettingsPanel = null;
+  const target = app && app.querySelector(selector);
+  if (!target) return;
+  /* .settings-view 自己是滚动容器（styles.css .settings-view overflow-y:auto），
+     block:"start" 让面板标题落在容器顶部；topbar 在另一 grid 行不会遮挡。 */
+  target.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+/* S3：延迟格的数据来源。优先本会话刚测的结果；没有就退回后端落库的最近一次
+ * 成功测试（last_test_status/last_test_latency_ms）——删掉进页面自动探针后，
+ * 这里不能再为了填一格而真实调一次 LLM，但刷新页面也不该永远显示「—」。 */
+function settingsLatency(node, lastTest) {
+  if (lastTest && lastTest.ok && lastTest.latency_ms != null) {
+    return lastTest.latency_ms;
+  }
+  if (node && node.last_test_status === "ok") {
+    const persisted = Number(node.last_test_latency_ms);
+    if (Number.isFinite(persisted) && persisted >= 0) return persisted;
+  }
+  return null;
+}
+
+/* S4：设置页头部状态行统一读 state.settingsStatus（请求失败时是
+ * {_degraded:true}）。抽成函数，让降级条的「重试」能就地刷新这一行，
+ * 而不必重渲染整页（避免冲掉用户还没保存的表单输入）。 */
+function settingsStatusLineHtml() {
+  const configured = Boolean(
+    state.settingsStatus && state.settingsStatus.api_key_configured,
+  );
+  return `<span class="dot ${configured ? "dot-success" : "dot-warn"}" aria-hidden="true"></span>${configured ? "LLM 已配置" : "LLM 未配置"}`;
+}
+
+/* S1：简单模式只有「连接 AI 助手」一张卡，而顶栏副标题承诺了「自动化规则 /
+ * 本地摄入 Token」，用户在这一页找不到任何入口（审计 S1）。补三行摘要 +
+ * 「查看」：数据全部来自 renderSettingsView 已经取回的 state，不再发请求；
+ * 点击切专家模式并滚到对应面板（settings-more-open → 上面的 pending 锚点）。
+ * 每行都给出「当前状态」，让用户不进专家模式也能判断要不要进去。 */
+function settingsMoreListHtml(settingsLoadFailed) {
+  const rules = Array.isArray(state.automationRules)
+    ? state.automationRules
+    : [];
+  const enabledRules = rules.filter((rule) => rule && rule.enabled).length;
+  const rulesText = rules.length
+    ? `已配置 ${rules.length} 条拦截规则${
+        enabledRules === rules.length
+          ? "（全部启用）"
+          : enabledRules
+            ? `（${enabledRules} 条启用）`
+            : "（全部停用）"
+      }`
+    : "还没有规则，可按公司 / 最低薪资拦截不适合的岗位";
+
+  const token = state.settings && state.settings.local_ingest_token;
+  const tokenText = settingsLoadFailed
+    ? "设置读取失败，暂时看不到 Token 状态"
+    : token
+      ? "已生成，浏览器插件可直接入库"
+      : "尚未生成，首次入库时自动创建";
+
+  const roles =
+    state.roleBindings && Array.isArray(state.roleBindings.roles)
+      ? state.roleBindings.roles
+      : [];
+  const bindings =
+    state.roleBindings && state.roleBindings.bindings
+      ? state.roleBindings.bindings
+      : {};
+  const boundRoles = roles.filter((role) => bindings[role]).length;
+  const bindingsText = !state.roleBindings
+    ? "分工状态加载失败，可进专家模式重试"
+    : boundRoles
+      ? `${boundRoles} / ${roles.length} 个角色绑定了独立节点，其余跟随主节点`
+      : "全部角色跟随主节点";
+
+  const row = (panel, title, text, ariaLabel) => `
+      <div class="settings-more__row">
+        <div class="settings-more__row-main">
+          <strong>${title}</strong>
+          <p>${text}</p>
+        </div>
+        <button class="btn btn-outline btn-sm" type="button" data-action="settings-more-open" data-panel="${panel}" aria-label="${ariaLabel}">查看</button>
+      </div>`;
+  return `
+    <div class="settings-more" data-settings-more>
+      ${row("automation", "自动化规则", rulesText, "查看自动化规则")}
+      ${row("local-ingest", "本地摄入 Token", tokenText, "查看本地摄入 Token")}
+      ${row("role-bindings", "节点分工", bindingsText, "查看节点分工")}
+    </div>`;
+}
+
 async function renderSettingsView(app) {
   const [settings, status, nodes, rules, roleBindings] = await Promise.all([
-    api("/api/settings"),
-    api("/api/settings/status"),
+    api("/api/settings").catch(() => null),
+    api("/api/settings/status").catch(() => null),
     api("/api/llm/nodes").catch(() => []),
     api("/api/automation/rules").catch(() => []),
     api("/api/settings/role-bindings").catch(() => null),
   ]);
-  state.settings = settings;
-  state.settingsStatus = status;
+  /* Module 7: partition degradation. If /api/settings/status fails, the
+   * main body still renders (node list derives status); the bento shows
+   * an error bar with retry.
+   *
+   * S4：这两个请求失败时返回 null，原实现随后 `settings.classification_vocabulary`
+   * 与 `status.api_key_configured` 直接解引用 → TypeError，整页停在「加载中」，
+   * 与上面「主体仍渲染」的承诺相反。请求处先归一化成对象：
+   * - settings 失败 → {}，主体表单按空白默认值渲染；
+   * - status 失败 → {_degraded:true}，bento 走已有的「加载失败 + 重试」分支。
+   * 模板里的状态一律读 state.settingsStatus，避免两套兜底口径再次分叉。 */
+  const settingsLoadFailed = !(settings && typeof settings === "object");
+  state.settings = settingsLoadFailed ? {} : settings;
+  state.settingsStatus =
+    status && typeof status === "object" ? status : { _degraded: true };
   state.llmNodes = Array.isArray(nodes) ? nodes : [];
   state.automationRules = Array.isArray(rules) ? rules : [];
   state.roleBindings =
     roleBindings && typeof roleBindings === "object" ? roleBindings : null;
-  const vocabulary = settings.classification_vocabulary;
+  const vocabulary = state.settings.classification_vocabulary;
   state.vocabulary = normalizeVocabulary(vocabulary);
   const activeNode = state.llmNodes.find((node) => node.is_active) || null;
   const activeLastTest = activeNode
     ? (state.llmNodeTests || {})[activeNode.node_id]
     : null;
-  const latency = activeLastTest && activeLastTest.ok ? activeLastTest.latency_ms : null;
+  const latency = settingsLatency(activeNode, activeLastTest);
   const nodeCards = state.llmNodes
     .map((node) => llmNodeCardHtml(node, (state.llmNodeTests || {})[node.node_id]))
     .join("");
@@ -659,8 +850,13 @@ async function renderSettingsView(app) {
   const settingsMode = readSettingsMode();
   const modeSwitchHtml = settingsModeSwitchHtml(settingsMode);
   const simpleSetupNode = activeNode || state.llmNodes[0] || null;
+  /* S4：/api/settings 失败时 Token 面板不能继续显示「生成中…」（会一直等），
+   * 如实说明读取失败。 */
+  const localIngestTokenText = settingsLoadFailed
+    ? "读取失败，请刷新重试"
+    : state.settings.local_ingest_token || "生成中…";
   const expertPanelsHtml = `
-      ${settingsBentoHtml(activeNode, latency, status)}
+      ${settingsBentoHtml(activeNode, latency, state.settingsStatus)}
       ${roleBindingsPanelHtml(
         (state.roleBindings && state.roleBindings.roles) || [],
         state.llmNodes,
@@ -676,7 +872,7 @@ async function renderSettingsView(app) {
         </div>
         <div class="panel-body">
           <div class="token-row">
-            <code class="token-value" data-local-ingest-token>${esc(settings.local_ingest_token || "生成中…")}</code>
+            <code class="token-value" data-local-ingest-token>${esc(localIngestTokenText)}</code>
             <button class="btn btn-secondary btn-sm" type="button" data-action="copy-local-ingest-token">复制</button>
           </div>
           <p class="small muted">首次启动自动生成；重置后旧 Token 立即失效，需同步更新油猴脚本配置。</p>
@@ -700,7 +896,7 @@ async function renderSettingsView(app) {
             </div>
             <form data-form="settings-eval-default" class="llm-eval-default">
               <label class="check-line">
-                <input type="checkbox" name="eval_default" ${settings.eval_default ? "checked" : ""}>
+                <input type="checkbox" name="eval_default" ${state.settings.eval_default ? "checked" : ""}>
                 运行对齐时默认开启评估（幻觉检测 / AI 对齐匹配分）
               </label>
               <div class="small muted">每任务额外一次 LLM 调用；工作台可按次覆盖。</div>
@@ -728,43 +924,24 @@ async function renderSettingsView(app) {
           <p>连接 AI 助手、配置节点与自动化规则${settingsMode === "expert" ? "（专家模式）" : ""}</p>
         </div>
         <div class="settings-head-actions">
-          <span class="status-line"><span class="dot ${status.api_key_configured ? "dot-success" : "dot-warn"}" aria-hidden="true"></span>${status.api_key_configured ? "LLM 已配置" : "LLM 未配置"}</span>
+          <span class="status-line" data-settings-status-line>${settingsStatusLineHtml()}</span>
           ${modeSwitchHtml}
-          <button class="btn btn-outline btn-sm" type="button" data-action="reset-settings">恢复默认设置</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-action="reset-settings" title="把 AI 连接配置与分类词表恢复为默认值（不会动 LLM 节点与本地摄入 Token）">恢复默认设置</button>
         </div>
       </div>
       ${settingsMode === "expert" ? expertPanelsHtml : simpleLlmSetupHtml(simpleSetupNode, simpleSetupNode ? (state.llmNodeTests || {})[simpleSetupNode.node_id] : null)}
+      ${settingsMode === "expert" ? "" : settingsMoreListHtml(settingsLoadFailed)}
     </div>`;
 
-  if (
-    activeNode &&
-    !activeLastTest &&
-    !(state.llmNodeTestInflight || {})[activeNode.node_id]
-  ) {
-    state.llmNodeTestInflight = {
-      ...(state.llmNodeTestInflight || {}),
-      [activeNode.node_id]: true,
-    };
-    api(`/api/llm/nodes/${encodeURIComponent(activeNode.node_id)}/test`, {
-      method: "POST",
-    })
-      .then((result) => {
-        state.llmNodeTests = {
-          ...(state.llmNodeTests || {}),
-          [activeNode.node_id]: result,
-        };
-        updateSettingsBento($("#app-router-view"));
-      })
-      .catch(() => {
-        /* keep the latency cell at — until the user tests explicitly */
-      })
-      .finally(() => {
-        state.llmNodeTestInflight = {
-          ...(state.llmNodeTestInflight || {}),
-          [activeNode.node_id]: false,
-        };
-      });
-  }
+  /* S3：原来这里会在进设置页时自动 POST /api/llm/nodes/{id}/test 给「API 延迟」
+   * 格补数据——每次进页面都对真实 provider 发一次最小请求（最长约 10s，结果还
+   * 落库），用户既没同意也看不见。延迟改由用户点节点卡「测试连通性」
+   * （llm-node-test → updateSettingsBento）或用下面 settingsLatency 读的持久化
+   * last_test_* 结果来填。
+   *
+   * S1 的跳转锚点也只能在这里补：目标面板仅专家模式渲染，所以「查看」先切模式
+   * 再重渲染，滚动必须等新 DOM 落地后执行。 */
+  scrollToPendingSettingsPanel(app);
 }
 
 function updateSettingsBento(app = $("#app-router-view")) {
@@ -775,7 +952,7 @@ function updateSettingsBento(app = $("#app-router-view")) {
   const lastTest = activeNode
     ? (state.llmNodeTests || {})[activeNode.node_id]
     : null;
-  const latency = lastTest && lastTest.ok ? lastTest.latency_ms : null;
+  const latency = settingsLatency(activeNode, lastTest);
   mount.outerHTML = settingsBentoHtml(activeNode, latency, state.settingsStatus);
 }
 
@@ -1084,8 +1261,13 @@ async function exportFinalDraft(format, options = {}) {
  * 引用会让新按钮顶着「一键预分析」的样子却执行取消。所以每次画都重新
  * 按选择器取当前真正在文档里的那个。 */
 let activePreanalyze = null;
+/* 批量对齐的提交闸门：确认按钮随弹窗销毁只能挡住连点弹窗，挡不住「弹窗关掉、
+ * POST 还在路上时再点一次工具栏」——那会排两批、花两遍钱。 */
+let batchAlignSubmitting = false;
 
 const PREANALYZE_SELECTOR = '[data-action="preanalyze-pending"]';
+const BATCH_ALIGN_SELECTOR =
+  '[data-action="batch-align-pending"][data-batch-align]';
 
 function paintPreanalyzeButton() {
   const button = document.querySelector(PREANALYZE_SELECTOR);
@@ -1111,6 +1293,113 @@ function resetPreanalyzeButton() {
   button.title = "";
   button.disabled = false;
   if (label) button.textContent = label;
+}
+
+/* J5（审计 2026-10-22）：「一键预分析 / 批量对齐」点下去就是一长串真实的
+ * 模型调用，可按钮上只有动作名，没有数量、时长、花费 —— 用户要么不敢点，
+ * 要么点完才发现搞大了。后端没有「先问价」的接口，所以这里用岗位库当前
+ * 已加载的列表（renderKanban 拉的 /api/jobs?limit=500，与看板同源）做前端
+ * 估算，弹窗与按钮文案都必须写明「按当前列表估算」。
+ *
+ * 预分析成本常量来自代码注释与实测（每个岗位 2 次串行 LLM 调用、约 3.5s/岗）：
+ * 87 个岗位 ≈ 174 次调用、5 分钟以上。改这里之前先重跑一次实测。 */
+const PREANALYZE_SECONDS_PER_JOB = 3.5;
+const PREANALYZE_CALLS_PER_JOB = 2;
+
+/* 复刻后端 job_needs_preanalyze：有 JD 正文 ∧（分类待定 ∨ 还没 JD 画像）。
+ * 漏掉 jd_text 会高估没有正文的岗位；审计时 318 条里 87 条命中，与后端扫描
+ * 结果一致（此后随实际预分析进度变化）。 */
+function estimatePreanalyzePending() {
+  return (state.jobs || []).filter(
+    (job) =>
+      (job.jd_text || "").trim() &&
+      (!job.jd_profile || Boolean(job.classification_pending)),
+  ).length;
+}
+
+/* 复刻后端 _pending_library_jobs 的前端下限：idle / failed 一律进队；queued
+ * 只在「注册任务已终态」时补跑，而前端拿不到注册表状态，所以这里不计入，
+ * 弹窗里说明是估算。当前真实数据：idle 87 + failed 209 = 296。 */
+function estimateBatchAlignPending() {
+  return (state.jobs || []).filter((job) =>
+    ["idle", "failed"].includes(job.alignment_status || "idle"),
+  ).length;
+}
+
+function estimateBatchMinutes(seconds) {
+  /* 不足 1 分钟也要说「约 1 分钟」：写 0 分钟等于没给预期。 */
+  return Math.max(1, Math.round(seconds / 60));
+}
+
+/* J5 第二步（预分析）：确认弹窗点「开始预分析」后才真正发请求。
+ * 按钮节点可能已被 render() 换掉，所以按选择器重新取，绝不持有旧引用
+ * （见 activePreanalyze 的注释）。逻辑与原 handler 完全一致，只是多了一层
+ * 「先讲代价」的前置确认。 */
+async function startPreanalyzeBatch() {
+  const button = document.querySelector(PREANALYZE_SELECTOR);
+  if (!button || activePreanalyze) return;
+  const label = button.textContent;
+  button.disabled = true;
+  try {
+    const start = await api("/api/jobs/preanalyze-pending", { method: "POST" });
+    if (!start.queued) {
+      button.disabled = false;
+      toast("没有待预分析的岗位", "success");
+      return;
+    }
+    /* 预分析是每岗位两次串行 LLM 调用（实测 ~3.5s/岗位），120 个岗位
+     * 约 7 分钟。按钮置灰等于让用户干等，所以改成进度按钮 + 「停止」：
+     * 已分析的结果保留，剩下的不再排队。 */
+    activePreanalyze = {
+      batchId: start.batch_id,
+      canceling: false,
+      label,
+      total: start.total,
+      analyzed: 0,
+    };
+    paintPreanalyzeButton();
+    const timer = window.setInterval(async () => {
+      try {
+        const status = await api(
+          `/api/jobs/preanalyze-pending/${start.batch_id}`,
+        );
+        if (activePreanalyze) {
+          activePreanalyze.analyzed = status.analyzed;
+          if (!activePreanalyze.canceling) paintPreanalyzeButton();
+        }
+        if (!status.queued) {
+          window.clearInterval(timer);
+          resetPreanalyzeButton();
+          const failed = (status.errors || []).length;
+          if (status.canceled) {
+            toast(
+              `已停止：已分析 ${status.analyzed}，剩余 ${status.total - status.analyzed - status.skipped} 个未处理`,
+              "info",
+            );
+          } else if (status.stopped && failed) {
+            /* 定义性阻断（欠费/鉴权）会让整批在首行停下：把后端给的
+             * 可执行原因直接透出，而不是只报「失败 1」。 */
+            toast(status.errors[0], "error");
+          } else {
+            toast(
+              `预分析完成：已分析 ${status.analyzed}，跳过 ${status.skipped}` +
+                (failed ? `，失败 ${failed}` : ""),
+              status.analyzed ? "success" : "error",
+            );
+          }
+          render();
+        }
+      } catch (error) {
+        window.clearInterval(timer);
+        resetPreanalyzeButton();
+        toast(error.message, "error");
+      }
+    }, 1500);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = label;
+    toast(error.message, "error");
+  }
 }
 
 const actions = {
@@ -1534,6 +1823,11 @@ const actions = {
       toast(error.message, "error");
     }
   },
+  /* J5（审计 2026-10-22）：原来点一下就直接 POST —— 一次点击 = 87 个岗位 x
+   * 2 次模型调用、5 分钟以上，而按钮文案里没有任何数量与代价。改成两步：
+   * 先按当前列表估算并弹窗讲清「处理多少 / 多久 / 几次调用 / 可停止」，
+   * 用户点「开始预分析」才真正排队；取消只关弹窗、不发任何请求。
+   * 「取消」排在动作区第一个，回车/空格不会顺手把这一批钱花掉。 */
   "preanalyze-pending": async (button) => {
     /* 正在跑的时候，同一个按钮就是「停止」。 */
     if (activePreanalyze) {
@@ -1556,68 +1850,36 @@ const actions = {
       }
       return;
     }
-    const label = button.textContent;
-    button.disabled = true;
-    try {
-      const start = await api("/api/jobs/preanalyze-pending", { method: "POST" });
-      if (!start.queued) {
-        button.disabled = false;
-        toast("没有待预分析的岗位", "success");
-        return;
-      }
-      /* 预分析是每岗位两次串行 LLM 调用（实测 ~3.5s/岗位），120 个岗位
-       * 约 7 分钟。按钮置灰等于让用户干等，所以改成进度按钮 + 「停止」：
-       * 已分析的结果保留，剩下的不再排队。 */
-      activePreanalyze = {
-        batchId: start.batch_id,
-        canceling: false,
-        label,
-        total: start.total,
-        analyzed: 0,
-      };
-      paintPreanalyzeButton();
-      const timer = window.setInterval(async () => {
-        try {
-          const status = await api(
-            `/api/jobs/preanalyze-pending/${start.batch_id}`,
-          );
-          if (activePreanalyze) {
-            activePreanalyze.analyzed = status.analyzed;
-            if (!activePreanalyze.canceling) paintPreanalyzeButton();
-          }
-          if (!status.queued) {
-            window.clearInterval(timer);
-            resetPreanalyzeButton();
-            const failed = (status.errors || []).length;
-            if (status.canceled) {
-              toast(
-                `已停止：已分析 ${status.analyzed}，剩余 ${status.total - status.analyzed - status.skipped} 个未处理`,
-                "info",
-              );
-            } else if (status.stopped && failed) {
-              /* 定义性阻断（欠费/鉴权）会让整批在首行停下：把后端给的
-               * 可执行原因直接透出，而不是只报「失败 1」。 */
-              toast(status.errors[0], "error");
-            } else {
-              toast(
-                `预分析完成：已分析 ${status.analyzed}，跳过 ${status.skipped}` +
-                  (failed ? `，失败 ${failed}` : ""),
-                status.analyzed ? "success" : "error",
-              );
-            }
-            render();
-          }
-        } catch (error) {
-          window.clearInterval(timer);
-          resetPreanalyzeButton();
-          toast(error.message, "error");
-        }
-      }, 1500);
-    } catch (error) {
-      button.disabled = false;
-      button.textContent = label;
-      toast(error.message, "error");
+    const pending = estimatePreanalyzePending();
+    if (!pending) {
+      /* 没有可分析的岗位时不弹空弹窗、也不发请求：后端会 422，白等一次往返。 */
+      toast("没有待分析的岗位", "info");
+      return;
     }
+    const calls = pending * PREANALYZE_CALLS_PER_JOB;
+    const minutes = estimateBatchMinutes(
+      pending * PREANALYZE_SECONDS_PER_JOB,
+    );
+    showModal(
+      "确认一键预分析",
+      `<p>将处理 <b>${pending}</b> 个待分析岗位（按当前列表估算）。</p>
+       <ul class="small muted">
+         <li>每个岗位约 ${PREANALYZE_CALLS_PER_JOB} 次模型调用（分类 + JD 画像提取），合计约 <b>${calls}</b> 次</li>
+         <li>串行执行，约 ${PREANALYZE_SECONDS_PER_JOB} 秒/岗，预计 <b>约 ${minutes} 分钟</b></li>
+         <li>开始后按钮会变成进度入口，可随时点它停止；已分析的结果保留</li>
+       </ul>
+       <p class="small muted">实际数量以后端扫描全库为准：当前筛选可能让估算偏低。</p>
+       <div class="actions">
+         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+         <button class="btn btn-primary" type="button" data-action="confirm-preanalyze-pending">开始预分析</button>
+       </div>`,
+    );
+  },
+  /* J5 第二步（预分析）：确认后才真正 POST。先关弹窗 —— 确认按钮节点随
+   * 弹窗销毁，天然挡住连点（连点会排两个批次、花两遍钱）。 */
+  "confirm-preanalyze-pending": async () => {
+    closeModal();
+    await startPreanalyzeBatch();
   },
   "clear-filters": () => {
     state.filters = {
@@ -1734,7 +1996,10 @@ const actions = {
     const panel = wrap || document.querySelector("[data-batch-wrap]");
     if (!panel) return;
     if (panel.hidden) openBatchPanel();
-    else panel.hidden = true;
+    else {
+      panel.hidden = true;
+      updateBatchSelection();
+    }
   },
   /* 岗位卡详情改为显式展开：hover 展开会让卡片高度变化，把同列下方所有卡片
    * 整体下推（实测 187px），鼠标在卡片间移动时目标在指针下跳动，多选复选框
@@ -1755,6 +2020,8 @@ const actions = {
   "close-batch-panel": () => {
     const panel = document.querySelector("[data-batch-wrap]");
     if (panel) panel.hidden = true;
+    /* 关闭后按当前选择恢复 FAB；否则取消勾选过的话它再也不出现。 */
+    updateBatchSelection();
   },
   "delete-job": (button) => {
     /* #U9: replace window.confirm with the in-app modal. The confirm
@@ -1978,10 +2245,63 @@ const actions = {
   "back-to-jobs": () => navigate("jobs"),
   "go-resumes": () => navigate("resume"),
   "go-jobs": () => navigate("jobs"),
-  "reset-settings": async () => {
+  /* S5：「恢复默认设置」原来点一下就直接 POST，误触即丢 AI 连接配置与分类词表；
+   * 而且用户会误以为 LLM 节点也一起被清空（后端只 update_settings(default_settings())，
+   * 保留 local_ingest_token，从不碰 llm_nodes）。改成二次确认，正文列清会/不会
+   * 重置的范围；确认按钮用 danger，取消是默认 ghost。 */
+  "reset-settings": () => {
+    showModal(
+      "恢复默认设置",
+      `<p>这会把以下设置还原为出厂默认：</p>
+       <ul class="small muted">
+         <li>AI 连接配置（服务商 / 模型 / API Key / Base URL）</li>
+         <li>分类词表（岗位状态、职能、级别）</li>
+         <li>评估默认开关、提醒与岗位表自动同步配置</li>
+       </ul>
+       <p class="small muted">不会重置：LLM 节点列表、本地摄入 Token。已导入的岗位、简历与投递记录也不受影响。</p>
+       <div class="actions">
+         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+         <button class="btn btn-danger" type="button" data-action="confirm-reset-settings">确认恢复</button>
+       </div>`,
+    );
+  },
+  "confirm-reset-settings": async () => {
+    closeModal();
     await api("/api/settings/reset", { method: "POST" });
-    toast("已恢复默认设置", "success");
+    /* 成功 toast 写明影响项，避免把「恢复默认」当成全部清空。 */
+    toast(
+      "已恢复默认：AI 连接配置与分类词表回到默认值（LLM 节点与本地摄入 Token 未改动）",
+      "success",
+    );
     render();
+  },
+  /* S1：简单模式「更多设置」行 → 切专家模式并滚到对应面板。render() 会整页
+   * 重建，锚点用 pendingSettingsPanel 传递（见 scrollToPendingSettingsPanel）。 */
+  "settings-more-open": async (button) => {
+    const selector = SETTINGS_MORE_TARGETS[button.dataset.panel];
+    if (typeof selector !== "string") return;
+    writeSettingsMode("expert");
+    pendingSettingsPanel = selector;
+    await render();
+  },
+  /* S4：bento 降级条上的「重试」此前没有 handler（点了没反应）。只重取
+   * /api/settings/status 并就地刷新头部状态行 + bento，失败则保留降级条。 */
+  "retry-settings-status": async () => {
+    let next;
+    try {
+      next = await api("/api/settings/status");
+    } catch {
+      state.settingsStatus = { _degraded: true };
+      updateSettingsBento($("#app-router-view"));
+      toast("系统状态仍不可用，请稍后重试", "error");
+      return;
+    }
+    state.settingsStatus =
+      next && typeof next === "object" ? next : { _degraded: true };
+    const statusLine = $("[data-settings-status-line]");
+    if (statusLine) statusLine.innerHTML = settingsStatusLineHtml();
+    updateSettingsBento($("#app-router-view"));
+    toast("系统状态已更新", "success");
   },
   "copy-local-ingest-token": () => {
     const token = state.settings && state.settings.local_ingest_token;
@@ -2263,7 +2583,16 @@ const actions = {
   },
   "open-optimizer": (button) => navigate("workspace", button.dataset.id),
   /* Phase E: 看板卡片单岗对齐。idle/failed/零 diff succeeded 由卡片按钮触发，
-   * 使用最近创建的主简历 + medium 粒度，与工作台默认一致。 */
+   * 使用最近创建的主简历 + medium 粒度，与工作台默认一致。
+   *
+   * J4（审计 2026-10-22）：这一步原来点下去就直接 POST —— 一次真实的 LLM 调用
+   * （1–3 分钟、按次计费）就这么花掉了，而「开始对齐」恰恰是新手在卡片上最
+   * 容易点到的那个按钮，用的还是系统替他挑的「最近一份简历」。所以拆成两步：
+   * 先弹确认，写清「用哪份简历 / 什么粒度 / 大概多久 / 会花一次模型调用」；
+   * 用户点「开始对齐」才真正排队，点「取消」只关弹窗、不发任何请求。
+   * 「取消」刻意排在动作区第一个：showModal 的 focusInitial 聚焦第一个可
+   * 聚焦元素，回车/空格不会顺手把钱花掉。
+   * 这是额度与信任问题，不是样式问题：误触必须零成本。 */
   "align-job": async (button) => {
     const jobId = button && button.dataset.id;
     if (!jobId) return;
@@ -2274,8 +2603,30 @@ const actions = {
       return;
     }
     const resumeId = resume.resume_id || resume.id;
-    const target = button;
-    if (target) target.disabled = true;
+    const resumeTitle = esc(resume.title || "主简历");
+    const resumeVersion = resume.current_version == null ? "—" : esc(resume.current_version);
+    showModal(
+      "确认开始对齐",
+      `<p>将用「<b>${resumeTitle}</b>」（v${resumeVersion}）对这个岗位运行一次对齐：</p>
+       <ul class="small muted">
+         <li>粒度：重构（medium）——在事实范围内调整措辞与结构</li>
+         <li>预计耗时：1–3 分钟（后台排队，完成后回到岗位库刷新即可）</li>
+         <li>成本：会消耗一次模型调用</li>
+       </ul>
+       <p class="small muted">想换另一份简历，请到工作台右侧「优化设置」里选择后再运行。</p>
+       <div class="actions">
+         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+         <button class="btn btn-primary" type="button" data-action="confirm-align-job" data-id="${esc(jobId)}" data-resume-id="${esc(resumeId)}">开始对齐</button>
+       </div>`,
+    );
+  },
+  /* J4 第二步：确认后才真正排队。先关弹窗再发请求 —— 按钮节点随弹窗销毁，
+   * 天然挡住连点（连点会花两次钱）。 */
+  "confirm-align-job": async (button) => {
+    const jobId = button && button.dataset.id;
+    const resumeId = button && button.dataset.resumeId;
+    if (!jobId || !resumeId) return;
+    closeModal();
     try {
       await api(`/api/jobs/${encodeURIComponent(jobId)}/workbench`, {
         method: "POST",
@@ -2288,7 +2639,6 @@ const actions = {
     } catch (error) {
       toast(error.message || "对齐排队失败", "error");
     } finally {
-      if (target) target.disabled = false;
       setTimeout(() => renderKanban($("#app-router-view")), 1200);
     }
   },
@@ -2571,30 +2921,70 @@ const actions = {
     toast("已恢复最近一次批次结果", "success");
   },
   /* 一键分析全部待处理岗位（idle/failed/卡死的 queued），后端 selector=pending 选岗。
-   * 主简历/粒度复用批量面板当前选择，主简历未选时后端回退到最近更新的主简历。 */
+   * 主简历/粒度复用批量面板当前选择，主简历未选时后端回退到最近更新的主简历。
+   *
+   * J5（审计 2026-10-22）：原来点一下就直接排队 —— 用户看到「已排队 N 个」
+   * 时钱已经花出去了，而 N 可能接近全库（当前 296 个）。先讲清「多少个 /
+   * 每个多久 / 几次模型调用 / 怎么停」，确认后才 POST。
+   * 注意：真正的 POST 放在紧随其后的 confirm-batch-align-pending 里 ——
+   * phase-e.test.mjs 从本键起切片断言 /api/batch-align 与 selector=pending，
+   * 两者必须保持「确认键在前面、POST 键在后面」这个源码顺序。 */
   "batch-align-pending": async () => {
-    const form = $('[data-form="batch-align"]');
-    const data = form
-      ? Object.fromEntries(new FormData(form).entries())
-      : {};
-    const result = await api("/api/batch-align", {
-      method: "POST",
-      body: JSON.stringify({
-        selector: "pending",
-        master_resume_id: data.master_resume_id || "",
-        job_ids: [],
-        granularity: data.granularity || "fine",
-        prompt_focus: "balanced",
-        custom_prompt: data.custom_prompt || null,
-      }),
-    });
-    state.batchAlign = result;
-    openBatchPanel();
-    const cancel = $("[data-batch-cancel]");
-    if (cancel) cancel.hidden = false;
-    renderBatchResults(result);
-    startBatchPolling(result.batch_id);
-    toast(`已排队 ${result.queued} 个待处理岗位`, "success");
+    const pending = estimateBatchAlignPending();
+    if (!pending) {
+      toast("没有待对齐的岗位", "info");
+      return;
+    }
+    showModal(
+      "确认批量对齐",
+      `<p>将排队 <b>${pending}</b> 个岗位（按当前列表估算）。</p>
+       <ul class="small muted">
+         <li>每个岗位约 1–3 分钟，排队后由工作线程逐个执行</li>
+         <li>消耗 <b>${pending}</b> 次模型调用（每岗一次对齐）</li>
+         <li>排队后可在批量面板里点「取消排队」，停掉还没开始的任务</li>
+       </ul>
+       <p class="small muted">实际数量以后端扫描全库为准：当前筛选可能让估算偏低；卡在「排队中」的残留任务不计入。</p>
+       <div class="actions">
+         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
+         <button class="btn btn-primary" type="button" data-action="confirm-batch-align-pending">开始排队</button>
+       </div>`,
+    );
+  },
+  /* J5 第二步（批量对齐）：确认后才真正 POST。先关弹窗 —— 确认按钮节点随
+   * 弹窗销毁，天然挡住连点；batchAlignSubmitting 再兜住「弹窗关掉、POST 还
+   * 在路上时又点一次工具栏」的窗口（那会排两批、花两遍钱）。 */
+  "confirm-batch-align-pending": async () => {
+    closeModal();
+    if (batchAlignSubmitting) return;
+    batchAlignSubmitting = true;
+    try {
+      const form = $('[data-form="batch-align"]');
+      const data = form
+        ? Object.fromEntries(new FormData(form).entries())
+        : {};
+      const result = await api("/api/batch-align", {
+        method: "POST",
+        body: JSON.stringify({
+          selector: "pending",
+          master_resume_id: data.master_resume_id || "",
+          job_ids: [],
+          granularity: data.granularity || "fine",
+          prompt_focus: "balanced",
+          custom_prompt: data.custom_prompt || null,
+        }),
+      });
+      state.batchAlign = result;
+      openBatchPanel();
+      const cancel = $("[data-batch-cancel]");
+      if (cancel) cancel.hidden = false;
+      renderBatchResults(result);
+      startBatchPolling(result.batch_id);
+      toast(`已排队 ${result.queued} 个待处理岗位`, "success");
+    } catch (error) {
+      toast(error.message || "批量对齐排队失败", "error");
+    } finally {
+      batchAlignSubmitting = false;
+    }
   },
   "toggle-theme": () => toggleTheme(),
   /* 网申结构化档案：生成 / 编辑（简历中心档案页侧栏卡）。 */
@@ -2987,6 +3377,12 @@ document.addEventListener("click", async (event) => {
   if (!button) return;
   const action = actions[button.dataset.action];
   if (!action) return;
+  /* B6 fix（2026-10-23）：看板 kebab 菜单里点完动作就收起菜单。否则 <details>
+     长期保持 open，卡片会为了菜单层级一直保持更高的层叠上下文
+     （.board-card:has(.board-more[open])），盖住下一张卡的 kebab，后续点击
+     被拦截（E2E 实测：同一页连开第二张卡的菜单会失败）。 */
+  const menu = button.closest("details.board-more");
+  if (menu) menu.open = false;
   try {
     await action(button, event);
   } catch (error) {
@@ -3003,7 +3399,11 @@ function updateBatchSelection() {
   const label = $("[data-board-selected-count]");
   if (label) label.textContent = `已选 ${count}`;
   const fab = $("[data-batch-fab]");
-  if (fab) fab.hidden = count === 0;
+  /* 面板打开时 FAB 会叠在面板底部（实测重叠 9898px²），且它的作用已被
+     面板本身接管：面板可见就收起 FAB，关闭时按选择数恢复。 */
+  const panel = $("[data-batch-wrap]");
+  const panelOpen = Boolean(panel && !panel.hidden);
+  if (fab) fab.hidden = count === 0 || panelOpen;
 }
 
 /* 看板勾选是用户看得见的「选择」（FAB 上的「已选 N」），但表单真正读取的是
@@ -3025,6 +3425,8 @@ function openBatchPanel() {
   if (!panel) return;
   syncBatchPanelFromBoard();
   panel.hidden = false;
+  const fab = $("[data-batch-fab]");
+  if (fab) fab.hidden = true;
 }
 
 document.addEventListener("change", (event) => {
@@ -3992,6 +4394,30 @@ setCanvasRenderHook(async (app) => {
   wrap.setAttribute("data-batch-wrap", "");
   wrap.innerHTML = batchPanelHtml(state.jobs || [], resumes || []);
   mount.append(fab, wrap);
+});
+
+/* J5：工具栏两个批量按钮直接带「按当前列表估算」的数量（一键预分析（87）/
+ * 批量对齐（296）），用户不必先点开弹窗才知道这一批的规模。只改文案，不碰
+ * kanban.js；用渲染 hook 在 renderKanban 完成后写回。预分析批次进行中时
+ * 按钮归 paintPreanalyzeButton 管（「预分析中 x/y」是停止入口），这里绝不
+ * 覆盖它。 */
+setCanvasRenderHook((app) => {
+  if (!activePreanalyze) {
+    const preanalyzeButton = app.querySelector(PREANALYZE_SELECTOR);
+    if (preanalyzeButton) {
+      preanalyzeButton.textContent =
+        `一键预分析（${estimatePreanalyzePending()}）`;
+      preanalyzeButton.title =
+        "批量分析待处理岗位：每个约 2 次模型调用，点击后会先确认";
+    }
+  }
+  const batchAlignButton = app.querySelector(BATCH_ALIGN_SELECTOR);
+  if (batchAlignButton) {
+    batchAlignButton.textContent =
+      `批量对齐（${estimateBatchAlignPending()}）`;
+    batchAlignButton.title =
+      "排队全部待对齐岗位：每岗一次模型调用，点击后会先确认";
+  }
 });
 
 async function boot() {

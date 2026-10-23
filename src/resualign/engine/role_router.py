@@ -9,7 +9,7 @@ Tiered timeouts (env overrides via ``RESUALIGN_ROLE_TIMEOUT_<ROLE>``):
 
 - profiler: 75s (was 30s; #116 甲案 after muse p95=43.9s) / gap_analyzer: 60s
 - diagnose: 45s
-- editor: 90s (heavier generation)
+- editor: 150s (heavier generation; #165 wall-clock calibration)
 - evaluator: 60s
 - connect timeout: 30s (shared via OpenAIClient.DEFAULT_CONNECT_TIMEOUT)
 """
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any
 
 from ..contracts.errors import LlmFailureCode
@@ -26,19 +27,63 @@ from .llm_nodes import LLMNodeStore
 
 logger = logging.getLogger(__name__)
 
+# Module 8: process-local cooldown. After a node fails with timeout
+# (connection error, stalled stream), skip it for 60s in the same process.
+# 5xx/http (e.g. 503) do NOT trigger cooldown: they are instant responses,
+# so the breaker tally must keep counting them toward auto-disable.
+# auth/quota (config problems) and parse/schema/empty (model output
+# problems) do NOT trigger cooldown; those need a node switch or a retry.
+_NODE_COOLDOWN_SECONDS = 60.0
+_NODE_COOLDOWN: dict[tuple[str, str], float] = {}
+_COOLDOWN_CODES = frozenset({"timeout"})
+
+
+def _node_cooldown_key(tenant_id: str, node_id: str) -> tuple[str, str]:
+    return (tenant_id, node_id)
+
+
+def _is_node_cooled_down(tenant_id: str, node_id: str) -> bool:
+    """Return True if the node is in cooldown (skip it)."""
+    key = _node_cooldown_key(tenant_id, node_id)
+    expires_at = _NODE_COOLDOWN.get(key)
+    if expires_at is None:
+        return False
+    if time.monotonic() >= expires_at:
+        # Cooldown expired; clean up.
+        _NODE_COOLDOWN.pop(key, None)
+        return False
+    return True
+
+
+def _cool_down_node(tenant_id: str, node_id: str) -> None:
+    """Put a node into cooldown for _NODE_COOLDOWN_SECONDS."""
+    key = _node_cooldown_key(tenant_id, node_id)
+    _NODE_COOLDOWN[key] = time.monotonic() + _NODE_COOLDOWN_SECONDS
+
+
+def _should_cool_down(code: str | None) -> bool:
+    """Return True if the failure code triggers cooldown."""
+    return code in _COOLDOWN_CODES
+
+
+def clear_node_cooldown() -> None:
+    """Clear all cooldowns (for tests)."""
+    _NODE_COOLDOWN.clear()
+
 # Per-role timeout defaults (seconds). Environment variables override:
 # ``RESUALIGN_ROLE_TIMEOUT_DIAGNOSE``, ``RESUALIGN_ROLE_TIMEOUT_PROFILER``, etc.
 # #116（2026-09-16，用户裁决「甲」解锁 AIE 决策域调值）：app.log 6036 事件实测
 # muse-glimmer-30b p95=43.9s/max=124.3s、qwen2.5:7b p95=61.7s，而 ADR-0018 合并
 # 画像+缺口调用走 profiler——原 30s 线低于该模型 p95，结构性必超时（#110 的
 # 60.3s/71.7s 硬失败、#115 的零产出归因主因）。profiler 30→75（覆盖 71.7s 观测），
-# gap_analyzer 30→60；其余角色维持 AIE 表。最坏单发墙钟 45+75+90=210s，远低于
+# gap_analyzer 30→60；其余角色维持 AIE 表。editor 90→150（#165：上一轮
+# Reolink 2/3 撞 90s，腾讯单发 81.9s）；最坏单发墙钟 45+75+150=270s，远低于
 # watchdog RESUALIGN_JOB_MAX_RUNTIME_S=1800。
 _ROLE_TIMEOUT_DEFAULTS: dict[str, float] = {
     "diagnose": 45.0,
     "profiler": 75.0,
     "gap_analyzer": 60.0,
-    "editor": 90.0,
+    "editor": 150.0,
     "evaluator": 60.0,
 }
 # R4 P0-2（03-AIE §③）：per-role max_tokens 钳制表 —— 值 = 04b-PE 契约输出上限
@@ -140,12 +185,32 @@ def usable_active_node(node_store: Any, tenant_id: str) -> dict | None:
 
     P0: multi-active failover — returns first usable node (local first).
     Callers that need failover should use ``usable_active_nodes`` instead.
+
+    Module 8: skip nodes in process-local cooldown (timeout/http failures).
+    A cooled-down node is skipped in favour of the next healthy usable
+    node, so a flapping first node does not make the whole tenant look
+    node-less while healthy nodes exist behind it.
     """
     usable = getattr(node_store, "get_usable_node", None)
-    if callable(usable):
-        return usable(tenant_id)
+    node = usable(tenant_id) if callable(usable) else None
+    if node and not _is_node_cooled_down(tenant_id, node.get("node_id", "")):
+        return node
+    # The single-node answer is cooled down (or absent): fall back to the
+    # full list so the next healthy usable node is served instead of
+    # reporting "no node at all" while healthy nodes exist.
+    nodes = getattr(node_store, "get_usable_nodes", None)
+    if callable(nodes):
+        for candidate in nodes(tenant_id):
+            if candidate and not _is_node_cooled_down(
+                tenant_id, candidate.get("node_id", "")
+            ):
+                return candidate
+        return None
     active = getattr(node_store, "get_active_node", None)
-    return active(tenant_id) if callable(active) else None
+    node = active(tenant_id) if callable(active) else None
+    if node and _is_node_cooled_down(tenant_id, node.get("node_id", "")):
+        return None
+    return node
 
 
 def usable_active_nodes(node_store: Any, tenant_id: str) -> list[dict]:
@@ -185,6 +250,9 @@ def _fallback_candidates(
             continue
         node_id = node.get("node_id")
         if node_id and node_id in seen:
+            continue
+        # Module 8: skip cooled-down nodes in the fallback chain too.
+        if node_id and _is_node_cooled_down(tenant_id, node_id):
             continue
         if node_id:
             seen.add(node_id)
@@ -284,6 +352,13 @@ def call_with_role(
 
     # ---- Primary attempt with role node ----
     primary_node = node_store.resolve_node_for_role(tenant_id, role)
+    # Module 8: a cooled-down node must not be re-aimed as the primary —
+    # skip the first attempt entirely and go straight to the fallback
+    # nodes instead of paying a full timeout on a node that just failed.
+    if primary_node and _is_node_cooled_down(
+        tenant_id, primary_node.get("node_id", "")
+    ):
+        primary_node = None
     resolved = _config_from_node(primary_node)
     if resolved is not None:
         from ..models import ResuAlignConfig
@@ -303,9 +378,13 @@ def call_with_role(
             _report_call_outcome(node_store, tenant_id, primary_node, success=True)
             return result, meta
         except LLMResponseError as exc:
+            # Module 8: cooldown on timeout failures (5xx/http do not trigger).
+            code = getattr(exc, "code", "other")
+            if _should_cool_down(code) and primary_node:
+                _cool_down_node(tenant_id, primary_node.get("node_id", ""))
             _report_call_outcome(
                 node_store, tenant_id, primary_node,
-                success=False, code=getattr(exc, "code", "other"),
+                success=False, code=code,
             )
             logger.warning(
                 "Role %s primary node failed: %s; trying fallback nodes",
@@ -314,6 +393,11 @@ def call_with_role(
             meta["error"] = str(exc)[:200]
             meta["fallback_used"] = True
         except Exception as exc:
+            # Module 8: cooldown on unexpected errors (treated as timeout —
+            # connection failures and stalled transports are the cooldown's
+            # core scenario).
+            if primary_node:
+                _cool_down_node(tenant_id, primary_node.get("node_id", ""))
             _report_call_outcome(
                 node_store, tenant_id, primary_node, success=False, code="other"
             )
@@ -336,10 +420,9 @@ def call_with_role(
 
     last_exc: Exception | None = None
     for index, (fallback_node, explicit_config) in enumerate(candidates):
-        if primary_node is not None and index == 0:
-            meta["fallback_used"] = True
-        elif primary_node is None and index > 0:
-            meta["fallback_used"] = True
+        # Module 8: a cooled-down primary (primary_node=None) still counts
+        # as fallback — the fallback node took over the call.
+        meta["fallback_used"] = True
 
         if fallback_node is not None:
             from ..models import ResuAlignConfig
@@ -419,6 +502,11 @@ def call_with_role_streaming(
 
     # ---- Primary attempt with role node ----
     primary_node = node_store.resolve_node_for_role(tenant_id, role)
+    # Module 8: skip a cooled-down primary (same contract as call_with_role).
+    if primary_node and _is_node_cooled_down(
+        tenant_id, primary_node.get("node_id", "")
+    ):
+        primary_node = None
     resolved = _config_from_node(primary_node)
     if resolved is not None:
         from ..models import ResuAlignConfig
@@ -434,9 +522,18 @@ def call_with_role_streaming(
             # A stalled stream is a transport-class failure; stream errors
             # without a structured code count as "other" (breaker-set
             # semantics, ticket #103).
+            # Module 8: cooldown on transport-class failures — a stalled
+            # stream counts as timeout, LLMResponseError carries its code.
+            code = getattr(exc, "code", "") or (
+                LlmFailureCode.TIMEOUT.value
+                if isinstance(exc, StreamConnectionError)
+                else ""
+            )
+            if _should_cool_down(code) and primary_node:
+                _cool_down_node(tenant_id, primary_node.get("node_id", ""))
             _report_call_outcome(
                 node_store, tenant_id, primary_node,
-                success=False, code=getattr(exc, "code", "other"),
+                success=False, code=code or "other",
             )
             logger.warning(
                 "Role %s primary stream failed: %s; trying fallback nodes",
@@ -455,10 +552,9 @@ def call_with_role_streaming(
 
     last_exc: Exception | None = None
     for index, (fallback_node, _) in enumerate(candidates):
-        if primary_node is not None and index == 0:
-            meta["fallback_used"] = True
-        elif primary_node is None and index > 0:
-            meta["fallback_used"] = True
+        # Module 8: a cooled-down primary (primary_node=None) still counts
+        # as fallback — the fallback node took over the call.
+        meta["fallback_used"] = True
 
         from ..models import ResuAlignConfig
         fallback_config = ResuAlignConfig(
