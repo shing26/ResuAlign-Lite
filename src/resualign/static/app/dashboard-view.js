@@ -173,18 +173,18 @@ export async function renderDashboard(container) {
     </div>
     <div class="metric-cell" data-kpi="aligned">
       <div class="metric-label">已完成对齐</div>
-      <div class="metric-value">${escAttr(alignedCount)} <span>/ ${escAttr(jobsTotal)}</span></div>
+      <div class="metric-value"><a class="metric-link" href="#/jobs" title="打开岗位库，用「工作状态」筛选已对齐" aria-label="打开岗位库查看已对齐的岗位">${escAttr(alignedCount)} <span>/ ${escAttr(jobsTotal)}</span></a></div>
       <div class="metric-hint">全量口径 · 完成率 ${escAttr(completionRate)}%<br>有可用改写的岗位 / 全部岗位${noGapCount ? ` · 无缺口 ${escAttr(noGapCount)}` : ""}</div>
     </div>
     <div class="metric-cell" data-kpi="ats">
       <div class="metric-label">主简历 ATS</div>
-      <div class="metric-value">${atsScore == null ? "—" : escAttr(atsScore)}</div>
+      <div class="metric-value"><a class="metric-link" href="#/resume/list" title="打开简历中心查看诊断" aria-label="打开简历中心查看 ATS 诊断">${atsScore == null ? "—" : escAttr(atsScore)}</a></div>
       ${atsMeter}
       <div class="metric-hint">${atsScore == null ? "未诊断" : `${escAttr(currentResume ? currentResume.title : "主简历")} · v${escAttr(currentResume ? currentResume.current_version : 1)}`}</div>
     </div>
     <div class="metric-cell" data-kpi="quality" ${quality ? "" : "hidden"}>
       <div class="metric-label">已优化条目</div>
-      <div class="metric-value">${quality && quality.diffs_accepted != null ? `${escAttr(quality.diffs_accepted)}<span> 条</span>` : "—"}</div>
+      <div class="metric-value"><a class="metric-link" href="#/resume/list" title="打开简历中心查看优化记录" aria-label="打开简历中心查看已优化条目">${quality && quality.diffs_accepted != null ? `${escAttr(quality.diffs_accepted)}<span> 条</span>` : "—"}</a></div>
       <div class="metric-hint">${qualityHint}</div>
     </div>`;
 
@@ -286,14 +286,21 @@ export async function renderDashboard(container) {
     ? "panel-body panel-body--flush skill-gap-panel"
     : "panel-body skill-gap-panel";
 
+  /* D7（2026-10-23，审计 D7）：星座图口径 —— 原来纯按 updated_at 排序，唯一一条
+     已投递岗位会被挤出前 5，漏斗有进展却永远不出现。现在把「有投递进展」的岗位
+     固定排在动态顶部（同组内仍按更新时间倒序），其余按更新时间。 */
+  const reachedStatuses = new Set(["applied", "interview", "offer"]);
+  const reached = (job) => reachedStatuses.has(String(job.status || "").toLowerCase());
   const recentJobs = jobs
     .filter((job) => job && job.job_id)
     /* PM 评审：与快速继续结构性重复——动态里跳过快速继续那条 */
     .filter((job) => job.job_id !== (quick && quick.job_id))
-    .sort(
-      (a, b) =>
-        (Number(b.updated_at) || 0) - (Number(a.updated_at) || 0),
-    )
+    .sort((a, b) => {
+      const aReached = reached(a) ? 1 : 0;
+      const bReached = reached(b) ? 1 : 0;
+      if (aReached !== bReached) return bReached - aReached;
+      return (Number(b.updated_at) || 0) - (Number(a.updated_at) || 0);
+    })
     /* 2026-10-22（审计 D3/D8）：原来固定 3 条，左卡底部空 135px 且没有
      * 「看全部」出口；改为 5 条 + 表头出口，把空白变成内容。 */
     .slice(0, 5);

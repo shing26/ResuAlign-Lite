@@ -82,7 +82,6 @@ const DECLARED_ZERO_REF_API = new Set(
 --field-line-hover
 --field-placeholder
 --field-radius
---focus-ring
 --font-cjk
 --font-num
 --form-max

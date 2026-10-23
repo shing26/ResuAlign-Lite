@@ -13450,3 +13450,82 @@ select,
   z-index: var(--z-dropdown);
 }
 }
+
+@layer components {
+/* =====================================================================
+ * B7（2026-10-23，审计 D9）：驾驶舱 KPI 四格可点性一致
+ * 第 1 格 4 个计数是链接、其余三格是纯文本 →「数字有的能点有的不能」。
+ * 现在四格都给出明确去向；.metric-link 不改变数值排版，只补 hover/focus。
+ * ===================================================================== */
+.metric-link {
+  display: inline-block;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.metric-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.metric-link:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+}
+
+@layer components {
+/* =====================================================================
+ * B7（2026-10-23）小项收尾的样式：J7 截断提示 / W9 移动底栏 / RS-06 卡片菜单
+ * ===================================================================== */
+
+/* J7：超过 500 条时的截断提示（列表工具条下方、看板首个非空列顶部共用） */
+.jobs-limit-hint {
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--lead-snug);
+}
+
+/* W9：窄屏失败态底栏。原来是 position: sticky + bottom:0，但滚动发生在
+ * document 上（main 不滚动），sticky 没有可粘的滚动容器 → 实际落在页面
+ * 最底部（390 实测 rect y=1707 / 页高 1778），首屏根本看不见。改 fixed。 */
+@media (max-width: 900px) {
+  .workbench-view[data-mobile-action-bar="true"] .wb-action-bar {
+    position: fixed;
+    right: var(--space-3);
+    bottom: var(--space-3);
+    left: var(--space-3);
+    display: flex;
+    gap: var(--space-3);
+    z-index: var(--z-sticky);
+    padding: var(--space-2) var(--space-3) calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+    backdrop-filter: blur(12px);
+  }
+
+  /* 底栏 fixed 后别让它盖住页面最后一段内容 */
+  .workbench-view[data-mobile-action-bar="true"] {
+    padding-bottom: calc(var(--space-16) + var(--space-6));
+  }
+
+  .wb-action-bar .wb-mobile-cta {
+    flex: 1 1 auto;
+  }
+}
+
+/* RS-06：简历卡入场动画留下 identity transform，每张卡各自成为层叠上下文，
+ * 展开的 kebab 菜单会被下一张卡盖住。给打开菜单的卡抬一层。 */
+.resume-card:has(details[open]) {
+  position: relative;
+  z-index: var(--z-dropdown);
+}
+}

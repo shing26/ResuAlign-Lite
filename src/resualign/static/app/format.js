@@ -1084,6 +1084,13 @@ export function diffCard(diff, index, jobId) {
     ? String(diff.reason || "").split("；真实性评估判定")[0].trim()
     : String(diff.reason || "");
   const typeLabel = { modify: "改写", add: "新增", remove: "删除" }[type] || "改写";
+  /* W7（2026-10-23，审计 W7）：invalid 卡内部原来并列 4 条「来源/真实性」信号
+   *（类型徽标 + 置信度徽标 + provenance 徽标 + reason + warning），读不出这条
+   * 到底怎么了。置信度徽标已按 #83 对 invalid 隐藏；这里再把 reason 与 warning
+   * 合并成**一段**说明：先给这条自己的具体原因，再接门禁结论与下一步动作。 */
+  const invalidSummary = invalid
+    ? [reasonText, invalidWarning].filter(Boolean).join("；")
+    : "";
   /* #17: modify diffs get character-level marks inside the card's 原文/优化
    * blocks (diff-char-del on the original side, diff-char-ins on the
    * proposed side); add/remove diffs have no counterpart so they stay plain.
@@ -1118,9 +1125,12 @@ export function diffCard(diff, index, jobId) {
           <div class="diff-card__text" data-diff-proposed>${proposedHtml}</div>
         </div>
       </div>
-      ${reasonText ? `<div class="diff-card__reason" data-diff-reason>${esc(reasonText)}</div>` : ""}
+      ${invalid
+        ? `<div class="diff-card__warning" role="alert" data-diff-invalid-summary>${esc(invalidSummary)}</div>`
+        : reasonText
+          ? `<div class="diff-card__reason" data-diff-reason>${esc(reasonText)}</div>`
+          : ""}
       ${provenance ? `<div class="provenance-quote">${esc(provenance)}</div>` : ""}
-      ${invalidWarning ? `<div class="diff-card__warning" role="alert">${esc(invalidWarning)}</div>` : ""}
       <div class="diff-card__actions" data-diff-actions>
         ${invalid ? "" : `<button class="btn btn-primary btn-sm" data-action="accept-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_CHECK} 采纳</button>`}
         <button class="btn btn-ghost btn-sm" data-action="reject-bullet" data-id="${esc(jobId)}" data-diff-id="${esc(diffId)}">${ICON_X} 跳过</button>
