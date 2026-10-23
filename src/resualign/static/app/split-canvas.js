@@ -458,6 +458,28 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
    * split-canvas 自包含（与上面 exportDock / inspectorControls 同一模式）。 */
   const blockedCta = app.querySelector("[data-wb-blocked-cta]");
   if (blockedCta) blockedCta.addEventListener("click", revealBlockedSuggestions);
+  /* W5（2026-10-23，审计 W5）：失败态只保留一个「再来一次」的付费入口。
+   * 失败后用户面对的是「要不要再花一次钱」的决定，界面上每多一个重试按钮就多一次
+   * 误触机会，而每点一次都是真实的一次 LLM 调用。顶栏（窄屏底栏）已经各有一个
+   * 主重试（P0-2 单入口），但 format.js::alignmentControls 在「优化设置」面板里
+   * 还渲染了一个同名 submit 按钮 —— 它提交的是同一个 data-form="split-align"，
+   * 和顶栏主按钮完全等价。实测 1440 下只要点开「优化设置」tab，可见 LLM 入口就从
+   * 1 个变成 2 个；窄屏同样（底栏 + 面板）。
+   * 所以在终态失败（failed / canceled / expired，与底栏 barActive 的终态集合一致）
+   * 时把它换成一句说明，而不是留一个等价的第二入口。
+   * 用 remove 而不是 hidden：表单里若仍有提交按钮，回车/隐式提交依然能触发一次
+   * 对齐，只有摘掉它才真的只剩一个入口。idle/running 等状态不动 —— 那时这个面板
+   * 是「设好简历/粒度 → 运行」的自然闭环，不是重试。 */
+  if (["failed", "canceled", "expired"].includes(alignment.status)) {
+    app.querySelectorAll("[data-controls-pane] [data-align-run]").forEach((node) => {
+      const hint = document.createElement("p");
+      hint.className = "small muted";
+      hint.setAttribute("data-wb-rerun-hint", "");
+      hint.textContent =
+        "失败后重试只保留一个入口：主按钮「重新运行对齐」（窄屏在底部「重新对齐」）——避免同一件事点两次、扣两次额度。";
+      node.replaceWith(hint);
+    });
+  }
   renderCanvasExtras();
   /* Sprint 2 T2: 每次画布重绘都同步 Live Sheet（SSE job.result / poll 终态 /
    * 采纳后整画布刷新都会走到这里）。增量 patch 只发生在已填充的 live pane

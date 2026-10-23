@@ -13529,3 +13529,70 @@ select,
   z-index: var(--z-dropdown);
 }
 }
+
+@layer components {
+/* =====================================================================
+ * B8（2026-10-23，审计 RS-05）：简历详情桌面不再「小窗口装长文」
+ *
+ * 现状：.resume-view 锁 100% 高、.resume-doc 自己 overflow-y:auto（447px
+ * 窗口装 1,949px 正文），右栏再独立滚动 —— 鼠标在正文里滚到底页面别处不动。
+ * 改为桌面「页面级滚动 + 页头吸顶」：滚动交给 #app-router-view（桌面本就是
+ * 唯一滚动容器），正文/右栏取消内部滚动；页头与简历卡头吸顶。
+ * ≤900px 仍走原来的单列堆叠（移动端由 #app-router-view overflow:visible
+ * 交给 document 滚动），不受影响。
+ * ===================================================================== */
+@media (min-width: 901px) {
+  /* #app-router-view > .view 的 height:100% 特异性更高（1,1,0），必须用同等
+     选择器压掉，否则 .resume-view 仍被锁成视口高、sticky 页头没有活动余量。 */
+  #app-router-view > .resume-view {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .resume-archive-grid,
+  .resume-grid {
+    flex: 0 0 auto;
+    grid-template-rows: auto;
+    align-items: start;
+  }
+
+  .resume-sheet {
+    overflow: visible;
+  }
+
+  .resume-sheet .resume-doc,
+  .resume-sheet .a4-paper,
+  .resume-sheet .resume-preview-bar + .resume-doc {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .resume-rail {
+    max-height: none;
+    overflow: visible;
+  }
+
+  /* 页头吸顶：滚动长简历时仍能看到「返回 / 标题 / 主 CTA」 */
+  .resume-band {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+  }
+
+
+}
+}
+
+@layer base {
+/* =====================================================================
+ * B8（2026-10-23，审计 SH-09）：placeholder 对比度
+ * 原来用装饰级 --text-faint（白底 2.61:1 / #F4F5F8 上 2.39:1），低于 4.5:1；
+ * 改用 --text-secondary（白底 7.56:1 / #F4F5F8 上 6.93:1）。opacity:1 抵消
+ * Firefox 默认 0.54 的额外降对比。
+ * ===================================================================== */
+::placeholder {
+  color: var(--text-secondary);
+  opacity: 1;
+}
+}

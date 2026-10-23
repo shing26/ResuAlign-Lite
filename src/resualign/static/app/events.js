@@ -2,8 +2,8 @@
 
 import {
   focusInitial,
+  isFocusable,
   lockBodyScroll,
-  restoreFocus,
   trapTabKey,
   unlockBodyScroll,
 } from "./focus-trap.js";
@@ -272,27 +272,152 @@ export async function api(path, options = {}) {
   return data;
 }
 
+/* SH-09（2026-10-23）：对话框可达性。
+ *
+ * 背景隔离：打开时给 #app-router-view / .app-rail / .topbar 加 inert，
+ * Tab 和读屏都进不去背景。原来只有遮罩挡鼠标 + keydown 里的 trapTabKey
+ * 在 Tab 时把焦点拽回来，读屏仍能读、程序 focus 仍能落进去。浏览器不支持
+ * inert 时退化成 aria-hidden="true"（关闭时按原值还原，不留副作用）。
+ *
+ * 焦点恢复：原来只记录 activeElement，但弹窗里的动作（保存/删除/确认）经常
+ * 触发 render()，触发按钮在关闭时已经被重绘替换，restoreFocus 会静默失败，
+ * activeElement 掉到 <body>，键盘用户再按 Tab 只能从页面开头重走。现在：
+ * 1) 关闭后的恢复动作延后一拍执行，等调用方同步的重绘落完再判断目标是否
+ *    还 isConnected；
+ * 2) 目标失效（或不可聚焦）时回退到当前路由容器 #app-router-view（临时
+ *    tabindex=-1），保证 activeElement 不是 body、下一次 Tab 从本页继续。 */
+const MODAL_BACKGROUND_SELECTORS = ["#app-router-view", ".app-rail", ".topbar"];
+const MODAL_FOCUS_FALLBACK_ID = "app-router-view";
+
 let modalReturnFocus = null;
 let modalKeydownHandler = null;
+/* [{ node, mode: "inert"|"aria-hidden", previous }]，关闭时逐条还原。 */
+let modalBackgroundState = [];
+let modalFocusTimer = null;
+/* 递增令牌：期间又开了新弹窗时，旧弹窗的延迟恢复不能抢焦点。 */
+let modalFocusToken = 0;
 
-function dismissModal() {
+function setModalBackgroundInert() {
+  clearModalBackgroundInert();
+  MODAL_BACKGROUND_SELECTORS.forEach((selector) => {
+    $$(selector).forEach((node) => {
+      if (!node || !node.isConnected) return;
+      /* 原生 inert 同时拦截 Tab、点击与读屏；不支持时才退而求其次用
+         aria-hidden（只对读屏生效，Tab 仍由 trapTabKey 兜底）。 */
+      if ("inert" in node) {
+        const previous = node.inert;
+        node.inert = true;
+        modalBackgroundState.push({ node, mode: "inert", previous });
+      } else {
+        const previous = node.getAttribute("aria-hidden");
+        node.setAttribute("aria-hidden", "true");
+        modalBackgroundState.push({ node, mode: "aria-hidden", previous });
+      }
+    });
+  });
+}
+
+function clearModalBackgroundInert() {
+  modalBackgroundState.forEach(({ node, mode, previous }) => {
+    if (!node || !node.isConnected) return;
+    if (mode === "inert") {
+      node.inert = Boolean(previous);
+      return;
+    }
+    if (previous == null) node.removeAttribute("aria-hidden");
+    else node.setAttribute("aria-hidden", previous);
+  });
+  modalBackgroundState = [];
+}
+
+function recordModalReturnFocus() {
+  const active = document.activeElement;
+  /* body / documentElement 没有可恢复的位置——记住它们等于关闭后什么都没做，
+     不如置 null 让关闭逻辑走「回退到路由容器」。 */
+  if (
+    !(active instanceof HTMLElement) ||
+    active === document.body ||
+    active === document.documentElement
+  ) {
+    modalReturnFocus = null;
+    return;
+  }
+  modalReturnFocus = active;
+}
+
+function focusRouteFallback() {
+  const main = document.getElementById(MODAL_FOCUS_FALLBACK_ID);
+  if (!main) return;
+  /* 容器本身不在 Tab 序列里；临时 tabindex=-1 让它能接程序焦点，
+     下一次 Tab 从本页第一个可交互元素继续。 */
+  if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");
+  main.focus({ preventScroll: true });
+}
+
+function restoreModalFocus(returnTo) {
+  const target =
+    returnTo && returnTo.isConnected && typeof returnTo.focus === "function"
+      ? returnTo
+      : null;
+  if (target) {
+    target.focus({ preventScroll: true });
+    /* disabled/hidden 的按钮 focus() 会被浏览器忽略，兜底再确认一次。 */
+    if (document.activeElement === target) return;
+  }
+  focusRouteFallback();
+}
+
+/* 延后一拍再恢复：closeModal() 之后调用方常同步执行 render()，它一上来就
+ * 替换 #app-router-view 的 innerHTML，若在关闭瞬间 focus 触发按钮，紧接着
+ * 就被冲掉、焦点落回 body。等本轮 JS 结束再判断 isConnected 才能正确回退。 */
+function scheduleModalFocusRestore(returnTo) {
+  modalFocusToken += 1;
+  const token = modalFocusToken;
+  if (modalFocusTimer !== null) window.clearTimeout(modalFocusTimer);
+  modalFocusTimer = window.setTimeout(() => {
+    modalFocusTimer = null;
+    if (token !== modalFocusToken) return;
+    restoreModalFocus(returnTo);
+  }, 0);
+}
+
+/* restoreFocus=false 用于「换弹窗」：旧弹窗的触发元素要留给新弹窗关闭时
+ * 归还，不能在中途先还一次。 */
+function dismissModal({ restoreFocus = true } = {}) {
   const backdrop = $(".modal-backdrop");
+  /* 没有任何弹窗在开时 closeModal() 应当是纯 no-op：不能让防御性的关闭调用
+     把焦点从用户当前位置挪走。 */
+  const hadOpenModal = Boolean(backdrop) || modalKeydownHandler !== null;
   if (backdrop) backdrop.remove();
   if (modalKeydownHandler) {
     document.removeEventListener("keydown", modalKeydownHandler);
     modalKeydownHandler = null;
   }
   unlockBodyScroll(document.body);
-  restoreFocus(modalReturnFocus);
+  /* 先解除背景 inert 再恢复焦点：焦点目标通常就在 #app-router-view 里，
+     inert 未清时 focus() 会被浏览器忽略。 */
+  clearModalBackgroundInert();
+  /* 作废尚未执行的延迟焦点恢复：快速「关一个再开一个」时，旧的恢复动作
+     不能在 0ms 后把焦点抢到新弹窗背后。 */
+  modalFocusToken += 1;
+  if (modalFocusTimer !== null) {
+    window.clearTimeout(modalFocusTimer);
+    modalFocusTimer = null;
+  }
+  if (!restoreFocus) return;
+  const returnTo = modalReturnFocus;
   modalReturnFocus = null;
+  if (!hadOpenModal) return;
+  scheduleModalFocusRestore(returnTo);
 }
 
 export function showModal(title, bodyHtml, options = {}) {
-  dismissModal();
-  modalReturnFocus =
-    document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
+  /* 叠弹窗（详情 → 确认删除之类）：换掉旧的但不要把焦点先还给旧触发按钮，
+     否则新弹窗打开后焦点会短暂落到背景里；旧弹窗记录的原触发元素保留，
+     等最后一个弹窗关闭时再归还。 */
+  const replacing = Boolean($(".modal-backdrop"));
+  dismissModal({ restoreFocus: false });
+  if (!replacing) recordModalReturnFocus();
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   if (options.className) backdrop.classList.add(options.className);
@@ -307,6 +432,7 @@ export function showModal(title, bodyHtml, options = {}) {
     if (event.target === backdrop) closeModal();
   });
   document.body.append(backdrop);
+  setModalBackgroundInert();
   lockBodyScroll(document.body);
   modalKeydownHandler = (event) => {
     if (event.key === "Escape") {
@@ -317,7 +443,16 @@ export function showModal(title, bodyHtml, options = {}) {
     trapTabKey(backdrop, event, document.activeElement);
   };
   document.addEventListener("keydown", modalKeydownHandler);
-  window.setTimeout(() => focusInitial(backdrop), 0);
+  /* 初始焦点：显式 [autofocus] 优先（表单弹窗常把 autofocus 放在首个输入框），
+     否则沿用 focusInitial 的第一个可交互元素。 */
+  window.setTimeout(() => {
+    const autofocus = backdrop.querySelector("[autofocus]");
+    if (autofocus && isFocusable(autofocus)) {
+      autofocus.focus();
+      return;
+    }
+    focusInitial(backdrop);
+  }, 0);
 }
 
 export function closeModal() {
