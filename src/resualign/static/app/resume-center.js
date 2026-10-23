@@ -15,6 +15,7 @@ import {
 } from "./events.js";
 import {
   atsHealthCardHtml,
+  atsHealthScoreLevel,
   diagnosisStatusText,
   esc,
   formatDate,
@@ -41,28 +42,76 @@ function diagnosisFromSnapshot(snapshot) {
 /* 列表视图（65% Sheet 入口 + 新建/上传）                                */
 /* ------------------------------------------------------------------ */
 
+/* 「去看诊断」的落地位置：列表卡上点了之后，详情渲染完要把诊断卡滚进视口。
+ * 用模块级标记而不是 URL 参数：main.js 的 navigate(name, id) 只带 id，
+ * 加 query 会牵动路由解析（不在本次改动范围）。 */
+let pendingResumeFocus = null;
+
+/* RS-06（2026-10-22 审计）：7 份简历标题高度相似（3 份「Java 全栈」、2 份
+ * 「AI 应用」），旧列表卡只有标题 + 更新时间 + vN，看不出「哪份最新改过、
+ * 哪份 ATS 分高、哪份内容更全」，选简历全靠点进详情再返回。
+ * 这里给每张卡补三样能一眼比较的依据：
+ * ① 字数：内容量（含空白，与详情页「共 N 字」口径一致）；
+ * ② ATS 分：列表 projection 的 latest_diagnosis 只在内容哈希仍匹配时才下发，
+ *    有分即「这份简历的当前内容诊断过」，没分显示「未诊断」；
+ * ③ 当前版本号：合进副标题，不再单独占一个「当前版本 vN」徽标。
+ * 后端 list projection（workspace.list_master_resumes）没有 is_primary /
+ * diagnosis_status 字段，所以不做「当前主简历」徽标，也不假装知道「诊断已过期」。 */
+function resumeCharsLabel(content) {
+  /* 千分位固定用 en-US 分组：toLocaleString() 的默认 locale 随运行环境变化，
+   * 同一份简历在列表里的字数不该有时是 3,287 有时是 3287。 */
+  return `${String(content || "").length.toLocaleString("en-US")} 字`;
+}
+
+/* ATS 徽标：复用 format.js 的分级阈值（85 优秀 / 70 良好），与详情页右栏
+ * ATS 卡同一套口径，避免列表说「优秀」、详情说「良好」。 */
+function resumeAtsBadgeHtml(resume) {
+  const score = Number((resume.latest_diagnosis || {}).score);
+  if (!Number.isFinite(score)) {
+    return '<span class="badge badge-gray" data-resume-ats data-resume-ats-state="missing">未诊断</span>';
+  }
+  const clamped = Math.max(0, Math.min(100, Math.round(score)));
+  const tone =
+    clamped >= 85 ? "badge-green" : clamped >= 70 ? "badge-amber" : "badge-red";
+  return `<span class="badge ${tone}" data-resume-ats data-resume-ats-state="done" title="ATS 健康度：${esc(atsHealthScoreLevel(clamped))}">ATS ${clamped}</span>`;
+}
+
 async function renderResumeListView(app) {
   state.resumes = await api("/api/master-resumes");
   const hasResumes = state.resumes.length > 0;
   const cards = state.resumes
-    .map(
-      (resume) => `
-      <div class="card resume-card card-base card-hover-soft">
+    .map((resume) => {
+      /* 预览文案末尾自带「（全文约 N 字）」（format.js resumeListPreview）；
+       * 字数已经提到元信息行，这里去掉重复后缀，免得一张卡出现两个字数口径。 */
+      const preview = String(resumeListPreview(resume.content)).replace(
+        /（全文约 [\d,]+ 字）$/,
+        "",
+      );
+      return `
+      <div class="card resume-card card-base card-hover-soft" data-resume-card data-resume-id="${resume.resume_id}" title="打开详情">
         <div class="card-head">
           <div>
             <div class="card-title">${esc(resume.title)}</div>
-            <div class="card-meta">更新于 ${formatDate(resume.updated_at)} · v${resume.current_version}</div>
+            <div class="card-meta" data-resume-card-meta>更新于 ${formatDate(resume.updated_at)} · 当前 v${resume.current_version} · <span data-resume-chars>${resumeCharsLabel(resume.content)}</span></div>
           </div>
-          <span class="badge badge-teal">当前版本 v${resume.current_version}</span>
+          ${resumeAtsBadgeHtml(resume)}
         </div>
-        <p class="small muted" data-resume-preview title="打开「查看档案」阅读全文">${esc(resumeListPreview(resume.content))}</p>
+        <p class="small muted" data-resume-preview title="打开详情阅读全文">${esc(preview)}</p>
         <div class="row" style="margin-top:10px">
-          <button class="btn btn-primary btn-sm" data-action="open-resume-archive" data-id="${resume.resume_id}">查看档案</button>
-          <button class="btn btn-outline btn-sm" data-action="edit-resume" data-id="${resume.resume_id}">编辑</button>
-          <button class="btn btn-danger btn-sm" data-action="delete-resume" data-id="${resume.resume_id}">删除</button>
+          <button class="btn btn-primary btn-sm" type="button" data-action="open-resume-archive" data-id="${resume.resume_id}">打开详情</button>
+          <button class="btn btn-outline btn-sm" type="button" data-action="open-resume-archive" data-id="${resume.resume_id}" data-resume-focus="diagnosis">去看诊断</button>
+          <!-- 编辑/删除降权到 kebab：列表的主要任务是「选哪份」，破坏性动作
+               不该和主操作同权重；二次确认仍在 main.js 的 delete-resume 里。 -->
+          <details class="board-more" data-resume-card-more>
+            <summary class="board-more__trigger" aria-label="更多操作" title="更多操作">${icon("more-horizontal", 20)}</summary>
+            <div class="board-more__menu">
+              <button class="btn btn-ghost btn-sm" type="button" data-action="edit-resume" data-id="${resume.resume_id}">编辑</button>
+              <button class="btn btn-danger btn-sm" type="button" data-action="delete-resume" data-id="${resume.resume_id}">删除</button>
+            </div>
+          </details>
         </div>
-      </div>`,
-    )
+      </div>`;
+    })
     .join("");
 
   app.innerHTML = `
@@ -263,6 +312,19 @@ async function renderResumeDetailView(app, resumeId) {
   /* AI 优化面板：恢复上次任务状态（结果/失败/进行中继续轮询）。 */
   state.optimizeResumeId = resumeId;
   recoverOptimization(resume);
+  /* 列表卡「去看诊断」：详情渲染完成后把诊断卡滚进视口并聚焦。
+   * 只做定位，不自动发起诊断——诊断要花模型调用，必须由用户显式点页头主 CTA。 */
+  if (pendingResumeFocus === "diagnosis") {
+    pendingResumeFocus = null;
+    const panel = app.querySelector("[data-diagnosis-panel]");
+    if (panel) {
+      panel.setAttribute("tabindex", "-1");
+      requestAnimationFrame(() => {
+        panel.focus({ preventScroll: true });
+        panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -434,16 +496,22 @@ export { closeModal };
 /* 简历中心页面内动作（事件委托）                                        */
 /* ------------------------------------------------------------------ */
 
-/* 三件事，都只属于简历详情页，不往 main.js 的动作表里加东西：
+/* 简历中心的页面内交互（事件委托），不往 main.js 的动作表里加东西：
  * 1) 「查看完整 ATS 建议」（RS-03 移动摘要）：摘要卡在诊断卡里，完整建议在
  *    右栏 ATS 卡；窄屏时右栏排在正文之后，这里滚动并聚焦过去，给键盘用户
  *    一个可见落点（只滚动，不触发任何请求）。
- * 2) 导出/更多两个下拉互斥：原生 <details> 不会自动收起，两个都展开时会
- *    互相盖住菜单项（实测「编辑简历/删除简历」压在「导出简历 MD」上面）。
- * 3) 点菜单项或页面其它位置就收起浮层，避免菜单一直挂在页头上。 */
+ * 2) 列表卡主体可点进详情（RS-06）：鼠标用户不用精确点中按钮；卡片内真正的
+ *    按钮/菜单仍走各自 action，不受影响。
+ * 3) 列表卡「去看诊断」：进详情后把诊断卡滚进视口（只定位，不发起诊断）。
+ * 4) 详情页导出/更多、列表卡 kebab 的下拉互斥与收起：原生 <details> 不会
+ *    自动收起，两个都展开时会互相盖住菜单项。 */
 if (typeof document !== "undefined") {
   const RESUME_DOCKS =
     "details[data-resume-export], details[data-resume-more]";
+  const CARD_MENUS = "[data-resume-card] details[data-resume-card-more]";
+  /* 卡片里这些元素自己就是交互目标，点它们时不要接管成「打开详情」。 */
+  const CARD_INTERACTIVE =
+    "button, summary, a, input, textarea, select, label, [role='button']";
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
@@ -456,6 +524,31 @@ if (typeof document !== "undefined") {
       }
       return;
     }
+
+    /* 「去看诊断」：记下落地目标，详情渲染完成后滚动到诊断卡。 */
+    if (target.closest("[data-resume-focus='diagnosis']")) {
+      pendingResumeFocus = "diagnosis";
+    }
+
+    /* 列表卡主体 → 详情（按钮/菜单自己处理，不重复导航）。 */
+    const resumeCard = target.closest("[data-resume-card]");
+    if (resumeCard && !target.closest(CARD_INTERACTIVE)) {
+      const resumeId = resumeCard.dataset.resumeId;
+      if (resumeId) {
+        window.location.hash = `#/resume/${encodeURIComponent(resumeId)}`;
+      }
+      return;
+    }
+
+    /* 列表卡 kebab：同时只展开一个，点页面其它位置收起（与详情页下拉一致）。 */
+    const cardMenus = [...document.querySelectorAll(CARD_MENUS)];
+    if (cardMenus.length) {
+      const openMenu = target.closest("details[data-resume-card-more]");
+      cardMenus.forEach((menu) => {
+        if (menu !== openMenu) menu.open = false;
+      });
+    }
+
     const docks = [...document.querySelectorAll(RESUME_DOCKS)];
     if (!docks.length) return;
     const owner = target.closest(RESUME_DOCKS);
@@ -473,6 +566,42 @@ if (typeof document !== "undefined") {
     }
     docks.forEach((node) => {
       node.open = false;
+    });
+  });
+
+  /* 卡片层叠修复：列表容器带 .motion-stagger，入场动画让每张卡都留下 identity
+   * transform → 每张卡各自成为层叠上下文；于是后一张卡会把前一张卡展开的
+   * kebab 菜单盖住（实测点菜单项时 pointer 被下一张卡拦截）。
+   * 展开时把宿主卡抬到其它卡之上、收起后还原——等价于看板用
+   * .board-card:has(.board-more[open]) 做的层级提升；styles.css 不在本次
+   * 改动范围，只能用行内层叠属性兜底。 */
+  const syncCardMenuLayer = (card) => {
+    if (!card) return;
+    const open = Boolean(
+      card.querySelector("details[data-resume-card-more][open]"),
+    );
+    card.style.position = open ? "relative" : "";
+    card.style.zIndex = open ? "2" : "";
+  };
+  /* details 的 toggle 事件不冒泡，用捕获阶段监听。 */
+  document.addEventListener(
+    "toggle",
+    (event) => {
+      const menu = event.target;
+      if (menu instanceof Element && menu.matches("details[data-resume-card-more]")) {
+        syncCardMenuLayer(menu.closest("[data-resume-card]"));
+      }
+    },
+    true,
+  );
+  /* 菜单项点击后 main.js 会收起 kebab（不经过我们关闭）；事件循环结束后
+   * 按最终 open 状态校准一次，避免卡片一直保持抬升。 */
+  document.addEventListener("click", () => {
+    if (!document.querySelector(CARD_MENUS)) return;
+    requestAnimationFrame(() => {
+      document
+        .querySelectorAll("[data-resume-card]")
+        .forEach((card) => syncCardMenuLayer(card));
     });
   });
 }

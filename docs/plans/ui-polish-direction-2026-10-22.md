@@ -132,6 +132,27 @@
 
 ---
 
+## 0.11 B7 小项收尾执行记录（2026-10-23，已完成）
+
+> B1–B6 之后剩下的 P2 小项，逐条清完；结构债（原 §3 B5）仍未开工。
+
+| 条目 | 落地内容 | 实测 |
+|---|---|---|
+| **J12** 引导卡竞态 | `loadResumesForOnboarding` 失败重试 1 次、仍失败返回 `null`（unknown），不再伪装成 `[]`；失败不写 `state.resumes`；引导卡只在 `state.jobs.length === 0` 且简历数已知时挂载 | 正常数据无卡；空库 + `/api/master-resumes` 503 无假卡（请求 3 次=重试生效）；真新用户 3 步卡仍正常 |
+| **W6** 「面试记录」tab 名不副实 | tab 文案改为「**实时定稿**」（先改「定稿预览」与主区 A4 预览钮撞名，取一）；`data-wb-tab-v3="livesheet"` 契约保留 | 点 tab 后 pane 仍正确激活，aria-selected 正确 |
+| **W9** 移动失败态无行动入口 | 窄屏 failed + 有被拦截建议时，底栏给主 CTA「查看被拦截建议（N）」+ 次按钮「重新对齐」；点击切到「结果」panes、展开 `<details>`、滚动到摘要卡并移焦；底栏 `position: sticky` 在 document 滚动下失效，改 **fixed** | 390×844 底栏固定 y=765（视口 844）；点 CTA 后 3/3 张被拦截卡可见、焦点在折叠标题；1440 底栏仍隐藏、桌面行为不变 |
+| **J7** 超 500 条静默截断 | 复用 `/api/dashboard` 的 `kpi.jobs`：`items.length ≥ 500 && total > items.length` 时渲染 `.jobs-limit-hint`「已显示前 500 个岗位（共 N 个）· 用筛选缩小范围」（列表在工具条下、看板在首个非空列顶）；total 未知或 ≤500 不渲染 | 真实 319 岗位无提示；打桩 500 条 + total 734 时列表/看板都出现且文案正确 |
+| **RS-06** 7 份简历难分辨 | 列表卡补「更新于 X · 当前 vN · N 字」副标题 + ATS 徽标（≥85 绿 / ≥70 琥珀 / <70 红 / 无诊断灰）；主操作「打开详情」+ 次操作「去看诊断」（滚到诊断卡、不自动诊断）；编辑/删除降权进 kebab；点卡片主体仍进详情 | 7/7 卡有字数与 ATS（85 / 未诊断 / 72 / 80 …），点卡片/去看诊断/kebab 均可用，0 console error |
+| **D7** 动态里看不到已投递岗位 | 最近岗位动态把「已投递 / 面试中 / Offer」的岗位固定排在顶部（同组内按更新时间），保证漏斗有进展时一定出现 | 动态首行变为「已投递」岗位 |
+| **D9** KPI 四格可点性不一致 | 四格全部可点：跟踪岗位计数→`#/jobs?status=*`；已完成对齐→`#/jobs`；主简历 ATS / 已优化条目→`#/resume/list`；补 `.metric-link` hover/focus | 四格 `a` 数量 4/1/1/1，链接目标正确 |
+| **W7** 被拦截卡 4 处来源信号 | invalid 卡隐藏置信度徽标；`reason` 与门禁 warning 合并为**一段**说明（不再并列两块）；保留原文/建议修改/来源引用 | 3 张被拦截卡 = 3 段合并说明，独立 reason 块 0 个 |
+| 顺带 | 补 `.jobs-limit-hint` / 移动 fixed 底栏 / `.resume-card:has(details[open])` 层叠上下文样式 | — |
+
+**验证**：前端全量 **589 passed / 0 failed**；e2e **7/7 passed**（73s）；390/1440 Playwright 复查 0 console error；缓存 `?v=69`。
+**改动文件**：`static/{styles.css,index.html}`、`static/app/{main,split-canvas,kanban,resume-center,dashboard-view,format}.js`、`tests/frontend/{adr0033,css-architecture}.test.mjs`。
+
+---
+
 ## 1. 诊断：57 条问题，其实只有 5 个系统性问题
 
 审计产出 57 条（驾驶舱/复盘/设置 20、岗位库/工作台 21、简历中心/全局壳 18），但去掉重复后，用户感知到的只有下面 5 件事。

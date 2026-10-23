@@ -8,6 +8,7 @@ import {
   formatDate,
   formatSalary,
   jobStatusLabel,
+  setWbMobilePane,
   state,
   toast,
 } from "./events.js";
@@ -290,6 +291,22 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
   const barActive =
     alignmentRunning ||
     ["failed", "canceled", "expired"].includes(alignment.status);
+  /* W9（2026-10-23，审计 W9）：移动端失败态首屏只有一整块红字横幅，没有任何
+   * 「下一步」——而本轮唯一可行动的东西（被拦截建议的逐条原因与重试）折叠在主区
+   * 卡片里，窄屏要滚过整个头部才看得到。所以终态失败且有被拦截建议时，底栏换一个
+   * 零成本的主 CTA：「查看被拦截建议（N）」；「重新运行对齐」从主位降为次按钮
+   * （重试是花钱动作，不该是满屏红字下唯一且最显眼的入口）。
+   * 判定条件必须与 format.js::diffList 渲染 [data-wb-blocked] 的条件完全一致
+   * （终态 failed/canceled + 无可用建议 + 有 invalid_diffs），否则 CTA 会指向一个
+   * 不存在的折叠卡。 */
+  const blockedPanelRendered =
+    ["failed", "canceled"].includes(alignment.status) &&
+    !diffs.length &&
+    invalidCount > 0;
+  /* W6（2026-10-23，审计 W6）：右栏第三个 tab 原来叫「面试记录」，但 pane 由
+   * mountLiveSheet 填充，内容一直是「定稿 Live Sheet · 实时同步」——想找定稿的人
+   * 不会点「面试记录」，想找面经的人点开看到的是简历。标签正名为「定稿预览」，
+   * 与 pane 实际内容一致；data-wb-tab-v3="livesheet" 契约保持不变。 */
   app.innerHTML = `
     <div class="view view-fit workbench-view" data-surface-mode="optimizer"${barActive ? ' data-mobile-action-bar="true"' : ""}>
       <div class="wb-mobile-tabs" role="tablist" aria-label="工作台面板">
@@ -362,7 +379,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <div class="wb-tabs" role="tablist" aria-label="工作台辅助信息">
             ${viewMode === "a4" ? `<button type="button" class="wb-tab ${suggestActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="suggest" aria-selected="${suggestActive}">建议</button>` : ""}
             <button type="button" class="wb-tab ${inspectorActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="inspector" aria-selected="${inspectorActive}">岗位分析</button>
-            <button type="button" class="wb-tab ${livesheetActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="livesheet" aria-selected="${livesheetActive}">面试记录</button>
+            <button type="button" class="wb-tab ${livesheetActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="livesheet" aria-selected="${livesheetActive}">实时定稿</button>
             <button type="button" class="wb-tab ${controlsActive ? "active" : ""}" data-action="set-wb-tab-v3" data-wb-tab-v3="controls" aria-selected="${controlsActive}">优化设置</button>
           </div>
           ${viewMode === "a4" ? `<div class="wb-pane ${suggestActive ? "active" : ""}" data-wb-pane="suggest" data-wb-aux-pane="suggest" data-suggest-pane>
@@ -404,7 +421,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <input type="checkbox" name="run_eval" hidden>
         </form>
       </div>
-      ${barActive ? `<div class="wb-action-bar" data-wb-action-bar>${workbenchPrimaryButtonHtml(resumes, alignmentRunning, alignment)}</div>` : ""}
+      ${barActive ? `<div class="wb-action-bar" data-wb-action-bar>${mobileActionBarHtml(resumes, alignmentRunning, alignment, blockedPanelRendered, invalidCount)}</div>` : ""}
     </div>`;
   const form = $("[data-form='split-align']");
   if (form) {
@@ -436,6 +453,11 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
       state.wbExportDockOpen = exportDockEl.open;
     });
   }
+  /* W9：「查看被拦截建议」按钮自带挂钩属性而不是 data-action —— 它只在这块画布
+   * 里有意义，main.js 的全局 action 表里没有对应项；在这里就地绑定，保持
+   * split-canvas 自包含（与上面 exportDock / inspectorControls 同一模式）。 */
+  const blockedCta = app.querySelector("[data-wb-blocked-cta]");
+  if (blockedCta) blockedCta.addEventListener("click", revealBlockedSuggestions);
   renderCanvasExtras();
   /* Sprint 2 T2: 每次画布重绘都同步 Live Sheet（SSE job.result / poll 终态 /
    * 采纳后整画布刷新都会走到这里）。增量 patch 只发生在已填充的 live pane
@@ -449,6 +471,54 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
       actions.innerHTML = '<button type="button" class="btn btn-ghost btn-sm adopted" disabled>已采纳</button>';
     }
   });
+}
+
+/* W9：移动端底栏内容。默认仍是「主按钮 = 开始/重新运行对齐」（P0-2 单入口）；
+ * 只有「终态失败 + 有被拦截建议」时换成主 CTA「查看被拦截建议（N）」+ 次按钮
+ * 「重新对齐」。桌面上 .wb-action-bar 是 display:none（styles.css 仅在窄屏
+ * 展开），所以这里的文案变化不会改变桌面视觉。
+ * 「重新对齐」刻意手写而不是复用 workbenchPrimaryButtonHtml：那里给的是红实底
+ * danger-solid 主按钮样式，放在这里会和「查看被拦截建议」抢主位；动作用同一个
+ * run-alignment / go-resumes，不新增任何接口。 */
+function mobileActionBarHtml(
+  resumes,
+  alignmentRunning,
+  alignment,
+  blockedPanelRendered,
+  blockedCount,
+) {
+  if (!blockedPanelRendered) {
+    return workbenchPrimaryButtonHtml(resumes, alignmentRunning, alignment);
+  }
+  const hasResumes = Array.isArray(resumes) && resumes.length > 0;
+  return `<button class="btn btn-primary wb-mobile-cta" type="button" data-wb-blocked-cta>查看被拦截建议（${esc(blockedCount)}）</button>
+    <button class="btn btn-secondary" type="button" data-action="${hasResumes ? "run-alignment" : "go-resumes"}">${hasResumes ? "重新对齐" : "先创建主简历"}</button>`;
+}
+
+/* W9：底栏 CTA 的落点 —— 把用户送到真正能逐条看/重试被拦截建议的地方：
+ * 1) 先切到「结果」面板。窄屏默认可能停在「调优」（.wb-main 被 CSS display:none），
+ *    直接 scrollIntoView 会滚到一个看不见的节点，点了像没反应；
+ *    若当前是 a4 模式（建议列表被移到右栏 suggest pane），则切到该 tab。
+ * 2) 展开 <details>（默认折叠，折叠状态下里面的逐条卡是 display:none）。
+ * 3) 滚动 + 把焦点交给折叠标题，键盘/读屏用户不用从页首重新 Tab。 */
+function revealBlockedSuggestions(event) {
+  if (event && typeof event.preventDefault === "function") event.preventDefault();
+  const panel = $("[data-wb-blocked]");
+  if (!panel) return;
+  const auxPane = panel.closest("[data-wb-aux-pane]");
+  if (auxPane) {
+    setWbAuxPane("suggest");
+    setWbMobilePane("controls");
+  } else if (state.wbMobilePane !== "diff") {
+    setWbMobilePane("diff");
+  }
+  const details = panel.querySelector("details");
+  if (details && !details.open) details.open = true;
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  const toggle = panel.querySelector("[data-wb-blocked-toggle]");
+  if (toggle && typeof toggle.focus === "function") {
+    toggle.focus({ preventScroll: true });
+  }
 }
 
 /* ------------------------------------------------------------------ */

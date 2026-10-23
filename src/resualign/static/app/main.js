@@ -4313,6 +4313,12 @@ function readOnboardingSkipped() {
   }
 }
 
+/* J12：/api/master-resumes 失败时重试一次，仍失败返回 null（未知）。
+ * 旧实现把任何失败 catch 成 []，等于把「读不到」当成「还没建简历」——
+ * 实测一次加载失败就给 8 份简历的老用户挂一张只含「1 创建主简历」的假卡，
+ * 且挂载后不再自动纠正。null 表示未知，调用方必须据此不渲染引导卡，
+ * 不能把 null 当 [] 用（format.js 的 onboardingSteps 会把非数组强制成 []，
+ * 那正好会得出「未完成」，所以判定放在本文件里）。 */
 async function loadResumesForOnboarding() {
   if (Array.isArray(state.resumes) && state.resumes.length > 0) {
     return state.resumes;
@@ -4320,26 +4326,43 @@ async function loadResumesForOnboarding() {
   if (Array.isArray(state.batchResumes) && state.batchResumes.length > 0) {
     return state.batchResumes;
   }
-  try {
-    const resumes = await api("/api/master-resumes");
-    state.resumes = resumes;
-    return resumes;
-  } catch {
-    return [];
+  /* 最多两次尝试：第一次失败立刻重试一次（偶发断流/超时），第二次仍失败
+   * 才放弃。不从 catch 里返回 []，也不写 state.resumes，避免把失败缓存成
+   * 「空简历」。 */
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const resumes = await api("/api/master-resumes");
+      if (!Array.isArray(resumes)) continue;
+      state.resumes = resumes;
+      return resumes;
+    } catch {
+      /* fall through to the retry / unknown result below */
+    }
   }
+  return null;
 }
 
 /* 岗位库顶部：三步引导卡（仅当存在未完成且未跳过的步骤）。通过第二个
-   canvas hook 挂载，不动 kanban.js 的 renderKanban。 */
+   canvas hook 挂载，不动 kanban.js 的 renderKanban。
+   J12：
+   1. 只有岗位库确实为空（state.jobs.length === 0）时才可能是新手；已有岗位
+      时这张卡只会把老用户当新用户，直接不挂。state.jobs 由 renderKanban 在
+      本 hook 之前 await 填充，已经 settled，不会拿到上一轮的旧数组。
+   2. 简历数据未知（loadResumesForOnboarding 返回 null）时也不挂——宁可少一张
+      卡，也不要一张「你没有主简历」的假卡。下次 render 再判断，不加定时器。 */
 setCanvasRenderHook(async (app) => {
   const header = app.querySelector(".jobs-topbar") || app.querySelector(".page-header");
   if (!header || app.querySelector("[data-onboarding-card]")) {
     return;
   }
+  const jobs = Array.isArray(state.jobs) ? state.jobs : [];
+  if (jobs.length > 0) return;
+  const resumes = await loadResumesForOnboarding();
+  if (resumes === null) return;
   const card = renderOnboardingCard(
     onboardingSteps({
-      resumes: await loadResumesForOnboarding(),
-      jobs: state.jobs || [],
+      resumes,
+      jobs,
       skipped: readOnboardingSkipped(),
     }),
   );

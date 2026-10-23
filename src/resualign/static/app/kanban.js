@@ -33,6 +33,9 @@ import { icon } from "./icons.js";
 
 let canvasRenderHooks = [];
 let draggingJobId = null;
+/* 每次 renderKanban 自增：截断提示是异步补挂的，旧请求回来时若已发生新一轮
+ * 渲染（视图切换/筛选/排序），就不能把旧 DOM 写脏。 */
+let kanbanRenderToken = 0;
 
 /* 工作状态维度（2026-10-22，审计 J3）：看板列按「投递阶段」切，但用户此刻
  * 真正的工作量在「对齐状态」——318 条里 209 条失败 / 22 条已对齐 / 87 条
@@ -93,6 +96,32 @@ let listLimit = LIST_PAGE;
 let boardLimit = BOARD_PAGE;
 let jobsViewMode = readJobsViewMode();
 
+/* J7（2026-10-22 审计 / 2026-10-23 B7）：岗位库一次 GET /api/jobs?limit=500，
+ * 第 500 条之后的数据会被静默丢弃——用户以为看到了全部岗位，实际少了。
+ * 这里复用 /api/dashboard 的 kpi.jobs（后端对整库计数，侧栏徽标已在用同一字段）
+ * 做「已截断」提示；拿不到总数就静默不提示：宁可少一行，也不要显示一个看起来
+ * 精确的错数。 */
+const JOBS_FETCH_LIMIT = 500;
+const JOBS_TOTAL_CACHE_KEY = "kanban:jobs-total";
+
+async function fetchJobsTotal() {
+  try {
+    const data = await api("/api/dashboard", { cacheKey: JOBS_TOTAL_CACHE_KEY });
+    const total = Number(data && data.kpi && data.kpi.jobs);
+    return Number.isFinite(total) && total >= 0 ? total : null;
+  } catch {
+    /* 失败静默：截断提示是补充信息，不该抢错误提示的位置 */
+    return null;
+  }
+}
+
+function jobsLimitHintHtml(items, total) {
+  const shown = Array.isArray(items) ? items.length : 0;
+  if (shown < JOBS_FETCH_LIMIT) return "";
+  if (total == null || total <= shown) return "";
+  return `<div class="jobs-limit-hint" role="status" data-jobs-limit-hint>已显示前 ${esc(shown)} 个岗位（共 ${esc(total)} 个）· 用筛选缩小范围</div>`;
+}
+
 function readJobsViewMode() {
   try {
     return localStorage.getItem(JOBS_VIEW_KEY) === "board" ? "board" : "list";
@@ -149,7 +178,7 @@ function moveBoardJob(jobId, status, extra = {}) {
 export async function renderKanban(app) {
   const query = new URLSearchParams({
     ...state.filters,
-    limit: "500",
+    limit: String(JOBS_FETCH_LIMIT),
     offset: "0",
   });
   for (const key of ["job_function", "seniority", "status", "search", "sort"]) {
@@ -158,6 +187,12 @@ export async function renderKanban(app) {
   /* work_status 是纯前端视图筛选，不进 API 契约（后端只认投递状态）。 */
   query.delete("work_status");
   state.jobs = await api(`/api/jobs?${query}`);
+  const jobsSnapshot = state.jobs;
+  /* J7：截断提示依赖 /api/dashboard 的总数，但它是补充信息——不等它，岗位
+   * 列表先照常渲染，总数回来后再补挂（多一次 await 会拖慢排序/视图切换这类
+   * 重渲染，也会让列表晚一帧出现）。 */
+  const renderToken = ++kanbanRenderToken;
+  const jobsTotalPromise = fetchJobsTotal();
   const vocabulary = await ensureVocabulary();
   const workFilter = state.filters.work_status || "all";
   const visibleJobs = (state.jobs || []).filter((job) =>
@@ -190,6 +225,11 @@ export async function renderKanban(app) {
               )
               .join("")}
           </div>`;
+  /* J7：看板没有列表那样的页级提示位，把截断提示放到第一个非空列的顶部——
+   * 用户第一眼看到的列就是有数据的那列，提示不会被塞进折叠的空列里。 */
+  const firstNonEmptyCanonical = JOB_STATUS_CANONICAL.find((canonical) =>
+    visibleJobs.some((job) => canonicalJobStatus(job.status) === canonical),
+  );
   const columns = JOB_STATUS_CANONICAL.map((canonical) => {
     const all = visibleJobs.filter(
       (job) => canonicalJobStatus(job.status) === canonical,
@@ -217,6 +257,7 @@ export async function renderKanban(app) {
           <span class="board-col-count">${all.length}</span>
         </div>
         <div class="board-col-body">
+          ${canonical === firstNonEmptyCanonical ? `<div data-jobs-limit-hint-mount></div>` : ""}
           ${shown.map((job) => boardCard(job, vocabulary.statuses)).join("")}
           ${more > 0 ? `<button type="button" class="btn btn-ghost btn-sm board-col__more" data-jobs-show-more>还有 ${more} 个 · 显示更多</button>` : ""}
         </div>
@@ -314,6 +355,7 @@ export async function renderKanban(app) {
     <div class="board-toolbar" data-jobs-batch-mount></div>
     ${emptyGuide}
     ${filteredEmptyHtml}
+    ${jobsViewMode === "list" && hasVisibleJobs ? `<div data-jobs-limit-hint-mount></div>` : ""}
     ${
       hasVisibleJobs
         ? jobsViewMode === "board"
@@ -322,6 +364,18 @@ export async function renderKanban(app) {
         : ""
     }
     </div>`;
+  /* 截断提示：总数回来后再补挂。若期间已发生新一轮渲染，renderToken 变化，
+   * 直接丢弃，避免把旧提示写进新 DOM。 */
+  jobsTotalPromise
+    .then((total) => {
+      if (renderToken !== kanbanRenderToken) return;
+      const mount = app.querySelector("[data-jobs-limit-hint-mount]");
+      if (!mount) return;
+      mount.innerHTML = jobsLimitHintHtml(jobsSnapshot, total);
+    })
+    .catch(() => {
+      /* fetchJobsTotal 已静默兜底；这里只防意外，不打扰用户 */
+    });
   const sortSelect = app.querySelector("[data-job-sort]");
   if (sortSelect) {
     sortSelect.addEventListener("change", () => {
