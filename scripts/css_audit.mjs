@@ -11,6 +11,7 @@
  *   node scripts/css_audit.mjs --pretty        # 缩进输出
  */
 import { readFileSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
+import { groupByContextSelector, parseRules } from "./css-rules.mjs";
 import { gzipSync } from "node:zlib";
 import { dirname, join } from "node:path";
 
@@ -23,11 +24,14 @@ const args = process.argv.slice(2);
 const pretty = args.includes("--pretty");
 const writeIndex = args.indexOf("--write");
 
-const css = readFileSync(CSS_PATH, "utf8");
-const html = readFileSync(HTML_PATH, "utf8");
+/* 统一成 LF 再度量：Windows 检出会按 core.autocrlf 把工作区文件写成 CRLF，
+ * 同一份内容在磁盘上会凭空多出「行数」个字节，让体积指标随 checkout 漂移。 */
+const toLf = (text) => text.replace(/\r\n/g, "\n");
+const css = toLf(readFileSync(CSS_PATH, "utf8"));
+const html = toLf(readFileSync(HTML_PATH, "utf8"));
 const appFiles = readdirSync(APP_DIR)
   .filter((name) => name.endsWith(".js"))
-  .map((name) => ({ name, text: readFileSync(join(APP_DIR, name), "utf8") }));
+  .map((name) => ({ name, text: toLf(readFileSync(join(APP_DIR, name), "utf8")) }));
 const jsText = appFiles.map((file) => file.text).join("\n");
 
 const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -58,23 +62,23 @@ const rulePreludesOnly = preludes.filter(
   (p) => !isAtRule(p) && !isKeyframeStep(p),
 );
 
-/* 选择器重复度：相同选择器（逗号拆分、空白归一）在多条规则里重复出现。 */
-const selectorCounts = new Map();
-for (const prelude of rulePreludesOnly) {
-  for (const raw of prelude.split(",")) {
-    const selector = raw.trim();
-    if (!selector) continue;
-    selectorCounts.set(selector, (selectorCounts.get(selector) || 0) + 1);
-  }
-}
-const duplicateSelectors = [...selectorCounts.entries()]
-  .filter(([, count]) => count > 1)
-  .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-const duplicateSelectorCount = duplicateSelectors.reduce(
-  (sum, [, count]) => sum + (count - 1),
+/* 选择器重复度：只统计「同上下文（同 @layer + 同 @media 链）内的重复定义」。
+ * 跨上下文的同名选择器（如桌面规则 + @media 内覆盖）是合法的响应式写法，
+ * 不算结构债；把它们算进去只会得到虚高的数字。 */
+const parsedRules = parseRules(css);
+const contextGroups = groupByContextSelector(parsedRules);
+const duplicateGroups = [...contextGroups.values()].filter(
+  (group) => group.length > 1,
+);
+const duplicateSelectorCount = duplicateGroups.reduce(
+  (sum, group) => sum + (group.length - 1),
   0,
 );
-const duplicateSelectorGroups = duplicateSelectors.length;
+const duplicateSelectorGroups = duplicateGroups.length;
+const duplicateSelectorsTop20 = duplicateGroups
+  .map((group) => [group[0].selector, group.length])
+  .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  .slice(0, 20);
 
 /* 断点：所有 @media 的条件，按出现次数排序。 */
 const mediaCounts = new Map();
@@ -140,11 +144,11 @@ const metrics = {
   css: {
     ruleBlocks: rulePreludesOnly.length,
     atRuleBlocks: preludes.length - rulePreludesOnly.length,
-    selectorCount: selectorCounts.size,
+    selectorCount: new Set(parsedRules.map((rule) => rule.selector)).size,
     duplicateSelectorCount,
     duplicateSelectorGroups,
-    duplicateSelectorsTop20: duplicateSelectors.slice(0, 20),
-    topbarDefinitions: selectorCounts.get(".topbar") || 0,
+    duplicateSelectorsTop20,
+    topbarDefinitions: parsedRules.filter((rule) => rule.selector === ".topbar").length,
     importantCount,
     breakpointCount: breakpoints.length,
     breakpoints,

@@ -6,6 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { parseRules } from "../../scripts/css-rules.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -83,22 +84,47 @@ function specificity(sel) {
  * 护栏 green，线上白底白字。这里改为显式列出会互相竞争的选择器集合，
  * 让测试按浏览器同样的方式裁定胜者。
  */
+/*
+ * 级联解析（2026-10-24 结构债 Phase 2 修）：
+ * 原实现用 `([^{}]+){([^}]*)}` 正则扫全表，遇到 @layer / @media 嵌套会错位，
+ * 而且完全忽略 @layer 优先级（层序优先于特异性）。删除冗余重复规则后
+ * 同一选择器的声明数量变化，旧解析会误判胜出者；这里改用共享的
+ * scripts/css-rules.mjs 解析出「选择器 + 声明 + 上下文」，再按
+ * 「层序 > 特异性 > 源码顺序」裁定。
+ */
+const LAYER_ORDER = new Map(
+  ["reset", "tokens", "base", "layout", "components", "patterns", "utilities", "overrides"].map(
+    (name, index) => [name, index],
+  ),
+);
+
+function layerOf(context) {
+  const layers = [...context.matchAll(/@layer\s+([\w-]+)/g)].map((match) => match[1]);
+  if (!layers.length) return 1000; // 未分层样式优先级最高
+  return LAYER_ORDER.get(layers[layers.length - 1]) ?? 0;
+}
+
 function resolveColor(css, selectors) {
   const wanted = new Set(selectors);
   const decls = [];
-  let order = 0;
-  for (const m of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
-    for (const part of m[1].split(",")) {
-      const sel = part.trim();
-      if (!wanted.has(sel)) continue;
-      const color = m[2].match(/(?:^|;)\s*color\s*:\s*([^;]+)/);
-      if (color) {
-        decls.push({ sel, color: color[1].trim(), spec: specificity(sel), order: order++ });
-      }
+  parseRules(css).forEach((rule, order) => {
+    for (const part of rule.selector.split(",")) {
+      const selector = part.trim();
+      if (!wanted.has(selector)) continue;
+      const color = rule.props.get("color");
+      if (!color) continue;
+      decls.push({
+        sel: selector,
+        color,
+        spec: specificity(selector),
+        rank: layerOf(rule.context),
+        order,
+      });
     }
-  }
+  });
   if (!decls.length) return null;
   decls.sort((a, b) => {
+    if (a.rank !== b.rank) return a.rank - b.rank;
     for (let i = 0; i < 3; i += 1) {
       if (a.spec[i] !== b.spec[i]) return a.spec[i] - b.spec[i];
     }
