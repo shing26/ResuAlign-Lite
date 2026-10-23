@@ -31,11 +31,11 @@ from pathlib import Path
 
 import pytest
 from helpers import (
-    use_board_view,
     assert_clean_page,
     capture_errors,
     expect,
     poll_until,
+    use_board_view,
     wait_for_count,
     wait_for_function,
 )
