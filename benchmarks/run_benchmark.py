@@ -32,6 +32,11 @@ from resualign.engine.llm import (
 )
 from resualign.models import ResuAlignConfig
 
+# Author-annotated match-quality expectations (optional per case). The band
+# anchors mirror the diagnosis score rubric in engine/llm.py
+# (80+ 优秀可直接投递 / 60-79 建议优化 / <60 需重点优化).
+MATCH_LEVELS = ("strong", "partial", "weak")
+
 _STOPWORDS = {
     "a", "an", "the", "and", "or", "for", "to", "of", "with", "in", "on",
     "at", "by", "as", "is", "are", "it", "its", "our", "your", "we", "you",
@@ -294,6 +299,71 @@ def _tokens(text: str) -> List[str]:
     ]
 
 
+def match_level_from_score(score) -> str:
+    """Map a diagnosis score onto the canonical match band.
+
+    Band anchors come from the engine's own score rubric (engine/llm.py),
+    so the benchmark and the UI never disagree about what "strong" means.
+    """
+    value = int(score)
+    if value >= 80:
+        return "strong"
+    if value >= 60:
+        return "partial"
+    return "weak"
+
+
+def _keyword_prf(expected: List[str], actual: List[str]) -> Dict:
+    """Precision/recall/F1 of annotated missing keywords vs the pipeline's
+    gap report. Exact casefolded matches — fuzzy matching would hide real
+    misses, and the point of the metric is to be falsifiable."""
+    expected_set = {kw.strip().casefold() for kw in expected if kw.strip()}
+    actual_set = {kw.strip().casefold() for kw in actual if kw.strip()}
+    hits = sorted(expected_set & actual_set)
+    precision = len(hits) / len(actual_set) if actual_set else 0.0
+    recall = len(hits) / len(expected_set) if expected_set else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall)
+        else 0.0
+    )
+    return {
+        "precision": round(precision, 3),
+        "recall": round(recall, 3),
+        "f1": round(f1, 3),
+        "expected_count": len(expected_set),
+        "actual_count": len(actual_set),
+        "hits": hits,
+        "missed": sorted(expected_set - actual_set),
+    }
+
+
+def _kappa(pairs: List) -> Optional[float]:
+    """Cohen's kappa over (expected, actual) level pairs.
+
+    Kappa corrects exact-agreement for chance, so a single-band golden set
+    cannot look good by always guessing the majority band. Returns None when
+    there are fewer than 2 annotated pairs or chance agreement is total.
+    """
+    if len(pairs) < 2:
+        return None
+    labels = sorted({label for pair in pairs for label in pair})
+    total = len(pairs)
+    po = sum(1 for expected, actual in pairs if expected == actual) / total
+    expected_counts = {label: 0 for label in labels}
+    actual_counts = {label: 0 for label in labels}
+    for expected, actual in pairs:
+        expected_counts[expected] += 1
+        actual_counts[actual] += 1
+    pe = sum(
+        expected_counts[label] * actual_counts[label] / (total * total)
+        for label in labels
+    )
+    if pe >= 1.0:
+        return None
+    return round((po - pe) / (1 - pe), 3)
+
+
 def evaluate_goals(expected_direction: List[str], evidence: str) -> Dict:
     """Score keyword overlap between expected goals and pipeline evidence."""
     evidence_tokens = set(_tokens(evidence))
@@ -347,6 +417,21 @@ def load_cases(cases_dir: Path) -> List[Dict]:
                 )
             if not all(isinstance(jd, str) and jd.strip() for jd in batch_jds):
                 raise ValueError(f"{path.name}: batch_jds must be non-empty strings")
+        match_level = data.get("expected_match_level")
+        if match_level is not None and match_level not in MATCH_LEVELS:
+            raise ValueError(
+                f"{path.name}: expected_match_level must be one of "
+                f"{sorted(MATCH_LEVELS)}"
+            )
+        missing_kw = data.get("expected_missing_keywords")
+        if missing_kw is not None and (
+            not isinstance(missing_kw, list)
+            or not all(isinstance(kw, str) and kw.strip() for kw in missing_kw)
+        ):
+            raise ValueError(
+                f"{path.name}: expected_missing_keywords must be a list of "
+                "non-empty strings"
+            )
         forbidden = data.get("must_not_contain")
         if forbidden is not None and (
             not isinstance(forbidden, list)
@@ -491,6 +576,23 @@ def _run_case(case: Dict, config: ResuAlignConfig, client) -> Dict:
             f"{expected_calls} LLM calls, got {llm_call_count}"
         )
 
+    expected_missing = case.get("expected_missing_keywords")
+    actual_missing = (
+        report.get("gap_report", {}).get("missing_keywords", [])
+        if isinstance(report, dict)
+        else []
+    )
+    match_quality = {
+        "expected_match_level": case.get("expected_match_level"),
+        "actual_match_level": match_level_from_score(report["score"]),
+        "expected_missing_keywords": list(expected_missing or []),
+        "missing_keywords_prf": (
+            _keyword_prf(expected_missing, actual_missing)
+            if expected_missing
+            else None
+        ),
+    }
+
     return {
         "id": case["id"],
         "source_file": case.get("source_file", ""),
@@ -498,6 +600,7 @@ def _run_case(case: Dict, config: ResuAlignConfig, client) -> Dict:
         "expected_direction": list(case["expected_direction"]),
         "report": report,
         "keyword_overlap": evaluate_goals(case["expected_direction"], evidence),
+        "match_quality": match_quality,
         "llm_call_count": llm_call_count,
         "cache_hit": bool(case.get("cache_hit") or diagnosis is not None),
         "batch_count": len(jd_texts) if len(jd_texts) > 1 else None,
@@ -556,7 +659,33 @@ def _summarize(results: List[Dict]) -> Dict:
     covered_goals = sum(
         result["keyword_overlap"]["covered_goal_count"] for result in results
     )
+    graded = [
+        (
+            result["match_quality"]["expected_match_level"],
+            result["match_quality"]["actual_match_level"],
+        )
+        for result in results
+        if result["match_quality"]["expected_match_level"]
+    ]
+    prfs = [
+        result["match_quality"]["missing_keywords_prf"]
+        for result in results
+        if result["match_quality"]["missing_keywords_prf"]
+    ]
+    exact = sum(1 for expected, actual in graded if expected == actual)
+    match_summary = {
+        "annotated_cases": len(graded),
+        "exact_level_agreement": (
+            round(exact / len(graded), 3) if graded else None
+        ),
+        "kappa": _kappa(graded),
+        "missing_keyword_cases": len(prfs),
+        "missing_keyword_macro_f1": (
+            round(sum(p["f1"] for p in prfs) / len(prfs), 3) if prfs else None
+        ),
+    }
     return {
+        "match_quality": match_summary,
         "cases": len(results),
         "avg_score": round(sum(scores) / len(scores), 1) if scores else 0.0,
         "avg_goal_coverage": (
@@ -581,6 +710,16 @@ def _print_summary(payload: Dict, out: TextIO) -> None:
         f"Goals covered: {summary['covered_goals']}/{summary['total_goals']}",
         file=out,
     )
+    mq = summary["match_quality"]
+    print(
+        f"Match quality (author-annotated): {mq['annotated_cases']} case(s); "
+        f"exact level agreement: "
+        f"{mq['exact_level_agreement'] if mq['exact_level_agreement'] is not None else '—'}; "
+        f"kappa: {mq['kappa'] if mq['kappa'] is not None else '—'}; "
+        f"missing-keyword macro F1: "
+        f"{mq['missing_keyword_macro_f1'] if mq['missing_keyword_macro_f1'] is not None else '—'}",
+        file=out,
+    )
     print("", file=out)
     for result in payload["cases"]:
         overlap = result["keyword_overlap"]
@@ -594,6 +733,26 @@ def _print_summary(payload: Dict, out: TextIO) -> None:
             marker = "PASS" if goal["covered"] else "MISS"
             print(
                 f"  {marker} {goal['goal']} ({goal['coverage']:.1%})",
+                file=out,
+            )
+        mq = result["match_quality"]
+        if mq["expected_match_level"]:
+            marker = (
+                "PASS"
+                if mq["expected_match_level"] == mq["actual_match_level"]
+                else "MISS"
+            )
+            print(
+                f"  {marker} level expected={mq['expected_match_level']} "
+                f"actual={mq['actual_match_level']}",
+                file=out,
+            )
+        prf = mq["missing_keywords_prf"]
+        if prf:
+            print(
+                f"  {'PASS' if prf['missed'] == [] else 'MISS'} "
+                f"missing-keywords R={prf['recall']} "
+                f"(missed: {', '.join(prf['missed']) or '—'})",
                 file=out,
             )
 
