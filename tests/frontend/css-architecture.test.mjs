@@ -21,10 +21,15 @@ const SOURCE_TEXT = [
 ].join("\n");
 
 const RUNTIME_INJECTED_TOKENS = new Set([
+  "--bar-color",
   "--c",
   "--d",
   "--delay",
+  /* Phase 3（2026-10-24）：进度/比例填充与固定尺寸骨架屏的注入通道 */
+  "--fill",
+  "--h",
   "--score",
+  "--w",
   "--x",
 ]);
 

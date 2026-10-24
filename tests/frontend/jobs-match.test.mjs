@@ -346,7 +346,7 @@ test("match dimensions tolerate missing or invalid values", () => {
   const body = bodyFrom(boardCard(partial));
   const dims = [...body.querySelectorAll("[data-match-dimension]")];
   assert.equal(dims[1].querySelector("b").textContent, "—");
-  assert.equal(dims[1].querySelector(".match-dim__track i").style.width, "0%");
+  assert.equal(dims[1].querySelector(".match-dim__track i").style.getPropertyValue("--fill"), "0%");
   assert.equal(dims[2].querySelector("b").textContent, "—");
   assert.equal(dims[3].querySelector("b").textContent, "100");
 });

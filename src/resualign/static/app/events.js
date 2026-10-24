@@ -753,7 +753,8 @@ export function renderDiagnosisProgress(snapshot) {
   const elapsed = $("[data-diagnosis-elapsed]", panel);
   const weight =
     STAGE_WEIGHTS[snapshot.stage || snapshot.status] ?? STAGE_WEIGHTS.running;
-  if (fill) fill.style.width = `${Math.round(weight * 100)}%`;
+  /* Phase 3：宽度经 --fill 注入，CSS 侧 width: var(--fill, 0%) */
+  if (fill) fill.style.setProperty("--fill", `${Math.round(weight * 100)}%`);
   if (stage) {
     stage.textContent =
       STAGE_LABELS[snapshot.stage || snapshot.status] ||
@@ -844,7 +845,7 @@ export function renderDiagnosisError(snapshot) {
     error.setAttribute("role", "alert");
     error.innerHTML = `
       <div><strong>${snapshot.status === "canceled" ? "诊断已取消" : "诊断失败"}</strong>：${esc(snapshot.error || "诊断任务暂时失败，请重试")}</div>
-      <div class="small muted" style="margin-top:6px">可点右上角「重新诊断」重试。</div>`;
+      <div class="small muted mt-2">可点右上角「重新诊断」重试。</div>`;
   }
   /* Sprint 4 T3: 失败态清空右侧 ATS 卡，避免展示过期结果。 */
   const atsNode = $("[data-ats-health-mount]");
@@ -978,7 +979,8 @@ export function renderOptimizeProgress(snapshot) {
   const elapsed = $("[data-optimize-elapsed]", panel);
   const weight =
     STAGE_WEIGHTS[snapshot.stage || snapshot.status] ?? STAGE_WEIGHTS.running;
-  if (fill) fill.style.width = `${Math.round(weight * 100)}%`;
+  /* Phase 3：宽度经 --fill 注入，CSS 侧 width: var(--fill, 0%) */
+  if (fill) fill.style.setProperty("--fill", `${Math.round(weight * 100)}%`);
   if (stage) {
     stage.textContent =
       STAGE_LABELS[snapshot.stage || snapshot.status] ||

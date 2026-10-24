@@ -25,9 +25,9 @@
       }
     })();
   </script>
-<link rel="stylesheet" href="/static/styles.css?v=72">
+<link rel="stylesheet" href="/static/styles.css?v=73">
 </head>
-<body class="app-body app-shell bg-appbg text-white/90 h-screen flex overflow-hidden select-none text-[13px]">
+<body class="app-body app-shell">
   <aside class="app-rail rail" aria-label="主导航栏">
     <div class="rail-brand">
       <span class="rail-mark brand-mark" data-brand-icon="crosshair" aria-hidden="true"></span>
@@ -89,7 +89,7 @@
       </div>
     </div>
   </aside>
-  <div class="app-main flex-1 flex flex-col overflow-hidden">
+  <div class="app-main">
     <header class="topbar">
       <div class="topbar-title">
         <h2 id="page-title">驾驶舱</h2>
@@ -101,7 +101,7 @@
           <span class="truncate">搜索岗位或命令...</span>
           <kbd>Ctrl K</kbd>
         </button>
-        <div class="topbar-actions__right flex items-center space-x-3">
+        <div class="topbar-actions__right">
           <button class="theme-toggle icon-btn" type="button" data-action="toggle-theme" data-theme-toggle aria-pressed="false" aria-label="切换明暗主题" title="切换明暗主题">
             <span class="theme-toggle-icon" data-theme-icon aria-hidden="true"></span>
             <span data-theme-label>浅色</span>
@@ -109,7 +109,7 @@
         </div>
       </div>
     </header>
-    <main id="app-router-view" class="flex-1 overflow-hidden relative" aria-live="polite">
+    <main id="app-router-view" aria-live="polite">
       <!-- SH-10（2026-10-23）：首屏静态骨架 —— boot() 要先等 /api/auth/me 才首次 render，
            这之前 #app-router-view 是空的（慢网/服务刚启动时是纯白屏）。先放同款骨架，
            render() 第一次运行时会整体替换掉。 -->
@@ -161,6 +161,6 @@
       </form>
     </div>
   </div>
-<script type="module" src="/static/app/main.js?v=72"></script>
+<script type="module" src="/static/app/main.js?v=73"></script>
 </body>
 </html>

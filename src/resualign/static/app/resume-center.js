@@ -97,7 +97,7 @@ async function renderResumeListView(app) {
           ${resumeAtsBadgeHtml(resume)}
         </div>
         <p class="small muted" data-resume-preview title="打开详情阅读全文">${esc(preview)}</p>
-        <div class="row" style="margin-top:10px">
+        <div class="row mt-3">
           <button class="btn btn-primary btn-sm" type="button" data-action="open-resume-archive" data-id="${resume.resume_id}">打开详情</button>
           <button class="btn btn-outline btn-sm" type="button" data-action="open-resume-archive" data-id="${resume.resume_id}" data-resume-focus="diagnosis">去看诊断</button>
           <!-- 编辑/删除降权到 kebab：列表的主要任务是「选哪份」，破坏性动作
@@ -115,7 +115,7 @@ async function renderResumeListView(app) {
     .join("");
 
   app.innerHTML = `
-    <div class="page-header page-header--resume flex items-center justify-between">
+    <div class="page-header page-header--resume">
       <div>
         <div class="sub">维护主简历与版本历史，工作台始终基于当前版本生成对齐稿</div>
       </div>
@@ -219,7 +219,7 @@ async function renderResumeDetailView(app, resumeId) {
         <p class="small muted" data-diagnosis-hint${hasDiagnosis ? " hidden" : ""}>还没有诊断，点右上角「诊断简历」。</p>
         ${atsSummaryHtml(diagnosis)}
         <div class="progress-wrap" data-diagnosis-progress hidden>
-          <div class="progress-track"><div class="progress-fill" data-diagnosis-fill style="width:5%"></div></div>
+          <div class="progress-track"><div class="progress-fill" data-diagnosis-fill style="--fill:5%"></div></div>
           <span class="small" data-diagnosis-stage>排队中</span>
           <span class="small muted" data-diagnosis-elapsed>0s</span>
           <button class="btn btn-ghost btn-sm" type="button" data-action="cancel-diagnosis" hidden>取消任务</button>
@@ -244,7 +244,7 @@ async function renderResumeDetailView(app, resumeId) {
             <button class="btn btn-ghost btn-sm" type="button" data-action="cancel-optimize" hidden>取消任务</button>
           </div>
           <div class="progress-wrap" data-optimize-progress hidden>
-            <div class="progress-track"><div class="progress-fill" data-optimize-fill style="width:5%"></div></div>
+            <div class="progress-track"><div class="progress-fill" data-optimize-fill style="--fill:5%"></div></div>
             <span class="small" data-optimize-stage>排队中</span>
             <span class="small muted" data-optimize-elapsed>0s</span>
           </div>
@@ -388,21 +388,21 @@ function resumeDetailSkeletonHtml() {
     <div class="view view-fit resume-view" data-resume-detail-skeleton aria-busy="true" aria-label="简历档案加载中">
       <div class="resume-band">
         <div class="resume-band-main">
-          <div class="skeleton is-shimmer" style="width:220px;height:22px"></div>
-          <div class="skeleton is-shimmer" style="width:340px;height:14px;margin-top:10px"></div>
+          <div class="skeleton skeleton--sized is-shimmer" style="--w:220px;--h:22px"></div>
+          <div class="skeleton skeleton--sized is-shimmer mt-3" style="--w:340px;--h:14px"></div>
         </div>
         <div class="resume-band-actions">
-          <div class="skeleton is-shimmer" style="width:120px;height:20px"></div>
-          <div class="skeleton is-shimmer" style="width:96px;height:28px"></div>
-          <div class="skeleton is-shimmer" style="width:76px;height:28px"></div>
-          <div class="skeleton is-shimmer" style="width:28px;height:28px"></div>
+          <div class="skeleton skeleton--sized is-shimmer" style="--w:120px;--h:20px"></div>
+          <div class="skeleton skeleton--sized is-shimmer" style="--w:96px;--h:28px"></div>
+          <div class="skeleton skeleton--sized is-shimmer" style="--w:76px;--h:28px"></div>
+          <div class="skeleton skeleton--sized is-shimmer" style="--w:28px;--h:28px"></div>
         </div>
       </div>
       <section class="panel diagnosis-panel">
-        <div class="skeleton is-shimmer" style="width:100%;height:110px"></div>
+        <div class="skeleton skeleton--sized is-shimmer" style="--w:100%;--h:110px"></div>
       </section>
       <section class="panel">
-        <div class="skeleton is-shimmer" style="width:100%;height:200px"></div>
+        <div class="skeleton skeleton--sized is-shimmer" style="--w:100%;--h:200px"></div>
       </section>
     </div>`;
 }
@@ -434,8 +434,8 @@ function resumeProfileHtml(resumeId, profile) {
     ${rows.length ? `<dl class="profile-basic">${rows.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>` : '<p class="small muted">基本字段为空</p>'}
     ${edu.length ? `<p class="small">教育：${esc(edu.join("；"))}</p>` : ""}
     ${work.length ? `<p class="small">工作：${esc(work.join("；"))}</p>` : ""}
-    ${profile.stale ? '<p class="small" style="color:#b45309">简历在抽取后有改动，建议重新生成。</p>' : ""}
-    <div class="row" style="margin-top:8px">
+    ${profile.stale ? '<p class="small warn-note">简历在抽取后有改动，建议重新生成。</p>' : ""}
+    <div class="row mt-2">
       <button class="btn btn-outline btn-sm" type="button" data-action="profile-extract" data-id="${esc(resumeId)}">${profile.stale ? "重新生成" : "重新抽取"}</button>
       <button class="btn btn-ghost btn-sm" type="button" data-action="profile-edit" data-id="${esc(resumeId)}">编辑</button>
     </div>`;
@@ -454,8 +454,8 @@ export function profileEditFormHtml(resumeId, profile) {
       <div class="field wide"><label>技能（逗号分隔）</label><input name="skills" value="${esc((data.skills || []).join(", "))}"></div>
       <div class="field wide"><label>个人总结</label><textarea name="summary" rows="2">${esc(data.summary || "")}</textarea></div>
     </div>
-    <p class="small muted" style="margin-top:6px">教育/工作/项目明细暂以抽取结果为准，可在生成后按需重抽。</p>
-    <div class="actions" style="margin-top:10px">
+    <p class="small muted mt-2">教育/工作/项目明细暂以抽取结果为准，可在生成后按需重抽。</p>
+    <div class="actions mt-3">
       <button class="btn btn-primary btn-sm" type="submit">保存档案</button>
       <button class="btn btn-ghost btn-sm" type="button" data-action="close-modal">取消</button>
     </div>
@@ -575,14 +575,9 @@ if (typeof document !== "undefined") {
    * 展开时把宿主卡抬到其它卡之上、收起后还原——等价于看板用
    * .board-card:has(.board-more[open]) 做的层级提升；styles.css 不在本次
    * 改动范围，只能用行内层叠属性兜底。 */
-  const syncCardMenuLayer = (card) => {
-    if (!card) return;
-    const open = Boolean(
-      card.querySelector("details[data-resume-card-more][open]"),
-    );
-    card.style.position = open ? "relative" : "";
-    card.style.zIndex = open ? "2" : "";
-  };
+  /* Phase 3：kebab 菜单层叠上下文由 .resume-card:has(details[open]) 接管
+   * （styles.css L13133，B7 落地），这里不再写行内 position/z-index。 */
+  const syncCardMenuLayer = () => {};
   /* details 的 toggle 事件不冒泡，用捕获阶段监听。 */
   document.addEventListener(
     "toggle",

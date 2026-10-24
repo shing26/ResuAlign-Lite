@@ -77,9 +77,9 @@ test("skillGapHtml renders a row per gap with proportional widths", () => {
   const rows = [...body.querySelectorAll("[data-skill-gaps] .skill-gap-row")];
   assert.equal(rows.length, 3);
   // widths relative to max=5: K8s 100%, 高并发 60%, Docker 20%
-  assert.equal(rows[0].querySelector(".skill-gap-row__fill").style.width, "100%");
-  assert.equal(rows[1].querySelector(".skill-gap-row__fill").style.width, "60%");
-  assert.equal(rows[2].querySelector(".skill-gap-row__fill").style.width, "20%");
+  assert.equal(rows[0].querySelector(".skill-gap-row__fill").style.getPropertyValue("--fill"), "100%");
+  assert.equal(rows[1].querySelector(".skill-gap-row__fill").style.getPropertyValue("--fill"), "60%");
+  assert.equal(rows[2].querySelector(".skill-gap-row__fill").style.getPropertyValue("--fill"), "20%");
   // PM 评审颜色倒挂回归：高缺口（峰值）必须 hot（红），低缺口必须 cool（中性）
   assert.ok(rows[0].querySelector(".skill-gap-row__fill--hot"), "peak gap uses hot tone");
   assert.ok(rows[2].querySelector(".skill-gap-row__fill--cool"), "low gap uses cool tone");
@@ -149,8 +149,8 @@ test("skillGapHtml table variant mirrors the dashboard reference without fake co
   );
   const rows = [...body.querySelectorAll("[data-skill-gaps] .skill-gap-table__row")];
   assert.equal(rows.length, 3);
-  assert.equal(rows[0].querySelector(".meter__fill").style.width, "100%");
-  assert.equal(rows[2].querySelector(".meter__fill").style.width, "20%");
+  assert.equal(rows[0].querySelector(".meter__fill").style.getPropertyValue("--fill"), "100%");
+  assert.equal(rows[2].querySelector(".meter__fill").style.getPropertyValue("--fill"), "20%");
   assert.match(rows[0].textContent, /K8s/);
   assert.match(rows[0].textContent, /5/);
   assert.match(body.querySelector("thead").textContent, /需求强度/);

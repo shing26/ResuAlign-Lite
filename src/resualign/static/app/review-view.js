@@ -36,7 +36,7 @@ function paceBars(weekPace) {
       const label = String(d.date || "").slice(5);
       return `
         <div class="review-pace__col" title="${escAttr(d.date)} · 投递 ${count} 次">
-          <div class="review-pace__bar${count ? "" : " is-empty"}" style="height:${Math.max(pct, count ? 12 : 4)}%"></div>
+          <div class="review-pace__bar${count ? "" : " is-empty"}" style="--fill:${Math.max(pct, count ? 12 : 4)}%"></div>
           <span class="review-pace__count">${count || ""}</span>
           <span class="review-pace__day">${escAttr(label)}</span>
         </div>`;

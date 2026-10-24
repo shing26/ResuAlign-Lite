@@ -745,17 +745,11 @@ function tryFocusSkill() {
   const first = pane.querySelector("[data-match-skill]");
   if (first) {
     first.scrollIntoView({ behavior: "smooth", block: "center" });
+    /* Phase 3：闪高亮走 .is-skill-flash 类（outline/background 在 styles.css，
+     * 颜色由 --warn 派生），不再写行内样式、不再手动保存/恢复。 */
     first.classList.add("is-skill-flash");
-    /* B 的 styles.css 会为 [data-match-skill] / .is-skill-match 提供持久样式；
-     * 这里再加一次短暂内联高亮，保证 B 未合入时冒烟也能肉眼可见。 */
-    const prevOutline = first.style.outline;
-    const prevBackground = first.style.backgroundColor;
-    first.style.outline = "2px solid #f59e0b";
-    first.style.backgroundColor = "rgba(245, 158, 11, 0.18)";
     window.setTimeout(() => {
       first.classList.remove("is-skill-flash");
-      first.style.outline = prevOutline;
-      first.style.backgroundColor = prevBackground;
     }, 4000);
   }
   pendingSkillFocus = null;
@@ -979,7 +973,7 @@ export async function renderOptimizerCanvas(app, jobId) {
             <option value="">${workbenchJobs.length ? "选择岗位..." : "岗位库为空，先粘贴一个 JD 吧"}</option>
             ${workbenchJobs.map((item) => `<option value="${esc(item.job_id)}">${esc(item.title)} · ${esc(item.company || "")}</option>`).join("")}
           </select></div>
-        <div class="row" style="margin-top:10px">
+        <div class="row mt-3">
           ${workbenchJobs.length ? '<button class="btn btn-primary" data-action="goto-selected-job">进入工作台</button>' : '<button class="btn btn-primary" data-action="open-command-panel">粘贴 JD / 链接</button>'}
         </div>
       </div>
@@ -1665,7 +1659,8 @@ async function pollAlignmentJob() {
         stageNode.textContent = STAGE_LABELS[stageKey] || stageKey || "正在生成";
       }
       const fill = $(".align-progress__fill");
-      if (fill) fill.style.width = `${alignProgressPercent(stageKey)}%`;
+      /* Phase 3：宽度经 --fill 注入 */
+      if (fill) fill.style.setProperty("--fill", `${alignProgressPercent(stageKey)}%`);
       const elapsed = $("[data-align-elapsed]");
       if (elapsed) {
         elapsed.textContent = formatElapsed(
@@ -1781,8 +1776,7 @@ export function copyAlignMarkdown(jobId, session) {
 function fallbackCopy(text) {
   const node = document.createElement("textarea");
   node.value = text;
-  node.style.position = "fixed";
-  node.style.opacity = "0";
+  node.className = "copy-helper"; /* Phase 3：固定+不可见走类 */
   document.body.append(node);
   node.select();
   try {

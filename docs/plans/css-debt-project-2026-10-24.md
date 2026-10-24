@@ -31,10 +31,10 @@ B1–B8 已经让界面「看起来」对了，但底层是不断追加的 CSS�
 | `!important` | 1 | ≤ 1 |
 | 断点数量（不同 @media 条件） | **17** | ≤ 6 |
 | token 定义 / 被引用 / 零引用 | 257 / 207 / **97** | 零引用 = 0（Phase 1 已达成） |
-| JS 内联 `style="` 属性 | **45** | 0（运行时计算值走 `style.setProperty` 白名单） |
-| JS `style.*` 写入 | 17 | 0（同上） |
-| JS/HTML 颜色字面量 | **20** | 0（除 tokens 层） |
-| Tailwind 遗留原子类 | 11 类（`bg-appbg`、`text-white/90`、`h-screen`…） | 0 |
+| JS 内联 `style="` 属性 | **45** | 0 —— **Phase 3 已达成**（`style="--` 注入白名单） |
+| JS `style.*` 写入 | 17 | 0 —— **Phase 3 已达成**（setProperty/removeProperty 白名单） |
+| JS/HTML 颜色字面量 | **20** | 0 —— **Phase 3 已达成**（口径：剥注释、含 rgba/hsla） |
+| Tailwind 遗留原子类 | 11 类 | 0 —— **Phase 3 已达成** |
 
 基线 JSON：`docs/reports/css-debt-baseline-2026-10-24.json`
 
@@ -122,6 +122,16 @@ node scripts/css_budget.mjs                         # 棘轮门禁（任何指�
 | 视觉基线本身受数据变化影响（时间/数字） | 对比阈值 0.2%；差异报告需人工确认为「预期变化」；基线在每阶段合并后重采 |
 
 ## 6. 实现记录
+
+### Phase 3（2026-10-24，已落地）
+- **JS 内联样式归零**：45 处 `style="` 属性与 17 处 `style.*` 写入全部收敛——动态值统一自定义属性注入（`--fill` 进度/比例、`--bar-color` 分数条颜色、`--w/--h` 固定尺寸骨架屏），CSS 侧 `width/height: var(--fill, …)` 消费、JS 侧 `setProperty` 更新；静态一次性间距吸附 4px 网格（`.mt-2/.mt-3/.mb-3`，原 6px→8px、10px→12px 为**有意归一**）；组件级内联布局进语义类（`.batch-bar/.field--grow/.row--tight/.hint-tight/.form-hint-danger/.warn-note/.copy-helper/.is-skill-flash/.skeleton--sized`）
+- **颜色字面量归零**：真身 8 个——Offer 彩带五色进 tokens（`--confetti-1..5`）、`#b45309`→`--warn-ink`（暗色取 var(--warn)）、技能闪高亮 `#f59e0b/rgba`→`--warn` 派生、`var(--danger,#c0392b)` 兜底删除；其余 12 个是 JS 注释里的 issue 号（#111 等），度量口径同步修正：**先剥注释、并补 rgba/hsla 口径**
+- **Tailwind 遗留类归零**：11 类全部来自壳层 5 处 + resume-center 1 处；折叠进 `.app-shell/.app-main/#app-router-view/.topbar-actions__right/.page-header--resume` 语义规则后删除 12 条工具类定义。两个级联坑当场修复：①`.topbar-actions__right` 漏加语义规则导致 display flex→block（连锁 theme-toggle 子项块化）；②移动端 `.page-header{align-items:stretch}`（同层后位）压过 `.page-header--resume` 的 center——原工具类是**无层规则**胜过一切分层，删除后需在媒体块内显式保留例外
+- **度量口径**：`style="--`(自定义属性注入) 与 `setProperty/removeProperty` 计入白名单；无层工具类的「胜过分层规则」语义在折叠时必须显式重建
+- 验证：589 前端 + e2e 7 全绿；元素级快照 **82 处差异全部为 margin/height 间距归一，0 其它属性变化**；视觉基线 0.005%–11.6%（2px 间距在长列表的累计位移，肉眼复核正常）；`css_budget` 绿
+- 已知噪音：mobile-jobs 的 DOM 元素数在同 CSS 下 3332↔2323 翻转（页面异步内容竞争，与 CSS 无关），快照对比时以桌面页 + 属性分类为准
+- 新基线：`docs/reports/css-debt-phase3-2026-10-24.json`（bytes +3,217：新组件类承接内联样式，删除的工具类部分抵消；重复定义维持 141）
+
 
 ### Phase 2b（2026-10-24，验证工具落地；2c 记入待办）
 - 新增 `scripts/style_snapshot.py`：元素级计算样式快照/对比（5 路由 × 明暗 × 桌面/手机，每元素 ~35 个计算属性）。比截图更敏感：能直接指出「哪个元素哪个属性变了」，是后续任何 CSS 重构的验证底座
