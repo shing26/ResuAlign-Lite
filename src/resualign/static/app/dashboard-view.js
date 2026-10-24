@@ -149,7 +149,7 @@ export async function renderDashboard(container) {
   const atsMeter = atsScore == null
     ? ""
     : `<div class="metric-meter">
-        <span class="meter ${atsTone}" role="img" aria-label="ATS 分数 ${escAttr(atsScore)} 分，${escAttr(atsLabel)}"><span class="meter__fill" style="width:${escAttr(atsScore)}%"></span></span>
+        <span class="meter ${atsTone}" role="img" aria-label="ATS 分数 ${escAttr(atsScore)} 分，${escAttr(atsLabel)}"><span class="meter__fill" style="--fill:${escAttr(atsScore)}%"></span></span>
         <span class="metric-meter__label">${escAttr(atsLabel)}</span>
       </div>`;
   const kpiCards = `

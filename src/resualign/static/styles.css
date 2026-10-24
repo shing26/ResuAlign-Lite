@@ -241,11 +241,17 @@
   --success-soft: #E7F5EC;
   --success-line: #A8D9BC;
   --warn:         #96650C;
+--warn-ink:      #B45309; /* 离屏提示（简历已变更）用的亮琥珀 */
   --warn-soft:    #FBF2DF;
   --danger:       #C0392F;
   --danger-soft:  #FCEBE9;
   --danger-line:  #EDB7B2;
   --info:         #1F6FB8;
+--confetti-1:    #F43F5E; /* Offer 彩带五色（庆祝装饰，明暗同值） */
+--confetti-2:    #F59E0B;
+--confetti-3:    #10B981;
+--confetti-4:    #3B82F6;
+--confetti-5:    #A855F7;
   --info-soft:    #E7F1FA;
 
   /* 序数色阶：hue 顺序与语义完全不变，只调 lightness 以适配白底 */
@@ -330,6 +336,7 @@
   --success-soft: #0E2A18;
   --success-line: #1E5B31;
   --warn:         #D9A43C; /* 警告、待处理、临期 */
+--warn-ink:      var(--warn);
   --warn-soft:    #2B2210;
   --danger:       #F0555C; /* 错误、失败、删除、超期 */
   --danger-soft:  #2E1417;
@@ -1150,6 +1157,7 @@ button:disabled {
 }
 
 .progress-fill {
+  width: var(--fill, 0%);
   height: 100%;
   border-radius: var(--radius-pill);
   background: var(--accent);
@@ -1652,6 +1660,12 @@ h6 {
   background: var(--bg-canvas);
   padding: 0;
   overflow: hidden;
+  /* Phase 3：吸收壳层工具类 bg-appbg / text-white\/90 / h-screen / flex /
+     overflow-hidden / select-none / text-[13px]（层级与特异性等价改写） */
+  user-select: none;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--text-primary) 90%, transparent);
 }
 
 
@@ -1816,6 +1830,7 @@ h6 {
 .app-main {
   min-width: 0;
   max-width: 1200px;
+  flex: 1 1 0%; /* Phase 3：吸收 .flex-1 */
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -1826,6 +1841,8 @@ h6 {
 #app-router-view {
   flex: 1 1 auto;
   min-height: 0;
+  position: relative; /* Phase 3：吸收 .relative */
+  overflow-x: hidden; /* Phase 3：吸收 .overflow-hidden 的 x 轴（y 轴仍由下方规则决定） */
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: var(--space-1);
@@ -1909,6 +1926,7 @@ h6 {
 
 .page-header--resume {
   --header-accent: var(--accent);
+  align-items: center; /* Phase 3：吸收 .items-center（基础规则是 flex-end） */
 }
 
 .page-header--jobs {
@@ -2632,6 +2650,12 @@ table.data th {
   .page-header {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  /* Phase 3：resume 页头原由无层 .items-center 工具类保持水平居中，
+     分层规则压不过它；工具类删除后在此显式保留该例外。 */
+  .page-header--resume {
+    align-items: center;
   }
 
   .btn,
@@ -4033,6 +4057,7 @@ body.command-palette-open {
 }
 
 .align-progress__fill {
+  width: var(--fill, 0%);
   height: 100%;
   border-radius: var(--radius-pill);
   background: var(--accent);
@@ -4629,6 +4654,7 @@ label.eval-option,
 
 .skill-gap-row__fill {
   display: block;
+  width: var(--fill, 0%);
   height: 100%;
   border-radius: var(--radius-pill);
   transition: width var(--dur-base) var(--ease-standard);
@@ -6228,11 +6254,11 @@ body {
 #app-router-view {
   flex: 1 1 auto;
   min-height: 0;
+  position: relative; /* Phase 3：吸收 .relative */
+  overflow-x: hidden; /* Phase 3：吸收 .overflow-hidden 的 x 轴（y 轴仍由下方规则决定） */
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-
-.bg-appbg { background-color: var(--bg-canvas); }
 
 .border { border-width: 1px; }
 
@@ -6241,12 +6267,8 @@ body {
 .border-t { border-top-width: 1px; }
 
 .text-white { color: var(--text-on-solid); }
-.text-white\/90 { color: color-mix(in srgb, var(--text-primary) 90%, transparent); }
-
-.text-\[13px\] { font-size: var(--text-sm); line-height: 1.5; }
 
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.select-none { user-select: none; }
 
 .relative { position: relative; }
 .absolute { position: absolute; }
@@ -6254,18 +6276,12 @@ body {
 
 .p-1 { padding: var(--space-1); }
 
-.flex-1 { flex: 1 1 0%; }
-.flex-col { flex-direction: column; }
-.flex-wrap { flex-wrap: wrap; }
-
-.items-center { align-items: center; }
-
-.justify-between { justify-content: space-between; }
-
-.space-x-3 > * + * { margin-left: var(--space-3); }
-
-.overflow-hidden { overflow: hidden; }
 .rounded { border-radius: var(--radius-sm); }
+
+/* Phase 3：一次性间距统一走 4px 网格 token（原内联 6px→8px、10px→12px） */
+.mt-2 { margin-top: var(--space-2); }
+.mt-3 { margin-top: var(--space-3); }
+.mb-3 { margin-bottom: var(--space-3); }
 
 .transition { transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease; }
 
@@ -6290,8 +6306,6 @@ body {
    v2 preview final polish: missing utilities + Settings bento/node cards.
    Kept at the very end so it wins over every earlier layer.
    ========================================================================== */
-
-.h-screen { height: 100vh; }
 
 .settings-bento {
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -9212,6 +9226,7 @@ details > summary::-webkit-details-marker,
 
 .match-dim__track i {
   display: block;
+  width: var(--fill, 0%);
   height: 100%;
   border-radius: inherit;
   background: var(--info);
@@ -10613,6 +10628,7 @@ select,
 }
 .review-pace__bar {
   width: 100%;
+  height: var(--fill, auto);
   max-width: 42px;
   min-height: 4px;
   border-radius: var(--radius-md) var(--radius-md) var(--radius-xs) var(--radius-xs);
@@ -11035,7 +11051,7 @@ select,
 }
 
 .meter__fill {
-  width: 0;
+  width: var(--fill, 0);
   height: 100%;
   display: block;
   border-radius: inherit;
@@ -13199,5 +13215,84 @@ select,
 ::placeholder {
   color: var(--text-secondary);
   opacity: 1;
+}
+}
+
+@layer components {
+/* =====================================================================
+ * 结构债 Phase 3（2026-10-24）：内联样式收敛出的组件类
+ * —— 批量对比矩阵（原 format.js 内联 grid/track/fill/score）
+ * ===================================================================== */
+.batch-bar {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 2fr) 40px;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.batch-bar__track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.batch-bar__fill {
+  width: var(--fill, 0%);
+  height: 100%;
+  border-radius: var(--radius-md);
+  background: var(--bar-color, var(--accent));
+  transition: width 0.4s ease;
+}
+
+.batch-bar__score {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-gaps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+.batch-gap-title {
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+/* 一次性布局修饰（对应被删除的内联 style） */
+.field--grow { flex: 1; }
+.row--tight { gap: var(--space-2); }
+.hint-tight { margin: calc(var(--space-1) * -1) 0 var(--space-2); }
+.form-hint-danger { margin: var(--space-2) 0 0; color: var(--danger); }
+.warn-note { color: var(--warn-ink); }
+
+/* 顶栏右侧动作簇（吸收原 .flex / .items-center / .space-x-3 工具类） */
+.topbar-actions__right {
+  display: flex;
+  align-items: center;
+}
+.topbar-actions__right > * + * {
+  margin-left: var(--space-3);
+}
+
+/* 剪贴板兜底节点（execCommand copy 用，不可见） */
+.copy-helper {
+  position: fixed;
+  opacity: 0;
+}
+
+/* 技能缺口聚焦闪高亮（原 split-canvas 内联 outline/background） */
+.is-skill-flash {
+  outline: 2px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+}
+
+/* 固定尺寸骨架屏（简历详情加载态；尺寸经 --w/--h 注入，不影响
+   main.js 的 view-skeleton，那些不带此类） */
+.skeleton--sized {
+  width: var(--w, auto);
+  height: var(--h, auto);
 }
 }

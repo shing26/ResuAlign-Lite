@@ -1,0 +1,106 @@
+{
+  "tag": "phase3",
+  "shots": {
+    "light-desktop-dashboard.png": {
+      "sha256": "d1fb2466ef4b80369f3b14cd729b19aef3548d09632147db823d5cdd72f34ea5",
+      "width": 1440,
+      "height": 900
+    },
+    "light-desktop-review.png": {
+      "sha256": "c2153359e4d2d2762eb7ebd27f139ad6ab351aff1a5bf4a943b195f08a4f6dbf",
+      "width": 1440,
+      "height": 900
+    },
+    "light-desktop-jobs.png": {
+      "sha256": "ebac362b5763139190f133b6b09ecd762f9b54230fcfa7e5acb3699e8320db26",
+      "width": 1440,
+      "height": 900
+    },
+    "light-desktop-resume-list.png": {
+      "sha256": "fd2c7f0e73c81d8aa354def479ba12224f3796054cda84ee79062af8045c7cc4",
+      "width": 1440,
+      "height": 900
+    },
+    "light-desktop-settings.png": {
+      "sha256": "5f3c3d6e9338dbbaf5fb459ffb7376d259a72f06f3ca70b44204bb299aa4f259",
+      "width": 1440,
+      "height": 900
+    },
+    "light-mobile-dashboard.png": {
+      "sha256": "176d266d97d09b3828537eb6f2e5f562d364a9508e6909c63d6ccc6e12c248c1",
+      "width": 390,
+      "height": 844
+    },
+    "light-mobile-review.png": {
+      "sha256": "8a4cf00f5614bcb73d0b7b42a55b52eb1e820784982a706e4a891286f01eaab6",
+      "width": 390,
+      "height": 844
+    },
+    "light-mobile-jobs.png": {
+      "sha256": "624ed7d5967e1e80057d5209200098f7316b226b2ecf9c0213c42418f4cd1d2d",
+      "width": 390,
+      "height": 844
+    },
+    "light-mobile-resume-list.png": {
+      "sha256": "8829eef4448423ec1df4ba7509dab9e2d176899760e7339f345c92c9d6e083fd",
+      "width": 390,
+      "height": 844
+    },
+    "light-mobile-settings.png": {
+      "sha256": "83dff057c4cc736e0a5c7c9fda69bb1440340def84810f85ef38ef56299bd153",
+      "width": 390,
+      "height": 844
+    },
+    "dark-desktop-dashboard.png": {
+      "sha256": "3d0303e35daa75cd23bff88fc0af6f1501785702c75fe237f832444e1e61e0ea",
+      "width": 1440,
+      "height": 900
+    },
+    "dark-desktop-review.png": {
+      "sha256": "6eb658cfc4a1545ba4551a368fa654e1a1772fe616a33d1d691ef9194a7d99f5",
+      "width": 1440,
+      "height": 900
+    },
+    "dark-desktop-jobs.png": {
+      "sha256": "f745742fe1414e14e98eb68ec0921cabd60675b5115e6c587423293bb7c7d920",
+      "width": 1440,
+      "height": 900
+    },
+    "dark-desktop-resume-list.png": {
+      "sha256": "787c4b44def3e1963709e65cf1ece11b3391d55f3cf5086f1561155efcd57ecc",
+      "width": 1440,
+      "height": 900
+    },
+    "dark-desktop-settings.png": {
+      "sha256": "1702aadbf01e6f6d137ac5888fdb7f50c1fb77579edbdd73156e037f8332faac",
+      "width": 1440,
+      "height": 900
+    },
+    "dark-mobile-dashboard.png": {
+      "sha256": "1b13a13e0b9b4ae7cc31a2a34f45f716e5dc56ba6b0e832a294249d83c9fe260",
+      "width": 390,
+      "height": 844
+    },
+    "dark-mobile-review.png": {
+      "sha256": "181bf793c40528d22f21859974f2be74df826af185290921a7c55554d22e1001",
+      "width": 390,
+      "height": 844
+    },
+    "dark-mobile-jobs.png": {
+      "sha256": "c7261e468ba120b23f48a11802549c51ea75d8c5d97e7e5226abbb996894372c",
+      "width": 390,
+      "height": 844
+    },
+    "dark-mobile-resume-list.png": {
+      "sha256": "a2109acdfb9c31bb27b72ca72400c091bc5511c85d2b93bc1c8798b86f6c4c2f",
+      "width": 390,
+      "height": 844
+    },
+    "dark-mobile-settings.png": {
+      "sha256": "911ff1fcfd1e4bcc5dcd84d2d569c1d27a16a0dc96678669a9f02483ae595568",
+      "width": 390,
+      "height": 844
+    }
+  },
+  "errors": []
+}

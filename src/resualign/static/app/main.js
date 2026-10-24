@@ -521,8 +521,8 @@ function openJobEditor(job) {
 const JOB_CREATE_FORM_HTML = `
     <form class="panel panel-card" data-form="job-create" hidden>
       <h3>添加岗位</h3>
-      <p class="small muted" style="margin:0 0 10px">岗位链接请用浏览器油猴插件一键入库，或用「粘贴 JD」方式录入（后端已不再抓取 JD 链接）</p>
-      <div class="form-grid" style="margin-top:10px">
+      <p class="small muted mb-3">岗位链接请用浏览器油猴插件一键入库，或用「粘贴 JD」方式录入（后端已不再抓取 JD 链接）</p>
+      <div class="form-grid mt-3">
         <div class="field"><label>标题</label><input type="text" name="title" placeholder="留空则从 JD 首行提取"></div>
         <div class="field"><label>公司</label><input type="text" name="company"></div>
         <div class="field"><label>城市</label><input type="text" name="location"></div>
@@ -546,7 +546,7 @@ const JOB_IMPORT_FORM_HTML = `
         <input type="checkbox" name="preanalyze" checked>
         <span>导入后自动 AI 预分析（分类 + 岗位画像 + 差距）</span>
       </label>
-      <div class="small muted" style="margin:-4px 0 6px">每条都会调用 LLM，导入会明显变慢；不勾选则只入库，之后可在岗位详情手动「AI 预分析」。重复岗位会直接跳过，不会重复入库。</div>
+      <div class="small muted hint-tight">每条都会调用 LLM，导入会明显变慢；不勾选则只入库，之后可在岗位详情手动「AI 预分析」。重复岗位会直接跳过，不会重复入库。</div>
       <div class="row"><button class="btn btn-primary" type="submit">开始导入</button>
         <button class="btn btn-ghost" type="button" data-action="cancel-import">取消</button>
         <span class="small muted" data-import-status></span></div>
@@ -900,7 +900,7 @@ async function renderSettingsView(app) {
                 运行对齐时默认开启评估（幻觉检测 / AI 对齐匹配分）
               </label>
               <div class="small muted">每任务额外一次 LLM 调用；工作台可按次覆盖。</div>
-              <div class="row" style="margin-top:10px">
+              <div class="row mt-3">
                 <button class="btn btn-outline btn-sm" type="submit">保存评估开关</button>
               </div>
             </form>
@@ -1073,8 +1073,7 @@ function copyMarkdownToClipboard(text) {
 function fallbackCopyMarkdown(text) {
   const node = document.createElement("textarea");
   node.value = text;
-  node.style.position = "fixed";
-  node.style.opacity = "0";
+  node.className = "copy-helper"; /* Phase 3：固定+不可见走类 */
   document.body.append(node);
   node.select();
   try {
@@ -1098,8 +1097,7 @@ function copyTextToClipboard(text, successMessage = "已复制") {
 function fallbackCopyText(text, successMessage) {
   const node = document.createElement("textarea");
   node.value = text;
-  node.style.position = "fixed";
-  node.style.opacity = "0";
+  node.className = "copy-helper"; /* Phase 3：固定+不可见走类 */
   document.body.append(node);
   node.select();
   try {
@@ -2896,7 +2894,8 @@ const actions = {
   "show-backup-guide": () => {
     showModal(
       "整库备份与还原",
-      `<pre class="pre small" style="white-space:pre-wrap">${esc(backupRestoreGuide())}</pre>`,
+      /* Phase 3：.pre 基础规则本就 white-space: pre-wrap，内联是冗余 */
+      `<pre class="pre small">${esc(backupRestoreGuide())}</pre>`,
     );
   },
   "export-batch-csv": () => {
@@ -3081,7 +3080,7 @@ const actions = {
             node.ok && !node.is_active
               ? `<button class="btn btn-outline btn-sm" type="button" data-action="rerun-with-node" data-node-id="${esc(node.node_id)}">用此节点重试</button>`
               : "";
-          return `<div class="row" style="gap:8px;align-items:center"><strong>${esc(node.name)}</strong>${health}<span class="small muted">${esc(node.model || "")}</span>${switchable}</div>`;
+          return `<div class="row row--tight"><strong>${esc(node.name)}</strong>${health}<span class="small muted">${esc(node.model || "")}</span>${switchable}</div>`;
         })
         .join("");
       mount.innerHTML = `<div class="align-error-banner align-notice-banner" role="status"><strong>节点状态</strong>${rows}</div>`;

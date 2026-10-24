@@ -1246,7 +1246,7 @@ export function alignmentControls(session, resumes, jobId) {
     <form class="align-form" data-form="split-align" novalidate>
       <input type="hidden" name="job_id" value="${esc(jobId)}">
       <div class="align-form__row">
-        <label class="field" style="flex:1;min-width:0">
+        <label class="field field--grow">
           <span class="small">主简历</span>
           <select name="master_resume_id">
             <option value="">${resumes.length ? "选择简历..." : "请先到简历中心创建主简历"}</option>
@@ -1279,10 +1279,10 @@ export function alignmentControls(session, resumes, jobId) {
         <input type="checkbox" name="run_eval">
         <span>本次运行评估（幻觉检测 / AI 对齐匹配分）</span>
       </label>
-      <div class="small muted" style="margin:-4px 0 6px">每任务额外一次 LLM 调用；不勾选则按设置页默认执行。</div>
+      <div class="small muted hint-tight">每任务额外一次 LLM 调用；不勾选则按设置页默认执行。</div>
       ${running ? `
       <div class="align-progress" data-align-progress role="status" aria-live="polite">
-        <div class="align-progress__track"><div class="align-progress__fill" style="width:${alignProgressPercent(alignment.stage)}%"></div></div>
+        <div class="align-progress__track"><div class="align-progress__fill" style="--fill:${alignProgressPercent(alignment.stage)}%"></div></div>
         <div class="align-progress__meta">
           <span data-align-stage>${esc(STAGE_LABELS[alignment.stage] || alignment.stage || "正在生成")}</span>
           <span class="small muted" data-align-elapsed></span>
@@ -1356,7 +1356,7 @@ function matchDimensionHtml(detail) {
     return `
       <div class="match-dim${weak ? " is-weak" : ""}" data-match-dimension="${key}">
         <span>${label}${weak ? '<i class="match-dim__weak-badge">弱项</i>' : ""}</span>
-        <div class="match-dim__track"><i style="width:${width}%"></i></div>
+        <div class="match-dim__track"><i style="--fill:${width}%"></i></div>
         <b>${value == null ? "—" : value}</b>
       </div>`;
   }).join("");
@@ -1689,7 +1689,7 @@ export function batchPanelHtml(jobs, resumes) {
         <button class="btn btn-danger" type="button" data-action="cancel-batch-align" data-batch-cancel hidden>取消排队</button>
         <span class="small muted" data-batch-status></span>
       </div>
-      <div class="row" style="margin-top:8px">
+      <div class="row mt-2">
         <button class="btn btn-ghost btn-sm" type="button" data-action="show-last-batch">查看最近一次批次</button>
         <span class="small muted">后端暂无批次列表接口，仅保留当前会话最近一次结果</span>
       </div>
@@ -1717,12 +1717,12 @@ export function renderBatchMatrixHtml(batch) {
     .map((row) => {
       const score = Math.max(0, Math.min(100, Number(row.summary.score) || 0));
       const title = row.title || row.job_id || "未命名岗位";
-      return `<div class="batch-bar" data-batch-bar style="display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px,2fr) 40px;gap:10px;align-items:center">
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(title)}">${esc(title)}${row.company ? `<span class="small muted"> · ${esc(row.company)}</span>` : ""}</span>
-        <div style="background:var(--surface-2);border-radius:6px;height:10px;overflow:hidden" data-batch-bar-track>
-          <div data-batch-bar-fill style="width:${score}%;height:100%;background:${barColor(score)};border-radius:6px;transition:width .4s ease"></div>
+      return `<div class="batch-bar" data-batch-bar>
+        <span class="truncate" title="${esc(title)}">${esc(title)}${row.company ? `<span class="small muted"> · ${esc(row.company)}</span>` : ""}</span>
+        <div class="batch-bar__track" data-batch-bar-track>
+          <div class="batch-bar__fill" data-batch-bar-fill style="--fill:${score}%;--bar-color:${barColor(score)}"></div>
         </div>
-        <span data-batch-bar-score style="text-align:right;font-variant-numeric:tabular-nums">${esc(score)}</span>
+        <span class="batch-bar__score" data-batch-bar-score>${esc(score)}</span>
       </div>`;
     })
     .join("");
@@ -1732,8 +1732,8 @@ export function renderBatchMatrixHtml(batch) {
       const gaps = (summary.key_gaps || []).slice(0, 5);
       const title = row.title || row.job_id || "未命名岗位";
       return `<div class="batch-gap-col" data-batch-gap-col>
-        <div class="small" style="font-weight:600;margin-bottom:6px">${esc(title)}${row.company ? `<span class="small muted"> · ${esc(row.company)}</span>` : ""}</div>
-        ${gaps.length ? `<div class="chips" style="display:flex;flex-wrap:wrap;gap:6px">${gaps.map((gap) => `<span class="gap-tag gap-tag--warn" data-batch-gap>${esc(gap)}</span>`).join("")}</div>` : `<span class="small muted">暂无缺口数据</span>`}
+        <div class="small batch-gap-title">${esc(title)}${row.company ? `<span class="small muted"> · ${esc(row.company)}</span>` : ""}</div>
+        ${gaps.length ? `<div class="chips">${gaps.map((gap) => `<span class="gap-tag gap-tag--warn" data-batch-gap>${esc(gap)}</span>`).join("")}</div>` : `<span class="small muted">暂无缺口数据</span>`}
       </div>`;
     })
     .join("");
@@ -1759,9 +1759,9 @@ export function renderBatchMatrixHtml(batch) {
     .join("");
   return `<div class="split-section-title">匹配分对比</div>
     <div class="batch-bars" data-batch-bars>${bars || '<div class="small muted">暂无已完成岗位</div>'}</div>
-    <div class="split-section-title" style="margin-top:12px">关键缺口对比</div>
-    <div class="batch-gaps" data-batch-gaps style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">${gapColumns}</div>
-    <div class="row" style="margin-top:12px">
+    <div class="split-section-title mt-3">关键缺口对比</div>
+    <div class="batch-gaps" data-batch-gaps>${gapColumns}</div>
+    <div class="row mt-3">
       <button class="btn btn-outline btn-sm" type="button" data-action="export-batch-csv">导出对比 CSV</button>
     </div>
     <div class="table-wrap"><table class="data batch-matrix">
@@ -2467,7 +2467,8 @@ export function offerCelebrationHtml(job) {
   if (status !== "offer") return "";
   const title = esc((job && job.title) || "你拿到了 Offer");
   const company = job && job.company ? ` · ${esc(job.company)}` : "";
-  const colors = ["#f43f5e", "#f59e0b", "#10b981", "#3b82f6", "#a855f7"];
+  /* Phase 3：彩带色板进 tokens（--confetti-1..5），JS 不再持色值 */
+  const colors = ["var(--confetti-1)", "var(--confetti-2)", "var(--confetti-3)", "var(--confetti-4)", "var(--confetti-5)"];
   const pieces = Array.from(
     { length: 28 },
     (_, i) =>
@@ -2957,7 +2958,7 @@ export function jobFollowupFormHtml(job) {
         <div class="field wide"><label>下一步</label><input type="text" name="next_step" value="${esc(job.next_step || "")}"></div>
         <div class="field wide"><label>到期时间</label><input type="datetime-local" name="next_step_due_at" value="${esc(toDateTimeInputValue(job.next_step_due_at))}"></div>
       </div>
-      <p class="small muted" style="margin:6px 0 0;color:var(--danger,#c0392b)">提示：保存后岗位状态将更新为「面试中」并记录投递日期。</p>
+      <p class="small muted form-hint-danger">提示：保存后岗位状态将更新为「面试中」并记录投递日期。</p>
       <div class="actions">
         <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
         <button class="btn btn-primary" type="submit">保存跟进</button>
@@ -3222,7 +3223,7 @@ export function skillGapHtml(gaps, onSkillGapUrl, options = {}) {
             <td class="is-num">${esc(count)}</td>
             <td>
               <span class="meter-cell">
-                <span class="meter meter--sm ${strength}" aria-hidden="true"><span class="meter__fill" style="width:${width}%"></span></span>
+                <span class="meter meter--sm ${strength}" aria-hidden="true"><span class="meter__fill" style="--fill:${width}%"></span></span>
               </span>
             </td>
             <td class="is-num">
@@ -3263,7 +3264,7 @@ export function skillGapHtml(gaps, onSkillGapUrl, options = {}) {
       <button type="button" class="skill-gap-row" data-action="goto-skill" data-skill="${esc(skill)}"${urlAttr} title="${hint}" aria-label="${esc(skill)}，${hint}">
         <span class="skill-gap-row__name">${esc(skill)}</span>
         <span class="skill-gap-row__track" aria-hidden="true">
-          <span class="skill-gap-row__fill skill-gap-row__fill--${tone}" style="width:${width}%"></span>
+          <span class="skill-gap-row__fill skill-gap-row__fill--${tone}" style="--fill:${width}%"></span>
         </span>
         <span class="skill-gap-row__count">${tone === "hot" && count >= 10 ? `需求最多 · ${count} 个岗位` : `库内 ${count} 个岗位要求此技能`}</span>
       </button>`;
@@ -4236,7 +4237,7 @@ export function roleBindingsPanelHtml(roles, nodes, bindings) {
       </div>
       <form class="panel-body" data-form="settings-role-bindings">
         <div class="role-binding-list" data-role-binding-list>${rows}</div>
-        <div class="row" style="margin-top:10px">
+        <div class="row mt-3">
           <button class="btn btn-primary btn-sm" type="submit">保存分工</button>
           <span class="small muted">不选的角色跟随主节点；绑定节点被删除后自动回落。</span>
         </div>

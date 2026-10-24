@@ -42,8 +42,8 @@ test("renderBatchMatrixHtml renders horizontal score bars with widths", () => {
   const bars = doc.querySelectorAll("[data-batch-bar]");
   assert.equal(bars.length, 2);
   const fills = doc.querySelectorAll("[data-batch-bar-fill]");
-  assert.equal(fills[0].style.width, "86%");
-  assert.equal(fills[1].style.width, "54%");
+  assert.equal(fills[0].style.getPropertyValue("--fill"), "86%");
+  assert.equal(fills[1].style.getPropertyValue("--fill"), "54%");
   assert.equal(doc.querySelector("[data-batch-bar-score]").textContent, "86");
 });
 

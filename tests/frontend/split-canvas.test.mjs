@@ -585,7 +585,7 @@ test("alignmentControls shows progress when running", () => {
     "job-9",
   );
   assert.match(html, /data-align-progress/);
-  assert.match(html, /width:85%/);
+  assert.match(html, /--fill:85%/);
   assert.match(html, /AI 改写简历/);
   assert.match(html, /disabled/);
 });

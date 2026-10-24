@@ -111,14 +111,18 @@ const zeroRefTokens = [...definedTokens]
   .sort();
 
 /* JS / HTML 里的内联样式与颜色字面量。 */
+/* Phase 3 口径：style="--x: …"（运行时注入自定义属性，CSS 消费）是受认可的
+ * 动态样式通道，不计违规；只有携带常规 CSS 属性的 style=" 才算。 */
 const inlineStyleAttrs =
-  (jsText.match(/style="/g) || []).length +
-  (html.match(/style="/g) || []).length;
+  (jsText.match(/style="(?!--)/g) || []).length +
+  (html.match(/style="(?!--)/g) || []).length;
 const inlineStyleWrites =
-  (jsText.match(/\.style\.[a-zA-Z]+/g) || []).length;
+  (jsText.match(/\.style\.(?!setProperty|removeProperty)[a-zA-Z]+/g) || []).length;
+const stripJsComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "");
+const colorLiteralRe = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/g;
 const colorLiterals =
-  (jsText.match(/#[0-9a-fA-F]{3,8}\b/g) || []).length +
-  (html.match(/#[0-9a-fA-F]{3,8}\b/g) || []).length;
+  (stripJsComments(jsText).match(colorLiteralRe) || []).length +
+  (stripJsComments(html).match(colorLiteralRe) || []).length;
 const importantCount = (cssBody.match(/!important/g) || []).length;
 
 /* Tailwind 遗留工具类（index.html 里 body/壳层还在用的原子类）。 */
@@ -126,7 +130,7 @@ const importantCount = (cssBody.match(/!important/g) || []).length;
  * 避免把 .gap-row / .select-all 这类项目自定义 class 误算进来。 */
 const tailwindClasses = new Set();
 for (const match of (html + jsText).matchAll(
-  /\b(?:bg-appbg|text-\[[^\]]+\]|text-white\/\d+|h-screen|min-h-screen|flex-1|flex-col|flex-wrap|items-center|justify-between|overflow-hidden|overflow-y-auto|space-[xy]-\d|select-none)\b/g,
+  /\b(?:bg-appbg|text-white\/\d+|h-screen|min-h-screen|flex-1|flex-col|flex-wrap|items-center|justify-between|overflow-hidden|overflow-y-auto|space-[xy]-\d+|select-none)\b|\btext-\[[^\]]+\]/g,
 )) {
   tailwindClasses.add(match[0]);
 }
