@@ -55,9 +55,9 @@ function stageChips(distribution) {
   return STAGE_ORDER.map((stage) => {
     const count = toCount(dist[stage]);
     return `
-      <div class="review-stage__item${count ? "" : " is-zero"}" data-review-stage="${escAttr(stage)}">
-        <span class="review-stage__count">${count}</span>
-        <span class="review-stage__label">${escAttr(jobStatusLabel(stage))}</span>
+      <div class="metric-cell review-stage__item${count ? "" : " is-zero"}" data-review-stage="${escAttr(stage)}">
+        <span class="metric-value review-stage__count">${count}</span>
+        <span class="metric-label review-stage__label">${escAttr(jobStatusLabel(stage))}</span>
       </div>`;
   }).join("");
 }
@@ -206,7 +206,7 @@ export async function renderReviewView(container) {
 
   if (!payload) {
     container.innerHTML = `
-      <div class="view view-scroll dashboard-view">
+      <div class="view view-scroll view--dense">
         <div class="panel main-pane">
           <div class="panel-head"><div><h2>投递复盘</h2><p>聚合数据暂不可用</p></div></div>
           <div class="panel-body muted small">复盘数据加载失败，请确认服务可用后刷新。</div>
@@ -237,7 +237,7 @@ export async function renderReviewView(container) {
   const stageTitleHtml = `<p class="small muted" data-review-stages-title>岗位阶段分布（全库 ${escAttr(totalJobs)}）· 岗位库当前状态，与上方「近 7 天」口径不同</p>`;
 
   container.innerHTML = `
-    <div class="view view-scroll dashboard-view">
+    <div class="view view-scroll view--dense">
       ${
         totalJobs
           ? ""
@@ -258,7 +258,7 @@ export async function renderReviewView(container) {
           <div class="panel-body">
             ${paceBars(payload.week_pace)}
             ${stageTitleHtml}
-            <div class="review-stages" data-review-stages>${stageChips(payload.stage_distribution)}</div>
+            <div class="review-stages metric-strip" data-review-stages>${stageChips(payload.stage_distribution)}</div>
           </div>
         </section>
         <section class="panel main-pane" data-review-actions>
