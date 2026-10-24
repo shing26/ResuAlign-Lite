@@ -137,3 +137,15 @@ jobs:
         run: python benchmarks/cold_start_benchmark.py --trials 5 --check-baseline
         env:
           PYTHONPATH: src
+
+  css-budget:
+    name: Stage 5 - css budget gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: CSS budget ratchet (structure-debt metrics only ratchet down)
+        run: node scripts/css_budget.mjs

@@ -1,7 +1,7 @@
 # 结构债项目：CSS / Token / 视觉基线（2026-10-24 立项）
 
 > 交接文档（下一个 agent 先读）：`docs/reports/css-debt-handoff-2026-10-24.md`
-> 状态：**Phase 0 已落地**（度量脚本 + 基线 + 棘轮门禁 + 视觉基线工具），Phase 1 待开工。
+> 状态：**项目已收官**（Phase 0/1/2a/2b/3/4/5 全部落地，2026-10-24）。剩余待办均为可选项：Phase 2c 语义合并、复盘 KPI 化 UX 改版、复盘根类 `.view--dense` 显式化、视觉基线入库 + CI advisory。
 > 背景审计：`docs/reports/ui-audit-resume-system-2026-10-22.md` SH-05 / SH-08 / SH-12 / X1 / X2。
 > 本文档是该项目的**唯一施工单**；每个阶段一个 PR，不与功能改动混提。
 
@@ -122,6 +122,14 @@ node scripts/css_budget.mjs                         # 棘轮门禁（任何指�
 | 视觉基线本身受数据变化影响（时间/数字） | 对比阈值 0.2%；差异报告需人工确认为「预期变化」；基线在每阶段合并后重采 |
 
 ## 6. 实现记录
+
+### Phase 5（2026-10-24，已落地 —— 结构债项目收官）
+- **X2 卡片密度收敛**：新增 `--card-pad`（16px，标准卡片）与 `--card-pad-wide`（20px，宽密度 panel）两档语义 token，11 处卡片内边距等值接线（`.panel` ×2 / `.panel-head` / `.panel-body` / `.dashboard-view .panel-head,body` / `.dashboard-kpi` / `.settings-bento__card` ×2 / `.card` ×2）——计算样式快照 **0 差异**、像素 **20/20 零差异**
+- **X1 实现层收敛 + 死代码清理**：`.board-stats` 漏斗统计条组件已在前端重构中退场（src 零引用），删除 12 条规则（−1,762 B）与陈旧源码断言测试；指标条现状：设置 bento 已复用 `.metric-strip/.metric-cell` 共享类、驾驶舱为规范实现、复盘 stage chips 保留（按审计原文「chip 保留给分布/标签」——阶段分布正是 chip 职责；复盘 KPI 化属 UX 改版，记入待办不混入结构债）
+- **记录为待办（语义债，非本次范围）**：复盘页根类借用 `dashboard-view`（review-view.js 两条渲染路径）以获得 panel 密度——改动需以 `.view--dense` 显式复制面板密度规则并回归两页，风险大于收益，留待 UX 批次
+- **CI 接入**：`.github/workflows/ci.yml` 新增 **Stage 5 - css budget gate**（`node scripts/css_budget.mjs`，12 项棘轮，纯 Node 标准库零依赖）；视觉 advisory 作业因基线 PNG 不入库暂缓（待办：基线入库后补 artifact 截图作业）
+- 验证：前端 **588 passed**（−1 为删除陈旧测试）/ 0 failed；e2e **7/7**（1 次 reclassify flake 重跑通过）；预算 12 项全绿（bytes −1,762）
+
 
 ### Phase 4（2026-10-24，已落地）
 - **断点 17 → 7**：长尾条件全部「原地改条件」收敛（规则不搬移，级联顺序零变化）——

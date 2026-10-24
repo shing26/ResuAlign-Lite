@@ -131,16 +131,8 @@ test("styles.css: board-card drag state deepens the shadow", () => {
   assert.match(block[1], /var\(--shadow-drag\)/);
 });
 
-test("styles.css: stats bar and funnel cards reuse dashboard KPI semantics", () => {
-  assert.match(stylesCss, /\.board-stats\s*\{/);
-  const base = stylesCss.match(/\.board-stats-card::before\s*\{([^}]*)\}/s);
-  assert.ok(base, ".board-stats-card::before rule exists");
-  assert.match(base[1], /var\(--info\)/);
-  const warning = stylesCss.match(/\.board-stats-card--warning::before\s*\{([^}]*)\}/s);
-  const success = stylesCss.match(/\.board-stats-card--success::before\s*\{([^}]*)\}/s);
-  assert.ok(warning && /var\(--warn\)/.test(warning[1]), "warning funnel card uses --warn");
-  assert.ok(success && /var\(--success\)/.test(success[1]), "success funnel card uses --success");
-});
+/* Phase 5（2026-10-24）：.board-stats 漏斗统计条组件已随 #146 前端重构退场，
+ * 标记与 CSS 均为零引用死代码，一并删除（X1 收敛的一部分）。 */
 
 test("styles.css: resume detail grid is 65/35 two-column", () => {
   const grid = stylesCss.match(/\.resume-archive-grid\s*\{([^}]*)\}/s);
