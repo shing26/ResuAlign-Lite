@@ -124,7 +124,10 @@ test("legacy print and reduced-motion compatibility lives in overrides", () => {
 
   assert.ok(printIndexes.length > 0);
   assert.ok(printIndexes.every((index) => index > overrides));
-  assert.ok(motionIndexes.filter((index) => index > overrides).length >= 5);
+  /* Phase 4（2026-10-24）：reduced-motion 合并为单一 blanket（含 tokens 层的
+   * --dur-* 与 --move-* 清零），仍必须位于 overrides 之后（文件末端）。 */
+  assert.ok(motionIndexes.length === 1);
+  assert.ok(motionIndexes[0] > overrides);
 });
 
 test("business rules keep the canonical eight-step font scale", () => {

@@ -29,7 +29,7 @@ B1–B8 已经让界面「看起来」对了，但底层是不断追加的 CSS�
 | 同上下文重复定义（Phase 2 新口径） | **225**（116 组）→ Phase 2a 后 **141** | ≤ 141（机械安全下限；再降需语义重构 2c） |
 | `.topbar` 定义次数 | **17** → Phase 2a 后 11 | ≤ 11（同上） |
 | `!important` | 1 | ≤ 1 |
-| 断点数量（不同 @media 条件） | **17** | ≤ 6 |
+| 断点数量（不同 @media 条件） | **17** | 7 —— **Phase 4 已达成**（≤640/≤900/≤1100/≥901/print/reduced-motion/触屏组合；原计划 6，≤1100 与 ≥901 为承重断点） |
 | token 定义 / 被引用 / 零引用 | 257 / 207 / **97** | 零引用 = 0（Phase 1 已达成） |
 | JS 内联 `style="` 属性 | **45** | 0 —— **Phase 3 已达成**（`style="--` 注入白名单） |
 | JS `style.*` 写入 | 17 | 0 —— **Phase 3 已达成**（setProperty/removeProperty 白名单） |
@@ -122,6 +122,31 @@ node scripts/css_budget.mjs                         # 棘轮门禁（任何指�
 | 视觉基线本身受数据变化影响（时间/数字） | 对比阈值 0.2%；差异报告需人工确认为「预期变化」；基线在每阶段合并后重采 |
 
 ## 6. 实现记录
+
+### Phase 4（2026-10-24，已落地）
+- **断点 17 → 7**：长尾条件全部「原地改条件」收敛（规则不搬移，级联顺序零变化）——
+  360/390/480/520/600/700 → ≤640，1023 → ≤900；`sm:/lg:` 响应式工具类**零使用**
+  （死代码）连同 min-640/min-1024 块删除；`(hover: none)` 与 `(pointer: coarse)`
+  统一为同一组合条件（触屏意图一致）。保留的 7 个条件各有明确职责：
+  ≤640（移动）、≤900（平板/收拢）、≤1100（diff 双栏折叠，工作台半宽窗格需要）、
+  ≥901（桌面腿）、print、reduced-motion、触屏组合。原计划 6 修订为 7
+- **reduced-motion 6 → 1**：合并为 EOF 单一无层 blanket（内容按源顺序拼接；
+  被跨过的只有 print 块与分层块，无同选择器竞争）。tokens 层的
+  `--dur-*/--move-*` 清零上移到无层后顺带修掉一个旧怪癖：≤390 且开启
+  reduced-motion 时 `--move-*` 曾被 390 块顶回 1-3px，现在正确清零
+- **动效 token 接线**：24 处硬编码时长/缓动接到 `--dur-fast/base/slow` +
+  `--ease-standard/out`（0.12s/0.15s/0.16s→fast/base、0.3s/0.4s/300ms→slow、
+  180ms→base、ra-drawer-in 240ms→slow+out）；保留 8 处艺术性一次性编排
+  （offer-fade 2.8s、spin 0.8s、empty-breathe 3.2s、stagger 延迟系列）并计入
+  新指标 `hardcodedMotionDecls`（budget 新增第 12 行棘轮）
+- 验证：589 前端 + e2e 7 全绿；元素级快照 60 处差异全部为 mobile rail 紧凑化
+  折叠（≤360 规则现在覆盖到 640），桌面 20 页零变化；Phase 4 自身像素差异
+  仅 10 张 mobile 图 0.4%–1.1%（rail 紧凑观感已肉眼复核），桌面零像素差异；
+  折叠产生的 +4 同上下文重复为级联锁死型（可安全删除 0），计入基线
+- 新基线：`docs/reports/css-debt-phase4-2026-10-24.json`；三个测试的启发式
+  同步更新（hover:none 组合条件、单一 rm blanket、hover 生效规则剥离
+  blanket 后判定——其 gate 由相邻测试单独断言）
+
 
 ### Phase 3（2026-10-24，已落地）
 - **JS 内联样式归零**：45 处 `style="` 属性与 17 处 `style.*` 写入全部收敛——动态值统一自定义属性注入（`--fill` 进度/比例、`--bar-color` 分数条颜色、`--w/--h` 固定尺寸骨架屏），CSS 侧 `width/height: var(--fill, …)` 消费、JS 侧 `setProperty` 更新；静态一次性间距吸附 4px 网格（`.mt-2/.mt-3/.mb-3`，原 6px→8px、10px→12px 为**有意归一**）；组件级内联布局进语义类（`.batch-bar/.field--grow/.row--tight/.hint-tight/.form-hint-danger/.warn-note/.copy-helper/.is-skill-flash/.skeleton--sized`）

@@ -421,20 +421,7 @@
   /* 浮层 */
 }
 
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --dur-fast: 1ms;
-    --dur-base: 1ms;
-    --dur-slow: 1ms;
-    --dur-loading: 0ms;
-    --dur-stagger: 0ms;
-    --move-0: 0px;
-    --move-1: 0px;
-    --move-2: 0px;
-  }
-}
-
-@media (max-width: 390px) {
+@media (max-width: 640px) {
   :root {
     --move-0: 1px;
     --move-1: 2px;
@@ -625,7 +612,7 @@ textarea {
   border-radius: var(--radius-md);
   font-weight: 700;
   font-size: var(--text-base);
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 
 .tabs button[aria-selected="true"] {
@@ -899,7 +886,7 @@ button:disabled {
   line-height: 1.2;
   min-height: 36px;
   white-space: nowrap;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 
 .btn-primary {
@@ -1161,7 +1148,7 @@ button:disabled {
   height: 100%;
   border-radius: var(--radius-pill);
   background: var(--accent);
-  transition: width 0.3s ease;
+  transition: width var(--dur-slow) var(--ease-standard);
 }
 
 .diff-add {
@@ -1634,8 +1621,6 @@ body.modal-open #app-router-view {
 /* Phase 17: visual redesign overlay                                    */
 /* =================================================================== */
 
-
-
 body,
 button,
 input,
@@ -1667,8 +1652,6 @@ h6 {
   line-height: 1.5;
   color: color-mix(in srgb, var(--text-primary) 90%, transparent);
 }
-
-
 
 .rail-mark {
   display: grid;
@@ -1760,7 +1743,7 @@ h6 {
   box-shadow: var(--shadow-popover);
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--dur-fast) var(--ease-standard);
 }
 
 .tabs--rail button:hover::before {
@@ -1774,7 +1757,7 @@ h6 {
   z-index: var(--z-popover);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--dur-fast) var(--ease-standard);
 }
 
 .tabs--rail button:hover::after,
@@ -1814,8 +1797,6 @@ h6 {
 .tabs--rail button:nth-child(4)::before {
   background: var(--text-tertiary);
 }
-
-
 
 .tabs--rail button[aria-selected="true"]::before,
 .tabs--rail button.active::before {
@@ -2019,8 +2000,6 @@ h6 {
   transition: border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard);
 }
 
-
-
 .card-title {
   font-size: var(--text-base);
   font-weight: 800;
@@ -2036,8 +2015,6 @@ h6 {
 .resume-card {
   border-left-color: var(--accent);
 }
-
-
 
 .btn {
   min-height: 38px;
@@ -2064,8 +2041,6 @@ h6 {
   background: var(--accent-active);
   transform: translateY(1px);
 }
-
-
 
 .btn-secondary:hover:not(:disabled) {
   background: var(--accent-soft);
@@ -2102,14 +2077,10 @@ h6 {
   background: color-mix(in srgb, var(--danger) 88%, var(--text-primary));
 }
 
-
-
 .btn-ghost:hover:not(:disabled) {
   background: var(--surface-2);
   color: var(--text-primary);
 }
-
-
 
 .icon-btn {
   width: 38px;
@@ -2282,7 +2253,7 @@ select {
 
 .progress-fill {
   background: var(--accent);
-  transition: width 300ms var(--ease-standard);
+  transition: width var(--dur-slow) var(--ease-standard);
 }
 
 .toast {
@@ -2293,7 +2264,7 @@ select {
   border-left: 4px solid var(--accent);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-toast);
-  animation: toast-in 180ms var(--ease-standard);
+  animation: toast-in var(--dur-base) var(--ease-standard);
 }
 
 .toast.success {
@@ -2542,8 +2513,6 @@ select {
   border-top: 1px solid var(--line-subtle);
 }
 
-
-
 .modal {
   background: var(--surface-2);
   border-radius: var(--radius-2xl);
@@ -2554,8 +2523,6 @@ select {
   background: var(--surface-2);
   border-color: var(--line);
 }
-
-
 
 .kbd {
   background: var(--surface-2);
@@ -3089,8 +3056,6 @@ select {
   transform: translateY(-50%) scaleY(1);
 }
 
-
-
 @media (max-width: 640px) {
 
   .btn,
@@ -3128,7 +3093,7 @@ select {
   }
 }
 
-@media (max-width: 390px) {
+@media (max-width: 640px) {
 
   .motion-stagger > *, .cmp-column .cmp-line{
     animation-delay: 0ms;
@@ -3262,8 +3227,6 @@ select {
   border-left: 3px solid var(--warn);
 }
 
-
-
 .board-card__title {
   border: 0;
   background: transparent;
@@ -3279,8 +3242,6 @@ select {
 .board-card__title:hover {
   text-decoration: underline;
 }
-
-
 
 .board-card__tags {
   display: flex;
@@ -3309,7 +3270,7 @@ select {
 }
 
 /* 触摸设备没有 hover 纠错机会，热区再放宽一档。 */
-@media (hover: none) {
+@media (hover: none), (pointer: coarse) {
   .board-check {
     min-width: 32px;
     min-height: 32px;
@@ -3369,7 +3330,7 @@ select {
 .board-filter__toggle {
   font-size: var(--text-xs);
   color: var(--text-secondary);
-  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform var(--dur-base) var(--ease-out);
 }
 
 .board-filter[open] .board-filter__toggle {
@@ -3384,8 +3345,6 @@ select {
   padding: var(--space-1) var(--space-4) var(--space-4);
   border-top: 1px solid var(--line);
 }
-
-
 
 @media (max-width: 900px) {
   .board-filter__form {
@@ -3651,8 +3610,6 @@ body.is-printing #print-root {
   -webkit-backdrop-filter: blur(var(--glass-blur));
   transition: border-color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
 }
-
-
 
 .command-bar__icon,
 .command-palette__glyph {
@@ -5301,8 +5258,6 @@ label.eval-option,
   color: var(--warn));
 }
 
-
-
 .settings-bento__value {
   font-size: var(--text-2xl);
   font-weight: 800;
@@ -5311,8 +5266,6 @@ label.eval-option,
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
-
-
 
 /* --- T2: LLM 节点卡网格 --- */
 .llm-nodes-panel {
@@ -5337,8 +5290,6 @@ label.eval-option,
   box-shadow: var(--shadow-none);
   transition: border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
 }
-
-
 
 .llm-node-card__head {
   display: flex;
@@ -5573,7 +5524,6 @@ body, html {
 
 /* 2. 64px 顶栏与侧边栏苹果暗色 */
 
-
 .app-rail{
   background-color: var(--bg-canvas);
   border-right: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
@@ -5581,11 +5531,7 @@ body, html {
 
 /* 3. 卡片与 5 列看板沉降底色 */
 
-
 /* 4. 低饱和度 Diff 对比框 */
-
-
-
 
 /* 5. 原生下拉菜单暗色修复 */
 
@@ -5620,7 +5566,7 @@ body {
 
 .tabs--rail button {
   border-radius: var(--radius-xl);
-  transition: background 0.16s cubic-bezier(0.16,1,0.3,1), color 0.16s;
+  transition: background var(--dur-base) var(--ease-out), color 0.16s;
   color: var(--text-secondary);
   padding: 0;
   margin: 1px 0;
@@ -5632,15 +5578,12 @@ body {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
-
-
 .command-bar__trigger {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--shadow-ink) 30%, transparent);
-  transition: background 0.16s, border-color 0.16s;
+  transition: background var(--dur-base), border-color 0.16s;
 }
-
 
 /* Card & button radius pass for the Apple feel */
 .card, .panel, .panel-card, .board-card, .diff-card, .dashboard-kpi, .llm-node-card, .rule-item, .batch-panel-wrap{
@@ -5652,7 +5595,6 @@ body {
 .diff-char-del { background: color-mix(in srgb, var(--surface-3) 10%, transparent); border: 1px solid color-mix(in srgb, var(--line) 25%, transparent); color: var(--text-faint); border-radius: var(--radius-sm); text-decoration: line-through; }
 
 /* Apple Native utilities (dashboard-view shell) */
-
 
 .text-white\\/40 { color: color-mix(in srgb, var(--text-primary) 40%, transparent); }
 .text-white\\/50 { color: color-mix(in srgb, var(--text-primary) 50%, transparent); }
@@ -5676,22 +5618,12 @@ body {
 
 .flex { display: flex; }
 
-
 .grid { display: grid; }
 
 .h-full { height: 100%; }
 .block { display: block; }
 .inline-block { display: inline-block; }
 
-
-
-@media (min-width: 640px) { .sm\\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-@media (min-width: 1024px) {
-  .lg\\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
-  .lg\\:grid-cols-7 { grid-template-columns: repeat(7, minmax(0,1fr)); }
-  .lg\\:col-span-7 { grid-column: span 7 / span 7; }
-  .lg\\:col-span-5 { grid-column: span 5 / span 5; }
-}
 }
 
 @layer components {
@@ -5699,12 +5631,6 @@ body {
    ResuAlign v2.1 - Apple sidebar + 52px topbar + jobs top bar
    (追加在 Apple Native override 层之后，保持桌面端与模板 1:1)
    ========================================================================== */
-
-
-
-
-
-
 
 .rail-brand .rail-mark {
   width: 36px;
@@ -5734,8 +5660,6 @@ body {
   line-height: 1;
   color: color-mix(in srgb, var(--text-primary) 40%, transparent);
 }
-
-
 
 .tabs--rail button {
   width: 100%;
@@ -5793,10 +5717,6 @@ body {
   text-align: center;
 }
 
-
-
-
-
 /* 侧栏有文字标签后，不再需要 hover 悬浮 tooltip。 */
 .tabs--rail button:hover::after,
 .tabs--rail button:hover::before {
@@ -5807,8 +5727,6 @@ body {
 .tabs--rail button::before {
   display: none;
 }
-
-
 
 .rail-foot__status {
   display: flex;
@@ -6189,16 +6107,12 @@ body {
   display: none;
 }
 
-
-
 .rail-brand .rail-mark {
   width: 32px;
   height: 32px;
   border-radius: var(--radius-xl);
   font-size: var(--text-sm);
 }
-
-
 
 .rail-foot__status {
   width: 100%;
@@ -6283,7 +6197,7 @@ body {
 .mt-3 { margin-top: var(--space-3); }
 .mb-3 { margin-bottom: var(--space-3); }
 
-.transition { transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease; }
+.transition { transition: background-color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard); }
 
 @keyframes preview-pulse {
   50% { opacity: 0.5; }
@@ -6297,7 +6211,6 @@ body {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
-
 
 }
 
@@ -6342,8 +6255,6 @@ body {
   color: color-mix(in srgb, var(--text-primary) 40%, transparent);
 }
 
-
-
 .llm-node-card {
   padding: var(--space-4);
   background: var(--surface-2);
@@ -6351,10 +6262,6 @@ body {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-none);
 }
-
-
-
-
 
 .rule-item {
   padding: var(--space-3) var(--space-3);
@@ -6594,10 +6501,6 @@ html {
   font-weight: 500;
   text-align: left;
 }
-
-
-
-
 
 .nav-index {
   width: 20px;
@@ -6966,8 +6869,6 @@ html {
   border-radius: var(--radius-pill);
 }
 
-
-
 .workbench-view {
   height: 100%;
   display: flex;
@@ -7030,8 +6931,6 @@ html {
   gap: var(--space-2);
   flex-wrap: wrap;
 }
-
-
 
 .status-line {
   display: inline-flex;
@@ -7200,10 +7099,6 @@ html {
   font-weight: 600;
   cursor: pointer;
 }
-
-
-
-
 
 .wb-pane {
   display: none;
@@ -7861,7 +7756,7 @@ body.resume-inline-editing .resume-doc {
   white-space: nowrap;
 }
 
-@media (max-width: 520px) {
+@media (max-width: 640px) {
   .llm-model-field {
     flex-direction: column;
   }
@@ -7941,7 +7836,7 @@ body.resume-inline-editing .resume-doc {
   max-width: 280px;
 }
 
-@media (max-width: 700px) {
+@media (max-width: 640px) {
   .role-binding-row {
     flex-direction: column;
     align-items: stretch;
@@ -8360,11 +8255,11 @@ button:active:not(:disabled),
 
 button, input, select, textarea, summary, .nav-btn, .cmd-trigger, .link, .wb-tab, .board-card-title{
   transition:
-    background-color 180ms ease,
-    border-color 180ms ease,
-    color 180ms ease,
-    box-shadow 180ms ease,
-    transform 160ms ease,
+    background-color var(--dur-base) var(--ease-standard),
+    border-color var(--dur-base) var(--ease-standard),
+    color var(--dur-base) var(--ease-standard),
+    box-shadow var(--dur-base) var(--ease-standard),
+    transform var(--dur-base) var(--ease-standard),
     opacity 180ms ease;
 }
 
@@ -8629,7 +8524,7 @@ button, input, select, textarea, summary, .nav-btn, .cmd-trigger, .link, .wb-tab
   background: var(--surface-1);
   color: inherit;
   text-decoration: none;
-  transition: border-color 160ms ease, background-color 160ms ease;
+  transition: border-color var(--dur-base), background-color var(--dur-base);
 }
 
 .recent-job:hover {
@@ -8752,7 +8647,7 @@ details > summary::-webkit-details-marker,
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+  transition: background-color var(--dur-base), border-color var(--dur-base), color var(--dur-base);
 }
 
 .board-more__trigger:hover,
@@ -9293,14 +9188,14 @@ details > summary::-webkit-details-marker,
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 640px) {
   .board-match__dims {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 /* 窄屏主导航：6 个入口紧凑排布，避免设置入口被横向滚动推出视口。 */
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   .app-rail.rail {
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
@@ -9390,8 +9285,6 @@ details > summary::-webkit-details-marker,
   flex-direction: column;
   gap: var(--space-1);
 }
-
-
 
 .workbench-live-progress__detail {
   overflow: hidden;
@@ -9600,9 +9493,6 @@ del{
 /* 必须带 .nav-btn：`.tabs--rail button`（0,1,1）会被前面的
    `.tabs--rail button.nav-btn { color: color-mix(in srgb, var(--text-primary) 60%, transparent) }`（styles.css:7389，
    0,2,1）压过，默认态仍是白底白字。 */
-
-
-
 
 .tabs--rail button[aria-selected="true"],
 .tabs--rail button.active {
@@ -9865,7 +9755,7 @@ select,
   align-items: stretch;
   padding: 0;
   background: color-mix(in srgb, var(--shadow-ink) 45%, transparent);
-  animation: ra-drawer-fade 160ms ease;
+  animation: ra-drawer-fade var(--dur-base) ease;
 }
 
 .modal-backdrop.modal--drawer .modal {
@@ -9884,7 +9774,7 @@ select,
   border-right: 0;
   border-bottom: 0;
   box-shadow: var(--shadow-modal);
-  animation: ra-drawer-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: ra-drawer-in var(--dur-slow) var(--ease-out);
 }
 
 .modal-backdrop.modal--drawer .modal > h3 {
@@ -10633,7 +10523,7 @@ select,
   min-height: 4px;
   border-radius: var(--radius-md) var(--radius-md) var(--radius-xs) var(--radius-xs);
   background: var(--accent-text);
-  transition: height 0.2s ease;
+  transition: height var(--dur-base) var(--ease-standard);
 }
 .review-pace__bar.is-empty {
   background: var(--line);
@@ -10815,7 +10705,7 @@ select,
   }
 }
 
-@media (pointer: coarse) {
+@media (hover: none), (pointer: coarse) {
   :root :is(select, input:not([type="checkbox"]):not([type="radio"]), textarea) {
     min-height: var(--hit-min);
   }
@@ -11267,7 +11157,7 @@ select,
   line-height: var(--lead-snug);
 }
 
-@media (max-width: 1023px) {
+@media (max-width: 900px) {
   .dashboard-view .metric-strip.dashboard-strip {
     max-width: none;
   }
@@ -11299,7 +11189,6 @@ select,
 }
 
 @layer overrides {
-
 
 @media print {
   @page {
@@ -11443,19 +11332,6 @@ select,
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms;
-    animation-iteration-count: 1;
-    transition-duration: 0.01ms;
-    scroll-behavior: auto;
-  }
-
-  
-}
-
 @media print {
   #print-root .panel,
   #print-root .card {
@@ -11486,38 +11362,6 @@ select,
   #print-root .score-ring {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms;
-    animation-delay: 0ms;
-    animation-iteration-count: 1;
-    transition-duration: 0.01ms;
-  }
-
-  .card, .cmp-line, .toast, .skeleton.is-shimmer, .empty-state, .empty-state .actions, .empty-state .actions .btn-primary{
-    animation: none;
-    transition: none;
-    transform: none;
-    opacity: 1;
-  }
-
-  .skeleton.is-shimmer {
-    opacity: 0.7;
-  }
-
-  .btn.is-loading::before {
-    animation: none;
-    border-right-color: currentColor;
-  }
-
-  .progress-fill {
-    transition: none;
   }
 }
 
@@ -11553,13 +11397,6 @@ select,
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .board-card:hover {
-    transform: none;
-    box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-ink) 6%, transparent);
-  }
-}
-
 @media print {
   body.is-printing #app-router-view,
   body.is-printing .app-rail,
@@ -11579,20 +11416,6 @@ select,
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .split-step.is-active .split-step__dot {
-    animation: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation: none;
-    transition: none;
-  }
-}
 }
 
 @layer components {
@@ -12589,7 +12412,7 @@ select,
   }
 }
 
-@media (max-width: 360px) {
+@media (max-width: 640px) {
   .tabs--rail button.nav-btn {
     padding: var(--space-2) var(--space-1);
   }
@@ -13242,7 +13065,7 @@ select,
   height: 100%;
   border-radius: var(--radius-md);
   background: var(--bar-color, var(--accent));
-  transition: width 0.4s ease;
+  transition: width var(--dur-slow) var(--ease-standard);
 }
 
 .batch-bar__score {
@@ -13295,4 +13118,78 @@ select,
   width: var(--w, auto);
   height: var(--h, auto);
 }
+}
+
+/* ============================================================
+ * Phase 4（2026-10-24）：prefers-reduced-motion 全局 blanket。
+ * 原 6 处分散块（含 tokens 层的 --dur-*/--move-* 清零）合并于此；
+ * 无层规则优先于分层规则，:root 清零同时覆盖明暗两套 token。
+ * ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 1ms;
+    --dur-base: 1ms;
+    --dur-slow: 1ms;
+    --dur-loading: 0ms;
+    --dur-stagger: 0ms;
+    --move-0: 0px;
+    --move-1: 0px;
+    --move-2: 0px;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
+  }
+
+  
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    animation-delay: 0ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+  }
+
+  .card, .cmp-line, .toast, .skeleton.is-shimmer, .empty-state, .empty-state .actions, .empty-state .actions .btn-primary{
+    animation: none;
+    transition: none;
+    transform: none;
+    opacity: 1;
+  }
+
+  .skeleton.is-shimmer {
+    opacity: 0.7;
+  }
+
+  .btn.is-loading::before {
+    animation: none;
+    border-right-color: currentColor;
+  }
+
+  .progress-fill {
+    transition: none;
+  }
+
+  .board-card:hover {
+    transform: none;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-ink) 6%, transparent);
+  }
+
+  .split-step.is-active .split-step__dot {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation: none;
+    transition: none;
+  }
 }

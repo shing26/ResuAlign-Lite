@@ -125,6 +125,16 @@ const colorLiterals =
   (stripJsComments(html).match(colorLiteralRe) || []).length;
 const importantCount = (cssBody.match(/!important/g) || []).length;
 
+/* Phase 4：业务层硬编码动效时长（应走 --dur-* 与 --ease-* token）。
+ * 0.01ms 是 prefers-reduced-motion blanket 的标准写法，不算违规。 */
+const motionDecls = cssBody.match(/(?:transition|animation)[^;{}]*/g) || [];
+const hardcodedMotionDecls = motionDecls.filter(
+  (decl) =>
+    /\b\d+\.?\d*m?s\b/.test(decl) &&
+    !decl.includes("var(--dur") &&
+    !decl.includes("0.01ms"),
+).length;
+
 /* Tailwind 遗留工具类（index.html 里 body/壳层还在用的原子类）。 */
 /* 只认真正的 Tailwind 原子类（带任意值括号 / 斜杠透明度 / 已知工具类名），
  * 避免把 .gap-row / .select-all 这类项目自定义 class 误算进来。 */
@@ -154,6 +164,7 @@ const metrics = {
     duplicateSelectorsTop20,
     topbarDefinitions: parsedRules.filter((rule) => rule.selector === ".topbar").length,
     importantCount,
+    hardcodedMotionDecls,
     breakpointCount: breakpoints.length,
     breakpoints,
   },

@@ -41,7 +41,7 @@ test(".board-check 的指针目标 ≥24px", () => {
 
 test("触摸设备（hover: none）热区再放宽一档", () => {
   const m = STYLES.match(
-    /@media\s*\(hover:\s*none\)\s*\{[\s\S]{0,200}?\.board-check\s*\{[^}]*\}/,
+    /@media\s*\(hover:\s*none\)[^{}]*\{[\s\S]{0,240}?\.board-check\s*\{[^}]*\}/,
   );
   assert.ok(m, "缺少 hover:none 下的 .board-check 尺寸放宽规则");
   const w = m[0].match(/min-width\s*:\s*(\d+(?:\.\d+)?)px/);

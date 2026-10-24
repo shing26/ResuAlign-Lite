@@ -17,7 +17,7 @@ const baselineIndex = args.indexOf("--baseline");
 const baselinePath =
   baselineIndex >= 0 && args[baselineIndex + 1]
     ? args[baselineIndex + 1]
-    : "docs/reports/css-debt-phase3-2026-10-24.json";
+    : "docs/reports/css-debt-phase4-2026-10-24.json";
 
 const baseline = JSON.parse(readFileSync(baselinePath, "utf8"));
 const current = JSON.parse(
@@ -34,6 +34,7 @@ const metrics = [
   ["重复选择器组数", (m) => m.css.duplicateSelectorGroups],
   [".topbar 定义次数", (m) => m.css.topbarDefinitions],
   ["断点数量", (m) => m.css.breakpointCount],
+  ["硬编码动效时长", (m) => m.css.hardcodedMotionDecls],
   ["零引用 token", (m) => m.tokens.zeroRefCount],
   ["JS 内联 style 属性", (m) => m.js.inlineStyleAttrs],
   ["JS style.* 写入", (m) => m.js.inlineStyleWrites],
