@@ -110,6 +110,55 @@ def test_jd_context_summary_without_prematch_unchanged():
     assert base == with_none
 
 
+def test_jd_context_summary_signal_survives_tight_budget():
+    """审阅意见点 3：预算紧张时信号行优先保留（插在最前）。"""
+    from resualign.jd_analysis import jd_context_summary
+
+    profile = {
+        "must_have_skills": ["Java", "Kafka", "Spark", "Airflow", "Redis"],
+        "business_scenarios": ["数据平台", "实时数仓", "湖仓一体"],
+        "soft_skills": ["Communication"],
+        "education_requirements": ["本科及以上"],
+        "min_years_experience": 5,
+    }
+    signals = {"matched_skills": ["java", "kafka"], "jd_skill_total": 6}
+    tight = jd_context_summary(profile, None, max_chars=60, prematch=signals)
+    assert tight.startswith("匹配信号")
+    assert "命中核心技能" in tight
+
+
+def test_vocab_blind_spot_logged_at_info(caplog):
+    """审阅意见 1：词表盲区（JD 无词表内技能）必须可见，只记计数不落原文。"""
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="resualign.prematch"):
+        compute_match_signals("三年 Java 后端经验", "需要 Cobol 与 Perl 与 Delphi")
+    blind_spots = [
+        record
+        for record in caplog.records
+        if "vocab blind spot" in record.message
+    ]
+    assert len(blind_spots) == 1
+    record = blind_spots[0]
+    assert record.levelno == logging.INFO
+    assert "Cobol" not in record.getMessage()
+    assert "Delphi" not in record.getMessage()
+
+
+def test_genuine_no_overlap_logged_at_debug(caplog):
+    import logging
+
+    with caplog.at_level(logging.DEBUG, logger="resualign.prematch"):
+        compute_match_signals("三年 Java 后端经验", "需要 Kubernetes 与 Rust")
+    debugs = [
+        record
+        for record in caplog.records
+        if record.levelno == logging.DEBUG and "no overlap" in record.message
+    ]
+    assert len(debugs) == 1
+    assert debugs[0].getMessage().startswith("prematch: no overlap (jd_skills=2)")
+
+
 @pytest.mark.parametrize("value", ["0", "false", "no", "off"])
 def test_prematch_disabled_values(monkeypatch, value):
     monkeypatch.setenv("RESUALIGN_PREMATCH", value)

@@ -16,9 +16,12 @@ untouched (vendor lock, ADR-0041 decision 11).
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 from typing import Dict, List
+
+logger = logging.getLogger(__name__)
 
 # variant -> canonical skill name. Curation rule: precision over recall —
 # only unambiguous tokens; "go" (stopword-prone) and single letters stay out.
@@ -107,6 +110,21 @@ def compute_match_signals(resume_text: str, jd_text: str) -> Dict[str, object]:
         for canonical in jd_skills
         if any(pattern.search(resume) for pattern in _PATTERNS[canonical])
     )
+    # 可观测性（审阅意见 1）：词表盲区（JD 没有任何词表内技能）与真实
+    # 零重叠分开计数——前者直接反映词表扩充的紧迫性。只记计数，
+    # 不落任何简历/JD 原文（隐私边界与 ADR-0064 一致）。
+    if not jd_skills:
+        logger.info(
+            "prematch vocab blind spot: JD matched 0 vocabulary skills "
+            "(resume_tokens=%d, jd_chars=%d)",
+            len(resume.split()),
+            len(jd),
+        )
+    elif not matched:
+        logger.debug(
+            "prematch: no overlap (jd_skills=%d) — genuine gap, not vocab issue",
+            len(jd_skills),
+        )
     return {
         "matched_skills": matched,
         "jd_skill_total": len(jd_skills),
