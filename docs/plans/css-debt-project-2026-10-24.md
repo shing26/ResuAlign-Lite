@@ -123,6 +123,15 @@ node scripts/css_budget.mjs                         # 棘轮门禁（任何指�
 
 ## 6. 实现记录
 
+### 视觉基线入库（2026-10-25，Stage 6 对比生效）
+
+- **来源**：从 main 最近一次成功 CI 的 Stage 6 artifact（ubuntu + 空 data 目录）下载 20 张截图，提交进 `tests/visual/baseline/`（`.gitignore` 加例外）。此后 Stage 6 的 compare 步骤从「只采集」变为**真实像素对比**（仍 advisory / continue-on-error，不阻塞）
+- **再生成流程**（有意视觉变更合并后）：
+  1. 等 main 最近一次 CI 成功；
+  2. `gh run download <run-id> --name visual-snapshots --dir <tmp>`；
+  3. 覆盖 `tests/visual/baseline/*.png` + `ci-manifest.json`，单独提交注明「重采基线（因 <变更>）」。
+- **已知边界**：本机 Windows 截图与 ubuntu 基线字体渲染不同，`--compare` 在本机必然报字体噪点差异——本机只看 ratio 量级，**权威对比只认 CI（ubuntu vs ubuntu）**；Playwright chromium 大版本更新可能造成周期性误报，按再生成流程重采即可。
+
 ### 收官扫尾（2026-10-24，PR #180/#181）
 
 - **X1 完成篇**：复盘阶段分布从散 chips 改用 `.metric-strip` 指标条（容器/单元格/计数/标签分别挂共享类，auto-fit 适配阶段数，`is-zero` 弱化保留）——三页指标条视觉语言贯通。截图复核正常

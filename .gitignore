@@ -83,3 +83,6 @@ docs/demo/
 /gui-test-screenshots/
 # 结构债视觉基线截图（生成物，不入库；manifest/报告入库）
 tests/visual/**/*.png
+# 例外：ubuntu CI 采集的视觉基线（Stage 6 真实像素对比的对照物）。
+# 来源与维护流程见 docs/plans/css-debt-project-2026-10-24.md §6 收官扫尾。
+!tests/visual/baseline/*.png
