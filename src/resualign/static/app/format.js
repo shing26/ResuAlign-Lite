@@ -1515,6 +1515,25 @@ function boardAlignmentChip(job) {
   return '<span class="badge badge-gray" title="已画像，尚未运行对齐">待对齐</span>';
 }
 
+/* ADR-0064 UI 徽章（P2，审阅第三轮定边界）：词面信号是信息性参考。
+ * 边界：只展示 resume ∩ JD 命中（后端 prematch.matched_skills 按类型
+ * 设计保证不含 JD-only 词）；措辞信息性——「词表内技能 n/m」的分母是
+ * 词表内识别技能数而非 JD 要求总数，禁止渲染成覆盖率或缺口提示
+ * （缺口属于 gap 视图）。RESUALIGN_PREMATCH=0 时后端不下发该字段，
+ * 前端自然不渲染。 */
+function prematchBadgeHtml(job) {
+  const prematch = job.prematch;
+  if (!prematch || !prematch.jd_skill_total) return "";
+  const matched = (prematch.matched_skills || []).map((skill) => esc(skill));
+  const title =
+    `词表内技能命中：${matched.join("、") || "—"}` +
+    "（简历与 JD 共同出现；分母为词表内识别技能数，非 JD 要求总数，仅作参考）";
+  return (
+    `<span class="badge badge-gray prematch-badge" title="${esc(title)}">` +
+    `词表内技能 ${matched.length}/${prematch.jd_skill_total}</span>`
+  );
+}
+
 export function boardCard(job, statuses = null) {
   const canonical = canonicalJobStatus(job.status);
   const optionsHtml = jobStatusOptionsHtml(statuses, canonical);
@@ -1554,6 +1573,7 @@ export function boardCard(job, statuses = null) {
         <div class="board-card__tags">
           <span class="badge badge-blue">${esc(job.job_function || "未分类")}</span>
           <span class="badge badge-gray">${esc(job.seniority || "未知")}</span>
+          ${prematchBadgeHtml(job)}
           ${jobCompletenessBadge(job)}
           ${alignmentBadgeHtml(job)}
         </div>
@@ -1608,6 +1628,7 @@ export function jobListRow(job, statuses = null) {
       <div class="job-row__main">
         <button type="button" class="job-row__title" data-action="open-optimizer" data-id="${job.job_id}" title="${esc(job.title)}">${esc(job.title)}</button>
         <span class="job-row__meta">${esc(job.company || "未知公司")} · ${esc(job.location || "未知城市")} · ${esc(formatSalary(job))}</span>
+        ${prematchBadgeHtml(job)}
       </div>
       <div class="job-row__cell job-row__match">${leadBadge}</div>
       <div class="job-row__cell job-row__work">${workCell}</div>

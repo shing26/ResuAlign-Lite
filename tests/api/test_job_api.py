@@ -864,3 +864,48 @@ def test_mark_applied_keeps_manual_followup_schedule():
     assert updated["status_canonical"] == "applied"
     assert updated["next_step"] == "准备面试"
     assert updated["next_step_due_at"] == "2026-08-20T10:00:00"
+
+
+def test_job_list_prematch_badge_data(monkeypatch):
+    """ADR-0064 UI 徽章：列表下发 resume ∩ JD 命中（分母=词表内识别技能数）。"""
+    with patch("resualign.api._classify_job", return_value={}):
+        created = client.post(
+            "/api/jobs",
+            json={
+                "title": "Backend Engineer",
+                "jd_text": "需要 Python 与 Kubernetes，处理高并发后端服务",
+            },
+        ).json()
+    user = api_module._users.get_or_create_personal_user()
+    resume = api_module._resumes.create_master_resume(
+        user["user_id"], "Master", "Python 后端工程师，熟悉 FastAPI"
+    )
+    api_module._jobs.update_job(
+        user["user_id"],
+        created["job_id"],
+        workbench_resume_id=resume["resume_id"],
+    )
+    r = client.get("/api/jobs")
+    assert r.status_code == 200
+    job = next(j for j in r.json() if j["job_id"] == created["job_id"])
+    assert job["prematch"]["matched_skills"] == ["python"]
+    assert job["prematch"]["jd_skill_total"] == 2
+
+
+def test_job_list_prematch_absent_when_disabled(monkeypatch):
+    with patch("resualign.api._classify_job", return_value={}):
+        created = client.post(
+            "/api/jobs",
+            json={"title": "Backend Engineer", "jd_text": "需要 Python"},
+        ).json()
+    user = api_module._users.get_or_create_personal_user()
+    resume = api_module._resumes.create_master_resume(user["user_id"], "Master", "Python 后端")
+    api_module._jobs.update_job(
+        user["user_id"],
+        created["job_id"],
+        workbench_resume_id=resume["resume_id"],
+    )
+    monkeypatch.setenv("RESUALIGN_PREMATCH", "0")
+    r = client.get("/api/jobs")
+    job = next(j for j in r.json() if j["job_id"] == created["job_id"])
+    assert "prematch" not in job
