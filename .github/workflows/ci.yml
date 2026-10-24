@@ -149,3 +149,41 @@ jobs:
           node-version: "20"
       - name: CSS budget ratchet (structure-debt metrics only ratchet down)
         run: node scripts/css_budget.mjs
+
+  visual-snapshots:
+    name: Stage 6 - visual snapshots (advisory)
+    needs: benchmark-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies and Chromium
+        run: |
+          pip install -e ".[dev]"
+          pip install playwright pillow
+          python -m playwright install --with-deps chromium
+      - name: Start app server
+        run: |
+          PYTHONPATH=src python -m resualign.api > server.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/health && break
+            sleep 1
+          done
+        env:
+          PYTHONIOENCODING: utf-8
+      - name: Capture visual snapshots (20 shots)
+        run: python scripts/visual_baseline.py --tag ci
+        env:
+          PYTHONIOENCODING: utf-8
+      - name: Compare against committed baseline (advisory)
+        continue-on-error: true
+        run: python scripts/visual_baseline.py --tag ci --compare
+      - name: Upload visual snapshot artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-snapshots
+          path: tests/visual/ci/
