@@ -12,6 +12,7 @@
  * "/" 快捷键（非输入态聚焦打开面板）。 */
 
 import { $, $$, api, esc, state, toast } from "./events.js";
+import { closeOverlaySurface, openOverlaySurface } from "./events.js";
 import { isJdUrl, previewFor, renderJobSuggestionsHtml } from "./format.js";
 import { icon } from "./icons.js";
 
@@ -279,8 +280,12 @@ function movePaletteFocus(direction) {
 export function openCommandPanel() {
   const palette = $("[data-command-palette]");
   if (!palette) return;
+  const wasHidden = palette.hidden;
   palette.hidden = false;
   document.body.classList.add("command-palette-open");
+  /* SH-09 后续：首开时记录触发元素并隔离背景（与 showModal 同一套
+   * inert/焦点机制）；已开时的重复调用不覆盖原触发元素。 */
+  if (wasHidden) openOverlaySurface();
   const input = $("[data-command-input]");
   if (input) {
     input.value = "";
@@ -293,12 +298,16 @@ export function openCommandPanel() {
 
 export function closeCommandPanel() {
   const palette = $("[data-command-palette]");
-  if (!palette) return;
+  /* 已关闭时纯 no-op：不让防御性的关闭调用抢走用户当前焦点。 */
+  if (!palette || palette.hidden) return;
   palette.hidden = true;
   document.body.classList.remove("command-palette-open");
   clearSuggestions();
   const input = $("[data-command-input]");
   if (input) input.blur();
+  /* SH-09 后续：解除背景 inert 并把焦点还给触发元素（触发元素被重渲染
+   * 替换时回退路由容器；延后一拍等本轮 JS 结束，与 showModal 同款）。 */
+  closeOverlaySurface();
   /* 每次关闭后失效岗位缓存，下次打开 ⌘K 重新拉取最新岗位列表。 */
   jobsCache = null;
 }
