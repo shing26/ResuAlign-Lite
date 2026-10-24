@@ -1496,6 +1496,23 @@ class JobLibraryStore(_SqliteStore):
             "created_at": row["created_at"],
         }
 
+    def pinned_resume_ids(self, tenant_id: str) -> set[str]:
+        """Distinct workbench_resume_ids referenced by this tenant's jobs.
+
+        「使用中」徽标（B7 遗留）的事实来源：简历被岗位钉住即在用。
+        单条 DISTINCT 查询，列表页每次渲染只调一次。
+        """
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT DISTINCT workbench_resume_id FROM library_jobs "
+                    "WHERE tenant_id = ? AND workbench_resume_id IS NOT NULL "
+                    "AND workbench_resume_id != ''",
+                    (tenant_id,),
+                ).fetchall()
+                return {row["workbench_resume_id"] for row in rows}
+
     def list_jobs(
         self,
         tenant_id: str,

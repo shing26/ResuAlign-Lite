@@ -411,6 +411,24 @@ function dismissModal({ restoreFocus = true } = {}) {
   scheduleModalFocusRestore(returnTo);
 }
 
+/* ---- 非 modal 浮层（命令面板等）复用同一套背景隔离 + 焦点归还 ----------
+ * SH-09 后续（2026-10-25）：命令面板此前是自写焦点陷阱——Tab 出不去，但
+ * 背景仍可点击/可读屏，关闭只 blur 不还焦点。openOverlaySurface /
+ * closeOverlaySurface 让浮层与 showModal 共享同一套 inert（或 aria-hidden
+ * 降级）+ 延迟焦点归还机制（含 token 防抢焦点：浮层关闭后立刻开弹窗时，
+ * 浮层的延迟归还会被弹窗的 dismissModal 作废，不会把焦点抢到弹窗背后）。 */
+export function openOverlaySurface() {
+  recordModalReturnFocus();
+  setModalBackgroundInert();
+}
+
+export function closeOverlaySurface() {
+  const returnTo = modalReturnFocus;
+  modalReturnFocus = null;
+  clearModalBackgroundInert();
+  scheduleModalFocusRestore(returnTo);
+}
+
 export function showModal(title, bodyHtml, options = {}) {
   /* 叠弹窗（详情 → 确认删除之类）：换掉旧的但不要把焦点先还给旧触发按钮，
      否则新弹窗打开后焦点会短暂落到背景里；旧弹窗记录的原触发元素保留，

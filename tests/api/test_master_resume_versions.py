@@ -250,3 +250,37 @@ def test_master_resume_versions_are_tenant_scoped():
 
     # Owner's history remains intact.
     assert _detail(resume_id)["current_version"] == 2
+
+
+def test_list_master_resumes_in_use_and_diagnosis_status():
+    """B7 遗留：列表投影补 diagnosis_status + in_use（被岗位钉住=使用中）。"""
+    from unittest.mock import patch
+
+    resume = _create_resume()
+    other = _create_resume(title="第二份")
+    headers = _auth_headers()
+    # 没有任何岗位钉住时：两份都不是使用中
+    body = client.get("/api/master-resumes", headers=headers).json()
+    by_id = {item["resume_id"]: item for item in body}
+    assert by_id[resume["resume_id"]]["in_use"] is False
+    assert by_id[other["resume_id"]]["in_use"] is False
+    # 列表投影带 diagnosis_status（无诊断 -> missing 态由存储层定义）
+    assert "diagnosis_status" in by_id[resume["resume_id"]]
+
+    # 创建一个岗位并钉住第一份简历 -> 只有它变成使用中
+    with patch("resualign.api._classify_job", return_value={}):
+        job = client.post(
+            "/api/jobs",
+            json={"title": "Backend", "jd_text": "需要 Python"},
+            headers=headers,
+        ).json()
+    tenant = client.get("/api/auth/me", headers=headers).json()["user_id"]
+    api_module._jobs.update_job(
+        tenant,
+        job["job_id"],
+        workbench_resume_id=resume["resume_id"],
+    )
+    body = client.get("/api/master-resumes", headers=headers).json()
+    by_id = {item["resume_id"]: item for item in body}
+    assert by_id[resume["resume_id"]]["in_use"] is True
+    assert by_id[other["resume_id"]]["in_use"] is False
