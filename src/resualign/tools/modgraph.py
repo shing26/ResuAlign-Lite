@@ -41,6 +41,7 @@ LAYERS = [
         "领域",
         (
             "match_scorer", "gap_analyzer", "jd_profiler", "jd_analysis",
+            "prematch",
             "evaluator", "classifier", "rules", "rule_diagnose",
             "local_fallback", "extractor", "parser", "resume_optimize",
             "batch", "config",

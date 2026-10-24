@@ -11,6 +11,7 @@ from ...alignment_lifecycle import transition_alignment
 from ...app.context import context
 from ...jd_analysis import jd_context_summary
 from ...llm_usage import llm_tenant_context
+from ...prematch import compute_match_signals, prematch_enabled  # ADR-0064
 from ..deps import get_current_user, get_local_ingest_user
 from ..schemas import (
     FinalDraftRequest,
@@ -654,9 +655,17 @@ def rewrite_workbench_bullet(
             detail='LLM 未配置。请设置 API Key（远程供应商）或激活 Ollama 本地节点。',
         )
     context.enforce_daily_llm_cap(user['user_id'])
+    # ADR-0064：词面信号进单条重写 prompt（简历有据词；缺 resume/jd 时静默降级）
+    prematch_signals = None
+    if prematch_enabled():
+        _resume_text = job.get('resume_text') or ''
+        _jd_text = job.get('jd_text') or ''
+        if _resume_text and _jd_text:
+            prematch_signals = compute_match_signals(_resume_text, _jd_text)
     jd_context = jd_context_summary(
         job.get('jd_profile'),
         job.get('gap_report'),
+        prematch=prematch_signals,
     )
     with llm_tenant_context(user['user_id']):
         with context.OpenAIClient(
