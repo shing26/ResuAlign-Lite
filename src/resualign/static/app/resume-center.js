@@ -91,7 +91,7 @@ async function renderResumeListView(app) {
       <div class="card resume-card card-base card-hover-soft" data-resume-card data-resume-id="${resume.resume_id}" title="打开详情">
         <div class="card-head">
           <div>
-            <div class="card-title">${esc(resume.title)}</div>
+            <div class="card-title">${esc(resume.title)}${resume.in_use ? '<span class="badge badge-green" data-resume-in-use title="至少一个岗位的对齐钉住了这份简历">使用中</span>' : ""}</div>
             <div class="card-meta" data-resume-card-meta>更新于 ${formatDate(resume.updated_at)} · 当前 v${resume.current_version} · <span data-resume-chars>${resumeCharsLabel(resume.content)}</span></div>
           </div>
           ${resumeAtsBadgeHtml(resume)}

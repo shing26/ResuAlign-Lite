@@ -66,8 +66,17 @@ async def parse_resume_upload(file: UploadFile=File(...), user: dict[str, Any]=D
 
 @router.get('/api/master-resumes')
 def list_master_resumes(user: dict[str, Any]=Depends(get_current_user)):
-    """Return the current user's master resumes."""
-    return context._resumes.list_master_resumes(user['user_id'])
+    """Return the current user's master resumes.
+
+    in_use（B7 遗留的「当前主简历」徽标）：被至少一个岗位钉住
+    （workbench_resume_id）即「使用中」——存储层没有 is_primary 概念，
+    用引用事实代替产品级决策。
+    """
+    resumes = context._resumes.list_master_resumes(user['user_id'])
+    pinned = context._jobs.pinned_resume_ids(user['user_id'])
+    for resume in resumes:
+        resume['in_use'] = resume['resume_id'] in pinned
+    return resumes
 
 @router.get('/api/master-resumes/{resume_id}')
 def get_master_resume(resume_id: str, user: dict[str, Any]=Depends(get_current_user)):

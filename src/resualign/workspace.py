@@ -445,6 +445,13 @@ class MasterResumeStore(_SqliteStore):
                                 row,
                                 version_row["content"] if version_row else "",
                             ),
+                            # 列表投影补齐（B7 遗留）：get_master_resume 一直
+                            # 返回 diagnosis_status，列表漏了——前端 ATS 徽标
+                            # 只能靠 latest_diagnosis 兜底推断。
+                            "diagnosis_status": self._diagnosis_for_row(
+                                row,
+                                version_row["content"] if version_row else "",
+                            ),
                         }
                     )
                 return result
