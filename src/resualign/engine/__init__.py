@@ -13,6 +13,7 @@ from ..gap_analyzer import analyze_gaps
 from ..jd_analysis import jd_context_summary, jd_profile_to_dict
 from ..jd_profiler import profile_jd
 from ..models import GapReport, Report, ResuAlignConfig, TailoredResume
+from ..prematch import compute_match_signals, prematch_enabled  # ADR-0064
 from ..rule_diagnose import diagnose_resume_local
 from .llm import LLMClient, LLMResponseError, OpenAIClient, diagnose_resume
 from .llm_nodes import LLMNodeStore
@@ -468,10 +469,18 @@ def run(
             notify("gap_analyzed", _gap_progress_message(report.gap_report))
             notify("tailoring", "正在生成 STAR 精修建议（约 3-15 条）...")
             import json as _json
+            # ADR-0064：确定性词面信号进编辑器上下文（简历有据词；
+            # RESUALIGN_PREMATCH=0 可整体关闭）。
+            prematch_signals = (
+                compute_match_signals(resume_text, jd_text or "")
+                if prematch_enabled()
+                else None
+            )
             jd_context = jd_context_summary(
                 report.jd_profile,
                 report.gap_report,
                 max_chars=MAX_JD_CONTEXT_SUMMARY_CHARS,
+                prematch=prematch_signals,
             )
             gap_report_str = _json.dumps({
                 "supported_keywords": report.gap_report.supported_keywords,

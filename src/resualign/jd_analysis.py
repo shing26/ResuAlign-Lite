@@ -10,6 +10,7 @@ from .engine.llm import LLMClient
 from .evidence import anchored_supported_keywords
 from .jd_profiler import profile_jd
 from .models import GapReport, JDProfile
+from .prematch import signal_line  # ADR-0064
 from .prompt_versions import JD_ANALYSIS as _JD_ANALYSIS_STAGE
 from .prompt_versions import get_prompt_version
 
@@ -122,6 +123,7 @@ def jd_context_summary(
     gap_report: GapReport | dict[str, Any] | None = None,
     *,
     max_chars: int = 300,
+    prematch: dict[str, Any] | None = None,
 ) -> str:
     """Build prompt-only JD context; never pass the raw JD back into a prompt."""
     profile_data = _context_data(profile)
@@ -162,6 +164,12 @@ def jd_context_summary(
     years = field(profile_data, "min_years_experience")
     if isinstance(years, int) and years > 0:
         parts.append(f"经验要求：{years} 年以上")
+
+    # ADR-0064：确定性词面信号，只含简历有据词（resume ∩ JD）；
+    # JD-only 词与 missing_keywords 一样禁止进入编辑器提示。
+    signal = signal_line(prematch)
+    if signal:
+        parts.append(signal)
 
     summary = re.sub(r"\s+", " ", "；".join(parts)).strip()
     return summary[:max_chars].rstrip() if max_chars > 0 else ""
