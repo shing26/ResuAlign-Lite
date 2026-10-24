@@ -64,14 +64,14 @@ async def parse_resume_upload(file: UploadFile=File(...), user: dict[str, Any]=D
         'stored_upload': str(stored_path),
     }
 
+# in_use（B7 遗留的「当前主简历」徽标）：被至少一个岗位钉住
+# （workbench_resume_id）即「使用中」——存储层没有 is_primary 概念，
+# 用引用事实代替产品级决策。
+# 注意：docstring 是 OpenAPI description 的来源，保持单行与快照一致；
+# 详细口径写在这里而不是 docstring 里。
 @router.get('/api/master-resumes')
 def list_master_resumes(user: dict[str, Any]=Depends(get_current_user)):
-    """Return the current user's master resumes.
-
-    in_use（B7 遗留的「当前主简历」徽标）：被至少一个岗位钉住
-    （workbench_resume_id）即「使用中」——存储层没有 is_primary 概念，
-    用引用事实代替产品级决策。
-    """
+    """Return the current user's master resumes."""
     resumes = context._resumes.list_master_resumes(user['user_id'])
     pinned = context._jobs.pinned_resume_ids(user['user_id'])
     for resume in resumes:
