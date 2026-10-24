@@ -1,5 +1,6 @@
 # 结构债项目：CSS / Token / 视觉基线（2026-10-24 立项）
 
+> 交接文档（下一个 agent 先读）：`docs/reports/css-debt-handoff-2026-10-24.md`
 > 状态：**Phase 0 已落地**（度量脚本 + 基线 + 棘轮门禁 + 视觉基线工具），Phase 1 待开工。
 > 背景审计：`docs/reports/ui-audit-resume-system-2026-10-22.md` SH-05 / SH-08 / SH-12 / X1 / X2。
 > 本文档是该项目的**唯一施工单**；每个阶段一个 PR，不与功能改动混提。
