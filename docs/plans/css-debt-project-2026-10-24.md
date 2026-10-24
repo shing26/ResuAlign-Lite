@@ -1,7 +1,7 @@
 # 结构债项目：CSS / Token / 视觉基线（2026-10-24 立项）
 
 > 交接文档（下一个 agent 先读）：`docs/reports/css-debt-handoff-2026-10-24.md`
-> 状态：**项目已收官**（Phase 0/1/2a/2b/3/4/5 全部落地，2026-10-24）。剩余待办均为可选项：Phase 2c 语义合并、复盘 KPI 化 UX 改版、复盘根类 `.view--dense` 显式化、视觉基线入库 + CI advisory。
+> 状态：**项目已收官，可选项亦已清零**（Phase 0–5 + 收官扫尾，2026-10-24）：复盘 KPI 化 ✅、复盘根类 `.view--dense` 显式化 ✅、CI 视觉 advisory ✅、Phase 2c **关闭（有据）**——见 §6 收官扫尾。
 > 背景审计：`docs/reports/ui-audit-resume-system-2026-10-22.md` SH-05 / SH-08 / SH-12 / X1 / X2。
 > 本文档是该项目的**唯一施工单**；每个阶段一个 PR，不与功能改动混提。
 
@@ -122,6 +122,13 @@ node scripts/css_budget.mjs                         # 棘轮门禁（任何指�
 | 视觉基线本身受数据变化影响（时间/数字） | 对比阈值 0.2%；差异报告需人工确认为「预期变化」；基线在每阶段合并后重采 |
 
 ## 6. 实现记录
+
+### 收官扫尾（2026-10-24，PR #180/#181）
+
+- **X1 完成篇**：复盘阶段分布从散 chips 改用 `.metric-strip` 指标条（容器/单元格/计数/标签分别挂共享类，auto-fit 适配阶段数，`is-zero` 弱化保留）——三页指标条视觉语言贯通。截图复核正常
+- **X2 语义债清偿**：复盘根类不再借用 `.dashboard-view`（两条渲染路径改挂 `.view--dense`）。`.dashboard-view` 作用域规则共 42 条，**活 DOM 探针**核对恰有 6 条命中复盘页，全部补等价变体；过程中活探针抓到 `.badge` 漏加导致的圆角/边框回退并当场修复——「借类名拿样式」不可持续的实证
+- **CI 视觉 advisory**：ci.yml 新增 **Stage 6 - visual snapshots**（起服 → 采 20 张 → 若存在已入库基线则对比（continue-on-error）→ 始终上传 artifact）。像素对比入 CI 需先以 ubuntu 采集基线并入库（Windows 本机字体渲染不同，跨 OS 直接对比不可信），两步引导已写入本节
+- **Phase 2c 关闭（有据）**：145 条同上下文重复定义的可安全机械合并 = 0（`css_merge_duplicates` 三轮验证）；拼接合并已被元素级快照证伪（1,392 属性变化）；按属性吸收仅 28 属性可移、0 规则可删。继续下降需要「hover/focus 状态覆盖的验证工具 + 逐组件 canonical 重构」（预估 1.5–2 天，回归风险集中在状态样式）。**重开触发**：未来同一组件再长出 ≥3 条同上下文重复时，优先做组件级重构而非追加
 
 ### Phase 5（2026-10-24，已落地 —— 结构债项目收官）
 - **X2 卡片密度收敛**：新增 `--card-pad`（16px，标准卡片）与 `--card-pad-wide`（20px，宽密度 panel）两档语义 token，11 处卡片内边距等值接线（`.panel` ×2 / `.panel-head` / `.panel-body` / `.dashboard-view .panel-head,body` / `.dashboard-kpi` / `.settings-bento__card` ×2 / `.card` ×2）——计算样式快照 **0 差异**、像素 **20/20 零差异**

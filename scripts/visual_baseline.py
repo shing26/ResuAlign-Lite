@@ -105,6 +105,10 @@ def capture(tag: str) -> dict:
 def compare(tag: str) -> int:
     before_dir = OUT_ROOT / "baseline"
     after_dir = OUT_ROOT / tag
+    if not before_dir.exists() or not any(before_dir.glob("*.png")):
+        # CI 首跑（或本机未采基线）：只采集，不做对比（advisory 语义）。
+        print(f"no baseline at {before_dir} — capture-only run, skip compare")
+        return 0
     report = {"compared": [], "changed": [], "missing": []}
     for shot in sorted((before_dir).glob("*.png")):
         current = after_dir / shot.name
