@@ -87,8 +87,32 @@ test("styles.css: board-column effective rule uses canonical surface tokens", ()
   assert.match(block, /box-shadow:\s*none/);
 });
 
+/* Phase 4（2026-10-24）：reduced-motion blanket 合并后位于文件末尾，
+ * 会成为 .board-card:hover 的最后一条同特异性规则；其 gate 行为由
+ * 下一条测试单独断言。这里剥离 blanket 后取「常规态」的生效规则。 */
+function withoutReducedMotionBlanket(css) {
+  const marker = "@media (prefers-reduced-motion: reduce) {";
+  let out = css;
+  let index = out.indexOf(marker);
+  while (index >= 0) {
+    const open = index + marker.length - 1;
+    let depth = 0;
+    let close = -1;
+    for (let i = open; i < out.length; i += 1) {
+      if (out[i] === "{") depth += 1;
+      if (out[i] === "}") {
+        depth -= 1;
+        if (depth === 0) { close = i; break; }
+      }
+    }
+    out = out.slice(0, index) + out.slice(close + 1);
+    index = out.indexOf(marker);
+  }
+  return out;
+}
+
 test("styles.css: board-card hover effective rule uses canonical hover tokens", () => {
-  const hover = winningBlock(stylesCss, ".board-card:hover");
+  const hover = winningBlock(withoutReducedMotionBlanket(stylesCss), ".board-card:hover");
   assert.ok(hover, ".board-card:hover rule exists");
   assert.match(hover, /var\(--surface-hover\)/);
   assert.match(hover, /var\(--line-strong\)/);
