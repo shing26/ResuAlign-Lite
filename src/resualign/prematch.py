@@ -134,8 +134,13 @@ def compute_match_signals(resume_text: str, jd_text: str) -> Dict[str, object]:
     }
 
 
-def signal_line(signals: Dict[str, object] | None, max_skills: int = 6) -> str:
-    """Render the one-line prompt context; resume-backed terms only."""
+def signal_line(signals: Dict[str, object] | None, max_skills: int = 3) -> str:
+    """Render the one-line prompt context; resume-backed terms only.
+
+    ``max_skills`` caps the displayed list so the signal line can never eat
+    the 300-char context budget (review round 2); unshown skills are
+    summarised as "等 n 项" while the hit count stays the true value.
+    """
     if not signals:
         return ""
     matched = list(signals.get("matched_skills") or [])
@@ -143,4 +148,6 @@ def signal_line(signals: Dict[str, object] | None, max_skills: int = 6) -> str:
         return ""
     shown = "、".join(str(skill) for skill in matched[:max_skills])
     total = signals.get("jd_skill_total", 0)
-    return f"匹配信号：命中核心技能 {shown}（{len(matched)}/{total}）"
+    extra = len(matched) - min(len(matched), max_skills)
+    suffix = f"，等 {extra} 项" if extra > 0 else ""
+    return f"匹配信号：命中核心技能 {shown}（{len(matched)}/{total}{suffix}）"

@@ -167,11 +167,12 @@ def jd_context_summary(
 
     # ADR-0064：确定性词面信号，只含简历有据词（resume ∩ JD）；
     # JD-only 词与 missing_keywords 一样禁止进入编辑器提示。
-    # 信号行插在最前：300 字预算紧张时优先保留结构化信号，
-    # 被收紧的是尾部低权重字段（审阅意见点 3）。
+    # 顺位（审阅第二轮）：核心要求 > 匹配信号 > 其余——信号插在首段
+    # 之后，且 signal_line 自带展示上限（前 3 项 + 等 n 项），
+    # 信号行本身不可能在 300 字预算里失控。
     signal = signal_line(prematch)
     if signal:
-        parts.insert(0, signal)
+        parts.insert(1 if parts else 0, signal)
 
     summary = re.sub(r"\s+", " ", "；".join(parts)).strip()
     return summary[:max_chars].rstrip() if max_chars > 0 else ""

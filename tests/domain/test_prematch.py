@@ -52,9 +52,11 @@ def test_signal_line_empty_when_no_resume_backed_hits():
 
 def test_signal_line_truncates_skill_list():
     signals = {"matched_skills": ["a", "b", "c", "d", "e", "f", "g"], "jd_skill_total": 9}
-    line = signal_line(signals, max_skills=6)
-    # 截断只影响展示列表；命中数仍是真实值（7/9）
-    assert line.endswith("（7/9）")
+    line = signal_line(signals)
+    # 审阅第二轮：展示上限默认前 3 项；命中数仍是真实值（7/9），
+    # 未展示的以「等 4 项」汇总——信号行自身不可能吃掉 300 字预算
+    assert line == "匹配信号：命中核心技能 a、b、c（7/9，等 4 项）"
+    assert "d" not in line
     assert "g" not in line
 
 
@@ -111,7 +113,11 @@ def test_jd_context_summary_without_prematch_unchanged():
 
 
 def test_jd_context_summary_signal_survives_tight_budget():
-    """审阅意见点 3：预算紧张时信号行优先保留（插在最前）。"""
+    """审阅第二轮：顺位为核心要求 > 匹配信号 > 其余。
+
+    预算 60 字时核心要求保得住、软技能/学历被收紧，信号行紧随核心要求
+    之后且自身有展示上限，不会吃掉预算。
+    """
     from resualign.jd_analysis import jd_context_summary
 
     profile = {
@@ -123,7 +129,9 @@ def test_jd_context_summary_signal_survives_tight_budget():
     }
     signals = {"matched_skills": ["java", "kafka"], "jd_skill_total": 6}
     tight = jd_context_summary(profile, None, max_chars=60, prematch=signals)
-    assert tight.startswith("匹配信号")
+    assert "岗位要求" in tight
+    assert "匹配信号" in tight
+    assert tight.index("岗位要求") < tight.index("匹配信号")
     assert "命中核心技能" in tight
 
 
