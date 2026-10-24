@@ -201,3 +201,105 @@ def test_offline_benchmark_writes_results_without_network(
             assert report["score"] > 0
         overlap = case["keyword_overlap"]
         assert overlap["coverage"] >= 0.6
+
+
+def test_match_level_from_score_anchors_to_engine_rubric(benchmark_module):
+    """分档锚点必须与 engine/llm.py 的评分 rubric 一致（80+/60-79/<60）。"""
+    assert benchmark_module.match_level_from_score(85) == "strong"
+    assert benchmark_module.match_level_from_score(80) == "strong"
+    assert benchmark_module.match_level_from_score(79) == "partial"
+    assert benchmark_module.match_level_from_score(60) == "partial"
+    assert benchmark_module.match_level_from_score(59) == "weak"
+
+
+def test_kappa_matches_hand_computed_example(benchmark_module):
+    pairs = [
+        ("strong", "strong"),
+        ("strong", "partial"),
+        ("partial", "partial"),
+        ("weak", "weak"),
+    ]
+    # po = 3/4；pe = (2*1 + 1*2 + 1*1) / 16 = 0.3125 → kappa = 0.636
+    assert benchmark_module._kappa(pairs) == 0.636
+
+
+def test_kappa_undefined_for_single_pair_or_total_chance(benchmark_module):
+    assert benchmark_module._kappa([("strong", "strong")]) is None
+    # 两位标注者都恒定：chance agreement = 1，kappa 无定义
+    assert (
+        benchmark_module._kappa([("strong", "strong"), ("strong", "strong")])
+        is None
+    )
+
+
+def test_keyword_prf_exact_casefold_semantics(benchmark_module):
+    prf = benchmark_module._keyword_prf(["Spark", "Airflow"], ["spark", "Kafka"])
+    assert prf["precision"] == 0.5
+    assert prf["recall"] == 0.5
+    assert prf["hits"] == ["spark"]
+    assert prf["missed"] == ["airflow"]
+
+
+def test_load_cases_rejects_unknown_match_level(benchmark_module, tmp_path):
+    import json as _json
+
+    case = {
+        "id": "bad-level",
+        "resume_text": "resume",
+        "jd_text": "jd",
+        "expected_direction": ["highlight SQL"],
+        "source_note": "synthetic regression case",
+        "expected_match_level": "excellent",
+    }
+    (tmp_path / "bad.json").write_text(
+        _json.dumps(case, ensure_ascii=False), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="expected_match_level"):
+        benchmark_module.load_cases(tmp_path)
+
+
+def _mq_result(level, actual, prf=None):
+    return {
+        "report": {"score": 80},
+        "keyword_overlap": {
+            "coverage": 1.0,
+            "goal_count": 1,
+            "covered_goal_count": 1,
+        },
+        "match_quality": {
+            "expected_match_level": level,
+            "actual_match_level": actual,
+            "missing_keywords_prf": prf,
+        },
+    }
+
+
+def test_summarize_aggregates_match_quality(benchmark_module):
+    summary = benchmark_module._summarize(
+        [
+            _mq_result(
+                "strong",
+                "strong",
+                {"precision": 1.0, "recall": 0.5, "f1": 0.667},
+            ),
+            _mq_result("weak", "partial"),
+        ]
+    )
+    mq = summary["match_quality"]
+    assert mq["annotated_cases"] == 2
+    assert mq["exact_level_agreement"] == 0.5
+    # po = 0.5；pe = (1*1 + 0 + 0) / 4 = 0.25 → kappa = 0.333
+    assert mq["kappa"] == 0.333
+    assert mq["missing_keyword_cases"] == 1
+    assert mq["missing_keyword_macro_f1"] == 0.667
+
+
+def test_summarize_match_quality_empty_without_annotations(benchmark_module):
+    summary = benchmark_module._summarize([_mq_result(None, "strong")])
+    assert summary["match_quality"] == {
+        "annotated_cases": 0,
+        "exact_level_agreement": None,
+        "kappa": None,
+        "missing_keyword_cases": 0,
+        "missing_keyword_macro_f1": None,
+    }

@@ -96,3 +96,27 @@ The JSON reports p50/p95/p99, the current role timeout, and the remaining
 headroom for `diagnose`, `profiler`, `gap_analyzer`, `editor`, and
 `evaluator`. This harness needs a real model and is evidence tooling, not a
 CI gate.
+
+
+## Match-quality annotation (author-only, informational)
+
+Cases may carry two optional, author-annotated fields that turn the harness
+into a match-quality metric alongside the hallucination checks:
+
+- `expected_match_level`: `"strong"` / `"partial"` / `"weak"` — the graded
+  match verdict you expect the pipeline to reach. Band anchors mirror the
+  engine's own score rubric (`engine/llm.py`: 80+ 优秀 / 60-79 建议优化 /
+  <60 需重点优化), so the benchmark and the UI can never disagree about what
+  "strong" means.
+- `expected_missing_keywords`: list of JD-critical keywords the resume lacks —
+  compared against the gap report's `missing_keywords` with exact casefolded
+  precision/recall/F1.
+
+The summary reports the annotated-case count, exact level agreement, Cohen's
+kappa (undefined until at least two graded pairs exist), and macro F1. The
+metric is **informational and never gates CI**.
+
+Governance: per ADR-0042 / ADR-0059 the golden set must come from the
+author's real, delivered-to job descriptions; synthetic cases in `cases/`
+are regression fixtures, not golden samples. Annotate real JDs as they flow
+through the self-use line (P0), not in bulk.
