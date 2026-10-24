@@ -60,6 +60,18 @@ def test_signal_line_truncates_skill_list():
     assert "g" not in line
 
 
+def test_signal_line_no_suffix_when_all_shown():
+    """审阅第三轮边界：命中 ≤ 展示上限时不渲染「等 0 项」。"""
+    boundary = signal_line(
+        {"matched_skills": ["java", "kafka", "redis"], "jd_skill_total": 5}
+    )
+    assert boundary == "匹配信号：命中核心技能 java、kafka、redis（3/5）"
+    assert "等" not in boundary
+    single = signal_line({"matched_skills": ["java"], "jd_skill_total": 5})
+    assert single == "匹配信号：命中核心技能 java（1/5）"
+    assert "等" not in single
+
+
 def test_prematch_enabled_flag(monkeypatch):
     monkeypatch.delenv("RESUALIGN_PREMATCH", raising=False)
     assert prematch_enabled() is True

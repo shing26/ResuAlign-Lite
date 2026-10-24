@@ -140,6 +140,11 @@ def signal_line(signals: Dict[str, object] | None, max_skills: int = 3) -> str:
     ``max_skills`` caps the displayed list so the signal line can never eat
     the 300-char context budget (review round 2); unshown skills are
     summarised as "等 n 项" while the hit count stays the true value.
+
+    分母口径（审阅第三轮）：``total`` 是**词表内识别出的 JD 技能数**，
+    不是 JD 要求总数——「（7/9）」不得被解读为匹配覆盖率。当前该行只进
+    LLM prompt 不对用户可见；UI 徽章落地时必须自带用户可见措辞
+    （如「词表内技能 7/9」）并注明口径，见 ADR-0064 附录。
     """
     if not signals:
         return ""
