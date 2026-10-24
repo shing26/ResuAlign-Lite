@@ -259,6 +259,37 @@ def sync_job_table_route(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _prematch_for(
+    user_id: str, job: dict[str, Any], resume_cache: dict[str, str]
+) -> dict[str, Any] | None:
+    """ADR-0064 UI 徽章数据（P2，审阅第三轮定边界）。
+
+    只下发 resume ∩ JD 命中（prematch 模块按类型设计保证不含 JD-only
+    词）；分母为词表内识别技能数，前端措辞须注明口径。词表盲区、缺
+    钉住主简历或开关关闭时缺省不下发该字段。
+    """
+    if not prematch_enabled():
+        return None
+    resume_id = job.get('workbench_resume_id')
+    if not resume_id:
+        return None
+    if resume_id not in resume_cache:
+        resume = context._resumes.get_master_resume(user_id, resume_id)
+        resume_cache[resume_id] = (resume or {}).get('content') or ''
+    resume_text = resume_cache[resume_id]
+    jd_text = job.get('jd_text') or ''
+    if not resume_text or not jd_text:
+        return None
+    signals = compute_match_signals(resume_text, jd_text)
+    if not signals.get('jd_skill_total'):
+        return None
+    return {
+        'matched_skills': list(signals['matched_skills']),
+        'jd_skill_total': signals['jd_skill_total'],
+        'overlap_ratio': signals['overlap_ratio'],
+    }
+
+
 @router.get('/api/jobs')
 def list_library_jobs(job_function: str | None=None, seniority: str | None=None, status: str | None=None, search: str | None=None, limit: int=100, offset: int=0, sort: str="updated_at_desc", user: dict[str, Any]=Depends(get_current_user)):
     """List library jobs with optional filters."""
@@ -277,8 +308,12 @@ def list_library_jobs(job_function: str | None=None, seniority: str | None=None,
         )
     except context.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    resume_cache: dict[str, str] = {}
     for job in jobs:
         job["match_stale"] = _match_stale(user['user_id'], job)
+        prematch = _prematch_for(user['user_id'], job, resume_cache)
+        if prematch:
+            job["prematch"] = prematch
     return jobs
 
 @router.get('/api/jobs/{job_id}')
@@ -287,6 +322,9 @@ def get_library_job(job_id: str, user: dict[str, Any]=Depends(get_current_user))
     job = context._jobs.get_job(user['user_id'], job_id)
     if job is not None:
         job["match_stale"] = _match_stale(user['user_id'], job)
+        prematch = _prematch_for(user['user_id'], job, {})
+        if prematch:
+            job["prematch"] = prematch
         return job
     return context.job_status(job_id, user)
 
@@ -658,7 +696,9 @@ def rewrite_workbench_bullet(
     # ADR-0064：词面信号进单条重写 prompt（简历有据词；缺 resume/jd 时静默降级）
     prematch_signals = None
     if prematch_enabled():
-        _resume_text = job.get('resume_text') or ''
+        # 修正（审阅第三轮）：job 记录不携带 resume_text，钉住的主简历
+        # 须经 _match_inputs 解析（与 match 评分路径同源）。
+        _resume_text, _ = _match_inputs(user['user_id'], job)
         _jd_text = job.get('jd_text') or ''
         if _resume_text and _jd_text:
             prematch_signals = compute_match_signals(_resume_text, _jd_text)
