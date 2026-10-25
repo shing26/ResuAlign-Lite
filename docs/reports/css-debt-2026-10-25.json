@@ -1,0 +1,144 @@
+{
+  "generatedAt": "2026-10-25T00:44:06.774Z",
+  "files": {
+    "stylesCssBytes": 300684,
+    "stylesCssGzipBytes": 64273,
+    "appJsFiles": 15
+  },
+  "css": {
+    "ruleBlocks": 1792,
+    "atRuleBlocks": 159,
+    "selectorCount": 1371,
+    "duplicateSelectorCount": 145,
+    "duplicateSelectorGroups": 119,
+    "duplicateSelectorsTop20": [
+      [
+        ".topbar",
+        5
+      ],
+      [
+        ".app-shell",
+        4
+      ],
+      [
+        ".rule-item",
+        4
+      ],
+      [
+        ".tabs--rail button",
+        4
+      ],
+      [
+        ".app-main",
+        3
+      ],
+      [
+        ".app-main",
+        3
+      ],
+      [
+        ".app-rail .tabs--rail button.nav-btn",
+        3
+      ],
+      [
+        ".btn",
+        3
+      ],
+      [
+        ".command-bar__trigger",
+        3
+      ],
+      [
+        ".diff-card",
+        3
+      ],
+      [
+        ".llm-node-card",
+        3
+      ],
+      [
+        ".rail-brand",
+        3
+      ],
+      [
+        ".rail-foot",
+        3
+      ],
+      [
+        ".rail-foot__status",
+        3
+      ],
+      [
+        ".settings-bento__value",
+        3
+      ],
+      [
+        ".toast",
+        3
+      ],
+      [
+        ".topbar",
+        3
+      ],
+      [
+        "*, *::before, *::after",
+        3
+      ],
+      [
+        "#app-router-view",
+        3
+      ],
+      [
+        "body",
+        3
+      ]
+    ],
+    "topbarDefinitions": 11,
+    "importantCount": 1,
+    "hardcodedMotionDecls": 8,
+    "breakpointCount": 7,
+    "breakpoints": [
+      [
+        "(max-width: 640px)",
+        29
+      ],
+      [
+        "(max-width: 900px)",
+        22
+      ],
+      [
+        "print",
+        4
+      ],
+      [
+        "(hover: none), (pointer: coarse)",
+        2
+      ],
+      [
+        "(min-width: 901px)",
+        2
+      ],
+      [
+        "(max-width: 1100px)",
+        1
+      ],
+      [
+        "(prefers-reduced-motion: reduce)",
+        1
+      ]
+    ]
+  },
+  "tokens": {
+    "definedCount": 163,
+    "referencedCount": 172,
+    "zeroRefCount": 0,
+    "zeroRefTokens": []
+  },
+  "js": {
+    "inlineStyleAttrs": 0,
+    "inlineStyleWrites": 0,
+    "colorLiterals": 0,
+    "tailwindUtilityClasses": [],
+    "tailwindUtilityClassCount": 0
+  }
+}

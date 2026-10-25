@@ -34,6 +34,7 @@ SKILL_ALIASES: Dict[str, str] = {
     "springboot": "spring boot",
     "ml": "machine learning",
     "nodejs": "node.js",
+    "vue.js": "vue",
 }
 
 # Canonical skill vocabulary detected directly (word-boundary, multi-word
@@ -64,6 +65,35 @@ CANONICAL_SKILLS: List[str] = [
     "aws",
     "ci/cd",
     "node.js",
+    # A 组扩充（2026-10-25，508 份真实 JD 离线分析，见 .scratch/prematch-vocab-analysis.json）：
+    # 低命中（<=1 技能）占 40.6%，以下全是 >=8 份 JD 出现的无歧义标准词。
+    "websocket",
+    "linux",
+    "rag",
+    "mcp",
+    "llm",
+    "langchain",
+    "vue",
+    "git",
+    "ollama",
+    "playwright",
+    "pytorch",
+    "tensorflow",
+    "nlp",
+    "gpu",
+    "vllm",
+    "restful",
+    "css",
+    "elasticsearch",
+    "deepseek",
+    "aigc",
+    "flink",
+    "aiops",
+    "langgraph",
+    "transformer",
+    "excel",
+    "embedding",
+    "hive",
 ]
 
 

@@ -17,7 +17,7 @@ const baselineIndex = args.indexOf("--baseline");
 const baselinePath =
   baselineIndex >= 0 && args[baselineIndex + 1]
     ? args[baselineIndex + 1]
-    : "docs/reports/css-debt-phase4-2026-10-24.json";
+    : "docs/reports/css-debt-2026-10-25.json";
 
 const baseline = JSON.parse(readFileSync(baselinePath, "utf8"));
 const current = JSON.parse(

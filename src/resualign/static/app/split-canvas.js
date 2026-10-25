@@ -12,6 +12,7 @@ import {
   state,
   toast,
 } from "./events.js";
+import { icon } from "./icons.js";
 import {
   PROVENANCE_LABELS,
   alignProgressPercent,
@@ -112,8 +113,11 @@ function alignmentFailureKind(message, status) {
   return "other";
 }
 
-/* P0-2: 失败/取消/过期横幅只承担「讲清失败原因」职责，不再放第二个
- * 「重新运行对齐」按钮 —— 重试收敛到顶栏危险级单入口（workbenchPrimaryButtonHtml）。 */
+/* P0-2 → 方案 A（2026-10-25，用户拍板）：失败/取消/过期横幅采用
+ * 「1 主 + 下拉」——主 CTA = 换节点重试（model_failed/timeout 类失败的
+ * 对症动作，btn-primary）；「重新运行对齐」「节点设置」收进折叠下拉
+ * （默认不可见，展开才成为入口）。顶栏「重新运行对齐」仍是全局单入口
+ * （workbenchPrimaryButtonHtml），两处角色不同：横幅主推对症动作。 */
 function workbenchAlignmentErrorBanner(alignment) {
   const status = alignment && alignment.status;
   if (!["failed", "canceled", "expired"].includes(status)) return "";
@@ -135,9 +139,17 @@ function workbenchAlignmentErrorBanner(alignment) {
     (meta.length ? `<span class="align-error-meta">${esc(meta.join(" · "))}</span>` : "") +
     /* 内容门禁失败时「换节点重试」是误诊：问题在被拦截的改写内容，不在模型
      * 节点。这里不再给付费重试入口，改用下方主区的「被拦截建议」摘要卡。 */
+    /* 方案 A：内容门禁失败不给付费入口（下方「被拦截建议」摘要卡接手）；
+     * 其余失败类给 1 主（换节点重试）+ 折叠下拉（重跑/节点设置）。 */
     (kind === "content_gate"
       ? ""
-      : `<button class="btn btn-outline btn-sm" type="button" data-action="show-node-picker">换节点重试</button>`) +
+      : `<button class="btn btn-primary btn-sm" type="button" data-action="show-node-picker">换节点重试</button>` +
+        `<details class="retry-more" data-retry-more>` +
+        `<summary class="retry-more__trigger" aria-label="更多重试选项" title="更多重试选项">${icon("more-horizontal", 20)}</summary>` +
+        `<div class="retry-more__menu">` +
+        `<button class="btn btn-ghost btn-sm" type="button" data-action="run-alignment">重新运行对齐</button>` +
+        `<a class="btn btn-ghost btn-sm" href="#/settings">节点设置</a>` +
+        `</div></details>`) +
     `</div>`
   );
 }
