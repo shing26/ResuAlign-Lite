@@ -35,6 +35,9 @@ SKILL_ALIASES: Dict[str, str] = {
     "ml": "machine learning",
     "nodejs": "node.js",
     "vue.js": "vue",
+    # qwen2.5 / qwen3 等带版本号的写法归一到 qwen（版本会过期，词不会）
+    "qwen2.5": "qwen",
+    "qwen3": "qwen",
 }
 
 # Canonical skill vocabulary detected directly (word-boundary, multi-word
@@ -94,6 +97,15 @@ CANONICAL_SKILLS: List[str] = [
     "excel",
     "embedding",
     "hive",
+    # C 组（2026-10-25，用户逐词拍板「全要」）：AI Agent 岗位市场的
+    # 工具/框架词。已知取舍：agent 会命中 User-Agent 这类普通名词义、
+    # claude/codex 是工具名兼人名——在中文 JD 语料里技能义占绝对主导。
+    "agent",
+    "claude",
+    "codex",
+    "qwen",
+    "openai",
+    "autogen",
 ]
 
 

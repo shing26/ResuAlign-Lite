@@ -67,6 +67,34 @@ def test_vocab_batch_a_alias_and_case():
     assert "llm" not in signals["matched_skills"]
 
 
+def test_vocab_batch_c_user_approved():
+    """C 组（2026-10-25 用户逐词拍板「全要」）：AI Agent 岗位市场工具词。"""
+    signals = compute_match_signals(
+        "用 Claude Code 与 AutoGen 做 Agent 编排，调 OpenAI API",
+        "需要 Agent 开发经验；熟悉 Claude / AutoGen / OpenAI / Qwen2.5 者优先",
+    )
+    matched = set(signals["matched_skills"])
+    # 两侧都出现（resume 有据）的：agent/claude/autogen/openai
+    assert {"agent", "claude", "autogen", "openai"} <= matched
+    # qwen2.5 只在 JD 侧出现 → 只计数，绝不出现在字符串字段
+    assert "qwen" not in matched
+    assert "qwen" not in str(signals)
+
+
+def test_vocab_batch_c_qwen_alias_and_boundary():
+    # qwen2.5 别名归一：简历写 Qwen2.5、JD 写 qwen 也能对上
+    signals = compute_match_signals("微调过 Qwen2.5-72B", "需要 Qwen 经验")
+    assert "qwen" in signals["matched_skills"]
+    # codex 不得命中 codename / codec（\b 边界）
+    signals = compute_match_signals("codec / codename 设计", "需要 codex CLI 经验")
+    assert "codex" not in signals["matched_skills"]
+    # claude 不得命中 claude沙箱之外的人名场景？——无可靠边界，记录取舍：
+    # \bclaude\b 在中文 JD 语料里技能义占绝对主导（用户拍板纳入），
+    # 这里锁定的是大小写不敏感匹配本身
+    signals = compute_match_signals("CLAUDE Code 重度用户", "需要 Claude 经验")
+    assert "claude" in signals["matched_skills"]
+
+
 def test_signal_line_resume_backed_only_and_format():
     signals = {"matched_skills": ["python", "redis"], "jd_skill_total": 5}
     line = signal_line(signals)
