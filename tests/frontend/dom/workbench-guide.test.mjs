@@ -148,12 +148,22 @@ test("failed alignment renders classified banner with stage+elapsed and no inner
   assert.doesNotMatch(bannerHtml, /data-resume-canvas-empty/, "failed state hides first-run guide");
   const banner = document.querySelector("[data-align-error-banner]");
   assert.ok(banner, "banner element rendered");
+  /* 方案 A（2026-10-25）：横幅「1 主 + 下拉」——主 CTA 是换节点重试（对症），
+   * 「重新运行对齐」只存在于折叠下拉里（默认不可见），顶栏仍是全局单入口。 */
+  const primary = banner.querySelector('[data-action="show-node-picker"]');
+  assert.ok(primary, "banner primary CTA: 换节点重试");
+  assert.match(primary.textContent, /换节点重试/);
   assert.equal(
-    banner.querySelectorAll('[data-action="run-alignment"]').length,
-    0,
-    "banner carries no inner rerun button (top-bar single entry)",
+    banner.querySelectorAll('[data-action="run-alignment"]:not([hidden])').length,
+    1,
+    "rerun exists only inside the collapsed dropdown",
   );
-  const topButton = document.querySelector('[data-action="run-alignment"]');
+  const retryMore = banner.querySelector("details[data-retry-more]");
+  assert.ok(retryMore, "collapsed retry dropdown rendered");
+  assert.equal(retryMore.open, false, "dropdown collapsed by default");
+  const topButton = document.querySelector(
+    '.wb-context-actions [data-action="run-alignment"]',
+  );
   assert.ok(topButton, "top-bar rerun button stays as the single entry");
   assert.match(topButton.textContent, /重新运行对齐/);
 });

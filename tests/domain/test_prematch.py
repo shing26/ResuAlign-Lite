@@ -39,6 +39,34 @@ def test_jd_only_terms_never_returned_as_strings():
     assert "terraform" not in str(signals)
 
 
+# ---------------------------------------------------------------- A 组扩充的误报防线
+
+
+def test_vocab_batch_a_word_boundaries():
+    """A 组词的边界误报（2026-10-25 离线分析后人工筛过的案例）。"""
+    # git 不得命中 GitHub（后续词是词字符，\b 不成立）
+    signals = compute_match_signals("GitHub Actions CI", "需要 git 经验")
+    assert signals["matched_skills"] == []  # GitHub ≠ git
+    # css 不得命中 scss/less 变体
+    signals = compute_match_signals("熟悉 SCSS 预处理", "需要 CSS 能力")
+    assert signals["matched_skills"] == []  # SCSS ≠ css
+    # excel 不得命中 excellent
+    signals = compute_match_signals("excellent communication", "需要 Excel 报表")
+    assert signals["matched_skills"] == []
+
+
+def test_vocab_batch_a_alias_and_case():
+    # vue.js 别名归一到 vue
+    signals = compute_match_signals("Vue.js 单页应用", "需要 Vue 经验")
+    assert "vue" in signals["matched_skills"]
+    # vLLM 大小写变体由 IGNORECASE 覆盖
+    signals = compute_match_signals("vLLM 部署", "需要 vLLM 推理")
+    assert "vllm" in signals["matched_skills"]
+    # llm 不得命中 hell 之类（\b 边界）
+    signals = compute_match_signals("hello world", "需要 LLM 微调经验")
+    assert "llm" not in signals["matched_skills"]
+
+
 def test_signal_line_resume_backed_only_and_format():
     signals = {"matched_skills": ["python", "redis"], "jd_skill_total": 5}
     line = signal_line(signals)

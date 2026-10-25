@@ -13104,3 +13104,53 @@ select,
     transition: none;
   }
 }
+
+/* =====================================================================
+ * 方案 A（2026-10-25）：模型失败横幅「1 主 + 下拉」的折叠菜单
+ * —— 结构复用 board-more 的 details/summary 模式，样式按横幅密度收紧。
+ * ===================================================================== */
+.align-error-banner {
+  position: relative; /* 下拉菜单的定位基准 */
+}
+
+.retry-more {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.retry-more__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color var(--dur-base), border-color var(--dur-base), color var(--dur-base);
+}
+
+.retry-more__trigger:hover,
+.retry-more[open] .retry-more__trigger {
+  border-color: var(--line);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.retry-more__menu {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 148px;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-popover);
+}
