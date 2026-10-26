@@ -14,6 +14,7 @@ from typing import Any, Optional
 from fastapi import Request
 
 from resualign.engine.role_router import call_with_role
+from resualign.engine.tailor import strip_metric_placeholders
 from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
 from resualign.llm_usage import reset_llm_tenant, set_llm_tenant
 
@@ -111,6 +112,26 @@ async def _read_timeline_extras(request: Request) -> dict[str, Any]:
         return {}
     return {key: payload.get(key) for key in context._TIMELINE_FIELDS if key in payload}
 
+def _strip_placeholders_in_diffs(diffs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Strip legacy metric placeholders from ``proposed`` before projecting.
+
+    2026-10-26：旧行（落库前注入占位串）通过 API 投影即变干净，用户可
+    直接采纳；不改写库内原始数据。
+    """
+    cleaned: list[dict[str, Any]] = []
+    for diff in diffs:
+        if not isinstance(diff, dict):
+            cleaned.append(diff)
+            continue
+        proposed = diff.get("proposed")
+        if isinstance(proposed, str) and proposed:
+            stripped = strip_metric_placeholders(proposed)
+            if stripped != proposed:
+                diff = {**diff, "proposed": stripped}
+        cleaned.append(diff)
+    return cleaned
+
+
 def _apply_diffs(base_text: str, diffs: list[dict[str, Any]], accepted_indices: list[int]) -> tuple[str, int]:
     """Apply accepted diffs to base text in a deterministic, ordered way."""
     draft = base_text
@@ -121,7 +142,9 @@ def _apply_diffs(base_text: str, diffs: list[dict[str, Any]], accepted_indices: 
         diff = diffs[index]
         diff_type = diff.get('type', 'modify')
         original = diff.get('original') or ''
-        proposed = diff.get('proposed') or ''
+        # 历史建议里可能残留「[待人工确认：…]」模板串；写进草稿前剥离，
+        # 保证采纳后的简历正文干净（2026-10-26 P0 成效审计）。
+        proposed = strip_metric_placeholders(diff.get('proposed') or '')
         if diff_type == 'modify' and original and proposed:
             if original in draft:
                 draft = draft.replace(original, proposed, 1)
@@ -568,8 +591,10 @@ def _session_sections_from_job(
             "reason": alignment_reason,
             "error": alignment_error or None,
             "code": None,
-            "diffs": job.get("diffs") or [],
-            "invalid_diffs": job.get("invalid_diffs") or [],
+            "diffs": _strip_placeholders_in_diffs(job.get("diffs") or []),
+            "invalid_diffs": _strip_placeholders_in_diffs(
+                job.get("invalid_diffs") or []
+            ),
             "draft": job.get("draft"),
             "eval_score": job.get("eval_score"),
             "notice": alignment_notice(
