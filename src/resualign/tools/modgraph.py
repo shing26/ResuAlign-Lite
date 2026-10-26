@@ -52,6 +52,7 @@ LAYERS = [
         (
             "store_base", "job_library/", "workspace", "settings_store",
             "llm_usage", "cache", "secret_box", "alignment_lifecycle", "jobs",
+            "vector_index",
         ),
     ),
     ("可观测", ("observability",)),
