@@ -4333,3 +4333,71 @@ export function ruleFormHtml() {
     </form>`;
 }
 
+
+/* ADR-0065：简历 与 岗位排序的纯渲染函数（DOM 绑定在 kanban.js）。
+ * 用户可见文案只出现「匹配度分位」「有据技能」；不出现向量 / 相似度 / RAG，
+ * 也不把排序分说成概率（ADR-0065 决策 10）。 */
+const RECOMMENDED_DEGRADED_HINTS = {
+  disabled: "推荐功能未启用。",
+  index_empty: "索引还没建好，先按已有匹配分排序。",
+  embedder_unavailable: "本地模型未就绪，先按已有匹配分排序。",
+  embedder_failed: "本地模型调用失败，先按已有匹配分排序。",
+  resume_missing: "没有找到这份简历。",
+  resume_text_missing: "这份简历还没有正文。",
+};
+
+export function recommendedJobsHtml(payload) {
+  if (payload && payload.enabled === false) {
+    return '<div class="muted small">推荐功能未启用。</div>';
+  }
+  const items = Array.isArray(payload && payload.items) ? payload.items : [];
+  const hint =
+    payload && payload.degraded
+      ? RECOMMENDED_DEGRADED_HINTS[payload.reason] || "先按已有匹配分排序。"
+      : "";
+  if (!items.length) {
+    return (
+      '<div class="muted small">' +
+      esc(hint || "暂无推荐：先让岗位库里有可排序的岗位。") +
+      "</div>"
+    );
+  }
+  const rows = items
+    .map((item) => {
+      const why = (item && item.why) || {};
+      const percentile =
+        typeof why.semantic_percentile === "number"
+          ? "匹配度分位 " + Math.round(why.semantic_percentile)
+          : "";
+      const skills =
+        Array.isArray(why.skill_hits) && why.skill_hits.length
+          ? "有据技能：" + why.skill_hits.map((skill) => esc(skill)).join("、")
+          : "";
+      const meta = [item.company, item.location, item.job_function]
+        .filter(Boolean)
+        .map((value) => esc(value))
+        .join(" · ");
+      return (
+        '<div class="job-row" data-job-id="' +
+        esc(item.job_id) +
+        '">' +
+        '<div class="job-row__main">' +
+        '<a class="job-row__title" href="#/workspace?job_id=' +
+        encodeURIComponent(item.job_id || "") +
+        '">' +
+        esc(item.title) +
+        "</a>" +
+        '<span class="job-row__meta">' +
+        meta +
+        "</span>" +
+        '<span class="muted small">' +
+        [percentile, skills].filter(Boolean).join(" · ") +
+        "</span>" +
+        "</div></div>"
+      );
+    })
+    .join("");
+  return (
+    (hint ? '<div class="muted small">' + esc(hint) + "</div>" : "") + rows
+  );
+}
