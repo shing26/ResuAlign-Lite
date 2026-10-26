@@ -909,3 +909,54 @@ def test_job_list_prematch_absent_when_disabled(monkeypatch):
     r = client.get("/api/jobs")
     job = next(j for j in r.json() if j["job_id"] == created["job_id"])
     assert "prematch" not in job
+
+
+def test_accept_workbench_diffs_falls_back_to_persisted_suggestions():
+    """2026-10-26（P2）：历史运行过期后，采纳仍应可用——回退到 diffs_json。
+
+    修复前：accept 只查内存 job registry，旧岗位（19 个可用建议）在 UI 上
+    看得见建议却无法采纳，返回 404「Workbench job not found」。
+    """
+    from unittest.mock import patch
+
+    created = client.post(
+        "/api/jobs",
+        json={"title": "Fallback Job", "jd_text": "需要 Python 与 Kubernetes"},
+    )
+    assert created.status_code in (200, 201)
+    job = created.json()
+    user = api_module._users.get_or_create_personal_user()
+    resume = api_module._resumes.create_master_resume(
+        user["user_id"], "Master Fallback", "负责后端开发\n熟悉 Python"
+    )
+    api_module._jobs.update_job(
+        user["user_id"],
+        job["job_id"],
+        workbench_resume_id=resume["resume_id"],
+    )
+    api_module._jobs.save_alignment(
+        user["user_id"],
+        job["job_id"],
+        diffs=[
+            {
+                "diff_id": "d1",
+                "type": "modify",
+                "original": "负责后端开发",
+                "proposed": "独立交付后端服务（FastAPI）",
+                "reason": "强化交付事实",
+            }
+        ],
+        alignment_status="succeeded",
+        usable_diffs=1,
+    )
+    # 内存 registry 里没有这条运行（模拟历史过期）
+    with patch.object(api_module._registry, "get", return_value=None):
+        resp = client.post(
+            f"/api/jobs/{job['job_id']}/workbench/accept",
+            json={"job_id": job["job_id"], "accepted_indices": [0]},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["accepted_count"] == 1
+    assert "独立交付后端服务" in body["draft"]
+    assert "待人工确认" not in body["draft"]

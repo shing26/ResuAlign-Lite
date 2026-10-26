@@ -51,6 +51,31 @@ def report_has_gap(gap_report: Any) -> bool:
     return gap_report_has_gap(gap_report)
 
 
+def strip_placeholders_in_diffs(
+    diffs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Strip legacy metric placeholders from ``proposed`` before projecting.
+
+    2026-10-26（P0 成效审计）：占位串「[待人工确认：…]」历史上被注入
+    `proposed`，会成为简历正文。投影层统一剥离，让旧建议立刻可采纳，
+    不改写库内原始数据。
+    """
+    from ...engine.tailor import strip_metric_placeholders
+
+    cleaned: list[dict[str, Any]] = []
+    for diff in diffs:
+        if not isinstance(diff, dict):
+            cleaned.append(diff)
+            continue
+        proposed = diff.get("proposed")
+        if isinstance(proposed, str) and proposed:
+            stripped = strip_metric_placeholders(proposed)
+            if stripped != proposed:
+                diff = {**diff, "proposed": stripped}
+        cleaned.append(diff)
+    return cleaned
+
+
 def split_verified_diffs(
     raw_diffs: list[dict[str, Any]],
     invalid_diffs: list[dict[str, Any]],

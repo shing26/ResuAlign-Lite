@@ -28,6 +28,7 @@ from ..schemas import (
     WorkbenchRewriteResponse,
     WorkbenchRunRequest,
 )
+from ..services.alignment_rules import strip_placeholders_in_diffs
 from ..services.jobs import (
     PreanalyzeUnavailable,
     _match_inputs,
@@ -290,6 +291,16 @@ def _prematch_for(
     }
 
 
+def _clean_job_diff_placeholders(job: dict[str, Any]) -> dict[str, Any]:
+    """Strip legacy metric placeholders from projected diffs (2026-10-26)."""
+    cleaned = dict(job)
+    for key in ("diffs", "invalid_diffs"):
+        value = cleaned.get(key)
+        if isinstance(value, list):
+            cleaned[key] = strip_placeholders_in_diffs(value)
+    return cleaned
+
+
 @router.get('/api/jobs')
 def list_library_jobs(job_function: str | None=None, seniority: str | None=None, status: str | None=None, search: str | None=None, limit: int=100, offset: int=0, sort: str="updated_at_desc", user: dict[str, Any]=Depends(get_current_user)):
     """List library jobs with optional filters."""
@@ -309,7 +320,9 @@ def list_library_jobs(job_function: str | None=None, seniority: str | None=None,
     except context.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     resume_cache: dict[str, str] = {}
-    for job in jobs:
+    for position, job in enumerate(jobs):
+        job = _clean_job_diff_placeholders(job)
+        jobs[position] = job
         job["match_stale"] = _match_stale(user['user_id'], job)
         prematch = _prematch_for(user['user_id'], job, resume_cache)
         if prematch:
@@ -321,6 +334,7 @@ def get_library_job(job_id: str, user: dict[str, Any]=Depends(get_current_user))
     """Return one library job, falling back to an analysis job snapshot."""
     job = context._jobs.get_job(user['user_id'], job_id)
     if job is not None:
+        job = _clean_job_diff_placeholders(job)
         job["match_stale"] = _match_stale(user['user_id'], job)
         prematch = _prematch_for(user['user_id'], job, {})
         if prematch:
@@ -539,11 +553,21 @@ def accept_workbench_diffs(job_id: str, req: WorkbenchAcceptRequest, user: dict[
     job = context._jobs.get_job(user['user_id'], job_id)
     if job is None:
         raise HTTPException(status_code=404, detail='Job not found')
-    analysis_job = context._registry.get(job.get('workbench_job_id') or '', tenant_id=user['user_id'])
-    if analysis_job is None or analysis_job.status != 'succeeded':
-        raise HTTPException(status_code=404, detail='Workbench job not found or not finished')
-    result = analysis_job.result or {}
-    diffs = result.get('diffs') or []
+    # 2026-10-26（P2 自用线卡点）：此前只从内存 job registry 取建议，历史
+    # 运行过期后「建议看得见、却无法采纳」（19 个可用建议岗位全部命中）。
+    # 回退顺序：registry 结果 → 持久化的 diffs_json。
+    diffs: list[dict[str, Any]] | None = None
+    analysis_job = context._registry.get(
+        job.get('workbench_job_id') or '', tenant_id=user['user_id']
+    )
+    if analysis_job is not None and analysis_job.status == 'succeeded':
+        diffs = (analysis_job.result or {}).get('diffs') or []
+    if diffs is None:
+        diffs = job.get('diffs') or []
+        if not diffs:
+            raise HTTPException(
+                status_code=404, detail='Workbench job not found or not finished'
+            )
     pinned = context._resumes.get_master_resume(user['user_id'], job.get('workbench_resume_id') or '')
     if pinned is None:
         raise HTTPException(status_code=404, detail='Pinned master resume not found')
