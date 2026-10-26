@@ -24,6 +24,15 @@ Phase A–E + CSS 架构重构 B0–B7），每批改动挂一篇或多篇 ADR�
 
 ### Added
 
+- ADR-0065 B1：简历 × 岗位确定性排序底座——`engine/embeddings.py`（本地 bge-m3 /
+  OpenAI 兼容端点，超长递归切分 + 池化）、`vector_index.py` + 迁移 47（两张向量表、
+  sha256 增量、JD 技能预存）、`api/services/resume_ranking.py`（rebuild / recommend /
+  best-resume / 近重复提示，全部降级不阻断），以及 4 个只读接口；
+  默认关（`RESUALIGN_RESUME_RANKING=0`），评测与协议见
+  [`docs/reports/resume-ranking-policy-eval-2026-10-27.md`](docs/reports/resume-ranking-policy-eval-2026-10-27.md)。
+- ADR-0065 B2：导入近重复提示接线（import 状态新增 `similar_existing`，只提示不拦截，
+  失败静默）+ 岗位库「按简历推荐」唯一入口（`kanban.js` 按钮与面板、
+  `format.js::recommendedJobsHtml` 纯渲染、六个降级 reason 的中文映射、禁用词断言）。
 - 角色级真实延迟校准工具 [`benchmarks/role_latency_benchmark.py`](benchmarks/role_latency_benchmark.py)：
   读取配置节点后复制到临时 store，按角色输出 p50/p95/p99、当前 timeout
   和余量；120B 实测记录见
