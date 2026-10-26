@@ -3,11 +3,13 @@ import json
 import pytest
 
 from resualign.engine.tailor import (
+    METRIC_CONFIRM_HINT,
     METRIC_PLACEHOLDER,
     _ensure_metric_placeholder,
     _has_quantified_metric,
     parse_diff_with_provenance,
     rewrite_bullet,
+    strip_metric_placeholders,
     tailor_resume,
 )
 from resualign.models import TailoredResume
@@ -319,8 +321,8 @@ def test_ensure_metric_placeholder_appends_only_when_missing():
     assert _ensure_metric_placeholder(legacy) == legacy
 
 
-def test_parse_diff_with_provenance_appends_placeholder_for_unquantified_proposal():
-    """P2 决策 1：门控后需 section（叙事章节）+ reason（量化意图）才追加。"""
+def test_parse_diff_with_provenance_notes_metric_on_reason_only():
+    """2026-10-26：门控后提醒落 reason，proposed 保持可采纳（不再注入占位串）。"""
     diff, valid = parse_diff_with_provenance(
         {
             "type": "modify",
@@ -333,7 +335,8 @@ def test_parse_diff_with_provenance_appends_placeholder_for_unquantified_proposa
         "负责后端开发",
     )
     assert valid is True
-    assert METRIC_PLACEHOLDER in diff.proposed
+    assert METRIC_PLACEHOLDER not in diff.proposed
+    assert METRIC_CONFIRM_HINT.strip("；") in diff.reason
 
 
 def test_parse_diff_with_provenance_gates_placeholder_by_reason_and_section():
@@ -381,7 +384,8 @@ def test_parse_diff_with_provenance_placeholder_forced_by_prompt_focus():
         "负责后端开发",
         prompt_focus="quantified",
     )
-    assert METRIC_PLACEHOLDER in diff.proposed
+    assert METRIC_PLACEHOLDER not in diff.proposed
+    assert METRIC_CONFIRM_HINT.strip("；") in diff.reason
 
 
 def test_parse_diff_with_provenance_keeps_existing_metric():
@@ -398,10 +402,11 @@ def test_parse_diff_with_provenance_keeps_existing_metric():
     assert diff.proposed == "吞吐量提升 30%"
 
 
-def test_rewrite_bullet_appends_placeholder_for_quantified_instruction():
+def test_rewrite_bullet_notes_metric_on_reason_for_quantified_instruction():
     mock = MockLLM(result={"proposed": "构建高吞吐后端服务", "reason": "强调指标"})
     diff = rewrite_bullet(mock, "负责后端开发", "quantified")
-    assert METRIC_PLACEHOLDER in diff.proposed
+    assert METRIC_PLACEHOLDER not in diff.proposed
+    assert METRIC_CONFIRM_HINT.strip("；") in diff.reason
 
 
 def test_rewrite_bullet_does_not_append_placeholder_for_concise_instruction():
@@ -873,3 +878,35 @@ def test_tailor_filters_unsupported_missing_keywords_from_editor_prompt():
     tailor_resume(mock, resume, gap)
     assert "Redis" in mock.last_user
     assert "设计模式" not in mock.last_user
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-26 P0 成效修复：指标占位串不进正文
+# ---------------------------------------------------------------------------
+
+
+def test_strip_metric_placeholders_removes_legacy_annotation():
+    legacy = "构建高吞吐服务 [待人工确认：耗时降低 X% / 支撑 QPS 达 Y]"
+    assert strip_metric_placeholders(legacy) == "构建高吞吐服务"
+    # 无占位串时原样返回（含多行结构）
+    plain = "构建服务\n- 第二条"
+    assert strip_metric_placeholders(plain) == plain
+    assert strip_metric_placeholders("") == ""
+
+
+def test_apply_diffs_strips_legacy_placeholder_from_draft():
+    """采纳历史建议时，写进草稿的正文不能再带占位串。"""
+    from resualign.api.services.workbench import _apply_diffs
+
+    base = "负责后端开发"
+    diffs = [
+        {
+            "type": "modify",
+            "original": "负责后端开发",
+            "proposed": "构建高吞吐服务 [待人工确认：耗时降低 X% / 支撑 QPS 达 Y]",
+        }
+    ]
+    draft, applied = _apply_diffs(base, diffs, [0])
+    assert applied == 1
+    assert "待人工确认" not in draft
+    assert draft == "构建高吞吐服务"

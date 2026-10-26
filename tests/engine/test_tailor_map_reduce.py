@@ -97,7 +97,8 @@ def test_map_reduce_targets_first_bullet_by_fallback():
     d = result.diffs[0]
     assert d.original == "使用 Python 开发后端服务"
     assert d.proposed.startswith("使用 Python 开发后端服务 (high concurrency)")
-    assert METRIC_PLACEHOLDER in d.proposed
+    assert METRIC_PLACEHOLDER not in d.proposed
+    assert "指标待补真实数据" in d.reason
     assert d.section == "工作经历"
     assert d.provenance_state == "verified"
     # source_span must point into the full resume text (not the bare bullet).

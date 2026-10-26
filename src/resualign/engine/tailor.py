@@ -67,7 +67,11 @@ BULLET_REWRITE_PROMPT = """PROMPT_VERSION: bullet_rewrite/v3
 - proposed 中每个技术名词与数字都能在原文找到依据；无新增事实；长度在上限内；
 - proposed 不含「负责/参与/协助/了解/熟悉」等弱动词；
 - 只输出 JSON，无 markdown fence，无解释文字。"""
+# 历史措辞保留：旧 draft / 旧 diffs 里可能已有这些串，靠 _METRIC_PLACEHOLDER_RE
+# 识别并剥离。新建议不再把它们写进 proposed（见 _note_metric_confirmation）。
 METRIC_PLACEHOLDER = "[待人工确认：请将 X% / Y 换成你的真实数据；无法量化请删除本括号]"
+# 2026-10-26（P0 成效审计）：提醒落在 reason，不落正文。
+METRIC_CONFIRM_HINT = "；指标待补真实数据"
 _METRIC_HINT_RE = re.compile(
     r"(?:\d+(?:\.\d+)?\s*(?:%|倍|万|亿|ms\b|s\b|qps\b|tps\b))|"
     r"\b(?:qps|tps|rt|pv|uv|roi)\b|"
@@ -202,6 +206,31 @@ def _normalize_whitespace(text: str) -> str:
 
 def _has_quantified_metric(text: str) -> bool:
     return bool(_METRIC_HINT_RE.search(text or ""))
+
+
+def _note_metric_confirmation(diff: DiffItem) -> None:
+    """Record the metric reminder on ``reason``, never on ``proposed``.
+
+    2026-10-26（P0 成效审计）：此前 `_ensure_metric_placeholder` 把
+    「[待人工确认：…]」直接拼进 proposed，而 proposed 会成为简历正文——
+    真实库里 45%（18/40）的可用建议带着模板串，用户因此无法采纳。
+    同一提醒现在只落在 reason（卡片可见），正文保持可采纳；历史文本由
+    `strip_metric_placeholders` 防御性剥离。
+    """
+    hint = METRIC_CONFIRM_HINT
+    if hint.strip("；") in (diff.reason or ""):
+        return
+    base = (diff.reason or "").rstrip("；;。 ")
+    diff.reason = f"{base}{hint}" if base else hint.lstrip("；")
+
+
+def strip_metric_placeholders(text: str) -> str:
+    """Remove legacy 「[待人工确认：…]」 annotations from resume-bound text."""
+    if not text:
+        return text
+    cleaned = _METRIC_PLACEHOLDER_RE.sub(" ", text)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    return "\n".join(line.rstrip() for line in cleaned.split("\n"))
 
 
 def _ensure_metric_placeholder(text: str) -> str:
@@ -603,7 +632,8 @@ def parse_diff_with_provenance(
         and diff.proposed
         and _wants_metric_placeholder(diff.section, diff.reason, prompt_focus)
     ):
-        diff.proposed = _ensure_metric_placeholder(diff.proposed)
+        # 提醒进 reason，正文（proposed）保持可采纳（2026-10-26）。
+        _note_metric_confirmation(diff)
     return diff, valid
 
 
@@ -1093,11 +1123,7 @@ def rewrite_bullet(
         DiffItemSchema,
         model=resolved_model,
     )
-    proposed = _ensure_metric_placeholder(
-        str(result.get("proposed") or "").strip()
-    ) if instruction in {"quantified", "high_concurrency"} else str(
-        result.get("proposed") or ""
-    ).strip()
+    proposed = str(result.get("proposed") or "").strip()
     diff = DiffItem(
         diff_id=uuid.uuid4().hex,
         type="modify",
@@ -1119,6 +1145,10 @@ def rewrite_bullet(
         _mark_unsupported(diff, unsupported)
     else:
         diff.provenance_state = "verified"
+    # 量化/高并发指令：提醒「指标待补」落在 reason，不进 proposed 正文
+    # （2026-10-26 P0 成效审计）。
+    if instruction in {"quantified", "high_concurrency"}:
+        _note_metric_confirmation(diff)
     if cache is not None and diff.provenance_state == "verified":
         cache.put(
             tenant,
