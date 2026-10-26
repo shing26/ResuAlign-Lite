@@ -28,6 +28,7 @@ import {
   jobListRow,
   jobsEmptyGuideHtml,
   options,
+  recommendedJobsHtml,
 } from "./format.js";
 import { icon } from "./icons.js";
 
@@ -337,6 +338,7 @@ export async function renderKanban(app) {
             </select>
           </label>
           <div class="jobs-tools" data-jobs-tools>
+            <button type="button" class="btn btn-outline btn-sm" data-recommended-toggle>按简历推荐</button>
             <button type="button" class="btn btn-outline btn-sm" data-action="preanalyze-pending">一键预分析</button>
             <button type="button" class="btn btn-outline btn-sm" data-action="batch-align-pending" data-batch-align>批量对齐</button>
             <button type="button" class="btn btn-primary btn-sm" data-action="show-add-job">添加岗位</button>
@@ -352,6 +354,7 @@ export async function renderKanban(app) {
         </div>
       </div>
     <div class="jobs-forms-mount" data-jobs-forms-mount></div>
+    <div class="card" data-recommended-panel hidden></div>
     <div class="board-toolbar" data-jobs-batch-mount></div>
     ${emptyGuide}
     ${filteredEmptyHtml}
@@ -391,6 +394,7 @@ export async function renderKanban(app) {
       renderKanban(app);
     });
   }
+  bindRecommendedPanel(app);
   bindBoardDrag(app);
   /* 工作状态筛选：纯前端视图筛选，切换后重渲染（不新增接口）。 */
   app.querySelectorAll("[data-work-status]").forEach((button) => {
@@ -431,6 +435,34 @@ export async function renderKanban(app) {
         }),
     ),
   );
+}
+
+/* ADR-0065：按简历推荐的唯一入口（工具栏按钮 + 一个卡片面板）。
+ * 任何失败都降级成一句提示，不弹错、不改任何岗位状态。 */
+function bindRecommendedPanel(app) {
+  const toggle = app.querySelector("[data-recommended-toggle]");
+  const panel = app.querySelector("[data-recommended-panel]");
+  if (!toggle || !panel) return;
+  toggle.addEventListener("click", async () => {
+    panel.hidden = !panel.hidden;
+    if (panel.hidden) return;
+    panel.innerHTML = '<div class="muted small">正在计算推荐…</div>';
+    try {
+      const resumes = await api("/api/master-resumes");
+      if (!Array.isArray(resumes) || !resumes.length) {
+        panel.innerHTML = '<div class="muted small">先在简历中心添加一份主简历。</div>';
+        return;
+      }
+      const payload = await api(
+        "/api/jobs/recommended?limit=10&resume_id=" +
+          encodeURIComponent(resumes[0].resume_id),
+      );
+      panel.innerHTML = recommendedJobsHtml(payload);
+    } catch (error) {
+      console.error("recommended jobs failed:", error);
+      panel.innerHTML = '<div class="muted small">暂时无法生成推荐。</div>';
+    }
+  });
 }
 
 function prefersCoarsePointer() {

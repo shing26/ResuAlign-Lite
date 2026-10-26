@@ -12,20 +12,21 @@
 - 定位：**单机可复现的求职工作台 / 面试作品**，不宣称任何形态的生产上线。
 - 项目评分：`79/81（97.53%）`，**合格 · 优秀**，P0 均值 3.00（未触发一票否决）。
   详见 `D:\WorkBuddyData\项目评估结果\ResuAlign-Lite\20260928-后端-431790b9.md`。
-- CI：`main` 四阶段全绿（单元/契约、benchmark 门禁、Playwright、冷启动）。
+- CI：`main` 六阶段全绿（单元/契约、benchmark 门禁、Playwright、冷启动、CSS 预算、视觉快照）；本批改动以 PR CI 复核为准。
 
 ## 达标项（带口径）
 
 | 维度 | 读数 | 口径 | 复现 |
 | --- | --- | --- | --- |
-| 后端测试 | 1179 passed / 7 skipped | `main@7b17607` 全量 pytest | `PYTHONPATH=src python -m pytest tests/ -q` |
-| 后端覆盖率 | 89.18% | line coverage，硬门禁 85% | `PYTHONPATH=src python -m pytest --cov=resualign --cov-fail-under=85 tests/` |
-| 前端/扩展 | 553 passed | node:test | `node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs tests/extension/*.test.mjs` |
+| 后端测试 | 1408 passed / 7 skipped | 2026-10-27 全量 pytest（ADR-0065 B1/B2 之后） | `PYTHONPATH=src python -m pytest tests/ -q` |
+| 后端覆盖率 | ≥85%（最近快照 89.18%，`main@7b17607`） | line coverage，硬门禁 85%；本批由 CI 复核（本地 `--cov` 受 pydantic/pytest-cov 环境问题，未改动测试同样复现） | `PYTHONPATH=src python -m pytest --cov=resualign --cov-fail-under=85 tests/` |
+| 前端/扩展 | 623 passed | node:test（2026-10-27） | `node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs tests/extension/*.test.mjs` |
 | E2E | 7 passed | Playwright，假 LLM | `PYTHONPATH=src python -m pytest tests/e2e -q --e2e` |
 | 熔断降级 | 5/5 trial 恰第 3 次熔断 | 本地故障注入，零外部模型 | `python benchmarks/degradation_benchmark.py --trials 5` |
 | 容量曲线 | 拐点 = 并发 8，错误率 0 | CI Ubuntu 确定性 API 负载 | `python benchmarks/capacity_benchmark.py --check-baseline` |
 | 冷启动 | 原生 p50 616.8ms / 容器 808.5ms UID 1000 | CI Ubuntu，空数据卷 | `python benchmarks/cold_start_benchmark.py --check-baseline` |
 | 备份恢复 | 在线一致性备份 + 恢复演练 | 见 `backup-restore.md` | `scripts/backup.ps1` |
+| 简历×岗位排序（ADR-0065） | B1+B2 已实现，**默认关**；政策口径 P@10 +60 / +50 pp | 政策标签（非投递意愿），balanced 集 35+35 | `python benchmarks/resume_ranking_benchmark.py --selftest` + `docs/reports/resume-ranking-policy-eval-2026-10-27.md` |
 
 > CI 的 JUnit / coverage artifact 是**持续事实源**；上表是一次带 commit 与命令的
 > 固定快照，不承诺自动跟随测试数量。

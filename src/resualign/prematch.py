@@ -176,6 +176,22 @@ def compute_match_signals(resume_text: str, jd_text: str) -> Dict[str, object]:
     }
 
 
+def detect_skills(text: str) -> list[str]:
+    """Canonical skill names present in a text, without a resume pairing.
+
+    Deterministic and network-free. The ranking index uses this to store each
+    JD's own skill set, so keyword co-recall becomes a set intersection at
+    query time instead of a regex scan over every JD (which cost 2.2 s / 233
+    jobs in the ADR-0065 evaluation).
+    """
+    body = text or ""
+    return sorted(
+        canonical
+        for canonical, patterns in _PATTERNS.items()
+        if any(pattern.search(body) for pattern in patterns)
+    )
+
+
 def signal_line(signals: Dict[str, object] | None, max_skills: int = 3) -> str:
     """Render the one-line prompt context; resume-backed terms only.
 

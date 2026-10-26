@@ -9,7 +9,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Version](https://img.shields.io/badge/version-1.1.0-blue?style=flat-square)](./CHANGELOG.md)
-[![ADR](https://img.shields.io/badge/ADR-0001--0058-orange?style=flat-square)](./docs/adr/)
+[![ADR](https://img.shields.io/badge/ADR-0001--0065-orange?style=flat-square)](./docs/adr/)
 [![Security](https://img.shields.io/badge/Security-encrypted_at_rest-success?style=flat-square)](#-隐私与安全边界)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](#-质量保证与测试体系)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
@@ -231,7 +231,7 @@ ResuAlign-Lite/
 ├── resualign-collector.user.js # Tampermonkey JD 采集脚本
 ├── benchmarks/                 # 压测、角色时延校准、agent 评测床、对抗幻觉用例
 ├── contracts/                  # OpenAPI 契约快照与增量演进规范
-├── docs/adr/                   # 57 篇架构决策记录（0001–0058，0029 有意缺号）
+├── docs/adr/                   # 65 篇架构决策记录（0001–0065，0029 有意缺号）
 ├── docs/assets/                # README 效果对照图（由 scripts/make_readme_figures.py 生成）
 ├── tests/                      # pytest 主套件 + frontend/extension node 测试 + e2e
 ├── scripts/                    # 备份/恢复、Kill-9 演练、探针视频、README 图表生成
@@ -253,7 +253,7 @@ ResuAlign-Lite/
 - **加密是硬化而非沙箱**（ADR-0035 自陈）：能防落盘的明文密钥，不能防同一台机器上的高权限攻击者。
 - **真实改写质量取决于所配模型**：Ollama `qwen2.5:7b` 是已知能力地板；9 月真实对齐 4/5 零产出的归因见 issue #110 / #115，未达标红线列在 [docs/STATUS.md](docs/STATUS.md)。
 - **抓取已退役**：岗位来源只有油猴脚本、粘贴与 CSV 同步，不承诺任意站点抓取（`--jd-url` 已移除）。
-- **探针未收口**：ADR-0041 冻结令仍有效，app 侧新功能冻结，总闸见 issue #114；解冻条件与例外流程见 [docs/STATUS.md](docs/STATUS.md) 与 [docs/probe-window-plan-2026-09-16.md](docs/probe-window-plan-2026-09-16.md)。
+- **app 自用验证未过线**：ADR-0059 已取代 ADR-0041 的 app 冻结总闸，但 app 通过线仍是 3 份真实投递 JD（当前 1/3，总闸 #168）；不过线时新工作台与 ADR-0065 排序能力均保持默认关闭。探针阈值与 `dist_not_executed` 事实不变。
 
 ## 🛡️ 质量保证与测试体系
 
@@ -270,14 +270,16 @@ python -m pytest tests/e2e --e2e
 python tests/e2e/playwright_smoke.py    # 假 LLM 冒烟：独立端口自启自停，不烧额度
 ```
 
-**测试基线**（2026-10-14 实测，`c2f1b31`，串行全量 `python -m pytest tests/`）：**1262 passed / 7 skipped**，另有 1 个已知偶发失败——`tests/storage/test_wal_concurrency.py::test_cold_start_schema_race_on_shared_db`（并发冷启动竞态下报 `attempt to write a readonly database`，隔离重跑通过）；前端与扩展 `node --test` **585 passed / 0 failed**；E2E 收集 7 个用例，运行需 Playwright + Chromium，由 CI Stage 3 门禁。覆盖率门槛 85%（`pyproject.toml` `fail_under`）。CI 的 JUnit / coverage artifact 是持续事实源，本行是带日期与命令的历史快照。
+**测试基线**（2026-10-27 实测，全量 `python -m pytest tests/`）：**1408 passed / 7 skipped**，另有 1 个已知偶发失败——`tests/storage/test_wal_concurrency.py::test_cold_start_schema_race_on_shared_db`（并发冷启动竞态下报 `attempt to write a readonly database`，隔离重跑通过）；前端与扩展 `node --test` **623 passed / 0 failed**；E2E 收集 7 个用例，运行需 Playwright + Chromium，由 CI Stage 3 门禁。覆盖率门槛 85%（`pyproject.toml` `fail_under`）。CI 的 JUnit / coverage artifact 是持续事实源，本行是带日期与命令的历史快照。
 
-CI 四阶段（`.github/workflows/ci.yml`）：
+CI 六阶段（`.github/workflows/ci.yml`）：
 
 1. **Stage 1**：ruff 门禁 + README 出图漂移检查（`scripts/make_readme_figures.py --check`）+ 分层 ratchet（modgraph）+ 单元/契约测试（85% 覆盖率门槛）+ 前端/扩展 node:test 全量 + ESM import 图检查；
 2. **Stage 2**：时延/调用次数基准门禁 + 离线基准套件（15 用例）+ 降级故障注入 + 容量曲线基线门禁；
 3. **Stage 3**：关键路径 Playwright 冒烟（假 LLM，桌面 + 移动双视口）+ e2e 套件，失败自动落盘诊断产物；
-4. **Stage 4**：分层冷启动门禁（原生进程 + `docker build --no-cache` + 空数据卷容器启动到 `/health`，断言 UID 1000）。
+4. **Stage 4**：分层冷启动门禁（原生进程 + `docker build --no-cache` + 空数据卷容器启动到 `/health`，断言 UID 1000）；
+5. **Stage 5**：CSS 结构债预算棘轮（`scripts/css_budget.mjs`，只许变好）；
+6. **Stage 6**：20 张视觉快照与基线对比（advisory，不阻断合并）。
 
 ## 🤝 参与贡献
 
@@ -285,7 +287,7 @@ CI 四阶段（`.github/workflows/ci.yml`）：
 2. **新逻辑补测试**：`pytest` 全绿是合并前提；
 3. **门禁规则上游优先**：`gate.py` 与 `tests/fixtures/gate/` 是 true-tailor 的 vendor 副本，改规则先改上游再 re-sync；漂移由字节级哈希（`VENDOR.json`）与双向对拍测试（`TestDriftLockParity`）锁定；
 4. **前端范式**：原生 JS + 单文件 `@layer` CSS，不引入打包器。
-5. **先看冻结窗口**：ADR-0041 冻结令期间 app 侧新功能停摆（总闸 #114）；例外须逐项引用 ADR-0042 决定 6e 登记后再施工。
+5. **先看双主线顺序**：ADR-0059 以 app 真实自用验证优先（P0 总闸 #168），app 大改先挂 feature flag；探针判据按 ADR-0042 独立运行，二者不得互相顶替。
 6. **改图改生成器**：`docs/assets/*.svg` 是 `scripts/make_readme_figures.py` 的产物，`--check` 会拦下手改；图里的数字必须能追到仓库命令或文件。
 
 ## 📚 文档导航

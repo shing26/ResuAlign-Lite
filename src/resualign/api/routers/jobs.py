@@ -36,6 +36,13 @@ from ..services.jobs import (
     _match_stale,
     build_job_export,
 )
+from ..services.resume_ranking import (  # ADR-0065
+    best_resume,
+    index_status,
+    ranking_enabled,
+    recommend_jobs,
+    start_rebuild,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -155,6 +162,7 @@ def import_status(import_id: str, user: dict[str, Any]=Depends(get_current_user)
         'errors': batch['errors'],
         'analyzed': batch.get('analyzed', 0),
         'analyze_errors': batch.get('analyze_errors', []),
+        'similar_existing': batch.get('similar_existing', []),
     }
 
 
@@ -329,6 +337,50 @@ def list_library_jobs(job_function: str | None=None, seniority: str | None=None,
             job["prematch"] = prematch
     return jobs
 
+@router.get('/api/jobs/recommended')
+def recommended_jobs(
+    resume_id: str | None = None,
+    resume_text: str | None = None,
+    limit: int = 10,
+    status: str | None = None,
+    job_function: str | None = None,
+    seniority: str | None = None,
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Rank library jobs for one resume (ADR-0065; flag default off)."""
+    if resume_id and context._resumes.get_master_resume(
+        user['user_id'], resume_id
+    ) is None:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    result = recommend_jobs(
+        user['user_id'],
+        context._jobs,
+        context._resumes,
+        resume_id=resume_id,
+        resume_text=resume_text,
+        limit=limit,
+        status=status,
+        job_function=job_function,
+        seniority=seniority,
+    )
+    result["resume_id"] = resume_id
+    return result
+
+
+@router.get('/api/jobs/embeddings/status')
+def ranking_index_status(user: dict[str, Any] = Depends(get_current_user)):
+    """Index coverage/model drift for the ranking feature (read-only)."""
+    return index_status(user['user_id'])
+
+
+@router.post('/api/jobs/embeddings/rebuild', status_code=202)
+def rebuild_ranking_index(user: dict[str, Any] = Depends(get_current_user)):
+    """Start a background index build; one in-flight build per tenant."""
+    if not ranking_enabled():
+        return {"started": False, "enabled": False, "reason": "disabled"}
+    return start_rebuild(user['user_id'], context._jobs)
+
+
 @router.get('/api/jobs/{job_id}')
 def get_library_job(job_id: str, user: dict[str, Any]=Depends(get_current_user)):
     """Return one library job, falling back to an analysis job snapshot."""
@@ -341,6 +393,25 @@ def get_library_job(job_id: str, user: dict[str, Any]=Depends(get_current_user))
             job["prematch"] = prematch
         return job
     return context.job_status(job_id, user)
+
+
+@router.get('/api/jobs/{job_id}/best-resume')
+def best_resume_for_job(
+    job_id: str,
+    limit: int = 3,
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Suggest base resumes for one job; never writes workbench_resume_id."""
+    try:
+        return best_resume(
+            user['user_id'],
+            context._jobs,
+            context._resumes,
+            job_id,
+            limit=limit,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Job not found") from exc
 
 
 @router.get('/api/jobs/{job_id}/snapshots')

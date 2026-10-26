@@ -29,6 +29,7 @@ from ...observability import new_request_id, reset_request_id, set_request_id
 from . import llm_probe
 from .alignment_rules import is_noop_diff as _is_noop_diff  # noqa: F401
 from .alignment_writer import AlignmentOutcome, persist_alignment
+from .resume_ranking import IMPORT_HINT_LIMIT, similar_existing_for_texts
 
 logger = logging.getLogger(__name__)
 
@@ -706,6 +707,7 @@ def _run_import(import_id: str) -> None:
     if batch is None:
         return
     user = {'user_id': batch['user_id']}
+    created_for_hints: list[dict[str, str]] = []
     _llm_tenant_token = set_llm_tenant(batch['user_id'])
     try:
         for row in batch['rows']:
@@ -739,8 +741,13 @@ def _run_import(import_id: str) -> None:
                 continue
             batch['created'] += 1
             batch.setdefault('job_ids', []).append(job['job_id'])
+            if len(created_for_hints) < IMPORT_HINT_LIMIT:
+                created_for_hints.append(
+                    {'job_id': job['job_id'], 'jd_text': row.get('jd_text') or ''}
+                )
             if batch.get('preanalyze'):
                 _preanalyze_imported_job(batch, user, job)
+        _attach_similar_hints(batch, created_for_hints)
     except Exception as exc:
         logger.exception('Import batch %s failed', import_id)
         batch['errors'].append(f'Import batch failed: {exc}')
@@ -748,6 +755,32 @@ def _run_import(import_id: str) -> None:
         reset_llm_tenant(_llm_tenant_token)
         batch['done'] = True
         context._prune_import_batches()
+
+def _attach_similar_hints(batch, created_for_hints: list[dict[str, str]]) -> None:
+    """ADR-0065: near-duplicate hints for newly imported rows (suggestions only).
+
+    Import is already async, but hints must never change the batch outcome:
+    every failure is swallowed and the batch state stays unchanged.
+    """
+    if not created_for_hints:
+        return
+    try:
+        hints = similar_existing_for_texts(
+            batch['user_id'],
+            context._jobs,
+            [item['jd_text'] for item in created_for_hints],
+            exclude_ids=[item['job_id'] for item in created_for_hints],
+        )
+        rows = [
+            {'job_id': item['job_id'], 'similar': hint}
+            for item, hint in zip(created_for_hints, hints)
+            if hint
+        ]
+        if rows:
+            batch['similar_existing'] = rows
+    except Exception:  # hints are decorative; the import must not fail on them
+        logger.exception('near-duplicate hints failed for import batch')
+
 
 def _prune_import_batches(max_kept: int=50) -> None:
     """Drop finished import batches once the in-memory backlog grows."""

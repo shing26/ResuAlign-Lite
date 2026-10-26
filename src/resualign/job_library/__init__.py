@@ -16,6 +16,7 @@ from typing import Any, Optional, Sequence
 
 from ..alignment_lifecycle import gap_report_has_gap
 from ..store_base import UserStoreError, _SqliteStore
+from ..vector_index import VECTOR_TABLES_SQL
 from .models import (
     JOB_FUNCTIONS,
     JOB_STATUSES,
@@ -978,6 +979,10 @@ class JobLibraryStore(_SqliteStore):
             46,
             "ALTER TABLE library_jobs ADD COLUMN alignment_reason TEXT",
         ),
+        # 47（ADR-0065）：简历×岗位排序的两张向量表。DDL 与 vector_index.py
+        # 共用同一个常量（单一事实源），老库在启动时升级、新库由
+        # VectorIndex 首次使用时幂等自建。5k 条阈值见 ADR-0065 决定 7。
+        (47, VECTOR_TABLES_SQL),
     )
 
     def validate_status(self, status: str) -> str:

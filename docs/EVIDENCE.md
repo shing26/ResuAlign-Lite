@@ -129,6 +129,19 @@ breaker 状态，不进入 CI 门禁。
 
 > 这三行是**未达标**，如实登记，不通过改口径或阈值刷绿。
 
+## 简历 × 岗位排序（ADR-0065，政策标签）
+
+标注来源：**作者 2026-10-27 口述政策**（族级规则），非逐条人工——读作「政策一致性」，
+不读作投递意愿。方法与局限见 `docs/reports/resume-ranking-policy-eval-2026-10-27.md`。
+依赖本地 `data/jobs.db`，下列命令需先跑 `python benchmarks/make_policy_labels.py`。
+
+| 读数 | 口径 | 复现命令 | 判据 | 达标否 |
+| --- | --- | --- | --- | --- |
+| P@10 0.800 vs 0.200（+60.0 pp，简历 A） | balanced 集 35 正 / 35 负，bge-m3 1024d | `python benchmarks/resume_ranking_benchmark.py --labels .scratch/ranking-a1/labels-policy-balanced.json --embedder ollama` | ≥ +10 pp | ✅（政策口径） |
+| P@10 0.900 vs 0.400（+50.0 pp，简历 B） | 同上 | 同上 | ≥ +10 pp | ✅（政策口径） |
+| P@10 1.000 vs 0.600（A）/ 1.000 vs 1.000（B） | full 集 198 正 / 35 负（85% 正例，饱和） | `--labels .scratch/ranking-a1/labels-policy-full.json` | 交叉检查 | 记录值（判据在 balanced 集） |
+| 排序路径 6–14 ms；建库 341–455 ms/doc | 本机 Windows，bge-m3 CPU | 同上 | 排序 p95 < 300 ms | ✅（建库走后台任务） |
+
 ## 复现总入口
 
 ```powershell
