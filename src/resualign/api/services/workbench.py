@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from fastapi import Request
 
+from resualign.api.services.alignment_rules import strip_placeholders_in_diffs
 from resualign.engine.role_router import call_with_role
 from resualign.engine.tailor import strip_metric_placeholders
 from resualign.jd_profiler import JD_PROFILER_PROMPT_VERSION
@@ -111,26 +112,6 @@ async def _read_timeline_extras(request: Request) -> dict[str, Any]:
     except Exception:
         return {}
     return {key: payload.get(key) for key in context._TIMELINE_FIELDS if key in payload}
-
-def _strip_placeholders_in_diffs(diffs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Strip legacy metric placeholders from ``proposed`` before projecting.
-
-    2026-10-26：旧行（落库前注入占位串）通过 API 投影即变干净，用户可
-    直接采纳；不改写库内原始数据。
-    """
-    cleaned: list[dict[str, Any]] = []
-    for diff in diffs:
-        if not isinstance(diff, dict):
-            cleaned.append(diff)
-            continue
-        proposed = diff.get("proposed")
-        if isinstance(proposed, str) and proposed:
-            stripped = strip_metric_placeholders(proposed)
-            if stripped != proposed:
-                diff = {**diff, "proposed": stripped}
-        cleaned.append(diff)
-    return cleaned
-
 
 def _apply_diffs(base_text: str, diffs: list[dict[str, Any]], accepted_indices: list[int]) -> tuple[str, int]:
     """Apply accepted diffs to base text in a deterministic, ordered way."""
@@ -591,8 +572,8 @@ def _session_sections_from_job(
             "reason": alignment_reason,
             "error": alignment_error or None,
             "code": None,
-            "diffs": _strip_placeholders_in_diffs(job.get("diffs") or []),
-            "invalid_diffs": _strip_placeholders_in_diffs(
+            "diffs": strip_placeholders_in_diffs(job.get("diffs") or []),
+            "invalid_diffs": strip_placeholders_in_diffs(
                 job.get("invalid_diffs") or []
             ),
             "draft": job.get("draft"),
