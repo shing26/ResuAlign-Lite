@@ -243,7 +243,7 @@ def test_export_pdf_renders_structured_resume():
     }
     content = build_job_export(job, "pdf")["content"]
 
-    for heading in ("教育经历", "专业技能清单", "核心项目经历", "综合评价"):
+    for heading in ("教育经历", "专业技能", "核心项目", "综合评价"):
         assert f"<h2>{heading}</h2>" in content
     # 三个项目必须各自成块，不能被并进上一条 bullet（用户反馈的「项目经历被删减」）
     assert content.count('<div class="rs-project">') == 3
