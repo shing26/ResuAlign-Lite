@@ -195,8 +195,50 @@ def test_export_pdf_returns_print_html_contract():
     assert body["print_target"] == "#print-root"
     assert "<article" in body["content"]
     assert "Python developer with Redis caching" in body["content"]
-    assert "engine.v1" in body["content"]
+    # 投递版式（2026-10-27）：PDF 不再输出 diff id / prompt 版本这些「日志」，
+    # 只保留一行短元信息；完整溯源在 Markdown / JSON 导出里。
+    assert "定稿 v1" in body["content"]
+    assert "engine.v1" not in body["content"]
+    assert "采纳项" not in body["content"]
     assert body["filename"] == "resualign-Backend-Engineer-v1.pdf"
+
+
+def test_export_pdf_renders_resume_layout():
+    from resualign.api.services.jobs import build_job_export
+
+    draft = (
+        "张三 · 后端工程师\n"
+        "138-0000-0000 zhangsan@example.com\n"
+        "主修：Java、数据结构 专业技能清单\n"
+        "- Java 21 虚拟线程与 Spring Boot 3.3；熟悉 <script>alert(1)</script>\n"
+        "   续行：Redis 与 MySQL 优化\n"
+        "- 第二个条目 **加粗** 片段\n"
+        "核心项目经历\n"
+        "ShopPilot — 智能客服 Agent\n"
+        "## 获奖经历\n"
+        "- 校级一等奖学金\n"
+    )
+    job = {
+        "title": "后端工程师",
+        "final_draft": draft,
+        "final_draft_version": 3,
+        "model": "deepseek-v4-flash",
+        "generated_at": 0,
+        "diffs": [],
+    }
+    content = build_job_export(job, "pdf")["content"]
+    # 章节标题被硬折行粘在段落尾部时也要拆出来
+    assert "<h2>专业技能清单</h2>" in content
+    assert "<h2>核心项目经历</h2>" in content
+    # 列表项：续行并回上一条，而不是新起一条
+    assert "<h2>获奖经历</h2>" in content  # Markdown 标题同样识别
+    assert content.count("<li>") == 3
+    assert "续行：Redis 与 MySQL 优化" in content
+    # 内容转义 + 行内加粗
+    assert "&lt;script&gt;" in content
+    assert "<script>" not in content
+    assert "<strong>加粗</strong>" in content
+    assert "定稿 v3" in content
 
 
 def test_export_missing_job_returns_404():
