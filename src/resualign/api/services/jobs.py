@@ -1,6 +1,5 @@
 
 import csv
-import html
 import io
 import json
 import logging
@@ -29,6 +28,7 @@ from ...observability import new_request_id, reset_request_id, set_request_id
 from . import llm_probe
 from .alignment_rules import is_noop_diff as _is_noop_diff  # noqa: F401
 from .alignment_writer import AlignmentOutcome, persist_alignment
+from .resume_print import render_resume_print_html
 from .resume_ranking import IMPORT_HINT_LIMIT, similar_existing_for_texts
 
 logger = logging.getLogger(__name__)
@@ -1973,142 +1973,15 @@ def _export_markdown(
     return "\n".join(lines).rstrip() + "\n"
 
 
-# 定稿导出的打印排版：把编辑器硬折行的纯文本整理成「可投递」的简历版式。
-# 背景（2026-10-27 用户反馈）：PDF 走 print-html，但正文是 <pre>、元信息表格 +
-# 采纳 diff id 一起输出，投递时像日志。PDF 只保留短元信息行；完整溯源仍在
-# Markdown / JSON 导出（accepted_diff_ids + prompt_version 均可追）。
-_PRINT_HEADINGS = (
-    "教育经历", "教育背景", "专业技能清单", "专业技能", "技能清单",
-    "核心项目经历", "项目经历", "工作经历", "实习经历", "实践经历",
-    "校园经历", "获奖经历", "荣誉奖项", "证书", "个人信息", "自我评价",
-)
-
-
-def _split_print_segments(line: str) -> list[tuple[str, str]]:
-    """拆开被硬折行粘在一起的章节标题（标题可能贴在行首或行尾）。"""
-    segments: list[tuple[str, str]] = []
-    remaining = line.strip()
-    for _ in range(6):
-        found: tuple[int, int] | None = None
-        for heading in _PRINT_HEADINGS:
-            if remaining == heading:
-                found = (0, len(remaining))
-                break
-            for sep in (" ", "\u3000"):
-                if remaining.startswith(heading + sep):
-                    found = (0, len(heading))
-                    break
-                if remaining.endswith(sep + heading):
-                    found = (len(remaining) - len(heading), len(remaining))
-                    break
-            if found:
-                break
-        if found is None:
-            break
-        start, end = found
-        if start > 0:
-            segments.append(("text", remaining[:start].strip()))
-        segments.append(("heading", remaining[start:end]))
-        remaining = remaining[end:].strip()
-        if not remaining:
-            return segments
-    if remaining:
-        segments.append(("text", remaining))
-    return segments
-
-
-def _cjk_boundary(previous: str, following: str) -> bool:
-    return bool(previous) and bool(following) and previous[-1] > "\u2e80" and following[0] > "\u2e80"
-
-
-def _inline_md(text: str) -> str:
-    escaped = html.escape(text)
-    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
-
-
-def _resume_doc_html(draft: str) -> str:
-    """把定稿纯文本整理为段落 / 列表 / 章节标题（保留原文措辞，只做版式）。
-
-    编辑器输出是硬折行的：列表项的续行不带 "- "，要并回上一条；段落行各自成段
-    （定稿里的段落本来就是独立行，强行合并会把两段经历粘成一段）。
-    """
-    blocks: list[list[str]] = []
-    for raw in draft.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        if line.startswith("#"):
-            heading = line.lstrip("#").strip()
-            if heading:
-                blocks.append(["heading", heading])
-            continue
-        if line.startswith(("- ", "\u2022 ", "\u00b7 ", "* ")):
-            blocks.append(["bullet", line[2:].strip()])
-            continue
-        for kind, text in _split_print_segments(line):
-            if kind == "heading":
-                blocks.append(["heading", text])
-            elif blocks and blocks[-1][0] == "bullet":
-                joiner = "" if _cjk_boundary(blocks[-1][1], text) else " "
-                blocks[-1][1] += joiner + text
-            else:
-                blocks.append(["para", text])
-
-    parts: list[str] = []
-    bullets: list[str] = []
-
-    def flush_bullets() -> None:
-        if bullets:
-            parts.append("<ul>" + "".join(bullets) + "</ul>")
-            bullets.clear()
-
-    for index, (kind, text) in enumerate(blocks):
-        if kind == "bullet":
-            bullets.append(f"<li>{_inline_md(text)}</li>")
-            continue
-        flush_bullets()
-        if kind == "heading":
-            parts.append(f"<h2>{_inline_md(text)}</h2>")
-        elif index == 0:
-            parts.append(f'<p class="resume-name"><strong>{_inline_md(text)}</strong></p>')
-        else:
-            parts.append(f"<p>{_inline_md(text)}</p>")
-    flush_bullets()
-    return "".join(parts)
 def _export_print_html(
     job: dict[str, Any],
     draft: str,
     accepted: list[dict[str, Any]],
     meta: dict[str, Any],
 ) -> str:
-    """A4 打印版：干净的可投递简历 + 一行溯源元信息（不含 diff id）。"""
-    title = html.escape(job.get("title") or "未命名岗位")
-    version = int(job.get("final_draft_version") or 0)
-    generated = meta.get("final_draft_updated_at") or meta.get("generated_at")
-    stamp = ""
-    if generated:
-        try:
-            stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(generated)))
-        except (TypeError, ValueError, OSError):
-            stamp = ""
-    meta_bits = [f"定稿 v{version}"]
-    # #82 双口径：AI 评估分与规则四维分必须分别标注（Markdown / PDF 一致）。
-    scored = False
-    if meta.get("eval_match_score") is not None:
-        meta_bits.append(f"匹配分（AI 评估）{meta['eval_match_score']}")
-        scored = True
-    if meta.get("rule_match_score") is not None:
-        meta_bits.append(f"匹配分（规则四维）{meta['rule_match_score']}")
-        scored = True
-    if not scored and meta.get("match_score") is not None:
-        meta_bits.append(f"匹配分 {meta['match_score']}")
-    if stamp:
-        meta_bits.append(f"生成于 {stamp}")
-    meta_line = html.escape(" · ".join(meta_bits))
-    return (
-        '<article class="export-article">'
-        f"<h1>{title}</h1>"
-        f'<p class="muted small">{meta_line}</p>'
-        f'<div class="resume-doc">{_resume_doc_html(draft)}</div>'
-        "</article>"
-    )
+    """A4 打印版：单栏版式（参照 E:resume-templates 的三项目模板）。
+
+    打印件要能直接投递：不输出定稿版本 / 匹配分 / diff id 之类的审计信息，
+    完整溯源保留在 Markdown / JSON 导出里。结构化与排版见 services/resume_print.py。
+    """
+    return render_resume_print_html(job, draft)
