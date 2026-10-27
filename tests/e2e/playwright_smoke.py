@@ -568,11 +568,11 @@ def run_key_path(
             "pdf export render type mismatch",
         )
         content = export.get("content") or ""
-        expect("export-article" in content, "pdf print html missing article")
+        expect('class="rs-print"' in content, "pdf print html missing article")
         # 2026-10-27：PDF 改为简历版式（不再有「定稿内容」这种日志式小标题），
         # 断言正文容器与短元信息行仍在。
-        expect('class="resume-doc"' in content, "pdf print html missing resume body")
-        expect("定稿 v" in content, "pdf print html missing version line")
+        expect('class="rs-print"' in content, "pdf print html missing resume body")
+        expect('class="rs-header"' in content, "pdf print html missing resume header")
         expect("采纳项" not in content, "pdf print html leaked diff ids")
         expect(
             "<button" not in content.lower(),

@@ -193,52 +193,87 @@ def test_export_pdf_returns_print_html_contract():
     body = r.json()
     assert body["render"] == "print-html"
     assert body["print_target"] == "#print-root"
-    assert "<article" in body["content"]
+    assert '<article class="rs-print"' in body["content"]
     assert "Python developer with Redis caching" in body["content"]
-    # 投递版式（2026-10-27）：PDF 不再输出 diff id / prompt 版本这些「日志」，
-    # 只保留一行短元信息；完整溯源在 Markdown / JSON 导出里。
-    assert "定稿 v1" in body["content"]
+    # 投递版式（2026-10-27 用户反馈）：PDF 只放简历本身，不再输出定稿版本、
+    # 匹配分、prompt 版本、采纳 diff id 这些审计信息；完整溯源在 Markdown / JSON。
+    assert "定稿 v" not in body["content"]
+    assert "匹配分" not in body["content"]
     assert "engine.v1" not in body["content"]
     assert "采纳项" not in body["content"]
     assert body["filename"] == "resualign-Backend-Engineer-v1.pdf"
 
 
-def test_export_pdf_renders_resume_layout():
+_PDF_DRAFT = (
+    "陈振成 AI 应用开发 / Agent 研发（Java + Python 双栈）\n"
+    "132-2978-7513 ccshing426@qq.com github.com/shing26\n"
+    "教育经历\n"
+    "广东理工学院 — 计算机科学与技术（统招本科） 2025.09 – 2027.06\n"
+    "主修：Java 程序设计、数据结构\n"
+    "专业技能清单\n"
+    "- AI 应用工程：LLM 编排、MCP 协议、<script>alert(1)</script>\n"
+    "- 后端技术栈：Python / FastAPI\n"
+    "核心项目经历\n"
+    "ShopPilot — 大促客服 Agent\n"
+    "技术栈：Java 21 · Spring Boot 3.3\n"
+    "情境：大促客服需同时答政策与办业务\n"
+    "- 有界编排（成本可预算）：自由 Agent 循环不可预算 → 改为有界状态机\n"
+    "意图级联（1 次模型请求）：三级级联降低开销\n"
+    "ResuAlign-Lite — 求职工作台\n"
+    "技术栈：Python · FastAPI\n"
+    "- 三道门禁：出处解析 + 内容核查\n"
+    "CodeCompass — 代码理解工作台\n"
+    "技术栈：Node 24 · TypeScript\n"
+    "- MCP 封装：17 个只读工具\n"
+    "综合评价\n"
+    "- 设计先行：ADR 留痕\n"
+)
+
+
+def test_export_pdf_renders_structured_resume():
     from resualign.api.services.jobs import build_job_export
 
-    draft = (
-        "张三 · 后端工程师\n"
-        "138-0000-0000 zhangsan@example.com\n"
-        "主修：Java、数据结构 专业技能清单\n"
-        "- Java 21 虚拟线程与 Spring Boot 3.3；熟悉 <script>alert(1)</script>\n"
-        "   续行：Redis 与 MySQL 优化\n"
-        "- 第二个条目 **加粗** 片段\n"
-        "核心项目经历\n"
-        "ShopPilot — 智能客服 Agent\n"
-        "## 获奖经历\n"
-        "- 校级一等奖学金\n"
-    )
     job = {
-        "title": "后端工程师",
-        "final_draft": draft,
-        "final_draft_version": 3,
+        "title": "AI Agent 应用研发工程师（职位 ID A145034）",
+        "final_draft": _PDF_DRAFT,
+        "final_draft_version": 4,
         "model": "deepseek-v4-flash",
         "generated_at": 0,
         "diffs": [],
     }
     content = build_job_export(job, "pdf")["content"]
-    # 章节标题被硬折行粘在段落尾部时也要拆出来
-    assert "<h2>专业技能清单</h2>" in content
-    assert "<h2>核心项目经历</h2>" in content
-    # 列表项：续行并回上一条，而不是新起一条
-    assert "<h2>获奖经历</h2>" in content  # Markdown 标题同样识别
-    assert content.count("<li>") == 3
-    assert "续行：Redis 与 MySQL 优化" in content
-    # 内容转义 + 行内加粗
+
+    for heading in ("教育经历", "专业技能清单", "核心项目经历", "综合评价"):
+        assert f"<h2>{heading}</h2>" in content
+    # 三个项目必须各自成块，不能被并进上一条 bullet（用户反馈的「项目经历被删减」）
+    assert content.count('<div class="rs-project">') == 3
+    for name in ("ShopPilot", "ResuAlign-Lite", "CodeCompass"):
+        assert name in content
+    # 求职意向按岗位推导，去掉「职位 ID」噪声
+    assert '<div class="rs-role">AI Agent 应用研发工程师</div>' in content
+    assert "【有界编排（成本可预算）】" in content
+    assert "意图级联（1 次模型请求）：三级级联降低开销" in content
     assert "&lt;script&gt;" in content
     assert "<script>" not in content
-    assert "<strong>加粗</strong>" in content
-    assert "定稿 v3" in content
+
+
+def test_export_pdf_has_no_audit_metadata():
+    from resualign.api.services.jobs import build_job_export
+
+    job = {
+        "title": "后端工程师",
+        "final_draft": _PDF_DRAFT,
+        "final_draft_version": 7,
+        "model": "deepseek-v4-flash",
+        "prompt_version": "engine:diag:v3;tailor:v5",
+        "generated_at": 1793000000,
+        "eval_score": {"jd_match_score": 88},
+        "match_score_detail": {"total": 61.5},
+        "diffs": [],
+    }
+    content = build_job_export(job, "pdf")["content"]
+    for leaked in ("定稿 v7", "匹配分", "engine:", "采纳项", "diff_id"):
+        assert leaked not in content
 
 
 def test_export_missing_job_returns_404():
@@ -334,8 +369,9 @@ def test_export_labels_match_score_calibers():
         f"/api/jobs/{job['job_id']}/exports",
         json={"format": "pdf"},
     ).json()
-    assert "匹配分（AI 评估）" in pdf["content"]
-    assert "匹配分（规则四维）" in pdf["content"]
+    # PDF 是投递件：不带匹配分/审计元信息（2026-10-27 用户反馈），
+    # 双口径由 Markdown 与 JSON 导出承载。
+    assert "匹配分" not in pdf["content"]
     js = client.post(
         f"/api/jobs/{job['job_id']}/exports",
         json={"format": "json"},
