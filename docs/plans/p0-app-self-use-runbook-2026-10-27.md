@@ -37,6 +37,7 @@ $Root = "D:\ResuAlign-Lite\.scratch\p0-2026-10-27"
 New-Item -ItemType Directory -Force "$Root\data", "$Root\logs", "$Root\evidence", "$Root\templates" | Out-Null
 
 # 2) 环境变量（只作用于本进程）
+$env:PYTHONPATH               = "D:\ResuAlign-Lite\src"   # 不设会报 No module named 'resualign'
 $env:RESUALIGN_DATA_DIR       = "$Root\data"
 $env:RESUALIGN_JOB_DB         = "$Root\data\jobs.db"
 $env:RESUALIGN_LOG_DIR        = "$Root\logs"
@@ -177,6 +178,38 @@ p0-01-r1,2,add,blocked,fabricated,原文无依据,,
 - **A1 预检**会拦截 auth/quota/本地节点不可用；被拦时先修环境，不要记成产品失败。
 - **单人操作偏差**：先定 JD 再跑；不要因为结果差就换 JD。
 - **8000 实例只读**：P0 期间不打开 8000 的工作台做任何写操作。
+
+## 8. 演练记录（2026-10-27，rehearsal，**不计入 P0 判据**）
+
+用腾讯那份真实 JD（`bcb5d7bb…`，609 字）+ 冻结主简历（`134ebf1e…`，3287 字）在隔离
+8003 走了一遍全链路。目的只是验证环境与流程，**不是 P0 证据**，不写 EVIDENCE 达标行、
+不改 #168 状态、不代替人工采纳。
+
+### 演练中发现的 3 个真实阻塞点（正式开跑前必须先修好）
+
+| # | 阻塞点 | 现象 | 处置 |
+| --- | --- | --- | --- |
+| 1 | 启动命令缺 `PYTHONPATH` | `python -m resualign.api` 报 `No module named 'resualign'` | 上面 §1 启动块已补 `$env:PYTHONPATH` |
+| 2 | DeepSeek 余额不足 | 工作台 422：**余额不足：请给该节点充值，或到「系统设置 → 模型节点」切换可用节点后重试**；A1 预检在排队前就拦住，未产生空跑 | 充值，或在隔离实例里配置可用节点 |
+| 3 | 本机 Ollama 显存不足 | `qwen2.5:3b` 加载报 `cudaMalloc failed: unable to allocate CUDA0 buffer`（RTX 3050 Ti，4GB，已用 1.5GB）；`qwen2.5:1.5b` 可正常加载 | 演练/兜底用 1.5b；正式 P0 建议用远端强节点 |
+
+### 用 `qwen2.5:1.5b` 跑通的全链路（可作为「流程可用」证据）
+
+- 建库/建简历/建岗位 → 工作台运行 → `jd_analysis` → `tailoring` → **succeeded**，
+  墙钟 **52.1s**，分析耗时 43.5s；
+- `usable_diffs = 2`，diff 2 条、被门禁拦下 **1** 条（invalid_diffs=1），evaluator 85 分，
+  `provenance_state` 全为 verified，prompt_version = `engine:diag:v3;profiler:v2;gap:v4;tailor:v5;eval:v3`；
+- 导出守卫正常：未保存定稿时 `POST /exports` 返回 422「尚未保存定稿，请先在工作台保存定稿后再导出」；
+- `scripts/p0_evidence.py` 对着隔离库跑通：1 个岗位、succeeded 1、usable≥1 为 1、定稿 0。
+
+### 质量观察（小模型，仅供参照）
+
+- 两条 diff 的 `section` 都标成「教育经历」，实际内容来自项目经历——**section 归属错**
+  但 provenance 校验照样通过。说明门禁只保证「有据」，不保证「归位」；
+- 编辑器输出带「优化算法以应对高并发和低延迟」这类与原文无关的套话，reason 里也自承
+  「指标待补真实数据」。这正是 1.5B 的能力地板，不能用来判断正式 P0 的质量。
+
+详见隔离目录 `.scratch/p0-2026-10-27/`（`data/`、`evidence/`、`resp-*.json`）。
 
 ## 附录 A：证据提取（只读，脚本已提供）
 
