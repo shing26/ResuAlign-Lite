@@ -59,6 +59,16 @@ def test_parse_draft_header_and_education():
     assert edu[1]["type"] == "major"
 
 
+def test_render_uses_template_section_titles():
+    html = render_resume_print_html({"title": "后端工程师"}, DRAFT)
+    # 内部叫法收敛成模板里的通用章节名
+    assert "<h2>专业技能</h2>" in html
+    assert "<h2>核心项目</h2>" in html
+    assert "<h2>综合评价</h2>" in html
+    assert "专业技能清单" not in html
+    assert "工作方式与个人特点" not in html
+
+
 def test_render_uses_job_role_as_objective():
     html = render_resume_print_html(
         {"title": "Java 后台开发工程师（所属类别：软件算法研发类）"},

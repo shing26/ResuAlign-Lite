@@ -28,6 +28,18 @@ _HEADINGS = (
     "自我评价", "工作方式与个人特点", "综合评价", "求职意向",
 )
 
+# 打印件用模板里的通用章节名（求职简历不暴露内部叫法）。
+_TITLE_MAP = {
+    "专业技能清单": "专业技能",
+    "技能清单": "专业技能",
+    "核心项目经历": "核心项目",
+    "项目经历": "核心项目",
+    "工作方式与个人特点": "综合评价",
+    "工作方式": "综合评价",
+    "个人特点": "综合评价",
+    "自我评价": "综合评价",
+}
+
 _HEADING_KINDS = {
     "教育经历": "edu", "教育背景": "edu",
     "专业技能清单": "skills", "专业技能": "skills", "技能清单": "skills",
@@ -221,7 +233,7 @@ def parse_draft(draft: str) -> dict[str, Any]:
     for kind, text in flat:
         if kind == "heading":
             current = {
-                "title": text,
+                "title": _TITLE_MAP.get(text, text),
                 "kind": _HEADING_KINDS.get(text, "generic"),
                 "items": [],
                 "lines": [],
