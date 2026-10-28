@@ -573,6 +573,16 @@ class JobExportMeta(BaseModel):
     eval_match_score: float | None = None
     rule_match_score: float | None = None
     workbench_resume_id: str | None = None
+    # ADR-0066：导出必须能指认「投的是哪一版」。旧数据（迁移回填）没有记录
+    # sha 时为 None；导出时按当前定稿现算，保证证据可用。
+    final_draft_sha256: str | None = None
+    final_draft_version_id: str | None = None
+
+
+class FinalDraftRollbackRequest(BaseModel):
+    """ADR-0066: restore an old final-draft version as a new version."""
+
+    version: int = Field(ge=1)
 
 
 class JobExportResponse(BaseModel):

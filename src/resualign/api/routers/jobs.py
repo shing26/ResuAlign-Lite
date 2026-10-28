@@ -1,4 +1,5 @@
 
+import difflib
 import logging
 import threading
 import time
@@ -15,6 +16,7 @@ from ...prematch import compute_match_signals, prematch_enabled  # ADR-0064
 from ..deps import get_current_user, get_local_ingest_user
 from ..schemas import (
     FinalDraftRequest,
+    FinalDraftRollbackRequest,
     JobCreateRequest,
     JobExportRequest,
     JobExportResponse,
@@ -509,6 +511,76 @@ def save_final_draft(job_id: str, req: FinalDraftRequest, user: dict[str, Any]=D
     return saved
 
 
+@router.get('/api/jobs/{job_id}/final-draft/versions')
+def list_final_draft_versions(job_id: str, user: dict[str, Any]=Depends(get_current_user)):
+    """ADR-0066: final-draft history, oldest first (metadata only)."""
+    job = context._jobs.get_job(user['user_id'], job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail='Job not found')
+    return {
+        'job_id': job_id,
+        'current_version': int(job.get('final_draft_version') or 0),
+        'versions': context._jobs.list_final_draft_versions(user['user_id'], job_id),
+    }
+
+
+@router.get('/api/jobs/{job_id}/final-draft/versions/{version}')
+def get_final_draft_version(
+    job_id: str, version: int, user: dict[str, Any]=Depends(get_current_user)
+):
+    row = context._jobs.get_final_draft_version(user['user_id'], job_id, version)
+    if row is None:
+        raise HTTPException(status_code=404, detail='Version not found')
+    return row
+
+
+@router.get('/api/jobs/{job_id}/final-draft/versions/{version}/diff')
+def diff_final_draft_versions(
+    job_id: str,
+    version: int,
+    against: int,
+    user: dict[str, Any]=Depends(get_current_user),
+):
+    """Unified diff between two persisted versions (against -> version)."""
+    left = context._jobs.get_final_draft_version(user['user_id'], job_id, against)
+    right = context._jobs.get_final_draft_version(user['user_id'], job_id, version)
+    if left is None or right is None:
+        raise HTTPException(status_code=404, detail='Version not found')
+    lines = list(difflib.unified_diff(
+        (left.get('draft') or '').splitlines(),
+        (right.get('draft') or '').splitlines(),
+        fromfile='v' + str(against),
+        tofile='v' + str(version),
+        lineterm='',
+    ))
+    added = sum(1 for line in lines if line.startswith('+') and not line.startswith('+++'))
+    removed = sum(1 for line in lines if line.startswith('-') and not line.startswith('---'))
+    return {
+        'job_id': job_id,
+        'from_version': against,
+        'to_version': version,
+        'added': added,
+        'removed': removed,
+        'diff': lines,
+    }
+
+
+@router.post('/api/jobs/{job_id}/final-draft/rollback')
+def rollback_final_draft(
+    job_id: str,
+    req: FinalDraftRollbackRequest,
+    user: dict[str, Any]=Depends(get_current_user),
+):
+    """Restore an old version by appending it as a new version (no deletes)."""
+    try:
+        saved = context._jobs.rollback_final_draft(user['user_id'], job_id, req.version)
+    except context.UserStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if saved is None:
+        raise HTTPException(status_code=404, detail='Version not found')
+    return saved
+
+
 @router.post(
     '/api/jobs/{job_id}/exports',
     response_model=JobExportResponse,
@@ -528,6 +600,12 @@ def export_final_draft(
             detail='尚未保存定稿，请先在工作台保存定稿后再导出',
         )
     payload = build_job_export(job, req.format)
+    # ADR-0066：导出携带版本身份（JSON/Markdown 的 meta），PDF 打印件不显示。
+    version_row = context._jobs.current_final_draft_version(user['user_id'], job_id)
+    if version_row:
+        payload.setdefault('meta', {})
+        payload['meta']['final_draft_sha256'] = version_row.get('sha256')
+        payload['meta']['final_draft_version_id'] = version_row.get('version_id')
     return JobExportResponse(**payload)
 
 @router.patch('/api/jobs/{job_id}')
