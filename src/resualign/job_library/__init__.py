@@ -983,6 +983,41 @@ class JobLibraryStore(_SqliteStore):
         # 共用同一个常量（单一事实源），老库在启动时升级、新库由
         # VectorIndex 首次使用时幂等自建。5k 条阈值见 ADR-0065 决定 7。
         (47, VECTOR_TABLES_SQL),
+        # 48（ADR-0066）：定稿版本化。每次保存定稿写一行历史（含 sha256），
+        # library_jobs.final_draft* 退化为「当前投影」；回滚=追加新版本。
+        # 存量按当前定稿回填一行（SQL 无法算哈希，sha256 留空，导出时现算）。
+        (
+            48,
+            "CREATE TABLE IF NOT EXISTS final_draft_versions ("
+            " version_id TEXT PRIMARY KEY,"
+            " tenant_id TEXT NOT NULL,"
+            " job_id TEXT NOT NULL,"
+            " version INTEGER NOT NULL,"
+            " draft TEXT NOT NULL,"
+            " accepted_diff_ids_json TEXT NOT NULL DEFAULT '[]',"
+            " model TEXT,"
+            " prompt_version TEXT,"
+            " sha256 TEXT NOT NULL DEFAULT '',"
+            " source TEXT NOT NULL DEFAULT 'save',"
+            " source_version INTEGER,"
+            " created_at REAL NOT NULL,"
+            " UNIQUE (job_id, version)"
+            ");"
+            "CREATE INDEX IF NOT EXISTS idx_final_draft_versions_job"
+            " ON final_draft_versions (tenant_id, job_id, version);"
+            "INSERT OR IGNORE INTO final_draft_versions ("
+            " version_id, tenant_id, job_id, version, draft,"
+            " accepted_diff_ids_json, model, prompt_version, sha256,"
+            " source, source_version, created_at"
+            ") SELECT lower(hex(randomblob(16))), tenant_id, job_id,"
+            " final_draft_version, final_draft, '[]', model, prompt_version,"
+            " '', 'backfill', NULL,"
+            " COALESCE(final_draft_updated_at, updated_at, 0)"
+            " FROM library_jobs"
+            " WHERE final_draft IS NOT NULL"
+            " AND length(trim(final_draft)) > 0"
+            " AND final_draft_version > 0;",
+        ),
     )
 
     def validate_status(self, status: str) -> str:
@@ -1924,27 +1959,37 @@ class JobLibraryStore(_SqliteStore):
         job_id: str,
         draft: str,
         accepted_diff_ids: list[str] | None = None,
+        *,
+        source: str = "save",
+        source_version: int | None = None,
     ) -> Optional[dict[str, Any]]:
-        """Persist a job's final draft and increment its saved version."""
+        """Persist a job's final draft and append an immutable version row.
+
+        ADR-0066: library_jobs.final_draft* is the current projection; the
+        authoritative history lives in final_draft_versions and is written in
+        the same transaction, so the two can never disagree.
+        """
         if not draft or not draft.strip():
             raise UserStoreError("Final draft cannot be empty")
+        accepted_ids = sorted({str(item) for item in (accepted_diff_ids or [])})
+        sha256 = self._final_draft_sha256(draft)
         with self._lock:
             self._ensure_initialized()
             with self._connect() as conn:
                 current = conn.execute(
-                    "SELECT final_draft_version, diffs_json FROM library_jobs "
-                    "WHERE job_id = ? AND tenant_id = ?",
+                    "SELECT final_draft_version, diffs_json, model, prompt_version "
+                    "FROM library_jobs WHERE job_id = ? AND tenant_id = ?",
                     (job_id, tenant_id),
                 ).fetchone()
                 if current is None:
                     return None
                 version = int(current["final_draft_version"] or 0) + 1
-                accepted_ids = set(accepted_diff_ids or [])
+                accepted_set = set(accepted_ids)
                 diffs = json.loads(current["diffs_json"] or "[]")
                 changed = False
                 for diff in diffs:
                     if (
-                        diff.get("diff_id") in accepted_ids
+                        diff.get("diff_id") in accepted_set
                         and diff.get("provenance_state") != "accepted"
                     ):
                         diff["provenance_state"] = "accepted"
@@ -1972,6 +2017,20 @@ class JobLibraryStore(_SqliteStore):
                         ),
                     )
                 now = time.time()
+                version_id = uuid.uuid4().hex
+                conn.execute(
+                    "INSERT INTO final_draft_versions ("
+                    " version_id, tenant_id, job_id, version, draft,"
+                    " accepted_diff_ids_json, model, prompt_version, sha256,"
+                    " source, source_version, created_at"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        version_id, tenant_id, job_id, version, draft,
+                        json.dumps(accepted_ids, ensure_ascii=False),
+                        current["model"], current["prompt_version"],
+                        sha256, source, source_version, now,
+                    ),
+                )
                 conn.execute(
                     "UPDATE library_jobs SET final_draft = ?, "
                     "final_draft_updated_at = ?, final_draft_version = ?, "
@@ -1982,8 +2041,111 @@ class JobLibraryStore(_SqliteStore):
         return {
             "draft": draft,
             "version": version,
+            "version_id": version_id,
+            "sha256": sha256,
+            "accepted_diff_ids": accepted_ids,
             "updated_at": now,
         }
+
+    @staticmethod
+    def _final_draft_sha256(draft: str) -> str:
+        return hashlib.sha256((draft or "").encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _final_draft_version_row(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        raw = item.pop("accepted_diff_ids_json", "[]") or "[]"
+        try:
+            item["accepted_diff_ids"] = json.loads(raw)
+        except ValueError:
+            item["accepted_diff_ids"] = []
+        # 迁移 48 回填的存量行没有 sha（SQL 算不了哈希）：读到就现算，
+        # 保证导出/P0 证据链对旧定稿同样可用。
+        if not item.get("sha256") and item.get("draft"):
+            item["sha256"] = JobLibraryStore._final_draft_sha256(item["draft"])
+        return item
+
+    def list_final_draft_versions(
+        self, tenant_id: str, job_id: str
+    ) -> list[dict[str, Any]]:
+        """Return the version history for one job, oldest first (no drafts)."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT version_id, version, sha256, source, source_version,"
+                    " created_at, length(draft) AS chars, accepted_diff_ids_json"
+                    " FROM final_draft_versions"
+                    " WHERE tenant_id = ? AND job_id = ? ORDER BY version",
+                    (tenant_id, job_id),
+                ).fetchall()
+        return [self._final_draft_version_row(row) for row in rows]
+
+    def get_final_draft_version(
+        self, tenant_id: str, job_id: str, version: int
+    ) -> Optional[dict[str, Any]]:
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM final_draft_versions"
+                    " WHERE tenant_id = ? AND job_id = ? AND version = ?",
+                    (tenant_id, job_id, version),
+                ).fetchone()
+        return self._final_draft_version_row(row) if row is not None else None
+
+    def current_final_draft_version(
+        self, tenant_id: str, job_id: str
+    ) -> Optional[dict[str, Any]]:
+        """Latest version row, or a read-only projection for pre-48 rows."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM final_draft_versions"
+                    " WHERE tenant_id = ? AND job_id = ?"
+                    " ORDER BY version DESC LIMIT 1",
+                    (tenant_id, job_id),
+                ).fetchone()
+                if row is not None:
+                    return self._final_draft_version_row(row)
+                legacy = conn.execute(
+                    "SELECT final_draft, final_draft_version, final_draft_updated_at,"
+                    " model, prompt_version FROM library_jobs"
+                    " WHERE tenant_id = ? AND job_id = ?",
+                    (tenant_id, job_id),
+                ).fetchone()
+        if legacy is None or not (legacy["final_draft"] or "").strip():
+            return None
+        draft = legacy["final_draft"]
+        return {
+            "version_id": None,
+            "version": int(legacy["final_draft_version"] or 0),
+            "draft": draft,
+            "sha256": self._final_draft_sha256(draft),
+            "accepted_diff_ids": [],
+            "source": "projection",
+            "source_version": None,
+            "created_at": legacy["final_draft_updated_at"],
+            "model": legacy["model"],
+            "prompt_version": legacy["prompt_version"],
+        }
+
+    def rollback_final_draft(
+        self, tenant_id: str, job_id: str, version: int
+    ) -> Optional[dict[str, Any]]:
+        """Restore an old version by appending it as a new version (no deletes)."""
+        target = self.get_final_draft_version(tenant_id, job_id, version)
+        if target is None:
+            return None
+        return self.save_final_draft(
+            tenant_id,
+            job_id,
+            target["draft"],
+            target.get("accepted_diff_ids") or [],
+            source="rollback",
+            source_version=version,
+        )
 
     def save_alignment(
         self,

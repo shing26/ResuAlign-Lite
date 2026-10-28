@@ -44,7 +44,11 @@
     "/api/workbench/session/{session_id}",
     "/api/workbench/session/{session_id}/analyze",
     "/api/workbench/session/{session_id}/events",
-    "/api/workspace/session/{job_id}"
+    "/api/workspace/session/{job_id}",
+    "/api/jobs/{job_id}/final-draft/rollback",
+    "/api/jobs/{job_id}/final-draft/versions",
+    "/api/jobs/{job_id}/final-draft/versions/{version}",
+    "/api/jobs/{job_id}/final-draft/versions/{version}/diff"
   ],
   "operations": [],
   "schemas": [
@@ -93,7 +97,8 @@
     "WorkstationJDSection",
     "WorkstationMeta",
     "WorkstationResumeSection",
-    "WorkstationState"
+    "WorkstationState",
+    "FinalDraftRollbackRequest"
   ],
   "sse_events": [
     "job.stage",

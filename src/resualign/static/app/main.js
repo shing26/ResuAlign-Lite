@@ -103,6 +103,8 @@ import {
   settingsBentoHtml,
   settingsModeSwitchHtml,
   simpleLlmSetupHtml,
+  draftDiffHtml,
+  draftVersionsHtml,
   snapshotDrawerHtml,
 } from "./format.js";
 import { icon } from "./icons.js";
@@ -1196,6 +1198,68 @@ function confirmPlaceholderExport(count, onProceed) {
       closeModal();
       onProceed();
     });
+  }
+}
+
+function currentDraftJobId() {
+  return (state.wbJob && state.wbJob.job_id) || (state.route && state.route.jobId) || "";
+}
+
+async function toggleDraftVersions() {
+  const box = $("[data-draft-versions]");
+  if (!box) return;
+  if (!box.hidden) {
+    box.hidden = true;
+    return;
+  }
+  const jobId = currentDraftJobId();
+  if (!jobId) return;
+  box.hidden = false;
+  box.innerHTML = '<p class="small muted">正在加载版本历史…</p>';
+  try {
+    const payload = await api(
+      "/api/jobs/" + encodeURIComponent(jobId) + "/final-draft/versions",
+    );
+    box.innerHTML = draftVersionsHtml(payload);
+  } catch (error) {
+    console.error("draft versions failed:", error);
+    box.innerHTML = '<p class="small muted">版本历史加载失败。</p>';
+  }
+}
+
+async function showDraftDiff(version, against) {
+  const jobId = currentDraftJobId();
+  if (!jobId) return;
+  try {
+    const payload = await api(
+      "/api/jobs/" + encodeURIComponent(jobId) + "/final-draft/versions/"
+        + version + "/diff?against=" + against,
+    );
+    showModal(
+      "定稿对比 v" + against + " → v" + version,
+      draftDiffHtml(payload),
+      { closeBtn: true },
+    );
+  } catch (error) {
+    console.error("draft diff failed:", error);
+    toast("对比加载失败", "error");
+  }
+}
+
+async function rollbackDraftVersion(version) {
+  const jobId = currentDraftJobId();
+  if (!jobId) return;
+  try {
+    const saved = await api(
+      "/api/jobs/" + encodeURIComponent(jobId) + "/final-draft/rollback",
+      { method: "POST", body: JSON.stringify({ version: version }) },
+    );
+    toast("已回滚到 v" + version + "（新版本 v" + saved.version + "）", "success");
+    window.setTimeout(function () {
+      window.location.reload();
+    }, 600);
+  } catch (error) {
+    toast(error.message || "回滚失败", "error");
   }
 }
 
@@ -3133,6 +3197,11 @@ const actions = {
   },
   "cancel-align-job": () => cancelActiveAlignment(),
   "export-final-draft": () => exportFinalDraft("pdf"),
+  "show-draft-versions": () => toggleDraftVersions(),
+  "draft-version-diff": (button) =>
+    showDraftDiff(Number(button.dataset.version), Number(button.dataset.against)),
+  "draft-version-rollback": (button) =>
+    rollbackDraftVersion(Number(button.dataset.version)),
   "open-snapshot": (button) => {
     const snapshot = findApplicationSnapshot(button.dataset.id);
     if (!snapshot) {
