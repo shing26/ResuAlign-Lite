@@ -85,3 +85,16 @@ def test_timeline_orders_events(tmp_path):
     assert timestamps == sorted(timestamps)
 
     assert store.job_timeline(TENANT, "missing") is None
+
+
+def test_funnel_counts(tmp_path):
+    store = _store(tmp_path)
+    job = _job(store)
+    store.save_final_draft(TENANT, job["job_id"], "定稿", accepted_diff_ids=["d1", "d2"])
+    store.upsert_job_application(TENANT, job["job_id"], channel="官网")
+    counts = store.application_funnel_counts(TENANT)
+    assert counts["jobs"] == 1
+    assert counts["drafts"] == 1
+    assert counts["versions"] == 1
+    assert counts["accepted_diffs"] == 2
+    assert counts["applications"] == 1

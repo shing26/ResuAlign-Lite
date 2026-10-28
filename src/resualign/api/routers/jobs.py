@@ -33,6 +33,7 @@ from ..schemas import (
     WorkbenchRunRequest,
 )
 from ..services.alignment_rules import strip_placeholders_in_diffs
+from ..services.application_funnel import build_application_funnel
 from ..services.jobs import (
     PreanalyzeUnavailable,
     _match_inputs,
@@ -581,6 +582,12 @@ def rollback_final_draft(
     if saved is None:
         raise HTTPException(status_code=404, detail='Version not found')
     return saved
+
+
+@router.get('/api/analytics/application-funnel')
+def application_funnel(user: dict[str, Any]=Depends(get_current_user)):
+    """ADR-0067/C: adoption -> interview funnel (small-sample self-use view)."""
+    return build_application_funnel(user['user_id'], context._jobs)
 
 
 @router.post('/api/jobs/{job_id}/application')

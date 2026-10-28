@@ -1517,6 +1517,45 @@
         }
       }
     },
+    "/api/analytics/application-funnel": {
+      "get": {
+        "summary": "Application Funnel",
+        "description": "ADR-0067/C: adoption -> interview funnel (small-sample self-use view).",
+        "operationId": "application_funnel_api_analytics_application_funnel_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs/{job_id}/application": {
       "post": {
         "summary": "Record Job Application",

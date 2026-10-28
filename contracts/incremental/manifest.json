@@ -50,7 +50,8 @@
     "/api/jobs/{job_id}/final-draft/versions/{version}",
     "/api/jobs/{job_id}/final-draft/versions/{version}/diff",
     "/api/jobs/{job_id}/application",
-    "/api/jobs/{job_id}/timeline"
+    "/api/jobs/{job_id}/timeline",
+    "/api/analytics/application-funnel"
   ],
   "operations": [],
   "schemas": [
