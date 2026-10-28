@@ -2215,6 +2215,47 @@ class JobLibraryStore(_SqliteStore):
                 ).fetchone()
         return self._application_row(row) if row is not None else None
 
+    def application_funnel_counts(self, tenant_id: str) -> dict[str, int]:
+        """ADR-0067/C: one-query funnel counters (jobs -> drafts -> 投递)."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                def count(sql: str) -> int:
+                    return int(conn.execute(sql, (tenant_id,)).fetchone()[0] or 0)
+
+                jobs = count("SELECT COUNT(*) FROM library_jobs WHERE tenant_id = ?")
+                aligned = count(
+                    "SELECT COUNT(*) FROM library_jobs"
+                    " WHERE tenant_id = ? AND alignment_status = 'succeeded'"
+                )
+                usable = count(
+                    "SELECT COUNT(*) FROM library_jobs"
+                    " WHERE tenant_id = ? AND usable_diffs >= 1"
+                )
+                drafts = count(
+                    "SELECT COUNT(*) FROM library_jobs"
+                    " WHERE tenant_id = ? AND final_draft_version > 0"
+                )
+                versions = count(
+                    "SELECT COUNT(*) FROM final_draft_versions WHERE tenant_id = ?"
+                )
+                accepted = count(
+                    "SELECT COALESCE(SUM(json_array_length(accepted_diff_ids_json)), 0)"
+                    " FROM final_draft_versions WHERE tenant_id = ?"
+                )
+                applications = count(
+                    "SELECT COUNT(*) FROM job_applications WHERE tenant_id = ?"
+                )
+        return {
+            "jobs": jobs,
+            "aligned": aligned,
+            "usable": usable,
+            "drafts": drafts,
+            "versions": versions,
+            "accepted_diffs": accepted,
+            "applications": applications,
+        }
+
     def list_job_applications(self, tenant_id: str) -> list[dict[str, Any]]:
         with self._lock:
             self._ensure_initialized()

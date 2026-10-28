@@ -4512,3 +4512,59 @@ export function recordApplicationFormHtml(job) {
     + "</div></form>"
   );
 }
+
+function funnelPct(value) {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  return Math.round(Number(value) * 100) + "%";
+}
+
+export function funnelHtml(funnel) {
+  const counts = (funnel && funnel.counts) || {};
+  const rates = (funnel && funnel.rates) || {};
+  const rows = Array.isArray(funnel && funnel.applications) ? funnel.applications : [];
+  const steps = [
+    ["岗位", counts.jobs || 0],
+    ["已对齐", counts.aligned || 0],
+    ["有可用建议", counts.usable || 0],
+    ["已保存定稿", counts.drafts || 0],
+    ["已记录投递", counts.applications || 0],
+  ].map(function (pair) {
+    return '<span class="badge pill-neutral">' + esc(pair[0]) + " " + pair[1] + "</span>";
+  }).join(" ");
+  const rateBits = [
+    ["定稿率", funnelPct(rates.draft_rate)],
+    ["投递率", funnelPct(rates.applied_rate)],
+    ["面试率", funnelPct(rates.interview_rate)],
+    ["Offer 率", funnelPct(rates.offer_rate)],
+  ].map(function (pair) {
+    return '<span class="small muted">' + esc(pair[0]) + " " + esc(pair[1]) + "</span>";
+  }).join(" · ");
+  const body = rows.length
+    ? '<table class="data-table"><thead><tr><th>岗位</th><th>投递</th><th>渠道</th>'
+      + "<th>版本</th><th>采纳</th><th>结果</th><th></th></tr></thead><tbody>"
+      + rows.map(function (row) {
+        const actions = ["interview", "offer", "rejected"]
+          .filter(function (status) { return row.status !== status; })
+          .map(function (status) {
+            const label = status === "interview" ? "面试" : status === "offer" ? "Offer" : "拒信";
+            return '<button class="btn btn-ghost btn-sm" type="button"'
+              + ' data-action="application-outcome" data-id="' + esc(row.job_id || "") + '"'
+              + ' data-status="' + status + '">' + label + "</button>";
+          }).join("");
+        return "<tr><td>" + esc(row.job_title || "") + "</td>"
+          + "<td>" + esc(row.applied_at || "") + "</td>"
+          + "<td>" + esc(row.channel || "") + "</td>"
+          + "<td>v" + (row.final_draft_version || 0) + "</td>"
+          + "<td>" + (row.accepted_count || 0) + "</td>"
+          + "<td>" + esc(row.status || "") + "</td>"
+          + "<td>" + actions + "</td></tr>";
+      }).join("") + "</tbody></table>"
+    : '<p class="small muted">还没有记录投递。到岗位工作台点「记录投递」后，这里会出现采纳与结果的对照。</p>';
+  return '<div class="panel-head"><div><h2>投递漏斗</h2><p>'
+    + esc((funnel && funnel.note) || "") + "</p></div></div>"
+    + '<div class="panel-body"><div class="row">' + steps + "</div>"
+    + '<div class="row">' + rateBits + "</div>" + body + "</div>";
+}
+

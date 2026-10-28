@@ -2014,6 +2014,24 @@ const actions = {
       recordApplicationFormHtml(job),
     );
   },
+  "application-outcome": async (button) => {
+    const jobId = button.dataset.id;
+    const status = button.dataset.status;
+    if (!jobId || !status) return;
+    try {
+      await api(
+        "/api/jobs/" + encodeURIComponent(jobId) + "/application",
+        {
+          method: "PATCH",
+          body: JSON.stringify({ status: status }),
+        },
+      );
+      toast("已回填投递结果：" + status, "success");
+      await render();
+    } catch (error) {
+      toast(error.message || "回填失败", "error");
+    }
+  },
   "show-job-timeline": async (button) => {
     const jobId = button.dataset.id || (state.wbJob && state.wbJob.job_id);
     if (!jobId) return;

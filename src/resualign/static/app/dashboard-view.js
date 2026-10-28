@@ -1,11 +1,12 @@
 /* ResuAlign v3 Dashboard: metric strip + quick continue + skill gaps.
    All values are derived from the live API, never hard-coded. */
-import { alignmentStatusLabel, esc, formatDate, jobStatusLabel, state } from "./events.js";
+import { alignmentStatusLabel, api, esc, formatDate, jobStatusLabel, state } from "./events.js";
 import {
   alignmentOutcomeKind,
   atsHealthScoreLevel,
   atsHealthTone,
   dashboardEmptyGuideHtml,
+  funnelHtml,
   shortenGapPhrase,
   skillGapHtml,
 } from "./format.js";
@@ -375,5 +376,20 @@ export async function renderDashboard(container) {
           </div>
         </aside>
       </div>
+      <section class="panel dashboard-panel" data-dashboard-funnel></section>
     </div>`;
+  loadDashboardFunnel(container).catch(() => {});
+}
+
+
+async function loadDashboardFunnel(container) {
+  const mount = container.querySelector("[data-dashboard-funnel]");
+  if (!mount) return;
+  mount.innerHTML = '<div class="panel-body"><p class="small muted">正在加载投递漏斗…</p></div>';
+  try {
+    const funnel = await api("/api/analytics/application-funnel");
+    mount.innerHTML = funnelHtml(funnel);
+  } catch (error) {
+    mount.innerHTML = '<div class="panel-body"><p class="small muted">投递漏斗加载失败。</p></div>';
+  }
 }
