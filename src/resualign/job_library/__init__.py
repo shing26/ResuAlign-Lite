@@ -1018,6 +1018,44 @@ class JobLibraryStore(_SqliteStore):
             " AND length(trim(final_draft)) > 0"
             " AND final_draft_version > 0;",
         ),
+        # 49（ADR-0067）：投递主线。job_applications 成为投递的唯一事实源
+        # （绑定定稿版本 + sha + 渠道 + 结果）；library_jobs.applied_at/status
+        # 退化为投影。存量从 applied_at 回填，状态按中英文别名归一。
+        (
+            49,
+            "CREATE TABLE IF NOT EXISTS job_applications ("
+            " application_id TEXT PRIMARY KEY,"
+            " tenant_id TEXT NOT NULL,"
+            " job_id TEXT NOT NULL,"
+            " version_id TEXT,"
+            " final_draft_version INTEGER NOT NULL DEFAULT 0,"
+            " draft_sha256 TEXT NOT NULL DEFAULT '',"
+            " channel TEXT NOT NULL DEFAULT '',"
+            " applied_at TEXT NOT NULL,"
+            " status TEXT NOT NULL DEFAULT 'applied',"
+            " outcome_at TEXT,"
+            " notes TEXT NOT NULL DEFAULT '',"
+            " created_at REAL NOT NULL,"
+            " updated_at REAL NOT NULL,"
+            " UNIQUE (tenant_id, job_id)"
+            ");"
+            "CREATE INDEX IF NOT EXISTS idx_job_applications_tenant"
+            " ON job_applications (tenant_id, applied_at);"
+            "INSERT OR IGNORE INTO job_applications ("
+            " application_id, tenant_id, job_id, version_id, final_draft_version,"
+            " draft_sha256, channel, applied_at, status, outcome_at, notes,"
+            " created_at, updated_at"
+            ") SELECT lower(hex(randomblob(16))), tenant_id, job_id, NULL,"
+            " final_draft_version, '', '', applied_at,"
+            " CASE"
+            " WHEN status IN ('interview', '面试中') THEN 'interview'"
+            " WHEN status IN ('offer', '已拿Offer') THEN 'offer'"
+            " WHEN status IN ('withdrawn', '放弃') THEN 'withdrawn'"
+            " ELSE 'applied' END,"
+            " NULL, '', COALESCE(updated_at, 0), COALESCE(updated_at, 0)"
+            " FROM library_jobs"
+            " WHERE applied_at IS NOT NULL AND trim(applied_at) != '';",
+        ),
     )
 
     def validate_status(self, status: str) -> str:
@@ -2146,6 +2184,258 @@ class JobLibraryStore(_SqliteStore):
             source="rollback",
             source_version=version,
         )
+
+    _APPLICATION_STATUSES = ("applied", "interview", "offer", "rejected", "withdrawn")
+    _APPLICATION_STATUS_LABELS = {
+        "applied": "已投递",
+        "interview": "面试中",
+        "offer": "已拿Offer",
+        "rejected": "放弃",
+        "withdrawn": "放弃",
+    }
+
+    @staticmethod
+    def _application_row(row: sqlite3.Row) -> dict[str, Any]:
+        return dict(row)
+
+    @staticmethod
+    def _today_string() -> str:
+        return time.strftime("%Y-%m-%d", time.localtime())
+
+    def get_job_application(
+        self, tenant_id: str, job_id: str
+    ) -> Optional[dict[str, Any]]:
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM job_applications"
+                    " WHERE tenant_id = ? AND job_id = ?",
+                    (tenant_id, job_id),
+                ).fetchone()
+        return self._application_row(row) if row is not None else None
+
+    def list_job_applications(self, tenant_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM job_applications WHERE tenant_id = ?"
+                    " ORDER BY applied_at DESC, updated_at DESC",
+                    (tenant_id,),
+                ).fetchall()
+        return [self._application_row(row) for row in rows]
+
+    def upsert_job_application(
+        self,
+        tenant_id: str,
+        job_id: str,
+        *,
+        channel: str = "",
+        applied_at: str | None = None,
+        notes: str = "",
+    ) -> Optional[dict[str, Any]]:
+        """Record (or refresh) the application for one job.
+
+        ADR-0067: binds the current final-draft version + sha256 so the P0
+        evidence chain can point at exactly what was submitted.
+        """
+        now = time.time()
+        applied = (applied_at or "").strip() or self._today_string()
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                job = conn.execute(
+                    "SELECT final_draft, final_draft_version, applied_at, status"
+                    " FROM library_jobs WHERE tenant_id = ? AND job_id = ?",
+                    (tenant_id, job_id),
+                ).fetchone()
+                if job is None:
+                    return None
+                draft = (job["final_draft"] or "").strip()
+                if not draft:
+                    raise UserStoreError("请先保存定稿，再记录投递")
+                version = conn.execute(
+                    "SELECT version_id, version, sha256 FROM final_draft_versions"
+                    " WHERE tenant_id = ? AND job_id = ?"
+                    " ORDER BY version DESC LIMIT 1",
+                    (tenant_id, job_id),
+                ).fetchone()
+                version_id = version["version_id"] if version else None
+                draft_version = int(version["version"]) if version else int(
+                    job["final_draft_version"] or 0
+                )
+                sha = (version["sha256"] if version else "") or self._final_draft_sha256(draft)
+                existing = conn.execute(
+                    "SELECT * FROM job_applications"
+                    " WHERE tenant_id = ? AND job_id = ?",
+                    (tenant_id, job_id),
+                ).fetchone()
+                if existing is None:
+                    conn.execute(
+                        "INSERT INTO job_applications ("
+                        " application_id, tenant_id, job_id, version_id,"
+                        " final_draft_version, draft_sha256, channel, applied_at,"
+                        " status, outcome_at, notes, created_at, updated_at"
+                        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'applied', NULL, ?, ?, ?)",
+                        (
+                            uuid.uuid4().hex, tenant_id, job_id, version_id,
+                            draft_version, sha, channel.strip(), applied,
+                            notes, now, now,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE job_applications SET version_id = ?,"
+                        " final_draft_version = ?, draft_sha256 = ?, channel = ?,"
+                        " applied_at = ?, notes = ?, updated_at = ?"
+                        " WHERE tenant_id = ? AND job_id = ?",
+                        (
+                            version_id, draft_version, sha, channel.strip(),
+                            applied, notes or (existing["notes"] or ""), now,
+                            tenant_id, job_id,
+                        ),
+                    )
+                current = (job["status"] or "").strip()
+                if not (job["applied_at"] or "").strip():
+                    conn.execute(
+                        "UPDATE library_jobs SET applied_at = ?, updated_at = ?"
+                        " WHERE tenant_id = ? AND job_id = ?",
+                        (applied, now, tenant_id, job_id),
+                    )
+                if current in ("", "draft", "未投递"):
+                    conn.execute(
+                        "UPDATE library_jobs SET status = '已投递', updated_at = ?"
+                        " WHERE tenant_id = ? AND job_id = ?",
+                        (now, tenant_id, job_id),
+                    )
+                row = conn.execute(
+                    "SELECT * FROM job_applications"
+                    " WHERE tenant_id = ? AND job_id = ?",
+                    (tenant_id, job_id),
+                ).fetchone()
+        return self._application_row(row) if row is not None else None
+
+    def update_job_application_outcome(
+        self,
+        tenant_id: str,
+        job_id: str,
+        status: str,
+        *,
+        outcome_at: str | None = None,
+        notes: str | None = None,
+    ) -> Optional[dict[str, Any]]:
+        """Record the outcome (interview / offer / rejected / withdrawn)."""
+        value = str(status or "").strip()
+        if value not in self._APPLICATION_STATUSES:
+            raise UserStoreError("Invalid application status: " + value)
+        now = time.time()
+        outcome = (outcome_at or "").strip() or self._today_string()
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                existing = conn.execute(
+                    "SELECT * FROM job_applications"
+                    " WHERE tenant_id = ? AND job_id = ?",
+                    (tenant_id, job_id),
+                ).fetchone()
+                if existing is None:
+                    return None
+                conn.execute(
+                    "UPDATE job_applications SET status = ?, outcome_at = ?,"
+                    " notes = ?, updated_at = ?"
+                    " WHERE tenant_id = ? AND job_id = ?",
+                    (
+                        value, outcome,
+                        existing["notes"] if notes is None else notes,
+                        now, tenant_id, job_id,
+                    ),
+                )
+                label = self._APPLICATION_STATUS_LABELS.get(value)
+                if label:
+                    conn.execute(
+                        "UPDATE library_jobs SET status = ?, updated_at = ?"
+                        " WHERE tenant_id = ? AND job_id = ?",
+                        (label, now, tenant_id, job_id),
+                    )
+                row = conn.execute(
+                    "SELECT * FROM job_applications"
+                    " WHERE tenant_id = ? AND job_id = ?",
+                    (tenant_id, job_id),
+                ).fetchone()
+        return self._application_row(row) if row is not None else None
+
+    def job_timeline(
+        self, tenant_id: str, job_id: str
+    ) -> Optional[dict[str, Any]]:
+        """One-screen timeline: job -> alignment -> versions -> application."""
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                job = conn.execute(
+                    "SELECT job_id, title, status, created_at, generated_at,"
+                    " alignment_status, alignment_reason, model"
+                    " FROM library_jobs WHERE tenant_id = ? AND job_id = ?",
+                    (tenant_id, job_id),
+                ).fetchone()
+                if job is None:
+                    return None
+                versions = conn.execute(
+                    "SELECT version, version_id, sha256, created_at, source"
+                    " FROM final_draft_versions"
+                    " WHERE tenant_id = ? AND job_id = ? ORDER BY version",
+                    (tenant_id, job_id),
+                ).fetchall()
+                application = conn.execute(
+                    "SELECT * FROM job_applications"
+                    " WHERE tenant_id = ? AND job_id = ?",
+                    (tenant_id, job_id),
+                ).fetchone()
+        events: list[dict[str, Any]] = [{
+            "at": job["created_at"],
+            "kind": "created",
+            "label": "岗位入库",
+            "detail": job["title"] or "",
+        }]
+        if job["generated_at"] or job["alignment_status"] in ("succeeded", "failed"):
+            status_text = "对齐完成" if job["alignment_status"] == "succeeded" else "对齐失败"
+            detail = job["alignment_reason"] or job["model"] or ""
+            events.append({
+                "at": job["generated_at"] or job["created_at"],
+                "kind": "alignment",
+                "label": status_text,
+                "detail": detail,
+            })
+        for row in versions:
+            events.append({
+                "at": row["created_at"],
+                "kind": "final_draft",
+                "label": "保存定稿 v" + str(row["version"]),
+                "detail": (row["sha256"] or "")[:10],
+            })
+        if application is not None:
+            events.append({
+                "at": application["created_at"],
+                "kind": "application",
+                "label": "记录投递",
+                "detail": " · ".join(
+                    item for item in (
+                        application["applied_at"] or "",
+                        application["channel"] or "",
+                        ("sha " + (application["draft_sha256"] or "")[:10])
+                        if application["draft_sha256"] else "",
+                    ) if item
+                ),
+            })
+            if application["status"] and application["status"] != "applied":
+                events.append({
+                    "at": application["updated_at"],
+                    "kind": "outcome",
+                    "label": "投递结果：" + application["status"],
+                    "detail": application["outcome_at"] or "",
+                })
+        events.sort(key=lambda item: item["at"] or 0)
+        return {"job_id": job_id, "events": events}
 
     def save_alignment(
         self,
