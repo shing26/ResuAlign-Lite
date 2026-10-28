@@ -4401,3 +4401,51 @@ export function recommendedJobsHtml(payload) {
     (hint ? '<div class="muted small">' + esc(hint) + "</div>" : "") + rows
   );
 }
+
+/* ADR-0066：定稿版本历史的纯渲染（DOM 绑定在 main.js / split-canvas.js）。 */
+export function draftVersionsHtml(payload) {
+  const versions = Array.isArray(payload && payload.versions) ? payload.versions : [];
+  const current = Number((payload && payload.current_version) || 0);
+  if (!versions.length) {
+    return '<p class="small muted">还没有定稿版本。</p>';
+  }
+  return versions.map(function (item) {
+    const version = Number(item.version || 0);
+    const isCurrent = version === current;
+    const sha = item.sha256 ? String(item.sha256).slice(0, 10) : "未记录";
+    const when = item.created_at ? formatDate(item.created_at) : "";
+    const source = item.source === "rollback"
+      ? "回滚自 v" + item.source_version
+      : item.source === "backfill" ? "历史回填" : "保存";
+    const diffButton = version > 1
+      ? '<button class="btn btn-ghost btn-sm" type="button" data-action="draft-version-diff" data-version="'
+        + version + '" data-against="' + (version - 1) + '">对比 v' + (version - 1) + "</button>"
+      : "";
+    const rollbackButton = isCurrent
+      ? ""
+      : '<button class="btn btn-outline btn-sm" type="button" data-action="draft-version-rollback" data-version="'
+        + version + '">回滚到此版</button>';
+    return '<div class="row draft-version-row">'
+      + '<span class="badge ' + (isCurrent ? "badge-green" : "badge-gray") + '">v' + version
+      + (isCurrent ? " 当前" : "") + "</span>"
+      + '<span class="small muted">' + esc(when) + " · " + esc(source) + " · "
+      + (item.chars || 0) + " 字 · sha " + esc(sha) + "</span>"
+      + diffButton + rollbackButton
+      + "</div>";
+  }).join("");
+}
+
+export function draftDiffHtml(result) {
+  const lines = Array.isArray(result && result.diff) ? result.diff : [];
+  if (!lines.length) {
+    return '<p class="small muted">两版内容一致。</p>';
+  }
+  const rows = lines.map(function (line) {
+    let cls = "diff-ctx";
+    if (line.indexOf("+++") === 0 || line.indexOf("---") === 0) cls = "diff-meta";
+    else if (line.indexOf("+") === 0) cls = "diff-add";
+    else if (line.indexOf("-") === 0) cls = "diff-del";
+    return '<span class="' + cls + '">' + esc(line) + "</span>";
+  }).join("\n");
+  return '<pre class="pre diff-view">' + rows + "</pre>";
+}

@@ -2059,6 +2059,10 @@ class JobLibraryStore(_SqliteStore):
             item["accepted_diff_ids"] = json.loads(raw)
         except ValueError:
             item["accepted_diff_ids"] = []
+        # 迁移 48 回填的存量行没有 sha（SQL 算不了哈希）：读到就现算，
+        # 保证导出/P0 证据链对旧定稿同样可用。
+        if not item.get("sha256") and item.get("draft"):
+            item["sha256"] = JobLibraryStore._final_draft_sha256(item["draft"])
         return item
 
     def list_final_draft_versions(
