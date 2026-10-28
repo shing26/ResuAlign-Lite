@@ -139,7 +139,7 @@ def test_job_library_migrates_legacy_db_and_keeps_data(tmp_path):
     # {43} (alignment_metrics + application_result, quality attribution)、
     # {44} (deadline)、{45} (usable_diffs, #111/ADR-0041) 与
     # {46} (alignment_reason, #167) follow.
-    assert _migrated_versions(store) == set(range(1, 29)) | {30, 35, 37, 38, 39, 42, 43, 44, 45, 46, 47, 48}
+    assert _migrated_versions(store) == set(range(1, 29)) | {30, 35, 37, 38, 39, 42, 43, 44, 45, 46, 47, 48, 49}
 
 
 def test_upgrade_keeps_historical_alignment_artifacts(tmp_path):
@@ -250,7 +250,7 @@ def test_fresh_job_library_db_records_migrations_as_applied(tmp_path):
         tenant_id="t1", title="Fresh", jd_text="Python backend."
     )
     assert job["alignment_status"] == "idle"
-    assert _migrated_versions(store) == set(range(1, 29)) | {30, 35, 37, 38, 39, 42, 43, 44, 45, 46, 47, 48}
+    assert _migrated_versions(store) == set(range(1, 29)) | {30, 35, 37, 38, 39, 42, 43, 44, 45, 46, 47, 48, 49}
 
 
 def test_migrated_legacy_db_supports_workbench_columns(tmp_path):

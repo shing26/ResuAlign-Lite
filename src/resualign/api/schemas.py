@@ -585,6 +585,22 @@ class FinalDraftRollbackRequest(BaseModel):
     version: int = Field(ge=1)
 
 
+class JobApplicationCreateRequest(BaseModel):
+    """ADR-0067: record an application bound to the current final draft."""
+
+    channel: str = Field(default="", max_length=64)
+    applied_at: str | None = Field(default=None, max_length=32)
+    notes: str = Field(default="", max_length=2000)
+
+
+class JobApplicationOutcomeRequest(BaseModel):
+    """ADR-0067: record what happened after applying."""
+
+    status: Literal["applied", "interview", "offer", "rejected", "withdrawn"]
+    outcome_at: str | None = Field(default=None, max_length=32)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
 class JobExportResponse(BaseModel):
     """Canonical export payload derived only from persisted job fields."""
 

@@ -48,7 +48,9 @@
     "/api/jobs/{job_id}/final-draft/rollback",
     "/api/jobs/{job_id}/final-draft/versions",
     "/api/jobs/{job_id}/final-draft/versions/{version}",
-    "/api/jobs/{job_id}/final-draft/versions/{version}/diff"
+    "/api/jobs/{job_id}/final-draft/versions/{version}/diff",
+    "/api/jobs/{job_id}/application",
+    "/api/jobs/{job_id}/timeline"
   ],
   "operations": [],
   "schemas": [
@@ -98,7 +100,9 @@
     "WorkstationMeta",
     "WorkstationResumeSection",
     "WorkstationState",
-    "FinalDraftRollbackRequest"
+    "FinalDraftRollbackRequest",
+    "JobApplicationCreateRequest",
+    "JobApplicationOutcomeRequest"
   ],
   "sse_events": [
     "job.stage",

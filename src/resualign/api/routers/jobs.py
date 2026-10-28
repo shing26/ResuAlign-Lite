@@ -17,6 +17,8 @@ from ..deps import get_current_user, get_local_ingest_user
 from ..schemas import (
     FinalDraftRequest,
     FinalDraftRollbackRequest,
+    JobApplicationCreateRequest,
+    JobApplicationOutcomeRequest,
     JobCreateRequest,
     JobExportRequest,
     JobExportResponse,
@@ -581,6 +583,71 @@ def rollback_final_draft(
     return saved
 
 
+@router.post('/api/jobs/{job_id}/application')
+def record_job_application(
+    job_id: str,
+    req: JobApplicationCreateRequest,
+    user: dict[str, Any]=Depends(get_current_user),
+):
+    """ADR-0067: record an application bound to the current final draft."""
+    try:
+        row = context._jobs.upsert_job_application(
+            user['user_id'],
+            job_id,
+            channel=req.channel,
+            applied_at=req.applied_at,
+            notes=req.notes,
+        )
+    except context.UserStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail='Job not found')
+    return row
+
+
+@router.get('/api/jobs/{job_id}/application')
+def get_job_application(
+    job_id: str, user: dict[str, Any]=Depends(get_current_user)
+):
+    row = context._jobs.get_job_application(user['user_id'], job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail='Application not found')
+    return row
+
+
+@router.patch('/api/jobs/{job_id}/application')
+def update_job_application(
+    job_id: str,
+    req: JobApplicationOutcomeRequest,
+    user: dict[str, Any]=Depends(get_current_user),
+):
+    """ADR-0067: record the outcome after applying."""
+    try:
+        row = context._jobs.update_job_application_outcome(
+            user['user_id'],
+            job_id,
+            req.status,
+            outcome_at=req.outcome_at,
+            notes=req.notes,
+        )
+    except context.UserStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail='Application not found')
+    return row
+
+
+@router.get('/api/jobs/{job_id}/timeline')
+def get_job_timeline(
+    job_id: str, user: dict[str, Any]=Depends(get_current_user)
+):
+    """ADR-0067: one-screen timeline from job to application outcome."""
+    data = context._jobs.job_timeline(user['user_id'], job_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail='Job not found')
+    return data
+
+
 @router.post(
     '/api/jobs/{job_id}/exports',
     response_model=JobExportResponse,
@@ -627,6 +694,17 @@ async def update_library_job(job_id: str, req: JobUpdateRequest, request: Reques
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if job is None:
         raise HTTPException(status_code=404, detail='Job not found')
+    # ADR-0067：旧「记录投递」按钮仍走 PATCH 写 applied_at/status，这里同步到
+    # 投递事实源（绑定当前定稿版本）；没有定稿时静默跳过，保持旧行为可用。
+    applied_at = timeline.get('applied_at')
+    wants_applied = req.status in ('applied', '已投递') or bool(applied_at)
+    if wants_applied:
+        try:
+            context._jobs.upsert_job_application(
+                user['user_id'], job_id, applied_at=applied_at or None
+            )
+        except context.UserStoreError:
+            logger.info('application sync skipped (no final draft): %s', job_id)
     return job
 
 @router.delete('/api/jobs/{job_id}', status_code=204)
