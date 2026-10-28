@@ -65,7 +65,7 @@ test("source contracts keep the new UX gap fixes wired", () => {
   );
 
   const main = read("main.js");
-  assert.match(main, /请先生成并保存定稿，再记录投递/, "record-application guards draft");
+  assert.match(main, /api\/jobs\/.*\/application/, "record-application posts the application endpoint");
   assert.match(
     main,
     /session\.job\.job_id/,

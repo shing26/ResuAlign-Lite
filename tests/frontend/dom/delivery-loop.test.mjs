@@ -104,7 +104,7 @@ const DEEP_JOB = {
   salary_max: 40000,
 };
 
-const calls = { patches: [], opens: [], gets: [] };
+const calls = { posts: [], patches: [], opens: [], gets: [] };
 
 function jsonBody(body, status = 200) {
   return {
@@ -135,6 +135,19 @@ async function mockFetch(path, options = {}) {
     const job = MOCK_JOBS.find((item) => item.job_id === jobId);
     if (job) Object.assign(job, body);
     return jsonBody(job || {});
+  }
+  if (method === "POST" && url.startsWith("/api/jobs/") && url.endsWith("/application")) {
+    const body = JSON.parse(options.body || "{}");
+    calls.posts.push({ url, body });
+    return jsonBody({
+      application_id: "app-1",
+      job_id: url.split("/")[3],
+      channel: body.channel || "",
+      applied_at: body.applied_at || "",
+      final_draft_version: 1,
+      draft_sha256: "a".repeat(64),
+      status: "applied",
+    });
   }
   if (method === "GET" && url.startsWith("/api/jobs/")) {
     const jobId = url.split("/").pop();
@@ -233,15 +246,23 @@ test("delivery loop: save source_url, open original JD, record application", asy
     "job detail modal reopened",
   );
   modal.querySelector('[data-action="record-application"][data-id="j2"]').click();
+  const recordForm = await waitFor(
+    () => document.querySelector("[data-form='record-application']"),
+    "record-application opens the channel form",
+  );
+  recordForm.querySelector('[name="channel"]').value = "官网";
+  recordForm.dispatchEvent(
+    new window.Event("submit", { bubbles: true, cancelable: true }),
+  );
   await waitFor(
     () =>
-      calls.patches.some(
+      calls.posts.some(
         (call) =>
-          call.url === "/api/jobs/j2" &&
-          call.body.status === "applied" &&
+          call.url === "/api/jobs/j2/application" &&
+          call.body.channel === "官网" &&
           Boolean(call.body.applied_at),
       ),
-    "record-application PATCHes applied with today",
+    "record-application POSTs the application endpoint",
   );
   await waitFor(
     () => !document.querySelector(".modal-backdrop"),

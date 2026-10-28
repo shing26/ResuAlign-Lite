@@ -444,6 +444,10 @@ def test_workbench_full_flow(page, base_url, api_call, artifacts_dir, browser):
         context_actions.locator(
             f'[data-action="record-application"][data-id="{job_id}"]'
         ).click()
+        record_form = page.locator('[data-form="record-application"]')
+        record_form.wait_for(timeout=10000)
+        record_form.locator('select[name="channel"]').select_option("官网")
+        record_form.locator('button[type="submit"]').click()
         page.wait_for_function(
             "() => (document.querySelector('.wb-context-meta') || {}).textContent"
             "?.includes('已投递')",

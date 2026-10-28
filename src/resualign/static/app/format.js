@@ -4449,3 +4449,66 @@ export function draftDiffHtml(result) {
   }).join("\n");
   return '<pre class="pre diff-view">' + rows + "</pre>";
 }
+
+/* ADR-0067：投递记录与岗位时间线的纯渲染（DOM 绑定在 main.js）。 */
+export function applicationSummaryHtml(application) {
+  if (!application) {
+    return '<span class="small muted">未记录投递</span>';
+  }
+  const parts = [];
+  if (application.applied_at) parts.push(String(application.applied_at));
+  if (application.channel) parts.push(String(application.channel));
+  if (application.final_draft_version) parts.push("v" + application.final_draft_version);
+  if (application.draft_sha256) {
+    parts.push("sha " + String(application.draft_sha256).slice(0, 10));
+  }
+  if (application.outcome_at) parts.push("结果 " + String(application.outcome_at));
+  const status = application.status || "applied";
+  return (
+    '<span class="badge badge-green">' + esc(status) + "</span> "
+    + '<span class="small muted">' + esc(parts.join(" · ")) + "</span>"
+  );
+}
+
+export function jobTimelineHtml(payload) {
+  const events = Array.isArray(payload && payload.events) ? payload.events : [];
+  if (!events.length) {
+    return '<p class="small muted">这个岗位还没有时间线。</p>';
+  }
+  const rows = events.map(function (event) {
+    const when = event.at ? formatDate(event.at) : "";
+    const detail = event.detail
+      ? ' <span class="small muted">' + esc(event.detail) + "</span>"
+      : "";
+    return (
+      '<li><span class="small muted">' + esc(when) + "</span> "
+      + "<strong>" + esc(event.label || "") + "</strong>" + detail + "</li>"
+    );
+  }).join("");
+  return '<ol class="timeline" data-job-timeline>' + rows + "</ol>";
+}
+
+export function recordApplicationFormHtml(job) {
+  const now = new Date();
+  const iso = now.getFullYear() + "-"
+    + String(now.getMonth() + 1).padStart(2, "0") + "-"
+    + String(now.getDate()).padStart(2, "0");
+  const channels = ["官网", "招聘平台", "邮箱", "内推", "其他"];
+  const options = channels.map(function (value) {
+    return '<option value="' + value + '">' + value + "</option>";
+  }).join("");
+  const jobId = (job && job.job_id) || "";
+  return (
+    '<form data-form="record-application" data-id="' + esc(jobId) + '">'
+    + '<p class="small muted">记录后会绑定当前定稿版本，作为投递证据。</p>'
+    + '<label><span>投递渠道</span><select class="field-input" name="channel">'
+    + options + "</select></label>"
+    + '<label><span>投递日期</span><input class="field-input" type="date" name="applied_at" value="'
+    + iso + '"></label>'
+    + '<label><span>备注（可选）</span><input class="field-input" type="text" name="notes" maxlength="200"></label>'
+    + '<div class="actions">'
+    + '<button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>'
+    + '<button class="btn btn-primary" type="submit">确认记录</button>'
+    + "</div></form>"
+  );
+}

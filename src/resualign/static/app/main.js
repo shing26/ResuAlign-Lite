@@ -105,6 +105,9 @@ import {
   simpleLlmSetupHtml,
   draftDiffHtml,
   draftVersionsHtml,
+  applicationSummaryHtml,
+  jobTimelineHtml,
+  recordApplicationFormHtml,
   snapshotDrawerHtml,
 } from "./format.js";
 import { icon } from "./icons.js";
@@ -2000,39 +2003,28 @@ const actions = {
     let job = state.wbJob && state.wbJob.job_id === jobId ? state.wbJob : null;
     if (!job) {
       try {
-        job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+        job = await api("/api/jobs/" + encodeURIComponent(jobId));
       } catch (error) {
         toast(error.message || "岗位不存在", "error");
         return;
       }
     }
-    if (jobStatusRank(job.status) >= jobStatusRank("applied")) {
-      showModal(
-        "再次记录投递",
-        `<p>岗位已是「${esc(jobStatusLabel(job.status))}」。再次记录会追加一轮不可篡改的投递快照，不会改变当前状态或时间线。</p>
-        <div class="actions">
-          <button class="btn btn-ghost" type="button" data-action="close-modal">取消</button>
-          <button class="btn btn-primary" type="button" data-action="confirm-append-application" data-id="${esc(job.job_id)}">确认追加</button>
-        </div>`,
-      );
-      return;
-    }
-    const activeSession = activeSessionForExport();
-    const draft =
-      (state.wbFinalDraft && state.wbFinalDraft.draft) ||
-      job.final_draft ||
-      (activeSession && activeSession.alignment && activeSession.alignment.draft) ||
-      "";
-    if (!draft) {
-      toast("请先生成并保存定稿，再记录投递", "error");
-      return;
-    }
-    await persistApplicationRecord(
-      job,
-      todayDateString(),
-      button,
-      "已记录投递",
+    showModal(
+      "记录投递 · " + (job.title || "该岗位"),
+      recordApplicationFormHtml(job),
     );
+  },
+  "show-job-timeline": async (button) => {
+    const jobId = button.dataset.id || (state.wbJob && state.wbJob.job_id);
+    if (!jobId) return;
+    try {
+      const payload = await api(
+        "/api/jobs/" + encodeURIComponent(jobId) + "/timeline",
+      );
+      showModal("岗位时间线", jobTimelineHtml(payload), { closeBtn: true });
+    } catch (error) {
+      toast(error.message || "时间线加载失败", "error");
+    }
   },
   "confirm-append-application": async (button) => {
     const jobId = button.dataset.id;
@@ -4060,6 +4052,29 @@ async function handleForm(formName, data, form) {
           : {}),
       };
       return applyPendingStatusTransition(payload);
+    }
+    case "record-application": {
+      const jobId = form.dataset.id || (state.wbJob && state.wbJob.job_id);
+      if (!jobId) break;
+      const application = await api(
+        "/api/jobs/" + encodeURIComponent(jobId) + "/application",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            channel: data.channel || "",
+            applied_at: data.applied_at || "",
+            notes: data.notes || "",
+          }),
+        },
+      );
+      toast(
+        "已记录投递（v" + (application.final_draft_version || 0)
+          + " · " + String(application.draft_sha256 || "").slice(0, 10) + "）",
+        "success",
+      );
+      closeModal();
+      await render();
+      break;
     }
     case "job-filter":
       state.filters = {
