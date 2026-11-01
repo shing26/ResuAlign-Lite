@@ -37,8 +37,11 @@
 | allowlist / JD 上下文边界 | [0060](docs/adr/0060-gap-report-keyword-split.md) · [0061](docs/adr/0061-jd-context-not-a-content-license.md) |
 | 编辑器墙钟 | [0062](docs/adr/0062-editor-wall-clock-150s.md) |
 | 工作台终态分型 | [0063](docs/adr/0063-workbench-terminal-outcomes.md) |
+| 预匹配词法信号 / 简历×岗位排序 | [0064](docs/adr/0064-prematch-lexical-signals.md) · [0065](docs/adr/0065-resume-job-ranking.md) |
+| 定稿版本化 / 投递主线 | [0066](docs/adr/0066-final-draft-versioning.md) · [0067](docs/adr/0067-job-application-spine.md) |
+| 秋招期打磨冻结与投递就绪 | [0068](docs/adr/0068-application-freeze-and-readiness-criteria.md) |
 
-> 全量决策见 `docs/adr/`（编号 0001–0063；**0029 有意缺号**，见 ADR-0036）。
+> 全量决策见 `docs/adr/`（编号 0001–0068；**0029 有意缺号**，见 ADR-0036）。
 > 历史轨迹见 [`CHANGELOG.md`](CHANGELOG.md)，交付状态见 [`docs/STATUS.md`](docs/STATUS.md)。
 
 ---

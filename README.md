@@ -9,7 +9,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Version](https://img.shields.io/badge/version-1.1.0-blue?style=flat-square)](./CHANGELOG.md)
-[![ADR](https://img.shields.io/badge/ADR-0001--0065-orange?style=flat-square)](./docs/adr/)
+[![ADR](https://img.shields.io/badge/ADR-0001--0068-orange?style=flat-square)](./docs/adr/)
 [![Security](https://img.shields.io/badge/Security-encrypted_at_rest-success?style=flat-square)](#-隐私与安全边界)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](#-质量保证与测试体系)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
