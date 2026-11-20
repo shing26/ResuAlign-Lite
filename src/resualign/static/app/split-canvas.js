@@ -340,7 +340,7 @@ export function renderSplitCanvas(app, session, resumes, jobs = workbenchJobs) {
           <select class="input input-sm" data-job-switcher aria-label="切换岗位">
             ${jobs.map((item) => `<option value="${esc(item.job_id)}" ${item.job_id === jobId ? "selected" : ""}>${esc(item.title)}${item.company ? ` · ${esc(item.company)}` : ""}</option>`).join("")}
           </select>
-          ${jobsCapped ? `<span class="small muted" data-job-switcher-cap>已载入前 ${WORKBENCH_JOBS_LIMIT} 个岗位，更多岗位请到岗位库筛选</span>` : ""}
+          ${jobsCapped ? `<span class="small muted" data-job-switcher-cap>已载入前 ${WORKBENCH_JOBS_LIMIT} 个岗位，更多岗位请到职位库筛选</span>` : ""}
           <div class="row">
             ${jobApplyLinkHtml(job)}
             <button class="btn btn-secondary" type="button" data-action="record-application" data-id="${esc(jobId)}">记录投递</button>
@@ -981,11 +981,11 @@ export async function renderOptimizerCanvas(app, jobId) {
     state.wbResumes = resumes;
     app.innerHTML = `
       <div class="page-header page-header--workspace"><div><h2>单岗位工作台</h2>
-        <div class="sub">从岗位库选择岗位，或使用顶部万能输入直接创建新岗位</div></div></div>
+        <div class="sub">从职位库选择岗位，或使用顶部万能输入直接创建新岗位</div></div></div>
       <div class="panel panel-card">
         <div class="field"><label>选择岗位</label>
           <select data-wb-job-select>
-            <option value="">${workbenchJobs.length ? "选择岗位..." : "岗位库为空，先粘贴一个 JD 吧"}</option>
+            <option value="">${workbenchJobs.length ? "选择岗位..." : "职位库为空，先粘贴一个 JD 吧"}</option>
             ${workbenchJobs.map((item) => `<option value="${esc(item.job_id)}">${esc(item.title)} · ${esc(item.company || "")}</option>`).join("")}
           </select></div>
         <div class="row mt-3">

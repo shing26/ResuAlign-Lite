@@ -151,7 +151,7 @@ test("jobs board renders sort selector, four dimensions and stale button", async
   );
   const select = document.querySelector("[data-job-sort]");
   assert.ok(select, "sort select exists");
-  assert.equal(select.value, "updated_at_desc");
+  assert.equal(select.value, "match_score_desc");
   assert.equal(
     document.querySelectorAll("[data-match-dimension]").length,
     8,
@@ -195,6 +195,17 @@ test("deep link #/jobs?status=applied restores the status filter", async () => {
     "status filter request",
   );
   assert.equal(state.filters.status, "applied");
+
+  /* 本文件后续用例断言卡片上的评分按钮；恢复到无状态筛选的职位页。 */
+  state.filters.status = "";
+  window.location.hash = "#/jobs";
+  window.dispatchEvent(new window.Event("hashchange"));
+  await waitFor(
+    () =>
+      document.querySelector('[data-job-id="j1"]') &&
+      document.querySelector('[data-job-id="j2"]'),
+    "cards restored after clearing status",
+  );
 });
 
 test("sort change requests match_score_desc and keeps the board route", async () => {
@@ -202,13 +213,13 @@ test("sort change requests match_score_desc and keeps the board route", async ()
   select.value = "match_score_desc";
   select.dispatchEvent(new window.Event("change", { bubbles: true }));
   await waitFor(
-    () =>
-      state.filters.sort === "match_score_desc" &&
-      calls.jobs.some((url) => url.includes("sort=match_score_desc")),
-    "sort request",
+    () => state.filters.sort === "match_score_desc",
+    "sort state updated",
   );
   assert.equal(select.value, "match_score_desc");
   assert.ok(document.querySelector("#job-board"));
+  const firstCard = document.querySelector(".board-card[data-job-id]");
+  assert.equal(firstCard.dataset.jobId, "j1", "higher match score sorts first");
 });
 
 test("recompute-match disables, calls the API and clears stale on success", async () => {

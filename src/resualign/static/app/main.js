@@ -66,9 +66,9 @@ import {
   syncLiveSheetDraft,
 } from "./split-canvas.js";
 import {
-  renderKanban,
   setCanvasRenderHook,
 } from "./kanban.js";
+import { renderJobHall, syncJobHallFromHash } from "./job-hall.js";
 import {
   applyAcceptedDiffsToDraft,
   applyDiffToDraft,
@@ -187,7 +187,7 @@ function celebrateOffer(job) {
 
 const ROUTE_LABELS = {
   resume: "简历中心",
-  jobs: "岗位库",
+  jobs: "职位",
   workspace: "对齐工作台",
   settings: "系统设置",
   dashboard: "驾驶舱",
@@ -199,7 +199,7 @@ const PAGE_META = {
   dashboard: ["驾驶舱", "主简历与岗位对齐态势"],
   review: ["投递复盘", "每周投递节奏、停滞预警与归因对比"],
   workspace: ["对齐工作台", "岗位上下文、Diff 画布与 JD/Live Sheet 辅助舱"],
-  jobs: ["岗位库", "Pipeline 看板与 JD 粘贴建库"],
+  jobs: ["职位", "职位大厅 · 投递看板 · 同一份岗位数据"],
   resume: ["简历中心", "Markdown 双态编辑、ATS 健康度与版本时间线"],
     settings: ["系统设置", "LLM 节点、自动化规则与本地摄入 Token"],
 };
@@ -261,7 +261,7 @@ function refreshJobsRailCount(count) {
    * 反而制造新的口径矛盾。 */
   badge.textContent =
     total >= JOBS_RAIL_TOTAL_CAP ? `${JOBS_RAIL_TOTAL_CAP}+` : String(total);
-  badge.title = `岗位库共 ${total} 个岗位`;
+  badge.title = `职位库共 ${total} 个岗位`;
 }
 
 let jobsRailTotalFetch = null;
@@ -295,6 +295,35 @@ async function handleRoute(app) {
   const route = (rawRoute || "dashboard").split("/")[0] || "dashboard";
   const params = new URLSearchParams(queryString || "");
 
+  const applyJobsQuery = () => {
+    const sort = params.get("sort");
+    if (
+      sort &&
+      ["updated_at_desc", "match_score_desc", "match_score_asc"].includes(sort)
+    ) {
+      state.filters.sort = sort;
+    }
+    const status = params.get("status");
+    if (
+      status &&
+      ["draft", "applied", "interview", "offer", "withdrawn"].includes(status)
+    ) {
+      state.filters.status = status;
+    }
+    for (const [param, key] of [
+      ["search", "search"],
+      ["job_function", "job_function"],
+      ["seniority", "seniority"],
+      ["city", "city"],
+    ]) {
+      if (params.has(param)) state.filters[key] = params.get(param) || "";
+    }
+    const audience = params.get("audience");
+    if (audience && ["all", "campus", "experienced"].includes(audience)) {
+      state.filters.audience = audience;
+    }
+  };
+
   switch (route) {
     case "dashboard":
       await renderDashboard(app);
@@ -310,21 +339,27 @@ async function handleRoute(app) {
       break;
     }
     case "jobs": {
-      const sort = params.get("sort");
-      if (
-        sort &&
-        ["updated_at_desc", "match_score_desc", "match_score_asc"].includes(sort)
-      ) {
-        state.filters.sort = sort;
-      }
-      const status = params.get("status");
-      if (
-        status &&
-        ["draft", "applied", "interview", "offer", "withdrawn"].includes(status)
-      ) {
-        state.filters.status = status;
-      }
-      await renderKanban(app);
+      applyJobsQuery();
+      await renderJobHall(app, {
+        jobId: state.route.jobId || null,
+        view: params.get("view"),
+      });
+      break;
+    }
+    case "job-hall": {
+      /* #/job-hall 是合并前的入口，只做重定向别名；不保留第二套页面。 */
+      applyJobsQuery();
+      const next = new URLSearchParams(params);
+      if (state.route.jobId) next.set("job", state.route.jobId);
+      window.history.replaceState(
+        null,
+        "",
+        `#/jobs${next.toString() ? `?${next.toString()}` : ""}`,
+      );
+      await renderJobHall(app, {
+        jobId: state.route.jobId || null,
+        view: params.get("view"),
+      });
       break;
     }
     case "review":
@@ -354,6 +389,16 @@ async function handleRoute(app) {
       await renderDashboard(app);
       break;
   }
+}
+
+async function rerenderJobsView() {
+  const params = new URLSearchParams(
+    String(window.location.hash || "").split("?")[1] || "",
+  );
+  await renderJobHall($("#app-router-view"), {
+    jobId: state.route.jobId || null,
+    view: params.get("view"),
+  });
 }
 
 async function render() {
@@ -462,7 +507,9 @@ const HEADER_JOBS_LIMIT = 100;
 
 function refreshHeaderJobSelect() {
   if (headerJobsFetch) return;
-  headerJobsFetch = api(`/api/jobs?limit=${HEADER_JOBS_LIMIT}`)
+  /* The header only needs id/title/company. Ask for the summary projection so
+   * every page boot does not drag the JD bodies of the latest 100 jobs. */
+  headerJobsFetch = api(`/api/jobs?view=summary&limit=${HEADER_JOBS_LIMIT}`)
     .then((jobs) => {
       headerJobsCache = Array.isArray(jobs) ? jobs : [];
       populateHeaderJobSelect(headerJobsCache);
@@ -508,10 +555,29 @@ function syncHeaderJobSelect() {
 /* Job Library                                                         */
 /* ------------------------------------------------------------------ */
 
-function openJobEditor(job) {
+function hasFullJob(job) {
+  if (!job || typeof job !== "object") return false;
+  return (
+    typeof job.jd_text === "string" ||
+    Array.isArray(job.diffs) ||
+    Object.prototype.hasOwnProperty.call(job, "final_draft")
+  );
+}
+
+/* The jobs hall now keeps a summary projection in state.jobs. Entry points
+ * that render/edit the full record must fetch it before opening, otherwise
+ * the JD textarea and draft sections silently render empty. */
+async function loadFullJob(jobId, candidate) {
+  if (hasFullJob(candidate)) return candidate;
+  if (!jobId) throw new Error("岗位不存在");
+  return api(`/api/jobs/${encodeURIComponent(jobId)}`);
+}
+
+async function openJobEditor(job) {
+  const full = await loadFullJob(job && job.job_id, job);
   showModal(
-    `编辑「${job.title}」`,
-    jobEditFormHtml(job, {
+    `编辑「${full.title}」`,
+    jobEditFormHtml(full, {
       statuses: vocabularyList("statuses"),
       job_functions: vocabularyList("job_functions"),
       seniorities: vocabularyList("seniorities"),
@@ -619,7 +685,7 @@ async function showDuplicateJobGuide(payload) {
   showModal(
     "检测到相同岗位",
     `<div class="drawer">
-      <p>岗位库中已存在相同岗位${
+      <p>职位库中已存在相同岗位${
         dup
           ? `：「${esc(dup.title)}」${dup.company ? ` · ${esc(dup.company)}` : ""}（${esc(dup.status || "未投递")}）`
           : ""
@@ -1372,13 +1438,16 @@ const PREANALYZE_SECONDS_PER_JOB = 3.5;
 const PREANALYZE_CALLS_PER_JOB = 2;
 
 /* 复刻后端 job_needs_preanalyze：有 JD 正文 ∧（分类待定 ∨ 还没 JD 画像）。
- * 漏掉 jd_text 会高估没有正文的岗位；审计时 318 条里 87 条命中，与后端扫描
- * 结果一致（此后随实际预分析进度变化）。 */
+ * 列表已改用 view=summary，没有 jd_text/jd_profile，必须读摘要字段
+ * jd_excerpt/has_jd_profile；漏掉摘要回退会让按钮永远估算为 0（ADR-0070）。
+ * has_jd_profile 由后端按 JD 画像真值计算，与 job_needs_preanalyze 同义。 */
 function estimatePreanalyzePending() {
   return (state.jobs || []).filter(
     (job) =>
-      (job.jd_text || "").trim() &&
-      (!job.jd_profile || Boolean(job.classification_pending)),
+      (job.jd_text || job.jd_excerpt || "").trim() &&
+      (job.has_jd_profile === undefined
+        ? !job.jd_profile
+        : !job.has_jd_profile || Boolean(job.classification_pending)),
   ).length;
 }
 
@@ -1917,8 +1986,9 @@ const actions = {
     }
     const pending = estimatePreanalyzePending();
     if (!pending) {
-      /* 没有可分析的岗位时不弹空弹窗、也不发请求：后端会 422，白等一次往返。 */
-      toast("没有待分析的岗位", "info");
+      /* 列表可能被筛选成 0 条，但后端全库仍有待分析岗位。这里不短路，
+       * 让后端扫描给真值；无岗位时接口直接返回 queued:false，不产生调用。 */
+      await startPreanalyzeBatch();
       return;
     }
     const calls = pending * PREANALYZE_CALLS_PER_JOB;
@@ -1948,11 +2018,19 @@ const actions = {
   },
   "clear-filters": () => {
     state.filters = {
+      ...state.filters,
       job_function: "",
       seniority: "",
       status: "",
       search: "",
-      sort: "updated_at_desc",
+      sort: "match_score_desc",
+      audience: "all",
+      city: "",
+      salary: "",
+      matchMin: 0,
+      savedOnly: false,
+      recentOnly: false,
+      work_status: "all",
     };
     state.offset = 0;
     render();
@@ -1965,16 +2043,26 @@ const actions = {
     state.offset += state.limit;
     render();
   },
-  "edit-job": (button) => {
-    const job = state.jobs.find((item) => item.job_id === button.dataset.id);
-    if (job) openJobEditor(job);
+  "edit-job": async (button) => {
+    const job = (state.jobs || []).find(
+      (item) => item.job_id === button.dataset.id,
+    );
+    try {
+      const full = await loadFullJob(button.dataset.id, job);
+      await openJobEditor(full);
+    } catch (error) {
+      toast(error.message || "岗位不存在", "error");
+    }
   },
   "open-job-timeline": async (button) => {
     let job = (state.jobs || []).find(
       (item) => item.job_id === button.dataset.id,
     );
-    if (!job) {
-      job = await api(`/api/jobs/${encodeURIComponent(button.dataset.id)}`);
+    try {
+      job = await loadFullJob(button.dataset.id, job);
+    } catch (error) {
+      toast(error.message || "岗位不存在", "error");
+      return;
     }
     if (job) openJobDetail(job);
   },
@@ -2048,13 +2136,11 @@ const actions = {
     const jobId = button.dataset.id;
     if (!jobId) return;
     let job = (state.jobs || []).find((item) => item.job_id === jobId);
-    if (!job) {
-      try {
-        job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
-      } catch (error) {
-        toast(error.message || "岗位不存在", "error");
-        return;
-      }
+    try {
+      job = await loadFullJob(jobId, job);
+    } catch (error) {
+      toast(error.message || "岗位不存在", "error");
+      return;
     }
     await persistApplicationRecord(
       job,
@@ -2176,7 +2262,7 @@ const actions = {
         updated.match_reason || `规则匹配分已更新：${updated.match_score ?? "—"}`,
         "success",
       );
-      renderKanban($("#app-router-view"));
+      void rerenderJobsView();
     } catch (error) {
       toast(error.message, "error");
       button.disabled = false;
@@ -2186,7 +2272,7 @@ const actions = {
   },
   "open-workspace": (button) => navigate("workspace", button.dataset.id),
   /* Sprint 1 T3: 技能缺口热力条点击 → 跳到最近一个含该技能的岗位工作台；
-   * 无匹配岗位时回退到岗位库并设置搜索关键词（renderKanban 读取
+   * 无匹配岗位时回退到职位库并设置搜索关键词（职位页读取
    * state.filters 回填搜索框）。 */
   "goto-skill": async (button) => {
     const skill = String(button.dataset.skill || "").trim();
@@ -2203,6 +2289,9 @@ const actions = {
     const match = (jobs || []).find((job) => {
       const profile = job && job.jd_profile;
       const skills = [
+        ...(Array.isArray(job && job.profile_skills)
+          ? job.profile_skills
+          : []),
         ...(profile && Array.isArray(profile.must_have_skills)
           ? profile.must_have_skills
           : []),
@@ -2221,19 +2310,17 @@ const actions = {
     }
     state.filters = { ...state.filters, search: skill };
     navigate("jobs");
-    toast(`未找到要求「${skill}」的岗位，已在岗位库带关键词搜索`, "info");
+    toast(`未找到要求「${skill}」的岗位，已在职位库带关键词搜索`, "info");
   },
   "open-job-detail": async (button) => {
     let job = (state.jobs || []).find(
       (item) => item.job_id === button.dataset.id,
     );
-    if (!job) {
-      try {
-        job = await api(`/api/jobs/${encodeURIComponent(button.dataset.id)}`);
-      } catch (error) {
-        toast(error.message || "岗位不存在", "error");
-        return;
-      }
+    try {
+      job = await loadFullJob(button.dataset.id, job);
+    } catch (error) {
+      toast(error.message || "岗位不存在", "error");
+      return;
     }
     if (job) openJobDetail(job);
   },
@@ -2262,7 +2349,7 @@ const actions = {
       if (mount) mount.innerHTML = preanalyzeResultHtml(data);
       /* 分类结果落库后岗位卡徽章会变，静默刷新后台数据（不重渲染抽屉） */
       try {
-        const list = await api("/api/jobs?limit=500");
+        const list = await api("/api/jobs?view=summary&limit=500");
         state.jobs = Array.isArray(list) ? list : state.jobs;
       } catch {
         /* keep stale list */
@@ -2682,7 +2769,7 @@ const actions = {
       `<p>将用「<b>${resumeTitle}</b>」（v${resumeVersion}）对这个岗位运行一次对齐：</p>
        <ul class="small muted">
          <li>粒度：重构（medium）——在事实范围内调整措辞与结构</li>
-         <li>预计耗时：1–3 分钟（后台排队，完成后回到岗位库刷新即可）</li>
+         <li>预计耗时：1–3 分钟（后台排队，完成后回到职位库刷新即可）</li>
          <li>成本：会消耗一次模型调用</li>
        </ul>
        <p class="small muted">想换另一份简历，请到工作台右侧「优化设置」里选择后再运行。</p>
@@ -2711,7 +2798,9 @@ const actions = {
     } catch (error) {
       toast(error.message || "对齐排队失败", "error");
     } finally {
-      setTimeout(() => renderKanban($("#app-router-view")), 1200);
+      setTimeout(() => {
+        void rerenderJobsView();
+      }, 1200);
     }
   },
   /* #17: live 工作台「对比视图」——复用 buildLiveCompareHtml 的文档润色
@@ -2946,7 +3035,7 @@ const actions = {
   "export-align-json": () => exportFinalDraft("json"),
   "export-jobs-csv": () => {
     if (!state.jobs.length) {
-      toast("岗位库为空，暂无可导出的岗位", "error");
+      toast("职位库为空，暂无可导出的岗位", "error");
       return;
     }
     download("resualign-jobs.csv", jobsToCsv(state.jobs), "text/csv;charset=utf-8");
@@ -2955,7 +3044,7 @@ const actions = {
   "export-jobs-backup": async () => {
     const jobs = await api("/api/jobs?limit=500");
     if (!jobs.length) {
-      toast("岗位库为空，暂无可备份的岗位", "error");
+      toast("职位库为空，暂无可备份的岗位", "error");
       return;
     }
     download(
@@ -3105,7 +3194,7 @@ const actions = {
       });
     } catch (error) {
       if (String(error.message).includes("Duplicate")) {
-        toast("该岗位已在库中，去岗位库查看", "info");
+        toast("该岗位已在库中，去职位库查看", "info");
         closeCommandPanel();
         return;
       }
@@ -3769,13 +3858,11 @@ async function handleForm(formName, data, form) {
       let job = (state.jobs || []).find(
         (item) => item.job_id === data.job_id,
       );
-      if (!job) {
-        try {
-          job = await api(`/api/jobs/${encodeURIComponent(data.job_id)}`);
-        } catch (error) {
-          toast(error.message || "岗位不存在", "error");
-          return;
-        }
+      try {
+        job = await loadFullJob(data.job_id, job);
+      } catch (error) {
+        toast(error.message || "岗位不存在", "error");
+        return;
       }
       const targetStatus = canonicalJobStatus(data.status);
       const saveJob = async (extra = {}) => {
@@ -3900,13 +3987,11 @@ async function handleForm(formName, data, form) {
       let job = (state.jobs || []).find(
         (item) => item.job_id === data.job_id,
       );
-      if (!job) {
-        try {
-          job = await api(`/api/jobs/${encodeURIComponent(data.job_id)}`);
-        } catch (error) {
-          toast(error.message || "岗位不存在", "error");
-          return;
-        }
+      try {
+        job = await loadFullJob(data.job_id, job);
+      } catch (error) {
+        toast(error.message || "岗位不存在", "error");
+        return;
       }
       const targetStatus = canonicalJobStatus(data.status);
       const reopenDetail = () => {
@@ -3986,13 +4071,11 @@ async function handleForm(formName, data, form) {
       let job = (state.jobs || []).find(
         (item) => item.job_id === data.job_id,
       );
-      if (!job) {
-        try {
-          job = await api(`/api/jobs/${encodeURIComponent(data.job_id)}`);
-        } catch (error) {
-          toast(error.message || "岗位不存在", "error");
-          return;
-        }
+      try {
+        job = await loadFullJob(data.job_id, job);
+      } catch (error) {
+        toast(error.message || "岗位不存在", "error");
+        return;
       }
       const targetStatus = canonicalJobStatus(data.status);
       const reopenFollowup = () => {
@@ -4096,11 +4179,12 @@ async function handleForm(formName, data, form) {
     }
     case "job-filter":
       state.filters = {
+        ...state.filters,
         job_function: data.job_function || "",
         seniority: data.seniority || "",
         status: data.status || "",
         search: data.search || "",
-        sort: state.filters.sort || "updated_at_desc",
+        sort: state.filters.sort || "match_score_desc",
       };
       state.offset = 0;
       render();
@@ -4444,7 +4528,7 @@ async function loadResumesForOnboarding() {
 }
 
 /* 岗位库顶部：三步引导卡（仅当存在未完成且未跳过的步骤）。通过第二个
-   canvas hook 挂载，不动 kanban.js 的 renderKanban。
+   canvas hook 挂载，不动合并页的 renderJobHall。
    J12：
    1. 只有岗位库确实为空（state.jobs.length === 0）时才可能是新手；已有岗位
       时这张卡只会把老用户当新用户，直接不挂。state.jobs 由 renderKanban 在
@@ -4522,7 +4606,7 @@ setCanvasRenderHook(async (app) => {
 
 /* J5：工具栏两个批量按钮直接带「按当前列表估算」的数量（一键预分析（87）/
  * 批量对齐（296）），用户不必先点开弹窗才知道这一批的规模。只改文案，不碰
- * kanban.js；用渲染 hook 在 renderKanban 完成后写回。预分析批次进行中时
+ * 合并页；用渲染 hook 在 renderJobHall 完成后写回。预分析批次进行中时
  * 按钮归 paintPreanalyzeButton 管（「预分析中 x/y」是停止入口），这里绝不
  * 覆盖它。 */
 setCanvasRenderHook((app) => {
@@ -4585,7 +4669,22 @@ async function boot() {
   } catch {
     state.personal = false;
   }
-  window.addEventListener("hashchange", render);
+  let jobsPopstateHandled = false;
+  window.addEventListener("popstate", () => {
+    const next = parseHash();
+    if (next.name !== "jobs" || !syncJobHallFromHash()) return;
+    state.route = next;
+    setActiveTab();
+    refreshHeaderMeta();
+    jobsPopstateHandled = true;
+  });
+  window.addEventListener("hashchange", () => {
+    if (jobsPopstateHandled) {
+      jobsPopstateHandled = false;
+      return;
+    }
+    void render();
+  });
   await render();
 }
 

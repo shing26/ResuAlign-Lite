@@ -79,6 +79,38 @@ breaker 状态，不进入 CI 门禁。
 > 本机 Windows 交叉验证拐点抖动为 `2 / 16 / 16`，QPS 与 P99 明显高于 CI，
 > 符合「正式数字只取 CI」。
 
+### 职位大厅首屏（ADR-0070，Windows 交叉验证）
+
+装置：本机真实库（432 条岗位）+ `uvicorn 127.0.0.1:8000`（修复轮 PID
+40416，2026-11-20 15:16:28 启动，晚于 `jobs.py` 最后一次修改）；服务端
+耗时用 Python `urllib` 连续 5 次，避免 `curl.exe` 进程启动开销；浏览器为
+Playwright Chromium，390×844 / 1440×900。
+
+| 读数 | 口径 | 复现命令 | 判据 | 达标否 |
+| --- | --- | --- | --- | --- |
+| full = 5,994,155 bytes / 2.39s | `GET /api/jobs?limit=500`，改造前基线 | 见下方脚本 | 记录值 | 记录 |
+| summary = 1,111,717 bytes / 0.374s | 5 次 `GET /api/jobs?view=summary&limit=500` 中位（0.576 / 0.322 / 0.307 / 0.374 / 0.430） | 下方 urllib 脚本 | ≤1.5MB 且中位 ≤500ms | ✅ |
+| 移动端首卡热态中位 984ms | 390×844，冷 1218ms；热态 984 / 1010 / 527ms | Playwright `#/jobs` → `[data-jh-card]` | ≤1.5s | ✅ |
+| 桌面首卡热态中位 1123ms | 1440×900，冷 1217ms；热态 995 / 1150 / 1123ms | 同上 | ≤1.5s | ✅ |
+| 详情请求 1 次；后退/前进 0 新增 | 点第 3 张卡 → 后退 → 前进 | 同上，统计 `/api/jobs/{id}` 与 `/api/jobs?` 请求 | 点击 +1、后退/前进 0 | ✅ |
+| 页面级可见正文 0 处 <4.5 | 390×844 / 1440×900，`aria-hidden` 装饰除外；含顶栏搜索占位与侧栏品牌/状态文字 | `.scratch/fix-round-probe.py` | 0 violations | ✅ |
+| 预分析按钮 48 且真实 POST 1 次 | summary 列表下按钮文案「一键预分析（48）」；确认后拦截到 1 次 POST | 同上，路由拦截 `POST /api/jobs/preanalyze-pending` | 数量 >0 且不发前端短路 | ✅ |
+| QA 狗食走查 0 findings | 空库/岗位/工作台/看板/移动端 22 个用例 | `PYTHONPATH=src python scripts/qa_dogfooder.py` | findings = 0 | ✅ |
+
+```powershell
+$env:PYTHONPATH='D:\ResuAlign-Lite\src'
+@'
+import time, urllib.request
+for i in range(5):
+    t = time.perf_counter()
+    with urllib.request.urlopen(
+        'http://127.0.0.1:8000/api/jobs?view=summary&limit=500'
+    ) as r:
+        body = r.read()
+    print(len(body), round(time.perf_counter() - t, 3))
+'@ | python -
+```
+
 ## 可部署与复现（B11）
 
 装置：`benchmarks/cold_start_benchmark.py` 分三层记录，互不混表。

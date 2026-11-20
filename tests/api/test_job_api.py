@@ -282,6 +282,52 @@ def test_job_list_filter_get_patch_delete():
     assert client.get(f"/api/jobs/{job_id}").status_code == 404
 
 
+def test_job_list_summary_projection_omits_heavy_payloads():
+    jd_text = "面向 2027 届校园招聘，负责 Python 服务端开发。" + "补充" * 400
+    with patch("resualign.api._classify_job", return_value={}):
+        created = client.post(
+            "/api/jobs",
+            json={
+                "title": "校园招聘后端工程师",
+                "jd_text": jd_text,
+                "job_function": "后端",
+            },
+        )
+    assert created.status_code == 201
+
+    r = client.get("/api/jobs?view=summary&limit=10")
+    assert r.status_code == 200
+    row = r.json()[0]
+    forbidden = {
+        "jd_text",
+        "diffs",
+        "invalid_diffs",
+        "jd_profile",
+        "gap_report",
+        "draft",
+        "final_draft",
+        "eval_score",
+        "custom_prompt",
+        "prematch",
+    }
+    assert not (forbidden & set(row))
+    assert row["jd_excerpt"] == jd_text[:500]
+    assert row["audience"] == "campus"
+    assert row["has_jd_profile"] is False
+    assert row["profile_skills"] == []
+    assert row["job_id"] == created.json()["job_id"]
+
+    full = client.get("/api/jobs?view=full&limit=10").json()[0]
+    assert full["jd_text"] == jd_text
+    assert "diffs" in full
+    assert "jd_profile" in full
+
+
+def test_job_list_rejects_unknown_view():
+    r = client.get("/api/jobs?view=bogus")
+    assert r.status_code == 422
+
+
 def test_job_import_json_batch():
     with patch("resualign.api._classify_job", return_value={}):
         r = client.post(

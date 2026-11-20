@@ -140,7 +140,7 @@
       },
       "get": {
         "summary": "List Library Jobs",
-        "description": "List library jobs with optional filters.",
+        "description": "List library jobs with optional filters.\n\n``view=summary`` is the job-hall fast path: it keeps card fields and\nserver-derived hints, but never serializes the JD body or alignment\npayloads. ``view=full`` stays the default for every existing caller.",
         "operationId": "list_library_jobs_api_jobs_get",
         "parameters": [
           {
@@ -235,6 +235,20 @@
               "type": "string",
               "default": "updated_at_desc",
               "title": "Sort"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "full",
+                "summary"
+              ],
+              "type": "string",
+              "default": "full",
+              "title": "View"
             }
           },
           {

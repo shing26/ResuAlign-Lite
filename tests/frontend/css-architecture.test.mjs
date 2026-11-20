@@ -292,7 +292,7 @@ test("business rules keep shadow on the canonical four-step scale", () => {
     .join("\n");
 
   const allowedFloatingSelector =
-    /(?:^|,\s*)\.(?:inline-suggestion__paper|toast|offer-celebration__card|command-palette__dialog|command-panel|filter-pop|opt-bubble|export-dock__menu|toolbar-more__menu|board-more__menu)$|\.modal(?!-)(?:\s|$)|\.board-card\.is-dragging$|\.tabs--rail button:hover::after$/;
+    /(?:^|,\s*)\.(?:inline-suggestion__paper|toast|offer-celebration__card|command-palette__dialog|command-panel|filter-pop|opt-bubble|export-dock__menu|toolbar-more__menu|board-more__menu|jh-menu__body)$|\.modal(?!-)(?:\s|$)|\.board-card\.is-dragging$|\.tabs--rail button:hover::after$|\.jh-workspace\.is-board \.jh-(?:filters|detail--drawer)$/;
   const canonicalShadow = /var\(--shadow-(popover|modal|toast|drag)\)/;
   const focusRing = /var\(--focus-(?:ring(?:-error)?|shadow)\)/;
   const nonFloatingRing = /^(?:inset\b|0 0 0\b)/;

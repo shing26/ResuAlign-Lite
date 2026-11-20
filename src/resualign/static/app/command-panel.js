@@ -33,7 +33,7 @@ const ROUTE_COMMANDS = [
   { route: "dashboard", hash: "#/dashboard", label: "驾驶舱", iconName: "gauge" },
   { route: "review", hash: "#/review", label: "投递复盘", iconName: "clipboard-list" },
   { route: "workspace", hash: "#/workspace", label: "工作台", iconName: "columns" },
-  { route: "jobs", hash: "#/jobs", label: "岗位库", iconName: "briefcase" },
+  { route: "jobs", hash: "#/jobs", label: "职位库", iconName: "briefcase" },
   { route: "resume", hash: "#/resume", label: "简历中心", iconName: "file-text" },
   { route: "settings", hash: "#/settings", label: "系统设置", iconName: "settings" },
 ];
@@ -484,7 +484,7 @@ export async function runQuickEval() {
       state.quickEval = { jd_text: jdText, master_resume_id: resumeId, existing_job_id: body.existing_job_id };
       if (preview) {
         preview.innerHTML =
-          '<div class="form-error" role="alert">该 JD 已在岗位库中。</div>' +
+          '<div class="form-error" role="alert">该 JD 已在职位库中。</div>' +
           '<a class="btn btn-outline btn-sm" href="#/workspace/' + encodeURIComponent(body.existing_job_id) + '" data-action="close-command-panel">查看该岗位 ' + icon("chevron-right", 16) + '</a>';
       }
       return;

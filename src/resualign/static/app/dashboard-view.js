@@ -174,7 +174,7 @@ export async function renderDashboard(container) {
     </div>
     <div class="metric-cell" data-kpi="aligned">
       <div class="metric-label">已完成对齐</div>
-      <div class="metric-value"><a class="metric-link" href="#/jobs" title="打开岗位库，用「工作状态」筛选已对齐" aria-label="打开岗位库查看已对齐的岗位">${escAttr(alignedCount)} <span>/ ${escAttr(jobsTotal)}</span></a></div>
+      <div class="metric-value"><a class="metric-link" href="#/jobs" title="打开职位库，用「工作状态」筛选已对齐" aria-label="打开职位库查看已对齐的岗位">${escAttr(alignedCount)} <span>/ ${escAttr(jobsTotal)}</span></a></div>
       <div class="metric-hint">全量口径 · 完成率 ${escAttr(completionRate)}%<br>有可用改写的岗位 / 全部岗位${noGapCount ? ` · 无缺口 ${escAttr(noGapCount)}` : ""}</div>
     </div>
     <div class="metric-cell" data-kpi="ats">
@@ -260,7 +260,7 @@ export async function renderDashboard(container) {
       <div class="quick-row" data-quick-continue>
         <div class="quick-main">
           <div class="quick-title">暂无待继续的对齐任务</div>
-          <div class="quick-meta">到岗位库粘贴 JD，或从完整工作台继续处理。</div>
+          <div class="quick-meta">到职位库粘贴 JD，或从完整工作台继续处理。</div>
         </div>
       </div>`;
 

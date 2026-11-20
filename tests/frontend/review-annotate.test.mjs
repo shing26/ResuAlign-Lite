@@ -127,8 +127,8 @@ test("review view wires empty-state CTA and annotate card mount", () => {
   );
   assert.match(source, /data-review-annotate/, "annotate card is tagged");
   assert.match(source, /data-annotate-select/, "selects are delegated");
-  assert.match(source, /去岗位库标注/, "attribution empty state has CTA");
-  assert.match(source, /去岗位库录入/, "module empty state has CTA");
+  assert.match(source, /去职位库标注/, "attribution empty state has CTA");
+  assert.match(source, /去职位库录入/, "module empty state has CTA");
   assert.match(source, /application_result: select\.value/, "PATCH carries attribution");
   assert.match(source, /method: "PATCH"/, "uses the existing partial-update endpoint");
 });

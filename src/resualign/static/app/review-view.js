@@ -23,7 +23,7 @@ function paceBars(weekPace) {
           <strong>本周 0 次投递</strong>
           <span>挑一个岗位今天投出去，复盘数据从第一次投递开始积累。</span>
           <div class="review-attr__empty-cta">
-            <a class="btn btn-primary btn-sm" href="#/jobs">去岗位库挑一个 →</a>
+            <a class="btn btn-primary btn-sm" href="#/jobs">去职位库挑一个 →</a>
           </div>
         </div>
       </div>`;
@@ -119,7 +119,7 @@ function attributionCard(attribution) {
           暂无投递结果归因数据。在岗位详情里给已投递的岗位标注「投递结果归因」，
           积累后这里会对比<b>对齐过 vs 未对齐</b>简历的过筛率——对齐是否有效的直接证据。
           <div class="review-attr__empty-cta">
-            <a class="btn btn-outline btn-sm" href="#/jobs">去岗位库标注</a>
+            <a class="btn btn-outline btn-sm" href="#/jobs">去职位库标注</a>
           </div>
         </div>
       </div>`;
@@ -186,7 +186,7 @@ export function quickAnnotateHtml(rows, totalCount) {
           )
           .join("")}
       </div>
-      ${totalCount > rows.length ? `<p class="small muted">仅显示最近 ${escAttr(rows.length)} 条，其余可在岗位库逐条标注。</p>` : ""}
+      ${totalCount > rows.length ? `<p class="small muted">仅显示最近 ${escAttr(rows.length)} 条，其余可在职位库逐条标注。</p>` : ""}
     </div>`;
 }
 
@@ -234,7 +234,7 @@ export async function renderReviewView(container) {
   /* R3（2026-10-22 界面打磨 B1）：chips 是全库口径，而卡片标题写的是「本周」，
      两者贴在一起会被读成「图的图例」或「本周某天的量」。加一行小标题把口径
      分开；N 取 stage_distribution 五项之和，与驾驶舱 KPI 的岗位总数同源。 */
-  const stageTitleHtml = `<p class="small muted" data-review-stages-title>岗位阶段分布（全库 ${escAttr(totalJobs)}）· 岗位库当前状态，与上方「近 7 天」口径不同</p>`;
+  const stageTitleHtml = `<p class="small muted" data-review-stages-title>岗位阶段分布（全库 ${escAttr(totalJobs)}）· 职位库当前状态，与上方「近 7 天」口径不同</p>`;
 
   container.innerHTML = `
     <div class="view view-scroll view--dense">
@@ -242,10 +242,10 @@ export async function renderReviewView(container) {
         totalJobs
           ? ""
           : `<div class="panel main-pane"><div class="panel-body muted small">
-              岗位库还是空的：先到「岗位库」用 Ctrl+K 粘贴 JD 或油猴插件录入岗位，
+              职位库还是空的：先到「职位库」用 Ctrl+K 粘贴 JD 或油猴插件录入岗位，
               投递并记录时间后，这里的节奏与复盘结论会自动生成。
               <div class="review-attr__empty-cta">
-                <a class="btn btn-primary btn-sm" href="#/jobs">去岗位库录入</a>
+                <a class="btn btn-primary btn-sm" href="#/jobs">去职位库录入</a>
               </div>
             </div></div>`
       }

@@ -58,7 +58,7 @@ test("B5 action affordances use the shared Lucide factory", () => {
   assert.match(readApp("events.js"), /icon\("x", 20\)/);
   assert.match(readApp("events.js"), /icon\("x", 16\)/);
   assert.match(readApp("theme.js"), /icon\(theme === "dark" \? "moon" : "sun", 16\)/);
-  assert.match(readApp("kanban.js"), /icon\("chevron-down", 16\)/);
+  assert.match(readApp("job-hall.js"), /icon\("chevron-down", 16\)/);
   assert.match(readApp("command-panel.js"), /icon\("chevron-right", 16\)/);
   assert.match(readStatic("index.html"), /data-theme-icon/);
 });

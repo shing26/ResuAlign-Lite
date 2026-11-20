@@ -24,8 +24,8 @@ function read(name) {
 /* ------------------------------------------------------------------ */
 
 test("kanban.js renders the collapsible filter toolbar (job-filter form)", () => {
-  const src = read("kanban.js");
-  assert.match(src, /data-board-filter/, "collapsible filter container");
+  const src = read("job-hall.js");
+  assert.match(src, /data-jh-filters/, "collapsible filter container");
   assert.match(src, /data-form="job-filter"/, "reuses the existing filter handler");
   /* 四维筛选字段必须齐备（关键词/职能/级别/状态） */
   assert.match(src, /name="search"/);
@@ -33,7 +33,7 @@ test("kanban.js renders the collapsible filter toolbar (job-filter form)", () =>
   assert.match(src, /name="seniority"/);
   assert.match(src, /name="status"/);
   /* 清除按钮复用既有 clear-filters action */
-  assert.match(src, /data-action="clear-filters"/);
+  assert.match(src, /data-jh-clear/);
 });
 
 test("styles.css styles the collapsible filter toolbar", () => {
@@ -108,7 +108,7 @@ test("index.html: rail brand, jobs count badge and topbar title slots", () => {
   assert.match(html, /class="nav-index\b/, "numbered rail indicators");
   assert.match(html, />驾驶舱</, "dashboard rail label");
   assert.match(html, />工作台</, "workspace rail label");
-  assert.match(html, />岗位库</, "jobs rail label");
+  assert.match(html, />职位</, "jobs rail label");
   assert.match(html, />简历中心</, "resume rail label");
   assert.match(html, />系统设置</, "settings rail label");
 });
@@ -143,8 +143,8 @@ test("styles.css: mobile rail hides the brand so nav buttons stay tappable", () 
   );
 });
 
-test("kanban.js: single jobs top bar keeps conversion and export contracts", () => {
-  const src = read("kanban.js");
+test("jobs view: single top bar keeps conversion and export contracts", () => {
+  const src = `${read("job-hall.js")}\n${read("kanban.js")}`;
   assert.match(src, /data-jobs-topbar/, "unified jobs top bar");
   assert.doesNotMatch(src, /data-fetch-url-bar/, "fetch bar removed (crawler de-bloat)");
   assert.doesNotMatch(src, /data-blocker-badge/, "blocker badge mount removed (blocker UI de-bloat)");
@@ -270,7 +270,7 @@ test("批量导入：预分析开关默认开启并随请求下发", () => {
 });
 
 test("岗位库：一键预分析按钮与批量预分析接线", () => {
-  const kanban = read("kanban.js");
+  const kanban = read("job-hall.js");
   const src = read("main.js");
   assert.match(
     kanban,
@@ -291,5 +291,30 @@ test("岗位库：一键预分析按钮与批量预分析接线", () => {
     src,
     /status\.stopped && failed/,
     "a stopped batch surfaces the backend's actionable reason",
+  );
+  /* ADR-0070：列表改摘要后，估算必须读 jd_excerpt/has_jd_profile，
+   * 否则按钮显示 0 且点击被前端短路，后端全库的待分析岗位永远发不出去。 */
+  const estimate = src.match(
+    /function estimatePreanalyzePending\(\) \{[\s\S]*?\n\}/,
+  );
+  assert.ok(estimate, "estimatePreanalyzePending is defined");
+  assert.match(
+    estimate[0],
+    /job\.jd_excerpt/,
+    "summary rows fall back to jd_excerpt for the JD-body check",
+  );
+  assert.match(
+    estimate[0],
+    /job\.has_jd_profile/,
+    "summary rows use the server-derived has_jd_profile flag",
+  );
+  const zeroBranch = src.match(
+    /if \(!pending\) \{[\s\S]*?\n    \}/,
+  );
+  assert.ok(zeroBranch, "zero-pending branch exists");
+  assert.match(
+    zeroBranch[0],
+    /await startPreanalyzeBatch\(\)/,
+    "zero estimate still asks the backend for the authoritative count",
   );
 });

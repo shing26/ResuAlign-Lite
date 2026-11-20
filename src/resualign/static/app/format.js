@@ -464,7 +464,16 @@ export function buildDiagnosisMarkdownFrom(diagnosis, title, originalContent = "
 /* v3 重做移除了「今日待办」，路由名必须同步摘掉：它留在列表里会让
  * parseHashValue 把 #/today「认下来」，可 handleRoute 根本没有对应视图，
  * 于是 URL 停在今日待办、页面却是 default 分支的驾驶舱（#152）。 */
-const ROUTE_NAMES = ["resume", "resumes", "jobs", "workspace", "settings", "dashboard", "review"];
+const ROUTE_NAMES = [
+  "resume",
+  "resumes",
+  "jobs",
+  "job-hall",
+  "workspace",
+  "settings",
+  "dashboard",
+  "review",
+];
 
 /* UX 走查 P1-A（2026-08-28）：裸 #/resumes 归一化为列表哨兵，与
  * #/resume/list 等价出列表；#/resume/<id> 才进单份档案。 */
@@ -501,6 +510,29 @@ export function parseHashValue(hash) {
       /* keep raw value */
     }
     return { name: "resume", jobId: null, resumeId };
+  }
+  /* #/job-hall/<jobId>：深链打开职位大厅并选中岗位。 */
+  if (parts[0] === "job-hall" && parts[1]) {
+    let jobId = parts[1];
+    try {
+      jobId = decodeURIComponent(jobId);
+    } catch {
+      /* keep raw value */
+    }
+    return { name: "job-hall", jobId, resumeId: resumeFromQuery };
+  }
+  /* #/jobs?job=<jobId>：合并后的详情深链。job 与 sort/status/view 可以
+   * 组合，旧的 #/jobs?status=applied 链接不受影响。 */
+  if (parts[0] === "jobs") {
+    let jobId = query.get("job") || null;
+    if (jobId) {
+      try {
+        jobId = decodeURIComponent(jobId);
+      } catch {
+        /* keep raw value */
+      }
+    }
+    return { name: "jobs", jobId, resumeId: resumeFromQuery };
   }
   /* "resumes" 是 "resume" 的复数路由别名（蓝图契约 #/resumes）：裸 #/resumes
      归一化为列表哨兵（UX 走查 P1-A）。带 id 的路径已在上方分支返回。 */
@@ -1370,6 +1402,7 @@ function jdTechStackHtml(job) {
   const sources = [
     profile.must_have_skills,
     profile.hard_skills,
+    job && job.profile_skills,
     profile.nice_to_have_skills,
     job && job.tech_tags,
   ];
@@ -1510,7 +1543,7 @@ function boardAlignmentChip(job) {
   if (status === "canceled" || status === "expired") {
     return '<span class="badge badge-amber" title="上次对齐未跑完，可重新运行">未完成</span>';
   }
-  const hasProfile = Boolean(job.jd_profile);
+  const hasProfile = Boolean(job.jd_profile) || job.has_jd_profile === true;
   if (!hasProfile) return "";
   return '<span class="badge badge-gray" title="已画像，尚未运行对齐">待对齐</span>';
 }
@@ -1651,7 +1684,11 @@ function boardAlignButton(job) {
   /* Phase E: per-card align button by alignment_status.
    * idle -> 开始对齐; failed or succeeded+0 diffs -> 重新对齐; others -> none. */
   const alignStatus = job.alignment_status || "idle";
-  const zeroDiff = alignStatus === "succeeded" && !(job.diffs || []).length;
+  const usableDiffs =
+    typeof job.usable_diffs === "number"
+      ? job.usable_diffs
+      : (job.diffs || []).length;
+  const zeroDiff = alignStatus === "succeeded" && usableDiffs === 0;
   if (alignStatus === "idle") {
     return `<button type="button" class="btn btn-outline btn-sm board-card__align" data-action="align-job" data-id="${esc(job.job_id)}">开始对齐</button>`;
   }
@@ -1689,9 +1726,9 @@ export function batchPanelHtml(jobs, resumes) {
       <div class="panel-head">
         <div>
           <h2>批量对齐</h2>
-          <p>选主简历与 2-5 个岗位一次排队；结果留在本面板，可随时返回岗位库</p>
+          <p>选主简历与 2-5 个岗位一次排队；结果留在本面板，可随时返回职位库</p>
         </div>
-        <button class="btn btn-ghost btn-sm" type="button" data-action="close-batch-panel" data-batch-close>返回岗位库</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="close-batch-panel" data-batch-close>返回职位库</button>
       </div>
       <div class="form-grid">
         <div class="field"><label>主简历</label><select name="master_resume_id" required>
@@ -1700,7 +1737,7 @@ export function batchPanelHtml(jobs, resumes) {
           <option value="fine">微调</option><option value="medium">重构</option><option value="coarse">重写</option>
         </select></div>
         <div class="field wide"><label>选择 2-5 个岗位</label>
-          <div class="batch-job-list">${jobOptions || '<div class="muted small">岗位库为空</div>'}</div></div>
+          <div class="batch-job-list">${jobOptions || '<div class="muted small">职位库为空</div>'}</div></div>
         <div class="field wide"><label>自定义补充要求（可选）</label>
           <textarea name="custom_prompt" rows="2" placeholder="例如：强调高并发缓存场景"></textarea></div>
       </div>
@@ -2140,12 +2177,12 @@ export function batchRowsToCsv(batch) {
  * mirror the real POST /api/jobs/import contract). */
 
 export const BACKUP_RESTORE_STEPS = [
-  "1. 备份：岗位库 →「整库备份 JSON」下载全部岗位；「导出 CSV」可作明细备份。",
+  "1. 备份：职位库 →「整库备份 JSON」下载全部岗位；「导出 CSV」可作明细备份。",
   "2. 还原 JSON：调用 POST /api/jobs/import，body 为 {\"jobs\": <备份中的 jobs 数组>}，重复岗位自动跳过。PowerShell 示例：",
   "   $body = Get-Content resualign-jobs-backup.json -Raw | ConvertFrom-Json;",
   "   $payload = @{ jobs = $body.jobs } | ConvertTo-Json -Depth 8;",
   "   Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/jobs/import -ContentType 'application/json' -Body $payload",
-  "3. 还原 CSV：岗位库 →「批量导入」粘贴导出的 CSV 内容（列顺序：岗位,公司,城市,薪资,状态,匹配分,定稿版本）。",
+  "3. 还原 CSV：职位库 →「批量导入」粘贴导出的 CSV 内容（列顺序：岗位,公司,城市,薪资,状态,匹配分,定稿版本）。",
   "4. 还原只重建岗位基础字段；匹配分/定稿版本等派生字段不会自动重算，可在工作台对关键岗位重新运行预分析。",
 ];
 
@@ -3084,7 +3121,7 @@ export function isJunkJd(jdText) {
 /** 岗位卡片完整性徽章：JD 文本疑似整页 HTML/JSON（历史抓取残留）显示
  *  「JD 文本异常」，缺关键字段显示「待补全」（title 说明缺什么）。完整返回空串。 */
 export function jobCompletenessBadge(job) {
-  if (isJunkJd(job && job.jd_text)) {
+  if (isJunkJd(job && (job.jd_text || job.jd_excerpt))) {
     return '<span class="badge badge-amber" title="JD 文本疑似整页 HTML/JSON，可到工作台编辑修正">JD 文本异常</span>';
   }
   const missing = jobCompleteness(job);
@@ -4358,7 +4395,7 @@ export function recommendedJobsHtml(payload) {
   if (!items.length) {
     return (
       '<div class="muted small">' +
-      esc(hint || "暂无推荐：先让岗位库里有可排序的岗位。") +
+      esc(hint || "暂无推荐：先让职位库里有可排序的岗位。") +
       "</div>"
     );
   }

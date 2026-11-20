@@ -429,15 +429,20 @@ class Runner:
                     clue="resume-center.js 空状态分支",
                 )
             self.goto(page, "#/jobs")
-            if "暂无岗位" not in page.locator("#job-board").inner_text():
+            page.wait_for_selector("[data-jh-list]", timeout=10000)
+            empty_text = page.locator("[data-jh-list]").inner_text()
+            if (
+                "职位库还是空的" not in empty_text
+                and "暂无岗位" not in empty_text
+            ):
                 record(
                     "P3",
                     "交互反馈",
                     "岗位库空状态文案缺失",
-                    "空库看板没有'暂无岗位'提示",
-                    "每列应有空状态占位",
+                    "空库列表没有'职位库还是空的'提示",
+                    "应展示空状态与添加入口",
                     ["清空数据后访问 #/jobs"],
-                    clue="kanban.js board-column__empty",
+                    clue="job-hall.js emptyLibraryHtml",
                 )
         finally:
             context.close()
@@ -458,14 +463,19 @@ class Runner:
                 "- 使用 Redis 缓存\n- 负责高并发接口优化\n"
             )
             form.locator('button[type="submit"]').click()
-            page.wait_for_selector('[data-action="edit-resume"]', timeout=15000)
+            page.locator(
+                '[data-action="edit-resume"]:visible'
+            ).first.wait_for(timeout=15000)
             page.wait_for_timeout(300)
             self.check_console(page, "resume-create")
 
             # 刷新后持久化检查
             page.reload(wait_until="domcontentloaded")
             self.wait_view(page)
-            if page.locator('[data-action="edit-resume"]').count() == 0:
+            if (
+                page.locator('[data-action="edit-resume"]:visible').count()
+                == 0
+            ):
                 record(
                     "P1",
                     "状态同步",
@@ -477,7 +487,7 @@ class Runner:
                 )
 
             # 诊断（fake LLM）
-            page.click('[data-action="diagnose-resume"]')
+            page.locator('[data-action="diagnose-resume"]:visible').first.click()
             try:
                 page.wait_for_function(
                     """() => {
@@ -586,7 +596,7 @@ class Runner:
                 )
 
             # 回到岗位库，卡片应出现
-            self.goto(page, "#/jobs")
+            self.goto(page, "#/jobs?view=board")
             page.wait_for_selector("#job-board", timeout=10000)
             card = page.locator(f'[data-job-id="{job_id}"]')
             try:
@@ -924,7 +934,7 @@ class Runner:
                     clue="检查 match scorer 是否在 workbench 后写入",
                 )
                 return
-            self.goto(page, "#/jobs")
+            self.goto(page, "#/jobs?view=board")
             page.wait_for_selector("#job-board", timeout=10000)
             select = page.locator("[data-job-sort]")
             select.wait_for(timeout=10000)
@@ -940,7 +950,10 @@ class Runner:
                     clue="kanban.js data-job-sort 渲染",
                 )
             else:
-                if "匹配分从高到低" not in sort_option.first.inner_text():
+                if not any(
+                    label in sort_option.first.inner_text()
+                    for label in ("匹配优先", "匹配分从高到低")
+                ):
                     record(
                         "P2",
                         "交互反馈",
@@ -1606,7 +1619,9 @@ class Runner:
         page = self.new_page(context)
         try:
             self.goto(page, "#/jobs")
-            page.locator("details.toolbar-more summary").click()
+            page.locator("details.jh-menu summary").filter(
+                has_text="数据"
+            ).click()
             page.click('[data-action="show-import"]')
             # 等待表单真的可见，而不是靠 sleep 赌时序
             page.wait_for_selector(
@@ -1757,7 +1772,9 @@ class Runner:
         page = self.new_page(context)
         try:
             self.goto(page, "#/jobs")
-            page.locator("details.toolbar-more summary").click()
+            page.locator("details.jh-menu summary").filter(
+                has_text="数据"
+            ).click()
             page.click('[data-action="show-import"]')
             page.wait_for_selector(
                 '[data-form="job-import"]:not([hidden])', timeout=10000
@@ -1877,12 +1894,13 @@ class Runner:
         page = self.new_page(context)
 
         def abort_jobs(route) -> None:
-            if route.request.url.endswith("/api/jobs"):
+            path = route.request.url.split("?", 1)[0]
+            if path.endswith("/api/jobs"):
                 route.abort()
             else:
                 route.continue_()
 
-        context.route("**/api/jobs", abort_jobs)
+        context.route("**/api/jobs*", abort_jobs)
         try:
             self.goto(page, "#/jobs", wait=False)
             try:
@@ -1891,7 +1909,12 @@ class Runner:
                 pass
             page.wait_for_timeout(800)
             text = page.locator("#app-router-view").inner_text()
-            if "出错了" not in text and "重试" not in text and not page.locator("#job-board").count():
+            if (
+                "出错了" not in text
+                and "重试" not in text
+                and "职位库暂时没有响应" not in text
+                and "重新加载" not in text
+            ):
                 record(
                     "P1",
                     "异常处理",

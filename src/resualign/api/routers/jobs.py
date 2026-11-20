@@ -1,10 +1,11 @@
 
 import difflib
 import logging
+import re
 import threading
 import time
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -51,6 +52,119 @@ from ..services.resume_ranking import (  # ADR-0065
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_SUMMARY_JD_EXCERPT_CHARS = 500
+_SUMMARY_PROFILE_SKILL_LIMIT = 20
+_CAMPUS_SIGNAL = re.compile(
+    r"校招|校园招聘|应届|实习|管培|储备干部|202[5-9]届"
+)
+_SUMMARY_JOB_FIELDS = (
+    "job_id",
+    "title",
+    "company",
+    "location",
+    "salary_min",
+    "salary_max",
+    "salary_currency",
+    "source_type",
+    "source_url",
+    "jd_url",
+    "job_function",
+    "seniority",
+    "tech_tags",
+    "status",
+    "status_canonical",
+    "status_label",
+    "classification_pending",
+    "final_draft_version",
+    "posting_date",
+    "applied_at",
+    "next_step",
+    "notes",
+    "offer_at",
+    "rejected_at",
+    "next_step_due_at",
+    "interview_stage",
+    "application_result",
+    "deadline",
+    "match_stale",
+    "match_score",
+    "match_score_detail",
+    "match_reason",
+    "match_updated_at",
+    "alignment_status",
+    "alignment_error",
+    "alignment_reason",
+    "usable_diffs",
+    "has_gap",
+    "analysis_ready",
+    "created_at",
+    "updated_at",
+)
+
+
+def _infer_audience(job: dict[str, Any]) -> str:
+    """Mirror the job-hall campus signal using the full JD server-side.
+
+    The list projection deliberately omits the JD body, so the client cannot
+    re-derive this hint after loading a summary. Keep the signal set and
+    precedence aligned with ``inferAudience`` in ``job-hall-model.js``.
+    """
+    seniority = str(job.get("seniority") or "").strip()
+    if seniority in {"实习", "应届"}:
+        return "campus"
+    tags = job.get("tech_tags")
+    haystack = " ".join(
+        str(part or "")
+        for part in (
+            job.get("title"),
+            job.get("job_function"),
+            seniority,
+            " ".join(tags) if isinstance(tags, list) else "",
+            str(job.get("jd_text") or "")[:2000],
+        )
+        if part
+    )
+    return "campus" if _CAMPUS_SIGNAL.search(haystack) else "experienced"
+
+
+def _summary_profile_skills(job: dict[str, Any]) -> list[str]:
+    profile = job.get("jd_profile")
+    if not isinstance(profile, dict):
+        return []
+    seen: set[str] = set()
+    skills: list[str] = []
+    for key in ("must_have_skills", "hard_skills", "nice_to_have_skills"):
+        values = profile.get(key)
+        if not isinstance(values, list):
+            continue
+        for raw in values:
+            value = str(raw or "").strip()
+            folded = value.casefold()
+            if not value or folded in seen:
+                continue
+            seen.add(folded)
+            skills.append(value)
+            if len(skills) >= _SUMMARY_PROFILE_SKILL_LIMIT:
+                return skills
+    return skills
+
+
+def _project_job_summary(job: dict[str, Any]) -> dict[str, Any]:
+    """Keep only fields the list and board cards render.
+
+    Heavy payloads (JD body, diffs, drafts, profile/gap JSON) are dropped
+    after server-side derivations (match_stale, audience) have run.
+    """
+    summary = {
+        key: job[key] for key in _SUMMARY_JOB_FIELDS if key in job
+    }
+    jd_text = str(job.get("jd_text") or "")
+    summary["jd_excerpt"] = jd_text[:_SUMMARY_JD_EXCERPT_CHARS]
+    summary["has_jd_profile"] = bool(job.get("jd_profile"))
+    summary["profile_skills"] = _summary_profile_skills(job)
+    summary["audience"] = _infer_audience(job)
+    return summary
 
 
 def _llm_match_reason(
@@ -315,8 +429,13 @@ def _clean_job_diff_placeholders(job: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get('/api/jobs')
-def list_library_jobs(job_function: str | None=None, seniority: str | None=None, status: str | None=None, search: str | None=None, limit: int=100, offset: int=0, sort: str="updated_at_desc", user: dict[str, Any]=Depends(get_current_user)):
-    """List library jobs with optional filters."""
+def list_library_jobs(job_function: str | None=None, seniority: str | None=None, status: str | None=None, search: str | None=None, limit: int=100, offset: int=0, sort: str="updated_at_desc", view: Literal["full", "summary"]="full", user: dict[str, Any]=Depends(get_current_user)):
+    """List library jobs with optional filters.
+
+    ``view=summary`` is the job-hall fast path: it keeps card fields and
+    server-derived hints, but never serializes the JD body or alignment
+    payloads. ``view=full`` stays the default for every existing caller.
+    """
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
     try:
@@ -334,12 +453,18 @@ def list_library_jobs(job_function: str | None=None, seniority: str | None=None,
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     resume_cache: dict[str, str] = {}
     for position, job in enumerate(jobs):
-        job = _clean_job_diff_placeholders(job)
-        jobs[position] = job
+        summary = view == "summary"
+        if not summary:
+            job = _clean_job_diff_placeholders(job)
+        # Must run before projection: staleness hashes the full JD body.
         job["match_stale"] = _match_stale(user['user_id'], job)
-        prematch = _prematch_for(user['user_id'], job, resume_cache)
-        if prematch:
-            job["prematch"] = prematch
+        if summary:
+            job = _project_job_summary(job)
+        else:
+            prematch = _prematch_for(user['user_id'], job, resume_cache)
+            if prematch:
+                job["prematch"] = prematch
+        jobs[position] = job
     return jobs
 
 @router.get('/api/jobs/recommended')

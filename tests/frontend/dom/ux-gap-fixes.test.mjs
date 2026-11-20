@@ -48,9 +48,9 @@ function diagnosisPanelHtml() {
 }
 
 test("source contracts keep the new UX gap fixes wired", () => {
-  const kanban = read("kanban.js");
-  assert.match(kanban, /stats\.total/, "kanban uses stats.total denominator");
-  assert.doesNotMatch(kanban, /funnel\.total/, "funnel.total no longer used");
+  const jobsView = read("job-hall.js");
+  assert.match(jobsView, /stats\.total/, "jobs view uses stats.total denominator");
+  assert.doesNotMatch(jobsView, /funnel\.total/, "funnel.total no longer used");
 
   const dashboard = read("dashboard-view.js");
   assert.match(dashboard, /currentResume\.latest_diagnosis/, "dashboard reads persisted diagnosis");
