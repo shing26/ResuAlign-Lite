@@ -70,9 +70,17 @@ for (const sel of CRITICAL_SELECTORS) {
     const lines = definitionLines(sel);
     assert.ok(lines.length > 0, `${sel} 未定义`);
     /* B6（2026-10-23）：B1-B6 都是 append-only 的润色块，文件尾部被追加内容
-     * 稀释，原来的固定 66% 阈值会随追加漂移、误判「v3 定义已丢失」。
-     * 阈值改为 55%：仍只考察文件后段，但不受追加块行数影响。 */
-    const v3Start = Math.floor(LINES.length * 0.55);
+     * 稀释，百分比阈值会随追加漂移（2026-11-21 追加 131 行后 .app-main
+     * 的 8384 行定义被 55% 阈值挤出，误判「v3 定义已丢失」）。
+     * 改用内容锚点：v3 自适应层是 .app-main / .app-shell 的最后定义处，
+     * 位置稳定，不再依赖总行数。 */
+    const anchor = RAW.search(/v3 adaptive: shell\/main/);
+    assert.notEqual(
+      anchor,
+      -1,
+      "v3 adaptive 内容锚点缺失：样式文件结构已变，请同步本测试",
+    );
+    const v3Start = RAW.slice(0, anchor).split("\n").length - 1;
     /* 定义可能写成逗号多行选择器列表（如 .resume-archive-grid, 换行 .resume-grid）,
        单行精确匹配会漏；用 v3 区段的字符串出现兜底。 */
     const v3Text = LINES.slice(v3Start).join("\n");

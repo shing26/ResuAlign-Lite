@@ -1579,7 +1579,7 @@ export function boardCard(job, statuses = null) {
    * 匹配已知时，工作状态单独占一行（失败/已对齐必须在折叠态可见）。 */
   const metaLeadBadge =
     match != null
-      ? `<span class="match-badge ${matchTone(match)}" data-match-total title="${matchTitle}">${match}</span>`
+      ? `<span class="jh-matchscore" data-match-total title="${matchTitle}"><b>${match}</b><i>匹配</i></span>`
       : workChip ||
         '<span class="match-badge match-badge--empty" title="尚未分析">待分析</span>';
   const statusLine = match != null && workChip ? workChip : "";

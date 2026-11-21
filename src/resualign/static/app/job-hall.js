@@ -29,6 +29,7 @@ import {
   formatSalary,
   jobSourceUrl,
   jobStatusOptionsHtml,
+  jobMatchSource,
   renderMarkdown,
 } from "./format.js";
 import { icon } from "./icons.js";
@@ -44,7 +45,6 @@ import {
   audienceLabel,
   cityOptions,
   companyInitial,
-  companyTone,
   computeHallStats,
   dueItems,
   filterHallJobs,
@@ -208,14 +208,8 @@ function statusTone(status) {
 
 function logoHtml(job, size = "md") {
   const company = job && job.company ? job.company : "未知公司";
-  return `<span class="jh-logo jh-logo--${companyTone(company)} jh-logo--${size}" aria-hidden="true">${esc(
+  return `<span class="jh-logo jh-logo--${size}" aria-hidden="true">${esc(
     companyInitial(company),
-  )}</span>`;
-}
-
-function statusBadge(job) {
-  return `<span class="jh-status jh-status--${statusTone(job.status)}">${esc(
-    jobStatusLabel(job.status),
   )}</span>`;
 }
 
@@ -249,7 +243,7 @@ function workStateBadge(job) {
       : state === "no_gap"
         ? "该岗位没有需要改写的缺口"
         : "";
-  return `<span class="jh-workstate jh-workstate--${tone}"${
+  return `<span class="jh-dotline jh-dotline--${tone}"${
     hint ? ` title="${esc(hint)}"` : ""
   }>${esc(label)}</span>`;
 }
@@ -259,7 +253,7 @@ function deadlineBadge(job) {
     return '<span class="jh-deadline is-overdue">已截止</span>';
   }
   if (isDeadlineSoon(job)) {
-    return '<span class="jh-deadline is-soon">7 天内截止</span>';
+    return '<span class="jh-deadline">7 天内截止</span>';
   }
   return "";
 }
@@ -267,6 +261,21 @@ function deadlineBadge(job) {
 function tagHtml(value) {
   const text = String(value || "").trim();
   return text ? `<span class="jh-tag">${esc(text)}</span>` : "";
+}
+
+function taglineHtml(values) {
+  const parts = values.map((value) => String(value || "").trim()).filter(Boolean);
+  return parts.length
+    ? `<span class="jh-job__tagline">${esc(parts.join(" · "))}</span>`
+    : "";
+}
+
+/* 投递状态与工作状态共用「4px 状态点 + 灰字」一种签名：卡片、详情、看板
+ * 都不再出现彩色 pill，颜色只留在点上。 */
+function statusLine(job) {
+  return `<span class="jh-dotline jh-dotline--${statusTone(
+    job.status,
+  )}">${esc(jobStatusLabel(job.status))}</span>`;
 }
 
 function optionHtml(values, selected, allLabel) {
@@ -409,7 +418,7 @@ function shellHtml() {
       typeof window.matchMedia !== "function" ||
       !window.matchMedia("(max-width: 900px)").matches);
   return `<div class="view jh-view${isBoard ? " is-board" : ""}" data-jh-shell data-jh-mode="${hall.view}">
-    <header class="jh-head jobs-topbar" data-jobs-topbar>
+    <header class="jh-head" data-jobs-topbar>
       <div class="jh-pagehead">
         <div class="jh-pagehead__title">
           <h2 data-jh-page-title>${isBoard ? "投递看板" : "职位大厅"}</h2>
@@ -421,7 +430,11 @@ function shellHtml() {
             <button type="button" data-jh-view="board" aria-pressed="${isBoard}">看板</button>
           </div>
           <details class="jh-menu">
-            <summary class="jh-menu__summary">批量处理 ${icon("chevron-down", 16)}</summary>
+            <summary class="jh-menu__summary" aria-label="批量处理">
+              <span class="jh-menu__label">批量处理</span>
+              <span class="jh-menu__chevron">${icon("chevron-down", 16)}</span>
+              <span class="jh-menu__narrow">${icon("clipboard-list", 16)}</span>
+            </summary>
             <div class="jh-menu__body">
               <button type="button" data-recommended-toggle>按简历推荐</button>
               <button type="button" data-action="preanalyze-pending">一键预分析</button>
@@ -429,7 +442,11 @@ function shellHtml() {
             </div>
           </details>
           <details class="jh-menu">
-            <summary class="jh-menu__summary">数据 ${icon("chevron-down", 16)}</summary>
+            <summary class="jh-menu__summary" aria-label="数据">
+              <span class="jh-menu__label">数据</span>
+              <span class="jh-menu__chevron">${icon("chevron-down", 16)}</span>
+              <span class="jh-menu__narrow">${icon("file-text", 16)}</span>
+            </summary>
             <div class="jh-menu__body">
               <button type="button" data-action="show-import">批量导入</button>
               <button type="button" data-action="export-jobs-csv">导出 CSV</button>
@@ -458,12 +475,11 @@ function shellHtml() {
             name="search"
             data-jh-search
             value="${esc(hall.filters.query)}"
-            placeholder="搜索岗位、公司、城市或技能"
+            placeholder="搜索岗位、公司、城市或技能，支持多关键词"
             autocomplete="off"
             spellcheck="false"
-            aria-label="搜索岗位、公司、城市或技能"
+            aria-label="搜索岗位、公司、城市或技能，支持多关键词"
           >
-          <span class="jh-search__hint">支持多关键词</span>
         </label>
         <button type="button" class="jh-filterbtn" data-jh-toggle-filters>
           ${icon("sliders-horizontal", 16)} 筛选
@@ -596,21 +612,26 @@ function jobCardHtml(job) {
         <div class="jh-job__meta">
           <span>${esc(job.company || "未知公司")}</span>
           <span>${esc(job.location || "城市未填")}</span>
-          <span>${esc(job.seniority || "职级未知")}</span>
         </div>
         <div class="jh-job__tags">
-          ${tags.map(tagHtml).join("")}
+          ${taglineHtml(tags)}
           ${
             audience === "campus"
               ? '<span class="jh-tag jh-tag--accent">校招</span>'
               : ""
           }
           ${workStateBadge(job)}
-          ${hasMatch ? `<span class="jh-matchpill">${Math.round(match)} 分</span>` : ""}
         </div>
       </div>
       <div class="jh-job__side">
-        ${statusBadge(job)}
+        ${
+          hasMatch
+            ? `<span class="jh-matchscore" title="匹配分 · ${esc(
+                jobMatchSource(job),
+              )}"><b>${Math.round(match)}</b><i>匹配</i></span>`
+            : ""
+        }
+        ${statusLine(job)}
         <span class="jh-job__time">${esc(relativeTime(job.updated_at))}</span>
         ${deadlineBadge(job)}
       </div>
@@ -673,9 +694,9 @@ function matchHtml(job) {
   return `<div class="jh-match">
     ${
       hasScore
-        ? `<div class="jh-match__score"><strong>${Math.round(
+        ? `<div class="jh-match__score"><span class="jh-matchscore jh-matchscore--detail"><b>${Math.round(
             score,
-          )}</strong><span>/100</span>${
+          )}</b><i>匹配</i></span>${
             job.match_stale
               ? '<em class="jh-match__stale">已过期</em>'
               : ""
@@ -859,6 +880,9 @@ function detailHtml(job) {
       <span>${icon("calendar", 16)} ${esc(
         relativeTime(job.updated_at) || "更新时间未知",
       )}</span>
+      <span>${esc(job.job_function || "未分类")} · ${esc(
+        job.seniority || "职级未知",
+      )}</span>
       ${
         source
           ? `<a href="${esc(source)}" target="_blank" rel="noopener noreferrer">${icon(
@@ -870,10 +894,8 @@ function detailHtml(job) {
     </div>
 
     <div class="jh-detail__badges">
-      ${statusBadge(job)}
+      ${statusLine(job)}
       ${workStateBadge(job)}
-      <span class="jh-tag">${esc(job.job_function || "未分类")}</span>
-      <span class="jh-tag">${esc(job.seniority || "职级未知")}</span>
       <span class="jh-tag jh-tag--accent">${esc(audienceLabel(audience))}</span>
       ${deadlineBadge(job)}
     </div>
@@ -1021,43 +1043,52 @@ function metricsHtml() {
   const truncated = displayTotal > stats.total;
   const cells = [
     {
+      key: "total",
       label: "全部岗位",
       value: displayTotal,
       hint: truncated ? `已载入 ${stats.total} 个` : "职位库总量",
       tone: "neutral",
     },
     {
+      key: "draft",
       label: "待投递",
       value: stats.draft,
       hint: "尚未投递",
       tone: "neutral",
     },
     {
+      key: "applied",
       label: "已投递",
       value: stats.applied,
       hint: `累计投递 ${stats.appliedCumulative}`,
       tone: "accent",
     },
     {
+      key: "interview",
       label: "面试中",
       value: stats.interview,
       hint: `面试转化 ${stats.interviewRate}%`,
       tone: "info",
     },
     {
+      key: "offer",
       label: "Offer",
       value: stats.offer,
       hint: `Offer 率 ${stats.offerRate}%`,
       tone: "success",
     },
     {
+      key: "saved",
       label: "已收藏",
       value: stats.saved,
       hint: "候选清单",
       tone: "neutral",
     },
   ];
+  /* 过滤键用稳定 key，不用展示文案：改文案不该改变「哪些列常驻」。 */
+  const core = new Set(["total", "draft", "applied", "saved"]);
   return cells
+    .filter((cell) => core.has(cell.key) || Number(cell.value) > 0)
     .map(
       (cell) => `<div class="jh-metric jh-metric--${cell.tone}">
         <span class="jh-metric__label">${cell.label}</span>
@@ -1074,10 +1105,20 @@ function progressFootHtml() {
     (item) => item.at <= Date.now() + 7 * 86400000,
   );
   const next = due[0] || null;
+  /* 零值转化率不进首屏：全部为 0 时只剩一串「0%」，对判断没有信息量。 */
+  const rates = [
+    ["投递率", stats.applyRate, "data-jobs-apply-rate"],
+    ["面试率", stats.interviewRate, "data-jobs-interview-rate"],
+    ["Offer 率", stats.offerRate, ""],
+  ]
+    .filter(([, value]) => Number(value) > 0)
+    .map(
+      ([label, value, attr]) =>
+        `<span>${label} <b${attr ? ` ${attr}` : ""}>${value}%</b></span>`,
+    )
+    .join("");
   return `<div class="jh-conversion" data-jobs-conversion>
-      <span>投递率 <b data-jobs-apply-rate>${stats.applyRate}%</b></span>
-      <span>面试率 <b data-jobs-interview-rate>${stats.interviewRate}%</b></span>
-      <span>Offer 率 <b>${stats.offerRate}%</b></span>
+      ${rates || '<span class="jh-conversion__empty">暂无转化数据</span>'}
     </div>
     <button type="button" class="jh-duebtn" data-jh-due ${
       next ? "" : "disabled"
@@ -1196,7 +1237,7 @@ function paintList(visible) {
     sub.textContent = `${
       MERGED_SORTS.find((item) => item.value === hall.sort)?.label ||
       "匹配优先"
-    } · 点击岗位查看详情`;
+    }`;
   }
   if (!mount) return;
   if (!hall.jobs.length) {

@@ -32,6 +32,16 @@ $env:PYTHONPATH = "D:\ResuAlign-Lite\src"
 python scripts\qa_dogfooder.py
 ```
 
+本机 Playwright 浏览器版本与 Python 包错位时，用与 e2e smoke 相同的变量
+显式指定可执行文件（不设置则自动探测）：
+
+```powershell
+$env:RESUALIGN_SMOKE_CHROMIUM = (Get-ChildItem "$env:LOCALAPPDATA\ms-playwright\chromium-*\chrome-win64\chrome.exe" |
+  Sort-Object FullName -Descending | Select-Object -First 1).FullName
+```
+
+路径不存在时 harness 记 P1 并中止，不会留下「空 findings = 无问题」的假象。
+
 Harness 行为：
 
 - 启动 fake LLM（`tests/e2e/fake_llm.py`）与真实 App，使用临时

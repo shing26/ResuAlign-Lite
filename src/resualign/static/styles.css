@@ -12326,6 +12326,11 @@ select,
 }
 
 @media (max-width: 640px) {
+  /* 只在职位页隐藏顶栏命令条：页内搜索是唯一入口，两根搜索并排只会让
+     首屏更挤。其它页面没有替代入口，命令条必须保留。 */
+  body:has(.jh-view) .topbar .command-bar {
+    display: none;
+  }
   .tabs--rail button.nav-btn {
     padding: var(--space-2) var(--space-1);
   }
@@ -13284,12 +13289,6 @@ select,
     color: var(--text-secondary);
   }
 
-  .jh-search__hint {
-    flex: 0 0 auto;
-    color: var(--text-secondary);
-    font-size: var(--text-2xs);
-  }
-
   .jh-add {
     flex: 0 0 auto;
     height: var(--control-h-lg);
@@ -13316,7 +13315,7 @@ select,
   }
 
   .jh-linkbtn {
-    margin-left: auto;
+    margin-left: 0;
     padding: 0;
     border: 0;
     background: transparent;
@@ -13338,11 +13337,11 @@ select,
   }
 
   .jh-metrics {
-    display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    display: flex;
   }
 
   .jh-metric {
+    flex: 1 1 0;
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -13365,6 +13364,7 @@ select,
     font-size: var(--text-xl);
     font-weight: var(--fw-announce);
     line-height: 1.2;
+    font-variant-numeric: tabular-nums;
   }
 
   .jh-metric__hint {
@@ -13401,7 +13401,8 @@ select,
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    color: var(--text-tertiary);
+    /* 11px 小字：暗色下 text-tertiary 只有 4.39:1，达不到 AA。 */
+    color: var(--text-secondary);
     font-size: var(--text-2xs);
     white-space: nowrap;
   }
@@ -13639,8 +13640,9 @@ select,
   }
 
   .jh-job.is-selected {
-    border-color: var(--accent);
-    background: var(--accent-soft);
+    border-color: var(--line-strong);
+    background: var(--surface-1);
+    box-shadow: inset 2px 0 0 var(--accent);
   }
 
   .jh-job__hit {
@@ -13688,40 +13690,6 @@ select,
     width: 48px;
     height: 48px;
     font-size: var(--text-lg);
-  }
-
-  .jh-logo--0 {
-    border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-
-  .jh-logo--1 {
-    border-color: color-mix(in srgb, var(--info) 30%, var(--line));
-    background: var(--info-soft);
-    color: var(--info);
-  }
-
-  .jh-logo--2 {
-    border-color: color-mix(in srgb, var(--success) 30%, var(--line));
-    background: var(--success-soft);
-    color: var(--success);
-  }
-
-  .jh-logo--3 {
-    background: var(--surface-inset);
-    color: var(--text-secondary);
-  }
-
-  .jh-logo--4 {
-    border-color: color-mix(in srgb, var(--danger) 30%, var(--line));
-    background: var(--danger-soft);
-    color: var(--danger);
-  }
-
-  .jh-logo--5 {
-    background: var(--surface-2);
-    color: var(--text-primary);
   }
 
   .jh-job__main {
@@ -13783,6 +13751,19 @@ select,
     margin-top: var(--space-1);
   }
 
+  .jh-job__tagline {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    /* 11px 小字：暗色下 text-tertiary 只有 4.39:1，达不到 AA。 */
+    color: var(--text-secondary);
+    font-size: var(--text-2xs);
+    line-height: 1.6;
+    vertical-align: middle;
+  }
+
   .jh-tag {
     display: inline-flex;
     align-items: center;
@@ -13801,20 +13782,31 @@ select,
 
   .jh-tag--accent {
     border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
-    background: var(--accent-soft);
+    background: transparent;
     color: var(--accent-text);
   }
 
-  .jh-matchpill {
+  .jh-matchscore {
     display: inline-flex;
     align-items: center;
-    padding: var(--space-1) var(--space-2);
-    border-radius: var(--radius-pill);
-    background: var(--success-soft);
-    color: color-mix(in srgb, var(--success) 85%, var(--text-primary));
+    gap: var(--space-1);
+    flex: 0 0 auto;
+    color: var(--text-secondary);
     font-family: var(--font-num);
-    font-size: var(--text-2xs);
+    font-size: var(--text-sm);
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .jh-matchscore b {
     font-weight: var(--fw-emphasize);
+  }
+
+  .jh-matchscore i {
+    color: var(--text-secondary);
+    font-size: var(--text-2xs);
+    font-style: normal;
   }
 
   .jh-job__side {
@@ -13823,7 +13815,9 @@ select,
     flex-direction: column;
     align-items: flex-end;
     gap: var(--space-1);
-    padding-right: var(--space-5);
+    /* 右上角是绝对定位的收藏按钮（28px + 4px 边距 = 32px），再留 4px
+       呼吸位，侧栏文字才不会被按钮压住。 */
+    padding-right: var(--space-8);
   }
 
   .jh-job__time {
@@ -13832,107 +13826,70 @@ select,
     white-space: nowrap;
   }
 
-  .jh-status {
+  /* 状态签名（2026-11-22）：投递状态 / 工作状态 / 截止提醒统一为
+   * 「4px 状态点 + 灰字」，卡片、详情、看板共用同一实现。颜色只留在点上，
+   * 正文一律 text-secondary——一张卡上不再同时出现 5 种彩色 pill。 */
+  .jh-dotline {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    padding: var(--space-1) var(--space-2);
-    border: 1px solid transparent;
-    border-radius: var(--radius-pill);
-    font-size: var(--text-2xs);
-    font-weight: var(--fw-emphasize);
-    white-space: nowrap;
-  }
-
-  .jh-status--neutral {
-    border-color: var(--line);
-    background: var(--surface-inset);
     color: var(--text-secondary);
-  }
-
-  .jh-status--accent {
-    border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
-    background: var(--accent-soft);
-    color: var(--accent-text);
-  }
-
-  .jh-status--info {
-    border-color: color-mix(in srgb, var(--info) 35%, var(--line));
-    background: var(--info-soft);
-    color: var(--info);
-  }
-
-  .jh-status--success {
-    border-color: color-mix(in srgb, var(--success) 35%, var(--line));
-    background: var(--success-soft);
-    color: color-mix(in srgb, var(--success) 85%, var(--text-primary));
-  }
-
-  .jh-status--danger {
-    border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
-    background: var(--danger-soft);
-    color: var(--danger);
-  }
-
-  .jh-workstate {
-    display: inline-flex;
-    align-items: center;
-    padding: var(--space-1) var(--space-2);
-    border: 1px solid transparent;
-    border-radius: var(--radius-pill);
     font-size: var(--text-2xs);
-    font-weight: var(--fw-emphasize);
     line-height: 1.4;
     white-space: nowrap;
   }
 
-  .jh-workstate--neutral {
-    border-color: var(--line);
-    background: var(--surface-inset);
-    color: var(--text-secondary);
+  .jh-dotline::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 4px;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--text-tertiary);
   }
 
-  .jh-workstate--info {
-    border-color: color-mix(in srgb, var(--info) 35%, var(--line));
-    background: var(--info-soft);
-    color: var(--info);
+  .jh-dotline--accent::before {
+    background: var(--accent);
   }
 
-  .jh-workstate--success {
-    border-color: color-mix(in srgb, var(--success) 35%, var(--line));
-    background: var(--success-soft);
-    color: color-mix(in srgb, var(--success) 85%, var(--text-primary));
+  .jh-dotline--info::before {
+    background: var(--info);
   }
 
-  .jh-workstate--warning {
-    border-color: color-mix(in srgb, var(--warn) 35%, var(--line));
-    background: var(--warn-soft);
-    color: var(--warn);
+  .jh-dotline--success::before {
+    background: var(--success);
   }
 
-  .jh-workstate--danger {
-    border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
-    background: var(--danger-soft);
-    color: var(--danger);
+  .jh-dotline--warning::before {
+    background: var(--warn);
   }
 
+  .jh-dotline--danger::before {
+    background: var(--danger);
+  }
+
+  /* 截止提醒用同一套「点 + 灰字」，只有逾期时点变红。 */
   .jh-deadline {
     display: inline-flex;
     align-items: center;
-    padding: var(--space-1) var(--space-2);
-    border-radius: var(--radius-pill);
+    gap: var(--space-1);
+    color: var(--text-secondary);
     font-size: var(--text-2xs);
+    line-height: 1.4;
     white-space: nowrap;
   }
 
-  .jh-deadline.is-overdue {
-    background: var(--danger-soft);
-    color: var(--danger);
+  .jh-deadline::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 4px;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--text-tertiary);
   }
 
-  .jh-deadline.is-soon {
-    background: var(--accent-soft);
-    color: var(--accent);
+  .jh-deadline.is-overdue::before {
+    background: var(--danger);
   }
 
   .jh-job__save {
@@ -14220,20 +14177,14 @@ select,
   .jh-match__score {
     flex: 0 0 auto;
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: var(--space-1);
-    color: var(--accent);
-    font-family: var(--font-num);
   }
 
-  .jh-match__score strong {
-    font-size: var(--text-3xl);
-    line-height: 1;
-  }
-
-  .jh-match__score span {
-    color: var(--text-tertiary);
-    font-size: var(--text-2xs);
+  /* 详情面板与卡片共用同一匹配分签名：等宽数字 + 小灰标「匹配」，
+   * 不再出现 24px accent 大字。 */
+  .jh-matchscore--detail {
+    font-size: var(--text-xl);
   }
 
   .jh-match__stale {
@@ -14783,15 +14734,10 @@ select,
 
     .jh-job__titleline {
       flex-direction: column;
+      /* 列方向下必须 stretch：沿用基线的 align-items: baseline 会让标题按
+         内容宽度撑出主列，压到右侧匹配分下面。 */
+      align-items: stretch;
       gap: var(--space-1);
-    }
-
-    .jh-job__side {
-      padding-right: 0;
-    }
-
-    .jh-job__meta span:nth-child(3) {
-      display: none;
     }
 
     .jh-detail {
@@ -14922,6 +14868,11 @@ select,
   .jh-menu__summary:hover {
     background: var(--surface-hover);
     color: var(--text-primary);
+  }
+
+  /* 窄屏图标只在 ≤640px 出现，桌面仍是带文字的菜单按钮。 */
+  .jh-menu__narrow {
+    display: none;
   }
 
   .jh-menu__body {
@@ -15080,6 +15031,54 @@ select,
     box-shadow: 0 0 0 2px var(--accent);
   }
 
+  /* 看板列只有 220px：匹配分与公司名挤同一行时公司名被截成几个字。
+     这里让公司名独占一行，匹配分留在元信息首行。 */
+  .jh-boardcard .board-card__meta {
+    flex-wrap: wrap;
+  }
+
+  .jh-boardcard .board-card__meta-text {
+    flex: 1 1 100%;
+    order: 3;
+  }
+
+  /* 对齐结果同样收成「状态点 + 灰字」，与列表卡片、详情面板一致；
+     颜色只留在点上，不再出现整块彩色 pill。 */
+  .jh-boardcard .board-card__statusline .badge {
+    gap: var(--space-1);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--text-2xs);
+    font-weight: var(--fw-emphasize);
+  }
+
+  .jh-boardcard .board-card__statusline .badge::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 4px;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--text-tertiary);
+  }
+
+  .jh-boardcard .board-card__statusline .badge-green::before {
+    background: var(--success);
+  }
+
+  .jh-boardcard .board-card__statusline .badge-amber::before {
+    background: var(--warn);
+  }
+
+  .jh-boardcard .board-card__statusline .badge-red::before {
+    background: var(--danger);
+  }
+
+  .jh-boardcard .board-card__statusline .badge-blue::before {
+    background: var(--info);
+  }
+
   .jh-workspace.is-board .jh-detail--drawer {
     position: absolute;
     top: 0;
@@ -15156,12 +15155,22 @@ select,
       flex: 0 0 auto;
     }
 
+    /* 批量处理 / 数据收成图标按钮：文字仍在 DOM 里给读屏（aria-label 也在
+       summary 上）。两个按钮各用专属图标，避免并排两个「⋯」分不清。 */
     .jh-menu__summary {
-      width: auto;
+      width: var(--space-8);
       height: 28px;
-      padding: 0 var(--space-2);
-      font-size: var(--text-2xs);
-      justify-content: space-between;
+      justify-content: center;
+      padding: 0;
+    }
+
+    .jh-menu__label,
+    .jh-menu__chevron {
+      display: none;
+    }
+
+    .jh-menu__narrow {
+      display: inline-flex;
     }
 
     .jh-board__toolbar {

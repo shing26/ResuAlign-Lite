@@ -2023,7 +2023,27 @@ def main() -> int:
             app_port=app.port,
         )
         with sync_playwright() as pw:
-            chromium = pw.chromium.launch(headless=True)
+            # 本机 Playwright 包版本与已下载浏览器版本可能错位（默认路径
+            # 指向的 1228 不存在、实际为 1248）。沿用 e2e smoke 的既有变量名，
+            # 不另起一套；未设置时保持 Playwright 自动探测。
+            launch_kwargs = {"headless": True}
+            chromium_path = os.environ.get("RESUALIGN_SMOKE_CHROMIUM")
+            if chromium_path:
+                if not Path(chromium_path).is_file():
+                    record(
+                        "P1",
+                        "QA harness",
+                        "RESUALIGN_SMOKE_CHROMIUM 指向的可执行文件不存在",
+                        chromium_path,
+                        "显式指定的 Chromium 路径必须存在，否则本轮走查无效",
+                        ["设置 RESUALIGN_SMOKE_CHROMIUM", "运行 qa_dogfooder.py"],
+                        clue="检查本机 ms-playwright 安装目录",
+                    )
+                    raise RuntimeError(
+                        f"RESUALIGN_SMOKE_CHROMIUM not found: {chromium_path}"
+                    )
+                launch_kwargs["executable_path"] = chromium_path
+            chromium = pw.chromium.launch(**launch_kwargs)
             try:
                 runner.run(chromium)
             finally:

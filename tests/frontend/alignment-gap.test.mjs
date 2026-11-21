@@ -97,7 +97,11 @@ test("index.html: rail brand, jobs count badge and topbar title slots", () => {
     "utf8",
   );
   assert.match(html, /class="rail-brand\b/, "rail brand block");
-  assert.match(html, /Career Studio v3/, "rail brand tagline");
+  assert.match(
+    html,
+    /class="rail-brand__tagline[^"]*"[^>]*>Career Studio</,
+    "rail brand tagline",
+  );
   assert.match(html, /data-jobs-rail-count/, "jobs nav count badge");
   assert.match(html, /id="page-title"/, "dynamic topbar title");
   assert.match(html, /id="page-title"[^>]*>驾驶舱</, "dashboard title matches template");
@@ -143,6 +147,20 @@ test("styles.css: mobile rail hides the brand so nav buttons stay tappable", () 
   );
 });
 
+test("styles.css: mobile command bar is hidden on jobs only", () => {
+  const css = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src/resualign/static/styles.css"),
+    "utf8",
+  );
+  /* 职位页有页内搜索，窄屏可以收掉顶栏命令条；其它页面没有替代入口，
+     必须保留。断言作用域前缀，防止有人把选择器放宽成全局 display:none。 */
+  assert.match(
+    css,
+    /body:has\(\.jh-view\) \.topbar \.command-bar\s*\{\s*display:\s*none;/,
+    "command bar hidden only on the jobs view",
+  );
+});
+
 test("jobs view: single top bar keeps conversion and export contracts", () => {
   const src = `${read("job-hall.js")}\n${read("kanban.js")}`;
   assert.match(src, /data-jobs-topbar/, "unified jobs top bar");
@@ -170,7 +188,11 @@ test("main.js: route meta, rail count and resume list route", () => {
   assert.match(src, /#\/resume\/list/, "explicit resume list route");
   assert.match(src, /settingsBentoHtml\(activeNode, latency, state\.settingsStatus\)/, "settings runtime status bento");
   assert.match(src, /data-llm-nodes-panel/, "settings LLM node panel");
-  assert.match(src, /\.jobs-topbar"\) \|\| app\.querySelector\("\.page-header"\)/, "jobs strip hooks target the top bar");
+  assert.match(
+    src,
+    /querySelector\("\[data-jobs-topbar\]"\) \|\| app\.querySelector\("\.page-header"\)/,
+    "jobs strip hooks target the top bar",
+  );
   assert.doesNotMatch(src, /page-header--jobs \.row/, "old fetch-bar hook removed");
 });
 

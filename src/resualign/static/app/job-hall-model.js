@@ -115,15 +115,6 @@ export function companyInitial(company) {
   return Array.from(text)[0].toUpperCase();
 }
 
-export function companyTone(company) {
-  const text = String(company || "");
-  let hash = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    hash = (hash * 31 + text.charCodeAt(index)) % 997;
-  }
-  return hash % 6;
-}
-
 export function jobStage(job) {
   const canonical = canonicalJobStatus(job && job.status);
   if (canonical === "withdrawn") return "withdrawn";

@@ -224,7 +224,10 @@ test("radar chart dead code is fully removed", () => {
 
 test("boardCard exposes total, reason source and stale recompute action", () => {
   const body = bodyFrom(boardCard(DETAIL_JOB));
-  assert.equal(body.querySelector("[data-match-total]").textContent, "83");
+  assert.equal(
+    body.querySelector("[data-match-total] b").textContent,
+    "83",
+  );
   assert.match(
     body.querySelector("[data-match-reason]").textContent,
     /四维匹配 82\.5 分/,
@@ -263,7 +266,7 @@ test("boardCard shows legacy hint when only match_score exists", () => {
   };
   const body = bodyFrom(boardCard(legacy));
   assert.ok(body.querySelector("[data-match-legacy]"));
-  assert.equal(body.querySelector("[data-match-total]").textContent, "83");
+  assert.equal(body.querySelector("[data-match-total] b").textContent, "83");
   assert.equal(body.querySelectorAll("[data-match-dimension]").length, 0);
 });
 

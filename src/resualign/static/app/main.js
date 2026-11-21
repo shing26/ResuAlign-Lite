@@ -4536,7 +4536,8 @@ async function loadResumesForOnboarding() {
    2. 简历数据未知（loadResumesForOnboarding 返回 null）时也不挂——宁可少一张
       卡，也不要一张「你没有主简历」的假卡。下次 render 再判断，不加定时器。 */
 setCanvasRenderHook(async (app) => {
-  const header = app.querySelector(".jobs-topbar") || app.querySelector(".page-header");
+  const header =
+    app.querySelector("[data-jobs-topbar]") || app.querySelector(".page-header");
   if (!header || app.querySelector("[data-onboarding-card]")) {
     return;
   }
