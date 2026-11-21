@@ -554,11 +554,14 @@ def test_preanalyze_batch_can_be_canceled_midway():
             )
 
     started = threading.Event()
+    release = threading.Event()
 
     def slow_preanalyze(user, job_id):
-        # Slow enough that the cancel lands mid-sweep rather than after it.
-        time.sleep(0.08)
         started.set()
+        # 阻塞到取消请求落地，保证 cancel 一定发生在批次中途：全量套件下
+        # 主线程可能被饿 0.4s+，5 个岗位跑完后 cancel 只能撞 409。
+        # 超时兜底防止挂死，超时后用例仍会以可诊断的方式失败。
+        release.wait(timeout=5.0)
         # 真的落库，否则「已分析结果保留」这条验收标准等于没测。
         api_module._jobs.update_job(
             user["user_id"],
@@ -581,6 +584,7 @@ def test_preanalyze_batch_can_be_canceled_midway():
         )
         assert canceled.status_code == 200
         assert canceled.json()["canceling"] is True
+        release.set()
         done = _wait_preanalyze(start["batch_id"])
 
     assert done["canceled"] is True

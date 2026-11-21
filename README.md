@@ -272,7 +272,7 @@ python -m pytest tests/e2e --e2e
 python tests/e2e/playwright_smoke.py    # 假 LLM 冒烟：独立端口自启自停，不烧额度
 ```
 
-**测试基线**（2026-11-21 实测，全量 `python -m pytest tests/`）：**1446 collected / 1438 passed / 1 failed / 7 skipped**。失败用例 `tests.api.test_job_api::test_preanalyze_batch_can_be_canceled_midway`（断言 `409 == 200`）——批量预分析中途取消在新工作台下返回 409，属时序敏感的已知失败，未隔离重跑验证，如实登记、不写成全绿；11-14 快照为 1443 collected / 1436 passed / 7 skipped。前端与扩展 `node --test` 本轮 **644 passed / 0 failed**（新工作台相关测试入库），历史基线 623。E2E 收集 7 个用例，运行需 Playwright + Chromium，由 CI Stage 3 门禁。覆盖率门槛 85%（`pyproject.toml` `fail_under`）。CI 的 JUnit / coverage artifact 是持续事实源，本行是带日期与命令的快照；投递前需重跑刷新。
+**测试基线**（2026-11-21 实测，全量 `python -m pytest tests/`）：**1439 passed / 7 skipped / 0 failed**（`test_preanalyze_batch_can_be_canceled_midway` 的时序竞态已修——第一个岗位阻塞在事件上直到取消请求落地，cancel 不再撞上已完成的批次；11-21 早前快照为 1438 passed / 1 failed）。前端与扩展 `node --test` 本轮 **644 passed / 0 failed**（新工作台相关测试入库），历史基线 623。E2E 收集 7 个用例，运行需 Playwright + Chromium，由 CI Stage 3 门禁。覆盖率门槛 85%（`pyproject.toml` `fail_under`）。CI 的 JUnit / coverage artifact 是持续事实源，本行是带日期与命令的快照；投递前需重跑刷新。
 
 CI 六阶段（`.github/workflows/ci.yml`）：
 
