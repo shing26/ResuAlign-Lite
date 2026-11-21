@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import queue
+import re
 import threading
 import time
 import uuid
@@ -130,6 +131,20 @@ def _apply_diffs(base_text: str, diffs: list[dict[str, Any]], accepted_indices: 
             if original in draft:
                 draft = draft.replace(original, proposed, 1)
                 applied += 1
+            else:
+                # 编辑器可能把多行 bullet 的换行折叠成空格；精确匹配失败时
+                # 把 original 中的连续空白当作任意空白串再定位一次（首 span）。
+                pattern = re.compile(
+                    r'\s+'.join(re.escape(part) for part in original.split())
+                )
+                collapsed = pattern.search(draft)
+                if collapsed:
+                    draft = (
+                        draft[: collapsed.start()]
+                        + proposed
+                        + draft[collapsed.end() :]
+                    )
+                    applied += 1
         elif diff_type == 'add' and proposed:
             draft = f'{draft}\n{proposed}'
             applied += 1

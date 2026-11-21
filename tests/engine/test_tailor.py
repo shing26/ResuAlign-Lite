@@ -910,3 +910,25 @@ def test_apply_diffs_strips_legacy_placeholder_from_draft():
     assert applied == 1
     assert "待人工确认" not in draft
     assert draft == "构建高吞吐服务"
+
+
+def test_apply_diffs_matches_multiline_original_with_collapsed_whitespace():
+    """编辑器把多行 bullet 的换行折叠成空格时，采纳仍要能命中原文。"""
+    from resualign.api.services.workbench import _apply_diffs
+
+    base = "OpsPilot：AI 命令行效率工具\n- 技术栈（Java 21，虚拟线程）\n- 个人独立开发\n其他内容"
+    diffs = [
+        {
+            "type": "modify",
+            "original": (
+                "OpsPilot：AI 命令行效率工具 - 技术栈（Java 21，虚拟线程） "
+                "- 个人独立开发"
+            ),
+            "proposed": "OpsPilot：AI 命令行效率工具（新增 gRPC 网关与灰度发布）",
+        }
+    ]
+    draft, applied = _apply_diffs(base, diffs, [0])
+    assert applied == 1
+    assert "OpsPilot：AI 命令行效率工具（新增 gRPC 网关与灰度发布）" in draft
+    assert "个人独立开发" not in draft
+    assert "其他内容" in draft

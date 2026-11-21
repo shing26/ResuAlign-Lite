@@ -9,7 +9,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Version](https://img.shields.io/badge/version-1.1.0-blue?style=flat-square)](./CHANGELOG.md)
-[![ADR](https://img.shields.io/badge/ADR-0001--0068-orange?style=flat-square)](./docs/adr/)
+[![ADR](https://img.shields.io/badge/ADR-0001--0070-orange?style=flat-square)](./docs/adr/)
 [![Security](https://img.shields.io/badge/Security-encrypted_at_rest-success?style=flat-square)](#-隐私与安全边界)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](#-质量保证与测试体系)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
@@ -63,7 +63,7 @@ ResuAlign-Lite 把这件事当工程问题做：一个跑在本机的 FastAPI + 
 | **JD 画像与差距分析** | 结构化岗位画像 + 差距度量 | `jd_profiler`（画像）与 `gap_analyzer`（深度缺口报告）走 LLM；Ctrl+K 走零 LLM 的 `/api/quick-eval`——`local_fallback` 规则抽取 + `match_scorer` 秒出匹配分与缺口 top3，不建岗位 |
 | **分角色模型路由** | 五个角色分工调度 LLM | `role_router.py`：diagnose / profiler / gap_analyzer / editor / evaluator 各有超时与 token 预算；多活节点故障转移、连续失败熔断、进程内冷却 |
 | **单岗位工作台** | 对照编辑 + A4 预览双视图 | 建议卡带 provenance 徽标与置信度；SSE 流式推进并透出 LLM 失败码；采纳 / 跳过 / 单条润色 / 手工编辑；导出 md / json / pdf |
-| **岗位库与投递看板** | 五列状态机 + 批量导入/预分析 | 未投递 → 已投递 → 面试中 → Offer → 放弃；在「岗位库 → 数据 → 批量导入」填 CSV 与 JD 正文目录，后台增量同步且去重预检在分类之前（重复行 0 次 LLM 调用）；看板可一键预分析未分析岗位，也可在导入后自动预分析 |
+| **统一求职工作台** | 列表 / 看板双视图 + 批量导入/预分析（ADR-0069） | 职位大厅与投递看板已合并为单一 `#/jobs` 工作台：列表与看板共享筛选、视图记忆与详情深链，详情后退不重拉；五列状态机未投递 → 已投递 → 面试中 → Offer → 放弃；CSV 与 JD 正文目录批量导入，去重预检在分类之前（重复行 0 次 LLM 调用）；列表摘要投影 `GET /api/jobs?view=full\|summary`（ADR-0070）跳过 prematch、只回 `jd_excerpt`（≤500 字）与 audience / has_jd_profile / profile_skills |
 | **驾驶舱与复盘** | KPI、技能缺口、有效性对比 | 技能缺口排行来自真实岗位 JD 聚合；对齐 vs 未对齐简历的过筛率对比（样本不足只报计数，不给误导性比率） |
 | **网申回填扩展** | Chrome MV3 逐字段填充 | 读取本地结构化档案填网申表单，React/Vue 受控表单兼容，数据全程不出本机 |
 | **隐私与静态加密** | 数据不离机，密钥落盘加密 | SQLite WAL；API Key 以 Fernet 加密存储（ADR-0035，密钥独立文件——文档自陈这是"硬化而非沙箱"） |
@@ -99,7 +99,7 @@ ResuAlign-Lite 把这件事当工程问题做：一个跑在本机的 FastAPI + 
                   └──────────────────────────────────────────────────────────────┘
                                                   ▼
                   ┌──────────────────────────────────────────────────────────────┐
-                  │ 交付层  工作台双栏 / 投递看板 / 驾驶舱 / 导出 md·json·pdf    │
+                  │ 交付层  单岗双栏 / 统一求职工作台（列表·看板）/ 驾驶舱 / 导出 │
                   │ MV3 回填扩展 → 网申表单（数据不出本机）                      │
                   └──────────────────────────────────────────────────────────────┘
 
@@ -188,6 +188,8 @@ python benchmarks/role_latency_benchmark.py     # 角色时延校准
 - **对抗性幻觉用例**：`benchmarks/cases/adversarial_hallucination_claims.json`（对抗性夸大凭据）与 `adversarial_hallucination_projects.json`（跨专业虚构项目），验证编造断言进不了输出——`must_not_contain` 命中即断言失败。
 - **Agent 评测床**（`benchmarks/agent/`）：actor / judge / runner 组成的回放测试 harness，配黄金 fixtures。
 
+**接口补充（ADR-0070）**：`GET /api/jobs` 新增 `view=summary` 投影，字段集是 `full` 的子集且跳过预匹配；schema 与环境变量均未变，无需迁移或新增配置。
+
 ## ⚙️ 配置
 
 复制 `.env.example` 为 `.env`：
@@ -231,7 +233,7 @@ ResuAlign-Lite/
 ├── resualign-collector.user.js # Tampermonkey JD 采集脚本
 ├── benchmarks/                 # 压测、角色时延校准、agent 评测床、对抗幻觉用例
 ├── contracts/                  # OpenAPI 契约快照与增量演进规范
-├── docs/adr/                   # 65 篇架构决策记录（0001–0065，0029 有意缺号）
+├── docs/adr/                   # 70 个决策文件（编号 0001–0070；0029 有意缺号、0059 有两篇，distinct 编号 69）
 ├── docs/assets/                # README 效果对照图（由 scripts/make_readme_figures.py 生成）
 ├── tests/                      # pytest 主套件 + frontend/extension node 测试 + e2e
 ├── scripts/                    # 备份/恢复、Kill-9 演练、探针视频、README 图表生成
@@ -270,7 +272,7 @@ python -m pytest tests/e2e --e2e
 python tests/e2e/playwright_smoke.py    # 假 LLM 冒烟：独立端口自启自停，不烧额度
 ```
 
-**测试基线**（2026-10-27 实测，全量 `python -m pytest tests/`）：**1408 passed / 7 skipped**，另有 1 个已知偶发失败——`tests/storage/test_wal_concurrency.py::test_cold_start_schema_race_on_shared_db`（并发冷启动竞态下报 `attempt to write a readonly database`，隔离重跑通过）；前端与扩展 `node --test` **623 passed / 0 failed**；E2E 收集 7 个用例，运行需 Playwright + Chromium，由 CI Stage 3 门禁。覆盖率门槛 85%（`pyproject.toml` `fail_under`）。CI 的 JUnit / coverage artifact 是持续事实源，本行是带日期与命令的历史快照。
+**测试基线**（2026-11-21 实测，全量 `python -m pytest tests/`）：**1446 collected / 1438 passed / 1 failed / 7 skipped**。失败用例 `tests.api.test_job_api::test_preanalyze_batch_can_be_canceled_midway`（断言 `409 == 200`）——批量预分析中途取消在新工作台下返回 409，属时序敏感的已知失败，未隔离重跑验证，如实登记、不写成全绿；11-14 快照为 1443 collected / 1436 passed / 7 skipped。前端与扩展 `node --test` 本轮 **644 passed / 0 failed**（新工作台相关测试入库），历史基线 623。E2E 收集 7 个用例，运行需 Playwright + Chromium，由 CI Stage 3 门禁。覆盖率门槛 85%（`pyproject.toml` `fail_under`）。CI 的 JUnit / coverage artifact 是持续事实源，本行是带日期与命令的快照；投递前需重跑刷新。
 
 CI 六阶段（`.github/workflows/ci.yml`）：
 
@@ -280,6 +282,8 @@ CI 六阶段（`.github/workflows/ci.yml`）：
 4. **Stage 4**：分层冷启动门禁（原生进程 + `docker build --no-cache` + 空数据卷容器启动到 `/health`，断言 UID 1000）；
 5. **Stage 5**：CSS 结构债预算棘轮（`scripts/css_budget.mjs`，只许变好）；
 6. **Stage 6**：20 张视觉快照与基线对比（advisory，不阻断合并）。
+
+**自用验收（2026-11-21）**：`scripts/qa_dogfooder.py` 走查 22 用例、0 findings；可见文本对比度修复至 ≥4.5:1；app 自用 3 份真实 JD 的闭环（定稿 / 导出，3/3 达标）见 `docs/reports/app-self-use-3jd-2026-11-21.md`，取代旧的 1/3 口径。摘要投影的性能收益（5.99MB → 1.11MB、中位 0.374s、首卡 ≤1.5s）见 `docs/EVIDENCE.md`。
 
 ## 🤝 参与贡献
 
@@ -298,7 +302,7 @@ CI 六阶段（`.github/workflows/ci.yml`）：
 | [docs/EVIDENCE.md](docs/EVIDENCE.md) | 证据台账：每个数字一行（口径 + 复现命令） |
 | [CHANGELOG.md](CHANGELOG.md) | 迭代轨迹（ADR 编号 + Phase 名是主要索引） |
 | [docs/user-guide.md](docs/user-guide.md) | 用户手册 |
-| [docs/adr/](docs/adr/) | 57 篇架构决策记录（0001–0058） |
+| [docs/adr/](docs/adr/) | 70 个决策文件（0001–0070，0029 缺号；0069 统一求职工作台、0070 列表摘要投影） |
 | [docs/assets/](docs/assets/) | README 效果对照图与出图口径（数字来源 + 复现命令） |
 | [docs/README.md](docs/README.md) | 文档放哪：平铺层 = 活文档，`plans/` + `reports/` = 归档 |
 | [CONTEXT.md](CONTEXT.md) | 领域词汇表 |

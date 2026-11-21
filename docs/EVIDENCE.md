@@ -176,6 +176,24 @@ for i in range(5):
 
 ## 复现总入口
 
+## app 自用闭环（ADR-0059，2026-11-21）
+
+装置：真实库 3 份作者投递过的 JD + `nvidia/nemotron-3-ultra-550b-a55b`
+（探活 3.1s）+ 服务 `127.0.0.1:8000`。
+
+| 读数 | 口径 | 判据 | 达标否 |
+| --- | --- | --- | --- |
+| 腾讯 `bcb5d7bb`：usable 3 / 采纳 3 / 定稿 v4 / 导出 | 换 Java 主简历 + fine 后重跑 | 采纳 ≥1 + 定稿 | ✅ |
+| Dida `c132fa2c`：usable 1 / 采纳 1 / 定稿 v1 / 导出 | medium 一次跑通 | 同上 | ✅ |
+| Reolink `76e52224`：usable 3 / 采纳 1 / 定稿 v1 / 导出 | medium 一次跑通 | 同上 | ✅ |
+| 多行采纳 P1 修复 | 编辑器把 `\n` 折叠为空格致 `accepted_count=0`；`_apply_diffs` 空白容错回退；契约 `plans/adopt-multiline-diffs-2026-11-21.md`，Verifier ACCEPT（98 passed，复跑 accept=3） | 采纳真实落地 | ✅ |
+
+逐阶段证据：`.scratch/selfuse-20261121/evidence.jsonl`；导出件
+`export-{tencent,dida,reolink}.md`（含定稿版本与 sha256 meta）。
+报告：`docs/reports/app-self-use-3jd-2026-11-21.md`。
+
+## 复现总入口
+
 ```powershell
 $env:PYTHONPATH = "D:\ResuAlign-Lite\src"
 
