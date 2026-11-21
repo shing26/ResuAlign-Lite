@@ -1,8 +1,8 @@
 """Generate the SVG figures embedded in README.md.
 
-Both figures are deterministic: same inputs, same bytes, no timestamps. The
-numbers printed inside them are read from repository artefacts, not typed in
-by hand -- every value is traceable to one of these commands:
+All figures are deterministic: same inputs, same bytes, no timestamps. The
+numbers printed inside the data figures are read from repository artefacts,
+not typed in by hand -- every value is traceable to one of these commands:
 
     $env:PYTHONPATH='src'
     python benchmarks/run_benchmark.py --offline        # adversarial leakage + gate
@@ -601,12 +601,381 @@ def figure_hallucination() -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Figure 3 -- README hero（品牌主视觉，不含数据）
+# ---------------------------------------------------------------------------
+
+
+def pill(
+    x: float,
+    y: float,
+    width: float,
+    label: str,
+    *,
+    fg: str,
+    bg: str,
+    size: float = 13,
+) -> str:
+    return rect(x, y, width, 30, fill=bg, rx=15) + text(
+        x + width / 2, y + 20, label, size=size, fill=fg, weight="600", anchor="middle"
+    )
+
+
+def figure_hero() -> str:
+    width, height = 1600, 460
+    bg = "#0B0D11"
+    panel_bg = "#12171F"
+    grid = "#161C24"
+    hairline = "#252C37"
+    bright = "#E9EEF5"
+    body = "#C3CBD8"
+    dim = "#98A2B3"
+    accent = "#2BB3C8"
+    accent_soft = "#123039"
+    ok = "#3DDC97"
+    ok_soft = "#123027"
+    alert = "#FF8A5B"
+    alert_soft = "#331E16"
+
+    out: list[str] = [rect(0, 0, width, height, fill=bg, rx=0)]
+    for gx in range(0, width, 80):
+        out.append(line(gx, 0, gx, height, stroke=grid))
+    for gy in range(0, height, 80):
+        out.append(line(0, gy, width, gy, stroke=grid))
+    out.append(rect(0, 0, width, 4, fill=accent, rx=0))
+
+    out.append(rect(64, 52, 44, 44, fill=accent, rx=11))
+    out.append(text(86, 81, "RA", size=17, fill=bg, weight="800", anchor="middle"))
+    out.append(text(124, 76, "ResuAlign-Lite", size=22, fill=bright, weight="700"))
+    out.append(
+        text(
+            124,
+            98,
+            "CAREER STUDIO · LOCAL-FIRST",
+            size=10.5,
+            fill=dim,
+            spacing=1.8,
+        )
+    )
+
+    out.append(text(64, 186, "模型只能改写，", size=54, fill=bright, weight="800"))
+    out.append(text(64, 252, "不能编造。", size=54, fill=accent, weight="800"))
+    out.append(
+        text(
+            64,
+            302,
+            "本地求职工作台：简历诊断 · JD 对齐 · 投递闭环",
+            size=20,
+            fill=body,
+        )
+    )
+    out.append(
+        text(
+            64,
+            334,
+            "每条建议都带 provenance；找不到原文依据的改写，会被 fail-closed 门禁拦下。",
+            size=15.5,
+            fill=dim,
+        )
+    )
+    out.append(pill(64, 362, 150, "本地 SQLite", fg=accent, bg=accent_soft))
+    out.append(pill(228, 362, 150, "逐条 provenance", fg=ok, bg=ok_soft))
+    out.append(pill(392, 362, 186, "fail-closed 门禁", fg=alert, bg=alert_soft))
+
+    card_x, card_y, card_w, card_h = 968, 88, 568, 300
+    out.append(rect(card_x, card_y, card_w, card_h, fill=panel_bg, rx=16, stroke=hairline))
+    out.append(
+        text(card_x + 28, card_y + 40, "gate.py · 每条建议都要过这一关", size=17, fill=bright, weight="700")
+    )
+    out.append(
+        text(
+            card_x + 28,
+            card_y + 64,
+            "纯 stdlib · 无网络 · 与 skill 仓字节级同步",
+            size=12,
+            fill=dim,
+            font=FONT_MONO,
+        )
+    )
+
+    rows = [
+        (
+            card_y + 86,
+            ok,
+            ok_soft,
+            "modify · 保留原文事实",
+            "provenance 命中：数字与经历都能回到主简历原文",
+            "通过",
+        ),
+        (
+            card_y + 166,
+            alert,
+            alert_soft,
+            "modify · 新增无关数字",
+            "未找到出处：不进入建议，标记「建议复核」",
+            "blocked",
+        ),
+    ]
+    for y, color, soft, title, note, verdict in rows:
+        out.append(rect(card_x + 24, y, card_w - 48, 66, fill="#0E131A", rx=10, stroke=hairline))
+        out.append(rect(card_x + 24, y, 4, 66, fill=color, rx=2))
+        out.append(text(card_x + 44, y + 27, title, size=14.5, fill=bright, weight="600"))
+        out.append(text(card_x + 44, y + 49, note, size=12, fill=dim))
+        out.append(pill(card_x + card_w - 130, y + 20, 82, verdict, fg=color, bg=soft, size=12))
+
+    out.append(
+        text(
+            card_x + 28,
+            card_y + card_h - 20,
+            "改写可以发生，事实不能凭空出现。",
+            size=13,
+            fill=body,
+            weight="600",
+        )
+    )
+    out.append(
+        text(
+            width - 64,
+            height - 34,
+            "FastAPI · SQLite WAL · 原生前端 · 零云依赖",
+            size=12.5,
+            fill=dim,
+            anchor="end",
+            font=FONT_MONO,
+        )
+    )
+    return svg(
+        width,
+        height,
+        "".join(out),
+        "ResuAlign-Lite：本地优先的求职工作台，每条改写必须溯源，"
+        "无原文依据的建议被门禁拦截",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Figure 4 -- 流水线架构（不含数据）
+# ---------------------------------------------------------------------------
+
+
+def arrow_down(x: float, y1: float, y2: float, *, color: str = "#AEB8C4") -> str:
+    return line(x, y1, x, y2 - 11, stroke=color, sw=2) + (
+        f'<path d="M{x - 6:g},{y2 - 13:g} L{x:g},{y2:g} L{x + 6:g},{y2 - 13:g} Z" fill="{color}"/>'
+    )
+
+
+def arrow_right(x1: float, x2: float, y: float, *, color: str = "#AEB8C4") -> str:
+    return line(x1, y, x2 - 11, y, stroke=color, sw=2) + (
+        f'<path d="M{x2 - 13:g},{y - 6:g} L{x2:g},{y:g} L{x2 - 13:g},{y + 6:g} Z" fill="{color}"/>'
+    )
+
+
+def stage_box(
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    index: str,
+    title: str,
+    subtitle: str,
+    *,
+    color: str,
+    note: str = "",
+) -> str:
+    out = [panel(x, y, w, h), rect(x, y, w, 4, fill=color, rx=0)]
+    out.append(
+        text(x + 22, y + 38, index, size=12, fill=color, weight="700", font=FONT_MONO)
+    )
+    out.append(text(x + 22, y + 66, title, size=19, fill=INK, weight="700"))
+    out.append(text(x + 22, y + 92, subtitle, size=12.5, fill=MUTED))
+    if note:
+        out.append(text(x + 22, y + h - 20, note, size=12, fill=INK_2))
+    return "".join(out)
+
+
+def figure_architecture() -> str:
+    width, height = 1600, 1100
+    out: list[str] = [
+        rect(0, 0, width, height, fill=CANVAS, rx=0),
+        text(64, 62, "从 JD 到定稿：一条受控流水线", size=28, fill=INK, weight="800"),
+        text(
+            64,
+            94,
+            "LLM 只负责提议；事实校验、排序与交付都是确定性的。任何一层都可以单独替换。",
+            size=14.5,
+            fill=MUTED,
+        ),
+    ]
+
+    top, top_h = 132, 128
+    top_w = 432
+    top_xs = (64, 584, 1104)
+    out.append(
+        stage_box(
+            top_xs[0],
+            top,
+            top_w,
+            top_h,
+            "01 / INGEST",
+            "采集",
+            "Tampermonkey 脚本 · 粘贴 JD · CSV 同步",
+            color=ACCENT,
+            note="来源与原文一起入库，不承诺任意站点抓取",
+        )
+    )
+    out.append(
+        stage_box(
+            top_xs[1],
+            top,
+            top_w,
+            top_h,
+            "02 / PARSE",
+            "解析与画像",
+            "parser(PDF / DOCX / TXT) → jd_profiler",
+            color=ACCENT,
+            note="结构化岗位画像：硬技能、场景、经验年限",
+        )
+    )
+    out.append(
+        stage_box(
+            top_xs[2],
+            top,
+            top_w,
+            top_h,
+            "03 / ROUTE",
+            "角色路由",
+            "diagnose · gap_analyzer · editor · evaluator",
+            color=ACCENT,
+            note="每角色独立超时、token 预算与故障转移",
+        )
+    )
+    out.append(arrow_right(64 + top_w + 8, 584 - 4, top + top_h / 2))
+    out.append(arrow_right(584 + top_w + 8, 1104 - 4, top + top_h / 2))
+
+    mid_y = 338
+    mid_h = 148
+    out.append(
+        stage_box(
+            64,
+            mid_y,
+            700,
+            mid_h,
+            "A / FAST PATH",
+            "快速评估（零 LLM）",
+            "local_fallback + match_scorer · Ctrl+K 秒出匹配分",
+            color=OK,
+            note="不建岗位、不烧额度；规则抽取缺口 top3，结论可解释",
+        )
+    )
+    out.append(
+        stage_box(
+            836,
+            mid_y,
+            700,
+            mid_h,
+            "B / CONTROLLED REWRITE",
+            "受控改写（逐条 Diff）",
+            "tailor.py · 每条建议携带 original / proposed / provenance",
+            color=ACCENT,
+            note="只改写、重排、强调已有事实；noop 与越权内容在写回前过滤",
+        )
+    )
+
+    bus_y = 302
+    out.append(line(800, top + top_h, 800, bus_y, stroke="#AEB8C4", sw=2))
+    out.append(line(414, bus_y, 1186, bus_y, stroke="#AEB8C4", sw=2))
+    out.append(arrow_down(414, bus_y - 1, mid_y))
+    out.append(arrow_down(1186, bus_y - 1, mid_y))
+
+    gate_y = 566
+    gate_h = 150
+    out.append(line(414, mid_y + mid_h, 414, gate_y - 16, stroke="#AEB8C4", sw=2))
+    out.append(line(1186, mid_y + mid_h, 1186, gate_y - 16, stroke="#AEB8C4", sw=2))
+    out.append(line(414, gate_y - 16, 1186, gate_y - 16, stroke="#AEB8C4", sw=2))
+    out.append(arrow_down(800, gate_y - 17, gate_y))
+
+    out.append(panel(64, gate_y, width - 128, gate_h))
+    out.append(rect(64, gate_y, width - 128, 4, fill=ALERT, rx=0))
+    out.append(text(88, gate_y + 38, "04 / GATE", size=12, fill=ALERT, weight="700", font=FONT_MONO))
+    out.append(text(88, gate_y + 68, "防幻觉门禁  gate.py", size=21, fill=INK, weight="800"))
+    out.append(
+        text(
+            88,
+            gate_y + 94,
+            "纯 stdlib · 无网络 · fail-closed；与 true-tailor skill 仓字节级锁定",
+            size=13,
+            fill=MUTED,
+        )
+    )
+    steps = [
+        ("①  provenance 解析", "建议必须能映射回主简历原文"),
+        ("②  内容检查", "数字、术语、断言逐项比对"),
+        ("③  noop 过滤", "原文与建议相同的不算改写"),
+    ]
+    for index, (title, note) in enumerate(steps):
+        x = 88 + index * 486
+        out.append(rect(x, gate_y + 108, 462, 30, fill=ALERT_SOFT, rx=8))
+        out.append(text(x + 14, gate_y + 128, title, size=12.5, fill=ALERT, weight="700"))
+        out.append(text(x + 164, gate_y + 128, note, size=11.5, fill=INK_2))
+
+    deliver_y = 776
+    out.append(arrow_down(800, gate_y + gate_h, deliver_y))
+    out.append(panel(64, deliver_y, width - 128, 150))
+    out.append(rect(64, deliver_y, width - 128, 4, fill=OK, rx=0))
+    out.append(
+        text(88, deliver_y + 38, "05 / DELIVER", size=12, fill=OK, weight="700", font=FONT_MONO)
+    )
+    out.append(text(88, deliver_y + 68, "交付层", size=21, fill=INK, weight="800"))
+    out.append(
+        text(
+            88,
+            deliver_y + 94,
+            "单岗双栏对照编辑 · A4 预览 · 统一求职工作台（列表 / 看板）· 驾驶舱复盘 · md / json / pdf 导出",
+            size=13.5,
+            fill=INK_2,
+        )
+    )
+    out.append(
+        text(
+            88,
+            deliver_y + 118,
+            "MV3 回填扩展 → 网申表单；所有数据留在本机。",
+            size=12.5,
+            fill=MUTED,
+        )
+    )
+
+    guard_y = height - 96
+    out.append(line(64, guard_y - 22, width - 64, guard_y - 22, stroke=RULE, dash="6 6"))
+    out.append(text(64, guard_y + 6, "横切护栏", size=12, fill=MUTED, weight="700"))
+    guards = [
+        ("cost_guard", "每日调用上限 · 同任务 3 连败熔断"),
+        ("llm_nodes", "节点熔断 · 冷却 · 多活转移"),
+        ("watchdog", "任务墙钟 1800s 默认"),
+        ("secret_box", "API Key Fernet 静态加密"),
+    ]
+    for index, (name, note) in enumerate(guards):
+        x = 176 + index * 348
+        out.append(text(x, guard_y + 6, name, size=12.5, fill=INK, weight="700", font=FONT_MONO))
+        out.append(text(x + 92, guard_y + 6, note, size=11.5, fill=MUTED))
+
+    return svg(
+        width,
+        height,
+        "".join(out),
+        "ResuAlign-Lite 流水线：采集、解析画像、角色路由、快速评估、受控改写、"
+        "防幻觉门禁、交付，横切成本、节点、看门狗与密钥护栏",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail instead of writing when files differ")
     args = parser.parse_args(argv)
 
     targets = {
+        OUT_DIR / "hero.svg": figure_hero(),
+        OUT_DIR / "architecture.svg": figure_architecture(),
         OUT_DIR / "gate-before-after.svg": figure_before_after(),
         OUT_DIR / "hallucination-rate.svg": figure_hallucination(),
     }

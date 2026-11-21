@@ -1,18 +1,32 @@
 # README 视觉资产
 
-`scripts/make_readme_figures.py` 确定性生成这里的两张 SVG。同样的输入产出同样的
+`scripts/make_readme_figures.py` 确定性生成这里的所有 SVG。同样的输入产出同样的
 字节，**图里不含时间戳**，重跑不会造成无意义 diff。
 
 | 文件 | 用在哪 | 画的是 |
 | --- | --- | --- |
+| [`hero.svg`](hero.svg) | README 顶部主视觉 | 一句话主张 + 门禁判定示意（不含数据） |
+| [`architecture.svg`](architecture.svg) | README「系统架构」 | 采集 → 画像 → 路由 → 改写 → 门禁 → 交付 |
 | [`gate-before-after.svg`](gate-before-after.svg) | README「效果对照」 | 原始简历 → 本地规则打标缺口 → 反幻觉门禁重写 |
 | [`hallucination-rate.svg`](hallucination-rate.svg) | README「效果对照」 | 8 条编造断言在门禁前后的到达率 + 判分装置 |
+
+界面截图在 [`shots/`](shots/)，由 `scripts/capture_readme_shots.py` 生成：
+
+| 文件 | 用在哪 | 画的是 |
+| --- | --- | --- |
+| [`shots/jobs.png`](shots/jobs.png) | README「界面一览」 | 统一求职工作台（列表 + 详情 + 匹配判断） |
+| [`shots/dashboard.png`](shots/dashboard.png) | README「界面一览」 | 驾驶舱 KPI、快速继续与技能缺口 |
+
+截图脚本只连隔离环境：临时 `RESUALIGN_DATA_DIR`、随机端口、假 LLM、合成简历与
+合成岗位。**不要**把本机真实 `data/` 的截图提交进来。截图是产品外观示意，
+不是指标证据；README 里的数字仍以 `docs/EVIDENCE.md` 为准。
 
 ## 重新生成
 
 ```powershell
 python scripts\make_readme_figures.py            # 写盘
 python scripts\make_readme_figures.py --check    # 只校验，有漂移退出码 1
+python scripts\capture_readme_shots.py           # 重拍界面截图（需要 Playwright）
 ```
 
 图里的数字不是手敲的常量，全部来自下面两条命令与三份文件：
