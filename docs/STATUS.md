@@ -10,18 +10,22 @@
 
 - 版本：`v1.1.0`（tag 指向 PR #136 的 release commit）。
 - 定位：**单机可复现的求职工作台 / 面试作品**，不宣称任何形态的生产上线。
+- app 自用线：2026-11-21 用 3 份真实投递 JD 完成「采纳 → 保存定稿 → 导出」
+  闭环（[报告](reports/app-self-use-3jd-2026-11-21.md)）；总闸 #168 尚未关闭，
+  签收前不把 3/3 写成冻结结论。
 - 项目评分：`79/81（97.53%）`，**合格 · 优秀**，P0 均值 3.00（未触发一票否决）。
   详见 `D:\WorkBuddyData\项目评估结果\ResuAlign-Lite\20260928-后端-431790b9.md`。
-- CI：`main` 六阶段全绿（单元/契约、benchmark 门禁、Playwright、冷启动、CSS 预算、视觉快照）；本批改动以 PR CI 复核为准。
+- CI：六阶段门禁（单元/契约、benchmark、Playwright、冷启动、CSS 预算、视觉快照）
+  以 GitHub Actions 的 `main` 运行为准；本页不代替 CI 结论。
 
 ## 达标项（带口径）
 
 | 维度 | 读数 | 口径 | 复现 |
 | --- | --- | --- | --- |
-| 后端测试 | 1408 passed / 7 skipped | 2026-10-27 全量 pytest（ADR-0065 B1/B2 之后） | `PYTHONPATH=src python -m pytest tests/ -q` |
+| 后端测试 | 1439 passed / 7 skipped | 2026-11-21 全量 pytest（新工作台与取消竞态修复之后） | `PYTHONPATH=src python -m pytest tests/ -q` |
 | 后端覆盖率 | ≥85%（最近快照 89.18%，`main@7b17607`） | line coverage，硬门禁 85%；本批由 CI 复核（本地 `--cov` 受 pydantic/pytest-cov 环境问题，未改动测试同样复现） | `PYTHONPATH=src python -m pytest --cov=resualign --cov-fail-under=85 tests/` |
-| 前端/扩展 | 623 passed | node:test（2026-10-27） | `node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs tests/extension/*.test.mjs` |
-| E2E | 7 passed | Playwright，假 LLM | `PYTHONPATH=src python -m pytest tests/e2e -q --e2e` |
+| 前端/扩展 | 644 passed | node:test（2026-11-21） | `node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs tests/extension/*.test.mjs` |
+| E2E | 7 collected | Playwright + Chromium，假 LLM；通过数以 CI Stage 3 为准 | `PYTHONPATH=src python -m pytest tests/e2e -q --e2e` |
 | 熔断降级 | 5/5 trial 恰第 3 次熔断 | 本地故障注入，零外部模型 | `python benchmarks/degradation_benchmark.py --trials 5` |
 | 容量曲线 | 拐点 = 并发 8，错误率 0 | CI Ubuntu 确定性 API 负载 | `python benchmarks/capacity_benchmark.py --check-baseline` |
 | 冷启动 | 原生 p50 616.8ms / 容器 808.5ms UID 1000 | CI Ubuntu，空数据卷 | `python benchmarks/cold_start_benchmark.py --check-baseline` |
@@ -31,15 +35,20 @@
 > CI 的 JUnit / coverage artifact 是**持续事实源**；上表是一次带 commit 与命令的
 > 固定快照，不承诺自动跟随测试数量。
 
+## 待签收
+
+| 项 | 现状 | 为什么不直接刷绿 |
+| --- | --- | --- |
+| **app 自用验证线** | 3 / 3 真实 JD 已留痕（2026-11-21，报告含定稿 sha256 与导出证据） | 总闸 #168 未关闭；签收前不把 3/3 写成冻结结论，并保留新工作台的回退开关 |
+
 ## 未达标红线
 
 | 项 | 现状 | 为什么不刷绿 |
 | --- | --- | --- |
 | **探针线判据** | `dist_not_executed`：四渠道 outreach 0/4，`2026-09-23 24:00` 判定线已过 | 这是**分发未执行**，不是证伪；不换判、不改阈值（ADR-0042 决定 6f） |
 | **skill 自用线判据** | 1 / 3 合格例（09-15 狗食两跳链） | 需真实投递中跑满 3 例；合成例、截图、口头复述一律不计 |
-| **app 自用验证线** | 0 / 3 真实 JD | ADR-0059：每份至少采纳 1 条并保存定稿，至少 2 份导出或记录投递；不过线则新工作台不设默认 |
 | **B10 配置与密钥** | 2 分（主动取舍） | 项目选择「钳制、绝不 raise」（`api/state.py`），与标准「非法值启动期拒绝」方向相反；**不为评分改设计**（ADR-0054 决定 6） |
-| **真实 LLM 端到端质量** | 9 月真实对齐 4/5 零产出（假成功主症状，见 #110） | 由 #115 归因与模型侧行为决定，不由容量/冷启动数字代表 |
+| **真实 LLM 端到端质量** | 9 月真实对齐 4/5 零产出（假成功主症状，见 #110）；2026-11-21 新节点 3/3 已留痕（待签收） | 两批数据口径不同、都不由容量/冷启动数字代表；#115 归因与模型侧行为仍是主变量 |
 | 浏览器探针 | Chromium 版本漂移曾致 E2E 假红 | 门禁已固定为 `chromium-1243`；属环境约束非产品缺陷 |
 
 ## 已知边界
@@ -50,6 +59,8 @@
 - **爬虫**：后端抓取已退役，岗位来源依赖油猴插件或粘贴；不承诺任意站点抓取。
 - **容量/冷启动数字**：来自 CI Ubuntu 的确定性 API 负载，**不代表真实 LLM
   端到端延迟**。
+- **app 自用验证线**：3/3 报告已留痕，但 #168 未签收；新工作台的回退开关
+  保留到签收完成。
 
 ## 双主线与触发条件
 
@@ -58,7 +69,8 @@
 
 **app 侧优先顺序**
 
-1. P0：3 份真实 JD 的可靠性验证；不过线时新工作台保持 feature flag 关闭。
+1. P0：3 份真实 JD 的可靠性验证；2026-11-21 已留痕 3/3，签收前保留
+   feature flag 回退开关。
 2. P1：ADR、术语、实施票与灰度开关。
 3. P2：三步工作台、用户文案、真实性检查与输出体验。
 4. P3：演示命名空间、BYOK 简化、首页空状态与本地漏斗指标。
