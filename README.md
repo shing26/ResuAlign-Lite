@@ -226,7 +226,7 @@ RESUALIGN_PORT=8000
 - **单机单进程**：`--workers > 1` 会打破任务队列与导入状态的前提，不承诺多实例部署或生产规模。
 - **加密是硬化而非沙箱**（ADR-0035 自陈）：能防落盘的明文密钥，不能防同一台机器上的高权限攻击者。
 - **真实改写质量取决于所配模型**：Ollama `qwen2.5:7b` 是已知能力地板；9 月真实对齐 4/5 零产出的归因见 issue #110 / #115，未达标红线列在 [docs/STATUS.md](docs/STATUS.md)。
-- **app 自用线已留痕 3/3，但总闸仍以签收为准**：2026-11-21 用 3 份真实投递 JD 完成「采纳 → 保存定稿 → 导出」闭环，证据见 [docs/reports/app-self-use-3jd-2026-11-21.md](docs/reports/app-self-use-3jd-2026-11-21.md)（含定稿 sha256）；issue #168 尚未关闭，未签收前不把该结论当作冻结事实。
+- **app 自用线仍是 1/3**：正式样本只有腾讯 `bcb5d7bb`（2026-09-19 已投递）。2026-11-21 跑批的另外两份 JD 库内仍是 `draft`、未实际投递，且由脚本代点，按 runbook 不计入判据，只作技术旁证，见 [docs/reports/app-self-use-3jd-2026-11-21.md](docs/reports/app-self-use-3jd-2026-11-21.md)；issue #168 保持 `needs-info`。
 - **skill 探针线独立判定**：按 ADR-0042 运行；四渠道 outreach 未全部发出时记 `dist_not_executed`（时钟不启动，不构成证伪）。探针线与 app 自用线的阈值、取证口径均不变，两条线不得互相顶替。
 - **抓取已退役**：岗位来源只有油猴脚本、粘贴与 CSV 同步，不承诺任意站点抓取（`--jd-url` 已移除）。
 
@@ -256,7 +256,7 @@ CI 六阶段（`.github/workflows/ci.yml`）：
 5. **Stage 5**：CSS 结构债预算棘轮（`scripts/css_budget.mjs`，只许变好）；
 6. **Stage 6**：20 张视觉快照与基线对比（advisory，不阻断合并）。
 
-**自用验收（2026-11-21）**：`scripts/qa_dogfooder.py` 走查 22 用例、0 findings；可见文本对比度修复至 ≥4.5:1；app 自用 3 份真实 JD 的闭环（定稿 / 导出，3/3 达成）见 [docs/reports/app-self-use-3jd-2026-11-21.md](docs/reports/app-self-use-3jd-2026-11-21.md)。摘要投影的性能收益（5.99MB → 1.11MB、中位 0.374s、首卡 ≤1.5s）见 [docs/EVIDENCE.md](docs/EVIDENCE.md)。
+**自用验收（2026-11-21，2026-11-25 复核）**：`scripts/qa_dogfooder.py` 走查 22 用例、0 findings；可见文本对比度修复至 ≥4.5:1；app 自用线正式样本仍为 **1/3**（腾讯已投递），Dida / Reolink 未投递且脚本代点，只作技术旁证，见 [docs/reports/app-self-use-3jd-2026-11-21.md](docs/reports/app-self-use-3jd-2026-11-21.md)。摘要投影的性能收益（5.99MB → 1.11MB、中位 0.374s、首卡 ≤1.5s）见 [docs/EVIDENCE.md](docs/EVIDENCE.md)。
 
 ## 仓库结构
 
