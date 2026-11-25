@@ -69,8 +69,10 @@ const LANE_JOBS = [
   ...Array.from({ length: 15 }, (_, index) => pending(`late${index + 1}`)),
 ];
 
-/* Mutated by the 7d case below; the mock reads them at call time. */
-let pendingTotal = 17;
+/* The lane count is library-wide and larger than the 17-row fixture on
+ * purpose: it keeps the cap label testable without a second dashboard fetch.
+ * `laneRows` is mutated by the 7d case below; the mock reads both at call time. */
+let pendingTotal = 600;
 let laneRows = LANE_JOBS;
 
 const calls = { jobs: [] };
@@ -172,6 +174,11 @@ test("lane switch requests the server bucket instead of scanning the page", asyn
     /503/,
     "metric cards keep the library-wide total",
   );
+  assert.match(
+    window.location.hash,
+    /(?:^|[?&])advance=pending_draft(?:&|$)/,
+    "the active lane is written to the URL",
+  );
 });
 
 test("re-clicking the same lane does not refetch", async () => {
@@ -192,7 +199,6 @@ test("switching back to 全部 reuses the loaded page", async () => {
 });
 
 test("a lane over the 500-row cap says it is truncated", async () => {
-  pendingTotal = 600;
   laneRows = Array.from({ length: 500 }, (_, index) =>
     pending(`big${index + 1}`),
   );
@@ -208,4 +214,33 @@ test("a lane over the 500-row cap says it is truncated", async () => {
     calls.jobs.some((url) => url.includes("advance=pending_draft")),
     "deep link resolves the lane server-side",
   );
+});
+
+test("a selected job keeps the lane in the URL and back restores it", async () => {
+  const card = document.querySelector("[data-jh-job]");
+  assert.ok(card, "a lane card is rendered");
+  card.click();
+  await waitFor(
+    () =>
+      window.location.hash.includes("job=") &&
+      window.location.hash.includes("advance=pending_draft"),
+    "job and lane share the URL",
+  );
+  assert.ok(
+    document.querySelector("[data-jh-shell]").classList.contains("is-detail-open"),
+    "detail opened for the selected job",
+  );
+
+  window.location.hash = "#/jobs?advance=pending_draft";
+  /* Browser Back fires popstate first; that is the in-place lane restore path. */
+  window.dispatchEvent(new window.Event("popstate"));
+  await waitFor(
+    () => {
+      const shell = document.querySelector("[data-jh-shell]");
+      return shell ? !shell.classList.contains("is-detail-open") : false;
+    },
+    "back to the lane closes the detail",
+  );
+  assert.match(resultCount(), /共 500 个岗位/);
+  assert.match(window.location.hash, /advance=pending_draft/);
 });

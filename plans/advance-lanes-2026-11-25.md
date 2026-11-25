@@ -305,3 +305,21 @@ Verifier 首轮复审发现 AC 7d 文字被 `paintList()` 无条件重写覆盖
 （段 600 / 返回 500）。同轮 P2：`markApplied`/`rescoreJob`/状态下拉仍用
 `hall.jobs.find`，500 之外的 lane 行操作会静默失败；已统一改用
 `summaryJob()`。
+
+## P2 收口（2026-11-26）
+
+### 段写入 URL
+
+- `writeJobsHash()` 现在把当前 `hall.filters.work_status` 写为 `advance`
+  （`all` 省略）。点段、选岗位、关详情、切列表/看板、清空筛选都会保留当前段。
+- `syncJobHallFromHash()` 不再把 `advance` 当作「整页重渲染」触发词；浏览器
+  Back/Forward 落到 `#/jobs?advance=<bucket>` 时原地调用 `loadLane()`，
+  不重建壳层、不重复拉首屏。
+- 回归：`tests/frontend/dom/jobs-lane-filter.test.mjs` 新增
+  「selected job keeps the lane in the URL and back restores it」。
+
+### 基线刷新
+
+- 全量后端：`1450 passed / 7 skipped`（469.51s）。
+- 前端：`634 passed`；扩展：`23 passed`；合计 `657`。
+- `README.md` 与 `docs/STATUS.md` 的日期与数字已同步到 2026-11-26。

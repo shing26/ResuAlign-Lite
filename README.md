@@ -245,7 +245,7 @@ python -m pytest tests/e2e --e2e
 python tests/e2e/playwright_smoke.py    # 假 LLM 冒烟：独立端口自启自停，不烧额度
 ```
 
-**测试基线**（2026-11-21 实测，全量 `python -m pytest tests/`）：**1439 passed / 7 skipped / 0 failed**。前端与扩展 `node --test` 同一轮 **644 passed / 0 failed**。E2E 收集 7 个用例，运行需 Playwright + Chromium，由 CI Stage 3 门禁。覆盖率门槛 85%（`pyproject.toml` `fail_under`）。CI 的 JUnit / coverage artifact 是持续事实源，本行是带日期与命令的快照；投递前需重跑刷新。
+**测试基线**（2026-11-26 实测，全量 `python -m pytest tests/`）：**1450 passed / 7 skipped / 0 failed**。前端与扩展 `node --test` 同一轮 **657 passed / 0 failed**。E2E 收集 7 个用例，运行需 Playwright + Chromium，由 CI Stage 3 门禁。覆盖率门槛 85%（`pyproject.toml` `fail_under`）。CI 的 JUnit / coverage artifact 是持续事实源，本行是带日期与命令的快照；投递前需重跑刷新。
 
 CI 六阶段（`.github/workflows/ci.yml`）：
 

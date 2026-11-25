@@ -23,9 +23,9 @@
 
 | 维度 | 读数 | 口径 | 复现 |
 | --- | --- | --- | --- |
-| 后端测试 | 1439 passed / 7 skipped | 2026-11-21 全量 pytest（新工作台与取消竞态修复之后） | `PYTHONPATH=src python -m pytest tests/ -q` |
+| 后端测试 | 1450 passed / 7 skipped | 2026-11-26 全量 pytest（待推进五段分组之后） | `PYTHONPATH=src python -m pytest tests/ -q` |
 | 后端覆盖率 | ≥85%（最近快照 89.18%，`main@7b17607`） | line coverage，硬门禁 85%；本批由 CI 复核（本地 `--cov` 受 pydantic/pytest-cov 环境问题，未改动测试同样复现） | `PYTHONPATH=src python -m pytest --cov=resualign --cov-fail-under=85 tests/` |
-| 前端/扩展 | 644 passed | node:test（2026-11-21） | `node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs tests/extension/*.test.mjs` |
+| 前端/扩展 | 657 passed | node:test（2026-11-26；前端 634 + 扩展 23） | `node --test tests/frontend/*.test.mjs tests/frontend/dom/*.test.mjs tests/extension/*.test.mjs` |
 | E2E | 7 collected | Playwright + Chromium，假 LLM；通过数以 CI Stage 3 为准 | `PYTHONPATH=src python -m pytest tests/e2e -q --e2e` |
 | 熔断降级 | 5/5 trial 恰第 3 次熔断 | 本地故障注入，零外部模型 | `python benchmarks/degradation_benchmark.py --trials 5` |
 | 容量曲线 | 拐点 = 并发 8，错误率 0 | CI Ubuntu 确定性 API 负载 | `python benchmarks/capacity_benchmark.py --check-baseline` |

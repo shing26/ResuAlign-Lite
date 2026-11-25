@@ -1527,6 +1527,9 @@ function writeJobsHash({
   const params = new URLSearchParams();
   if (jobId) params.set("job", jobId);
   if (view === "board") params.set("view", "board");
+  if (hall.filters.work_status && hall.filters.work_status !== "all") {
+    params.set("advance", hall.filters.work_status);
+  }
   const query = params.toString();
   const nextHash = `#/jobs${query ? `?${query}` : ""}`;
   const nextState = {
@@ -1576,11 +1579,16 @@ export function syncJobHallFromHash() {
       "seniority",
       "city",
       "audience",
-      "advance",
     ].some((key) => params.has(key))
   ) {
     return false;
   }
+  const requestedAdvance = params.get("advance");
+  if (requestedAdvance && !ADVANCE_BUCKETS.includes(requestedAdvance)) {
+    return false;
+  }
+  const nextLane = requestedAdvance || "all";
+  const laneChanged = nextLane !== hall.filters.work_status;
   const requestedView = params.get("view");
   if (requestedView && requestedView !== "board" && requestedView !== "list") {
     return false;
@@ -1611,13 +1619,26 @@ export function syncJobHallFromHash() {
     paintSelection();
     paintDetail();
   };
+  const restoreLane = (done) => {
+    if (!laneChanged) {
+      done();
+      return;
+    }
+    hall.filters.work_status = nextLane;
+    state.filters.work_status = nextLane;
+    paintFilterCount();
+    hall.listLimit = LIST_PAGE;
+    void loadLane(nextLane).then(done);
+  };
   if (nextView !== hall.view) {
     writeJobsViewMode(nextView);
     hall.listLimit = LIST_PAGE;
     hall.boardLimit = BOARD_PAGE;
-    void renderShell().then(applySelection);
+    restoreLane(() => {
+      void renderShell().then(applySelection);
+    });
   } else {
-    applySelection();
+    restoreLane(applySelection);
   }
   return true;
 }
@@ -1803,6 +1824,7 @@ function resetFilters() {
   };
   hall.boardLimit = BOARD_PAGE;
   hall.listLimit = LIST_PAGE;
+  writeJobsHash({ jobId: null });
   void renderShell();
 }
 
@@ -1876,6 +1898,7 @@ function bindEvents(root) {
       paintFilterCount();
       hall.listLimit = LIST_PAGE;
       hall.boardLimit = BOARD_PAGE;
+      writeJobsHash({ jobId: null });
       void loadLane(key);
       return;
     }
