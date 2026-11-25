@@ -41,6 +41,7 @@ from .status_lifecycle import (
 )
 
 __all__ = [
+    "ADVANCE_BUCKETS",
     "JOB_FUNCTIONS",
     "JOB_STATUSES",
     "JOB_STATUSES_CANONICAL",
@@ -49,7 +50,9 @@ __all__ = [
     "SENIORITIES",
     "TAILOR_FOCUSES",
     "TAILOR_GRANULARITIES",
+    "advance_bucket",
     "canonical_status",
+    "job_needs_preanalyze",
     "status_label",
     "status_lifecycle_fields",
     "validate_status_transition",
@@ -69,6 +72,99 @@ ALIGNMENT_REASONS = (
     "no_safe_rewrite",
     "model_failed",
 )
+
+# 「待推进」五桶：职位页分组条与看板 chip 共用同一组键。
+# 顺序即「离完成由近到远」，前端按这个顺序渲染分段条。
+ADVANCE_BUCKETS = (
+    "pending_draft",
+    "unanalyzed",
+    "unaligned",
+    "failed",
+    "finalized",
+)
+
+
+def job_needs_preanalyze(job: dict[str, Any]) -> bool:
+    """Return True when a job has JD text but no stored preanalysis product.
+
+    This is the single skip predicate for the bulk sweep: a job is only
+    re-analyzed when it has no ``jd_profile`` yet, or its classification is
+    still pending (a failed earlier attempt).
+    """
+    if not (job.get('jd_text') or '').strip():
+        return False
+    if job.get('classification_pending'):
+        return True
+    return not job.get('jd_profile')
+
+
+def advance_bucket(job: dict[str, Any]) -> str | None:
+    """Classify one library job into its 「待推进」 bucket.
+
+    The five buckets are mutually exclusive and ordered by how close the job
+    is to being finished. Jobs without a JD body fall into **no** bucket: the
+    「未预分析」 lane must stay drainable by the bulk sweep, so rows that can
+    never be analysed must not inflate it.
+
+    Accepts either the JD body itself (``jd_text``) or a precomputed
+    ``has_jd_body`` flag — the dashboard projection computes the flag in SQL
+    so it never has to load every JD body.
+
+    Keep this in sync with ``_ADVANCE_SQL_CONDITIONS`` below — the SQL side is
+    the same rule expressed as a filter so it can run before LIMIT/OFFSET.
+    """
+    has_body = job.get('has_jd_body')
+    if has_body is None:
+        has_body = bool(str(job.get('jd_text') or '').strip())
+    if not has_body:
+        return None
+    status = str(job.get('alignment_status') or 'idle')
+    if status == 'failed':
+        return 'failed'
+    if status == 'succeeded':
+        if int(job.get('final_draft_version') or 0) > 0:
+            return 'finalized'
+        if int(job.get('usable_diffs') or 0) >= 1:
+            return 'pending_draft'
+        # 无缺口 / 无安全改写：已完成且无可采纳项，不进入任何待推进桶。
+        return None
+    if status in {'queued', 'running'}:
+        return None
+    if job_needs_preanalyze(job):
+        return 'unanalyzed'
+    return 'unaligned'
+
+
+_HAS_JD_SQL = "trim(coalesce(jd_text, '')) <> ''"
+_NO_PROFILE_SQL = (
+    "coalesce(trim(jd_profile_json), '') IN ('', 'null', '{}')"
+)
+
+# Same rule as ``advance_bucket`` expressed as SQL. Every branch starts from
+# 「has a JD body」 so the no-JD rows stay out of all five buckets.
+_ADVANCE_SQL_CONDITIONS = {
+    'pending_draft': (
+        f"{_HAS_JD_SQL} AND coalesce(alignment_status, 'idle') = 'succeeded' "
+        "AND coalesce(final_draft_version, 0) = 0 "
+        "AND coalesce(usable_diffs, 0) >= 1"
+    ),
+    'finalized': (
+        f"{_HAS_JD_SQL} AND coalesce(alignment_status, 'idle') = 'succeeded' "
+        "AND coalesce(final_draft_version, 0) > 0"
+    ),
+    'failed': (
+        f"{_HAS_JD_SQL} AND coalesce(alignment_status, 'idle') = 'failed'"
+    ),
+    'unanalyzed': (
+        f"{_HAS_JD_SQL} AND coalesce(alignment_status, 'idle') = 'idle' "
+        f"AND ({_NO_PROFILE_SQL} OR coalesce(classification_pending, 0) = 1)"
+    ),
+    'unaligned': (
+        f"{_HAS_JD_SQL} AND coalesce(alignment_status, 'idle') = 'idle' "
+        f"AND NOT ({_NO_PROFILE_SQL}) "
+        "AND coalesce(classification_pending, 0) = 0"
+    ),
+}
 
 
 def _human_alignment_error(message: str | None) -> str | None:
@@ -1601,6 +1697,7 @@ class JobLibraryStore(_SqliteStore):
         limit: int | None = None,
         offset: int = 0,
         sort: str = "updated_at_desc",
+        advance: str | None = None,
     ) -> list[dict[str, Any]]:
         sort = sort or "updated_at_desc"
         if sort not in {
@@ -1610,6 +1707,8 @@ class JobLibraryStore(_SqliteStore):
             "match_score_asc",
         }:
             raise UserStoreError(f"Invalid sort: {sort}")
+        if advance and advance != "all" and advance not in ADVANCE_BUCKETS:
+            raise UserStoreError(f"Invalid advance bucket: {advance}")
         order_by = {
             "updated_at_desc": "updated_at DESC",
             "updated_at_asc": "updated_at ASC",
@@ -1636,6 +1735,10 @@ class JobLibraryStore(_SqliteStore):
             )
             pattern = f"%{search.strip()}%"
             values.extend([pattern, pattern, pattern, pattern])
+        # Applied before LIMIT/OFFSET so a lane can page past the first page
+        # without the client having to load the whole library.
+        if advance and advance != "all":
+            conditions.append(_ADVANCE_SQL_CONDITIONS[advance])
         sql = (
             "SELECT * FROM library_jobs WHERE "
             + " AND ".join(conditions)
@@ -1648,6 +1751,39 @@ class JobLibraryStore(_SqliteStore):
             with self._connect() as conn:
                 rows = conn.execute(sql, values).fetchall()
                 return [self._row_to_library_job(row) for row in rows]
+
+    def advance_counts(self, tenant_id: str) -> dict[str, int]:
+        """Return the 「待推进」 lane counts for one tenant.
+
+        Counts are always library-wide (they ignore every other filter) so the
+        lane strip can show a stable total while the list shows the filtered
+        subset. ``unclassified`` is the honest remainder: every row in **no**
+        lane. That covers rows without a JD body (they must stay out of
+        「未预分析」 so the bulk sweep can drain it) *and* finished rows with
+        nothing to act on (``succeeded`` with zero usable diffs). Hence
+        ``sum(five lanes) + unclassified == library total`` always holds.
+        """
+        not_in_any_lane = " AND ".join(
+            f"NOT ({_ADVANCE_SQL_CONDITIONS[bucket]})"
+            for bucket in ADVANCE_BUCKETS
+        )
+        selects = ", ".join(
+            f"SUM(CASE WHEN {_ADVANCE_SQL_CONDITIONS[bucket]} THEN 1 ELSE 0 END)"
+            for bucket in ADVANCE_BUCKETS
+        )
+        with self._lock:
+            self._ensure_initialized()
+            with self._connect() as conn:
+                row = conn.execute(
+                    f"SELECT {selects}, "
+                    f"SUM(CASE WHEN {not_in_any_lane} THEN 1 ELSE 0 END) "
+                    "FROM library_jobs WHERE tenant_id = ?",
+                    (tenant_id,),
+                ).fetchone()
+        values = [int(value or 0) for value in row]
+        counts = dict(zip(ADVANCE_BUCKETS, values))
+        counts["unclassified"] = values[-1]
+        return counts
 
     def list_dashboard_jobs(
         self, tenant_id: str
@@ -1666,7 +1802,9 @@ class JobLibraryStore(_SqliteStore):
                     "SELECT job_id, title, company, status, jd_profile_json, "
                     "gap_report_json, alignment_status, alignment_reason, "
                     "last_alignment_error, usable_diffs, applied_at, offer_at, "
-                    "next_step_due_at, updated_at "
+                    "next_step_due_at, updated_at, final_draft_version, "
+                    "match_score, classification_pending, "
+                    f"({_HAS_JD_SQL}) AS has_jd_body "
                     "FROM library_jobs WHERE tenant_id = ? "
                     "ORDER BY updated_at DESC",
                     (tenant_id,),
@@ -1702,6 +1840,21 @@ class JobLibraryStore(_SqliteStore):
                 "offer_at": row["offer_at"] or None,
                 "next_step_due_at": row["next_step_due_at"] or None,
                 "updated_at": row["updated_at"],
+                "final_draft_version": int(row["final_draft_version"] or 0),
+                "match_score": row["match_score"],
+                "classification_pending": row["classification_pending"],
+                "advance_bucket": advance_bucket({
+                    "has_jd_body": bool(row["has_jd_body"]),
+                    "alignment_status": alignment_status,
+                    "usable_diffs": usable_diffs,
+                    "final_draft_version": row["final_draft_version"],
+                    "jd_profile": (
+                        json.loads(row["jd_profile_json"])
+                        if row["jd_profile_json"]
+                        else None
+                    ),
+                    "classification_pending": row["classification_pending"],
+                }),
             })
         return dashboard
     def update_job(

@@ -1,5 +1,6 @@
 """API tests for the Job Library endpoints."""
 
+import sqlite3
 import time
 from unittest.mock import patch
 
@@ -1010,3 +1011,205 @@ def test_accept_workbench_diffs_falls_back_to_persisted_suggestions():
     assert body["accepted_count"] == 1
     assert "独立交付后端服务" in body["draft"]
     assert "待人工确认" not in body["draft"]
+
+
+# --- 「待推进」五桶（advance-lanes-2026-11-25） ---------------------------
+#
+# 契约：plans/advance-lanes-2026-11-25.md。五桶互斥、无 JD 正文的行不落入
+# 任何桶，且 Python 分桶与 SQL 过滤必须逐条一致（否则两套谓词会静默漂移）。
+
+_ADVANCE_LANES = (
+    "pending_draft",
+    "unanalyzed",
+    "unaligned",
+    "failed",
+    "finalized",
+)
+
+
+def _advance_tenant() -> str:
+    return client.get("/api/auth/me").json()["user_id"]
+
+
+def _seed_advance_fixtures(tenant: str) -> dict[str, dict]:
+    """One job per lane, plus the two rows that must belong to no lane."""
+    jobs = api_module._jobs
+    profile = {"must_have_skills": ["Python"], "hard_skills": []}
+
+    pending = jobs.create_job(
+        tenant_id=tenant,
+        title="Lane pending draft",
+        jd_text="pending draft role text",
+    )
+    jobs.save_alignment(
+        tenant, pending["job_id"], jd_profile=profile,
+        diffs=[{"diff_id": "p1", "type": "modify", "original": "a",
+                "proposed": "b"}],
+        alignment_status="succeeded", usable_diffs=2,
+    )
+
+    finalized = jobs.create_job(
+        tenant_id=tenant,
+        title="Lane finalized",
+        jd_text="finalized role text",
+    )
+    jobs.save_alignment(
+        tenant, finalized["job_id"], jd_profile=profile,
+        diffs=[{"diff_id": "f1", "type": "modify", "original": "a",
+                "proposed": "b"}],
+        alignment_status="succeeded", usable_diffs=2,
+    )
+    jobs.save_final_draft(tenant, finalized["job_id"], "final draft body")
+
+    failed = jobs.create_job(
+        tenant_id=tenant,
+        title="Lane failed",
+        jd_text="failed role text",
+    )
+    jobs.save_alignment(
+        tenant, failed["job_id"], alignment_status="failed",
+        last_alignment_error="no_output: model returned empty",
+    )
+
+    unanalyzed = jobs.create_job(
+        tenant_id=tenant, title="Lane unanalyzed",
+        jd_text="unanalyzed role text",
+    )
+
+    unaligned = jobs.create_job(
+        tenant_id=tenant, title="Lane unaligned",
+        jd_text="unaligned role text",
+    )
+    jobs.save_alignment(
+        tenant, unaligned["job_id"], jd_profile=profile,
+        alignment_status="idle", usable_diffs=0,
+    )
+
+    # 不属于任何桶：已完成且无可用建议（无缺口）。
+    no_gap = jobs.create_job(
+        tenant_id=tenant, title="No gap", jd_text="no gap role text",
+    )
+    jobs.save_alignment(
+        tenant, no_gap["job_id"], jd_profile=profile,
+        alignment_status="succeeded", usable_diffs=0,
+    )
+
+    return {
+        "pending_draft": pending,
+        "finalized": finalized,
+        "failed": failed,
+        "unanalyzed": unanalyzed,
+        "unaligned": unaligned,
+        "no_gap": no_gap,
+    }
+
+
+def test_advance_filter_returns_only_that_lane():
+    tenant = _advance_tenant()
+    seeded = _seed_advance_fixtures(tenant)
+    for lane in _ADVANCE_LANES:
+        r = client.get(f"/api/jobs?advance={lane}&limit=500")
+        assert r.status_code == 200, r.text
+        ids = [job["job_id"] for job in r.json()]
+        assert ids == [seeded[lane]["job_id"]], (lane, ids)
+
+
+def test_advance_filter_rejects_unknown_bucket():
+    """An unknown lane must 422 rather than silently returning everything."""
+    r = client.get("/api/jobs?advance=not_a_lane")
+    assert r.status_code == 422
+
+
+def test_advance_filter_combines_with_search():
+    tenant = _advance_tenant()
+    _seed_advance_fixtures(tenant)
+    r = client.get("/api/jobs?advance=failed&search=Lane%20failed")
+    assert r.status_code == 200
+    assert len(r.json()) == 1
+    r = client.get("/api/jobs?advance=failed&search=unanalyzed")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_advance_filter_works_with_summary_view():
+    tenant = _advance_tenant()
+    seeded = _seed_advance_fixtures(tenant)
+    r = client.get("/api/jobs?advance=pending_draft&view=summary")
+    assert r.status_code == 200
+    body = r.json()
+    assert [job["job_id"] for job in body] == [
+        seeded["pending_draft"]["job_id"]
+    ]
+    assert "jd_text" not in body[0]
+    assert body[0]["usable_diffs"] == 2
+
+
+def test_advance_bucket_python_matches_sql():
+    """The Python predicate and the SQL filter must never drift apart."""
+    from resualign.job_library import advance_bucket
+
+    tenant = _advance_tenant()
+    _seed_advance_fixtures(tenant)
+    all_jobs = api_module._jobs.list_jobs(tenant, limit=None)
+    python_ids: dict[str, set[str]] = {}
+    for job in all_jobs:
+        bucket = advance_bucket(job)
+        if bucket:
+            python_ids.setdefault(bucket, set()).add(job["job_id"])
+    for bucket in _ADVANCE_LANES:
+        sql_ids = {
+            job["job_id"]
+            for job in api_module._jobs.list_jobs(
+                tenant, limit=None, advance=bucket
+            )
+        }
+        assert sql_ids == python_ids.get(bucket, set()), bucket
+
+
+def test_advance_counts_are_exclusive_and_account_for_no_jd_rows():
+    tenant = _advance_tenant()
+    _seed_advance_fixtures(tenant)
+    counts = api_module._jobs.advance_counts(tenant)
+    for lane in _ADVANCE_LANES:
+        assert counts[lane] == 1, lane
+    # unclassified 是「不属于任何桶」的诚实余量：这组夹具里就是那条
+    # 无缺口行（succeeded ∧ usable=0），它已完成且无可采纳项。
+    assert counts["unclassified"] == 1
+    total = api_module._jobs.list_jobs(tenant, limit=None)
+    five = sum(counts[lane] for lane in _ADVANCE_LANES)
+    assert five + counts["unclassified"] == len(total)
+
+
+def test_advance_counts_keep_no_jd_rows_out_of_unanalyzed():
+    """无 JD 正文的行不得进入「未预分析」，否则该桶永远清不掉。"""
+    tenant = _advance_tenant()
+    jobs = api_module._jobs
+    with_jd = jobs.create_job(
+        tenant_id=tenant, title="Has JD", jd_text="real jd body",
+    )
+    no_jd = jobs.create_job(tenant_id=tenant, title="No JD", jd_text="x")
+    # create_job 拒绝空正文，所以用 update 把它清空以模拟历史脏行。
+    conn = sqlite3.connect(str(jobs.db_path))
+    try:
+        conn.execute(
+            "UPDATE library_jobs SET jd_text = '' WHERE job_id = ?",
+            (no_jd["job_id"],),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    counts = jobs.advance_counts(tenant)
+    assert counts["unanalyzed"] == 1
+    assert counts["unclassified"] == 1
+    total = jobs.list_jobs(tenant, limit=None)
+    five = sum(counts[lane] for lane in _ADVANCE_LANES)
+    assert five + counts["unclassified"] == len(total)
+    for lane in _ADVANCE_LANES:
+        ids = {
+            job["job_id"] for job in jobs.list_jobs(tenant, advance=lane)
+        }
+        assert no_jd["job_id"] not in ids, lane
+    assert with_jd["job_id"] in {
+        job["job_id"] for job in jobs.list_jobs(tenant, advance="unanalyzed")
+    }

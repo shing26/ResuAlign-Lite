@@ -429,12 +429,17 @@ def _clean_job_diff_placeholders(job: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get('/api/jobs')
-def list_library_jobs(job_function: str | None=None, seniority: str | None=None, status: str | None=None, search: str | None=None, limit: int=100, offset: int=0, sort: str="updated_at_desc", view: Literal["full", "summary"]="full", user: dict[str, Any]=Depends(get_current_user)):
+def list_library_jobs(job_function: str | None=None, seniority: str | None=None, status: str | None=None, search: str | None=None, limit: int=100, offset: int=0, sort: str="updated_at_desc", view: Literal["full", "summary"]="full", advance: str | None=None, user: dict[str, Any]=Depends(get_current_user)):
     """List library jobs with optional filters.
 
     ``view=summary`` is the job-hall fast path: it keeps card fields and
     server-derived hints, but never serializes the JD body or alignment
     payloads. ``view=full`` stays the default for every existing caller.
+
+    ``advance`` narrows to one 「待推进」 lane (``pending_draft`` /
+    ``unanalyzed`` / ``unaligned`` / ``failed`` / ``finalized``). The filter
+    runs in SQL before LIMIT/OFFSET, so a lane is pageable on its own; an
+    unknown value is a 422 rather than a silently ignored parameter.
     """
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
@@ -448,6 +453,7 @@ def list_library_jobs(job_function: str | None=None, seniority: str | None=None,
             limit=limit,
             offset=offset,
             sort=sort,
+            advance=advance,
         )
     except context.UserStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -31,6 +31,32 @@ export const HALL_SORTS = [
   { value: "deadline_asc", label: "截止日期最近" },
 ];
 
+/* One builder for both the first load and lane switches. `advance` is passed
+ * explicitly by the caller: the first load must stay unfiltered so the metric
+ * cards reflect the whole library, while a lane switch must carry the bucket
+ * to the server (AC 7/7c). Keeping this pure also lets the node suite lock the
+ * parameter names without booting the DOM. */
+export function jobsRequestUrl({
+  filters = {},
+  sort = "updated_at_desc",
+  advance = "",
+  limit = 500,
+  offset = 0,
+} = {}) {
+  const query = new URLSearchParams({
+    view: "summary",
+    limit: String(limit),
+    offset: String(offset),
+    sort,
+  });
+  if (filters.query) query.set("search", filters.query);
+  if (filters.jobFunction) query.set("job_function", filters.jobFunction);
+  if (filters.seniority) query.set("seniority", filters.seniority);
+  if (filters.status) query.set("status", filters.status);
+  if (advance && advance !== "all") query.set("advance", advance);
+  return `/api/jobs?${query.toString()}`;
+}
+
 const CAMPUS_SIGNAL = /校招|校园招聘|应届|实习|管培|储备干部|202[5-9]届/;
 const DAY_MS = 86400000;
 
@@ -275,6 +301,59 @@ export function dueItems(jobs, now = Date.now()) {
     }
   }
   return items.sort((a, b) => a.at - b.at);
+}
+
+/* 「待推进」五桶：与后端 job_library.advance_bucket 同一套规则。
+ * 顺序即「离完成由近到远」，分组条按这个顺序渲染。
+ * 无 JD 正文 → null（不落入任何桶，「未预分析」必须能被批量预分析清空）。 */
+export const ADVANCE_BUCKETS = [
+  "pending_draft",
+  "unanalyzed",
+  "unaligned",
+  "failed",
+  "finalized",
+];
+
+export const ADVANCE_LABELS = {
+  pending_draft: "有建议 · 待定稿",
+  unanalyzed: "未预分析",
+  unaligned: "已预分析 · 未对齐",
+  failed: "对齐失败",
+  finalized: "已定稿",
+};
+
+/* 职位页用 view=summary，拿不到 jd_text/jd_profile；摘要投影给的是
+ * jd_excerpt / has_jd_profile。漏掉摘要回退会让整页岗位都判成 null
+ * （ADR-0070 已经为预估按钮踩过一次同样的坑）。 */
+function hasJdBody(job) {
+  return Boolean(String((job.jd_text || job.jd_excerpt || "")).trim());
+}
+
+function hasJdProfile(job) {
+  if (job.has_jd_profile !== undefined) return job.has_jd_profile === true;
+  return Boolean(job.jd_profile);
+}
+
+export function jobNeedsPreanalyze(job) {
+  if (!job || !hasJdBody(job)) return false;
+  if (job.classification_pending) return true;
+  return !hasJdProfile(job);
+}
+
+export function advanceBucket(job) {
+  if (!job || !hasJdBody(job)) return null;
+  const status = String(job.alignment_status || "idle");
+  if (status === "failed") return "failed";
+  if (status === "succeeded") {
+    if (Number(job.final_draft_version) > 0) return "finalized";
+    const usable =
+      typeof job.usable_diffs === "number"
+        ? job.usable_diffs
+        : (job.diffs || []).length;
+    return usable >= 1 ? "pending_draft" : null;
+  }
+  if (status === "queued" || status === "running") return null;
+  return jobNeedsPreanalyze(job) ? "unanalyzed" : "unaligned";
 }
 
 export function computeHallStats(jobs, savedIds = new Set(), now = Date.now()) {

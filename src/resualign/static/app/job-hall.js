@@ -39,9 +39,12 @@ import {
   runCanvasRenderHooks,
 } from "./kanban.js";
 import {
+  ADVANCE_BUCKETS,
+  ADVANCE_LABELS,
   AUDIENCES,
   SALARY_BANDS,
   activeFilterCount,
+  advanceBucket,
   audienceLabel,
   cityOptions,
   companyInitial,
@@ -52,6 +55,7 @@ import {
   inferAudience,
   isDeadlineOverdue,
   isDeadlineSoon,
+  jobsRequestUrl as buildJobsRequestUrl,
   relativeTime,
   seniorityOptions,
   sortHallJobs,
@@ -63,13 +67,15 @@ const JOBS_VIEW_KEY = "resualign.jobs.view";
 const JOBS_DETAIL_STATE_KEY = "resualignJobsDetail";
 const LIST_PAGE = 50;
 const BOARD_PAGE = 20;
+/* Server-side list cap (`GET /api/jobs` clamps limit to 500). */
+const LIST_FETCH_LIMIT = 500;
 
+/* 看板 chip 与职位页分组条共用这组键（ADR-0069：全页只有一个筛选来源）。
+ * 旧键 pending/aligned/final 已删除且不保留别名：aligned 曾把「已定稿」与
+ * 「差一次采纳」混在一起，是最误导人的地方。 */
 const WORK_FILTERS = [
   { key: "all", label: "全部" },
-  { key: "pending", label: "待分析" },
-  { key: "aligned", label: "已对齐" },
-  { key: "failed", label: "对齐失败" },
-  { key: "final", label: "已定稿" },
+  ...ADVANCE_BUCKETS.map((key) => ({ key, label: ADVANCE_LABELS[key] })),
 ];
 
 const EMPTY_FILTERS = Object.freeze({
@@ -101,6 +107,9 @@ const hall = {
   listLimit: LIST_PAGE,
   boardLimit: BOARD_PAGE,
   vocabulary: null,
+  laneJobs: null,
+  laneKey: null,
+  laneToken: 0,
   selectedId: null,
   detailOpen: false,
   detailPushed: false,
@@ -116,7 +125,12 @@ function detailJob(jobId) {
 
 function summaryJob(jobId) {
   if (!jobId) return null;
-  return hall.jobs.find((item) => item.job_id === jobId) || null;
+  const lane = Array.isArray(hall.laneJobs) ? hall.laneJobs : [];
+  return (
+    hall.jobs.find((item) => item.job_id === jobId) ||
+    lane.find((item) => item.job_id === jobId) ||
+    null
+  );
 }
 
 function readShortlist() {
@@ -156,26 +170,14 @@ function writeJobsViewMode(mode) {
 
 function jobWorkState(job) {
   const status = String(job.alignment_status || "");
-  if (status === "failed") return "failed";
-  if (status === "succeeded") {
-    const usable =
-      typeof job.usable_diffs === "number"
-        ? job.usable_diffs
-        : (job.diffs || []).length;
-    return usable >= 1 ? "aligned" : "no_gap";
-  }
   if (status === "queued" || status === "running") return "running";
-  return "pending";
-}
-
-function isFinalDraft(job) {
-  return Number(job.final_draft_version) > 0 || job.has_final_draft === true;
+  // 五桶之外只剩「无缺口 / 无安全改写」这类已收口状态。
+  return advanceBucket(job) || "no_gap";
 }
 
 function matchesWorkFilter(job, key) {
   if (key === "all" || !key) return true;
-  if (key === "final") return isFinalDraft(job);
-  return jobWorkState(job) === key;
+  return advanceBucket(job) === key;
 }
 
 function safeUrl(value) {
@@ -227,22 +229,30 @@ function workStateBadge(job) {
         ? "无安全改写"
         : "对齐失败";
     tone = "danger";
-  } else if (state === "aligned") {
-    label = "已对齐";
+  } else if (state === "pending_draft") {
+    label = "待定稿";
+    tone = "accent";
+  } else if (state === "finalized") {
+    label = "已定稿";
     tone = "success";
+  } else if (state === "unanalyzed") {
+    label = "未预分析";
+    tone = "neutral";
+  } else if (state === "unaligned") {
+    label = "未对齐";
+    tone = "warning";
   } else if (state === "no_gap") {
     label = "无缺口";
     tone = "warning";
-  } else if (isFinalDraft(job)) {
-    label = "已定稿";
-    tone = "success";
   }
   const hint =
     state === "failed"
       ? String(job.alignment_error || "本轮未产出可用改写建议")
       : state === "no_gap"
         ? "该岗位没有需要改写的缺口"
-        : "";
+        : state === "pending_draft"
+          ? "已产出可用建议，采纳并保存定稿即完成闭环"
+          : "";
   return `<span class="jh-dotline jh-dotline--${tone}"${
     hint ? ` title="${esc(hint)}"` : ""
   }>${esc(label)}</span>`;
@@ -353,24 +363,82 @@ function workFilterHtml() {
         hall.filters.work_status === key ? " is-active" : ""
       }" data-jh-work="${key}" aria-pressed="${
         hall.filters.work_status === key
-      }">${label}<span>${counts[key] || 0}</span></button>`,
+      }">${label}<span data-jh-count>${
+        counts[key] || 0
+      }</span></button>`,
   ).join("");
+}
+
+/* 分组条的副标题：每段回答「这堆岗位现在缺什么」。
+ * 键名与后端 advance_bucket 一致；顺序 = 离完成由近到远。 */
+const ADVANCE_HINTS = {
+  pending_draft: "已跑完对齐，差你采纳",
+  unanalyzed: "导入后还没跑过",
+  unaligned: "有 JD 画像，没生成建议",
+  failed: "零产出 / 额度 / 服务错误",
+  finalized: "可直接导出或记录投递",
+};
+
+function advanceLanesHtml() {
+  const counts = workFilterCounts();
+  return `<div class="jh-lanes" role="group" aria-label="按待推进阶段分组">${ADVANCE_BUCKETS.map(
+    (key) => {
+      const active = hall.filters.work_status === key;
+      return `<button type="button" class="jh-lane jh-lane--${key}${
+        active ? " is-active" : ""
+      }" data-jh-work="${key}" aria-pressed="${active}">
+        <span class="jh-lane__top"><b class="jh-lane__n" data-jh-count>${
+          counts[key] || 0
+        }</b><i class="jh-lane__dot" aria-hidden="true"></i></span>
+        <span class="jh-lane__label">${esc(ADVANCE_LABELS[key])}</span>
+        <span class="jh-lane__hint">${esc(ADVANCE_HINTS[key] || "")}</span>
+      </button>`;
+    },
+  ).join("")}</div>`;
+}
+
+function advanceNoteHtml(visibleCount) {
+  const key = hall.filters.work_status;
+  if (!key || key === "all") return "";
+  const total = workFilterCounts()[key] || 0;
+  const narrowed = Number(visibleCount) !== total;
+  return `<div class="jh-lanenote">
+    <span>正在看 <b>${esc(ADVANCE_LABELS[key] || key)}</b>（${
+      narrowed ? `筛选后 ${visibleCount} / ${total}` : total
+    }）· ${esc(ADVANCE_HINTS[key] || "")}</span>
+    <button type="button" class="jh-lanenote__clear" data-jh-work="all">显示全部</button>
+  </div>`;
 }
 
 function workFilterCounts() {
   const counts = {
     all: hall.jobs.length,
-    pending: 0,
-    aligned: 0,
+    pending_draft: 0,
+    unanalyzed: 0,
+    unaligned: 0,
     failed: 0,
-    final: 0,
+    finalized: 0,
   };
+  // 服务端计数是全库口径；列表只加载前 500 条，所以优先用它，
+  // 未取到（dashboard 请求失败）才退回本地已加载页的计数。
+  const remote =
+    hall.dashboard && hall.dashboard.advance
+      ? hall.dashboard.advance
+      : null;
+  if (remote) {
+    // 「全部」也是全库口径（kpi.jobs），不是已加载页的行数。
+    const kpiTotal = Number(
+      hall.dashboard && hall.dashboard.kpi && hall.dashboard.kpi.jobs,
+    );
+    if (Number.isFinite(kpiTotal)) counts.all = kpiTotal;
+    for (const key of ADVANCE_BUCKETS) {
+      counts[key] = Number(remote[key] || 0);
+    }
+    return counts;
+  }
   for (const job of hall.jobs) {
-    const stateKey = jobWorkState(job);
-    if (stateKey === "pending") counts.pending += 1;
-    if (stateKey === "aligned") counts.aligned += 1;
-    if (stateKey === "failed") counts.failed += 1;
-    if (isFinalDraft(job)) counts.final += 1;
+    const key = advanceBucket(job);
+    if (key) counts[key] += 1;
   }
   return counts;
 }
@@ -491,6 +559,9 @@ function shellHtml() {
         <span class="jh-head__note">校招/社招按岗位标题、职级与 JD 关键词自动归类；筛选在列表和看板之间共享</span>
       </div>
     </header>
+
+    ${isBoard ? "" : advanceLanesHtml()}
+    <div data-jh-lanenote>${advanceNoteHtml(0)}</div>
 
     <section class="jh-progress" aria-label="求职进度概览">
       <div class="jh-metrics" data-jh-metrics></div>
@@ -1167,7 +1238,10 @@ function paintWorkFilter() {
     const active = hall.filters.work_status === key;
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
-    const count = button.querySelector("span");
+    // 分组条与看板 chip 的计数标记不同（<b>/<span>），统一用 data 属性定位。
+    // 用裸 `span` 选择器会先命中分组条的 `.jh-lane__top`，把整块 top 行
+    // （含小圆点）替换成纯数字。
+    const count = button.querySelector("[data-jh-count]");
     if (count) count.textContent = String(counts[key] || 0);
   });
 }
@@ -1226,7 +1300,9 @@ function paintList(visible) {
   const sub = hall.root.querySelector("[data-jh-list-sub]");
   const count = hall.root.querySelector("[data-jh-result-count]");
   if (count) {
-    count.textContent = `共 ${visible.length} 个岗位`;
+    const laneActive =
+      hall.laneKey != null && hall.laneKey === hall.filters.work_status;
+    count.textContent = resultCountLabel(visible.length, laneActive);
   }
   if (title) {
     title.textContent = hall.filters.audience === "all"
@@ -1303,12 +1379,38 @@ function paintDetail() {
   if (backdrop) backdrop.hidden = !isBoard || !hall.detailOpen;
 }
 
+/* AC 7d: a lane can exceed the 500-row server cap. Say so in the list header
+ * instead of letting 500 look like the full bucket count. */
+function resultCountLabel(visibleCount, laneActive) {
+  let label = `共 ${visibleCount} 个岗位`;
+  const laneCount =
+    hall.dashboard && hall.dashboard.advance
+      ? Number(hall.dashboard.advance[hall.filters.work_status])
+      : NaN;
+  if (
+    laneActive &&
+    visibleCount >= LIST_FETCH_LIMIT &&
+    Number.isFinite(laneCount) &&
+    laneCount > LIST_FETCH_LIMIT
+  ) {
+    label += "（仅显示前 500 条）";
+  }
+  return label;
+}
+
 function paintResults() {
   if (!hall.root) return;
+  /* A lane comes from the server so rows beyond the first 500 still show
+   * (AC 7b). Metrics keep reading hall.jobs below (AC 7c). */
+  const laneActive =
+    hall.laneKey != null && hall.laneKey === hall.filters.work_status;
+  const source =
+    laneActive && Array.isArray(hall.laneJobs) ? hall.laneJobs : hall.jobs;
   const visible = sortHallJobs(
-    filterHallJobs(hall.jobs, hall.filters, hall.saved),
+    filterHallJobs(source, hall.filters, hall.saved),
     hall.sort,
   ).filter((job) => matchesWorkFilter(job, hall.filters.work_status));
+  hall.visibleCount = visible.length;
   const selectedVisible = visible.some(
     (job) => job.job_id === hall.selectedId,
   );
@@ -1317,7 +1419,8 @@ function paintResults() {
     if (!hall.selectedId) hall.detailOpen = false;
   }
   const count = hall.root.querySelector("[data-jh-result-count]");
-  if (count) count.textContent = `共 ${visible.length} 个岗位`;
+  if (count) count.textContent = resultCountLabel(visible.length, laneActive);
+  paintLaneNote();
   paintMetrics();
   paintFilterCount();
   paintAudience();
@@ -1336,6 +1439,14 @@ function paintResults() {
   ) {
     void ensureJobDetail(hall.selectedId);
   }
+}
+
+/* 分段条的计数来自 /api/dashboard，比列表晚一拍到达；首屏渲染时只能先用
+ * 已加载页的本地计数。dashboard 回来后必须重画计数与说明条，否则页面上
+ * 会一直停着错的数字（真实库里「待定稿」会显示成 0）。 */
+function paintLaneNote() {
+  const note = hall.root && hall.root.querySelector("[data-jh-lanenote]");
+  if (note) note.innerHTML = advanceNoteHtml(hall.visibleCount || 0);
 }
 
 function schedulePaintResults() {
@@ -1457,9 +1568,16 @@ export function syncJobHallFromHash() {
   if ((pathPart || "").split("/")[0] !== "jobs") return false;
   const params = new URLSearchParams(queryPart || "");
   if (
-    ["sort", "status", "search", "job_function", "seniority", "city", "audience"].some(
-      (key) => params.has(key),
-    )
+    [
+      "sort",
+      "status",
+      "search",
+      "job_function",
+      "seniority",
+      "city",
+      "audience",
+      "advance",
+    ].some((key) => params.has(key))
   ) {
     return false;
   }
@@ -1473,6 +1591,8 @@ export function syncJobHallFromHash() {
     if (
       requestedJob &&
       (hall.jobs.some((job) => job.job_id === requestedJob) ||
+        (Array.isArray(hall.laneJobs) &&
+          hall.laneJobs.some((job) => job.job_id === requestedJob)) ||
         hall.details.has(requestedJob))
     ) {
       hall.selectedId = requestedJob;
@@ -1528,6 +1648,12 @@ function replaceJob(updated, fallback) {
   if (!id) return;
   const index = hall.jobs.findIndex((item) => item.job_id === id);
   if (index >= 0) hall.jobs[index] = { ...hall.jobs[index], ...next };
+  if (Array.isArray(hall.laneJobs)) {
+    const laneIndex = hall.laneJobs.findIndex((item) => item.job_id === id);
+    if (laneIndex >= 0) {
+      hall.laneJobs[laneIndex] = { ...hall.laneJobs[laneIndex], ...next };
+    }
+  }
   if (hall.details.has(id)) {
     hall.details.set(id, { ...hall.details.get(id), ...next });
   } else if (
@@ -1620,7 +1746,7 @@ function requestStatusChange(job, status, reset) {
 }
 
 function markApplied(jobId) {
-  const job = hall.jobs.find((item) => item.job_id === jobId);
+  const job = summaryJob(jobId);
   if (!job) return;
   if (canonicalJobStatus(job.status) !== "draft") {
     toast("该岗位已经投递，可在详情里更新后续状态", "info");
@@ -1630,7 +1756,7 @@ function markApplied(jobId) {
 }
 
 async function rescoreJob(jobId, button) {
-  const job = hall.jobs.find((item) => item.job_id === jobId);
+  const job = summaryJob(jobId);
   if (!job) return;
   const original = button.textContent;
   button.disabled = true;
@@ -1656,6 +1782,9 @@ async function rescoreJob(jobId, button) {
 
 function resetFilters() {
   hall.filters = { ...EMPTY_FILTERS };
+  hall.laneToken += 1;
+  hall.laneJobs = null;
+  hall.laneKey = null;
   hall.sort = "match_score_desc";
   state.filters = {
     ...state.filters,
@@ -1738,11 +1867,16 @@ function bindEvents(root) {
     }
     const workButton = target.closest("[data-jh-work]");
     if (workButton) {
-      hall.filters.work_status = workButton.dataset.jhWork || "all";
+      const key = workButton.dataset.jhWork || "all";
+      if (key === hall.filters.work_status && (key === "all" || hall.laneJobs)) {
+        return;
+      }
+      hall.filters.work_status = key;
       syncStateFilters();
       paintFilterCount();
       hall.listLimit = LIST_PAGE;
-      paintResults();
+      hall.boardLimit = BOARD_PAGE;
+      void loadLane(key);
       return;
     }
     const boardMore = target.closest("[data-jh-board-more]");
@@ -1884,7 +2018,7 @@ function bindEvents(root) {
     }
     if (target.matches("[data-jh-status]")) {
       const jobId = target.dataset.jhStatusId;
-      const job = hall.jobs.find((item) => item.job_id === jobId);
+      const job = summaryJob(jobId);
       if (!job) return;
       const previous = canonicalJobStatus(job.status);
       requestStatusChange(job, canonicalJobStatus(target.value), () => {
@@ -1916,25 +2050,49 @@ const SERVER_SORTS = new Set([
 ]);
 
 /* The first load carries the server-supported deep-link filters so a shared
- * #/jobs?status=applied&sort=... link yields the same page. Client-only
- * filters (audience/salary/match/saved/recent/work_status) still run in
- * memory over the fetched page. */
-function jobsRequestUrl() {
-  const query = new URLSearchParams({
-    view: "summary",
-    limit: "500",
-    offset: "0",
+ * #/jobs?status=applied&sort=... link yields the same page. `advance` is empty
+ * on the first load so metric cards stay library-wide; a lane switch passes
+ * the bucket explicitly. Client-only filters (audience/salary/match/saved/
+ * recent) still run in memory over the fetched page. */
+function jobsRequestUrl(advance = "") {
+  return buildJobsRequestUrl({
+    filters: hall.filters,
     sort: SERVER_SORTS.has(hall.sort) ? hall.sort : "updated_at_desc",
+    advance,
+    limit: LIST_FETCH_LIMIT,
   });
-  if (hall.filters.query) query.set("search", hall.filters.query);
-  if (hall.filters.jobFunction) {
-    query.set("job_function", hall.filters.jobFunction);
+}
+
+/* AC 7/7b: a lane is a server-side filter, not a scan of the loaded page.
+ * `hall.jobs` stays untouched (AC 7c) and only feeds the metric cards. */
+async function loadLane(key = hall.filters.work_status) {
+  if (!key || key === "all") {
+    hall.laneToken += 1;
+    hall.laneJobs = null;
+    hall.laneKey = null;
+    paintResults();
+    return;
   }
-  if (hall.filters.seniority) {
-    query.set("seniority", hall.filters.seniority);
+  if (hall.laneKey === key && Array.isArray(hall.laneJobs)) {
+    paintResults();
+    return;
   }
-  if (hall.filters.status) query.set("status", hall.filters.status);
-  return `/api/jobs?${query.toString()}`;
+  const token = ++hall.laneToken;
+  hall.laneKey = key;
+  hall.laneJobs = null;
+  paintResults();
+  let rows;
+  try {
+    rows = await api(jobsRequestUrl(key));
+  } catch (error) {
+    if (token !== hall.laneToken || hall.filters.work_status !== key) return;
+    toast(error.message || "筛选岗位失败，请重试。", "error");
+    paintResults();
+    return;
+  }
+  if (token !== hall.laneToken || hall.filters.work_status !== key) return;
+  hall.laneJobs = Array.isArray(rows) ? rows : [];
+  paintResults();
 }
 
 export async function renderJobHall(app, options = {}) {
@@ -1944,9 +2102,17 @@ export async function renderJobHall(app, options = {}) {
   hall.detailLoading = new Set();
   hall.detailErrors = new Map();
   hall.error = "";
+  hall.laneToken += 1;
+  hall.laneJobs = null;
+  hall.laneKey = null;
   const hashQuery = new URLSearchParams(
     String(window.location.hash || "").split("?")[1] || "",
   );
+  const requestedAdvance = hashQuery.get("advance");
+  if (requestedAdvance && ADVANCE_BUCKETS.includes(requestedAdvance)) {
+    hall.filters.work_status = requestedAdvance;
+    state.filters.work_status = requestedAdvance;
+  }
   const requestedView = options.view || hashQuery.get("view");
   hall.view =
     requestedView === "board"
@@ -2000,6 +2166,11 @@ export async function renderJobHall(app, options = {}) {
   );
 
   await renderShell();
+  /* Deep link: the first fetch stays unfiltered for the metric cards, then
+   * the lane is resolved server-side (AC 7). */
+  if (hall.filters.work_status && hall.filters.work_status !== "all") {
+    void loadLane(hall.filters.work_status);
+  }
   if (
     hall.selectedId &&
     (hall.view === "list" || hall.detailOpen) &&
@@ -2020,6 +2191,9 @@ export async function renderJobHall(app, options = {}) {
       );
       hall.total = Number.isFinite(kpiTotal) ? kpiTotal : hall.jobs.length;
       paintMetrics();
+      /* 服务端计数到位：分段条的数字与说明条都要按全库口径重画。 */
+      paintWorkFilter();
+      paintLaneNote();
       if (hall.view === "board") paintResults();
     },
   );

@@ -103,7 +103,8 @@
     "WorkstationState",
     "FinalDraftRollbackRequest",
     "JobApplicationCreateRequest",
-    "JobApplicationOutcomeRequest"
+    "JobApplicationOutcomeRequest",
+    "AdvanceCounts"
   ],
   "sse_events": [
     "job.stage",

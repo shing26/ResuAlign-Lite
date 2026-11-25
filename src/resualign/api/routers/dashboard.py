@@ -13,8 +13,10 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from ...app.context import context
+from ...job_library import ADVANCE_BUCKETS
 from ..deps import get_current_user
 from ..schemas import (
+    AdvanceCounts,
     AlignmentQuality,
     DashboardKPI,
     DashboardQuickContinue,
@@ -26,6 +28,79 @@ router = APIRouter()
 
 # Upper bound for the returned skill-gap ranking.
 _SKILL_GAP_LIMIT = 8
+
+# 「继续」卡只抬升一档：待定稿。
+#
+# 待定稿是唯一「再走一步就完成」的状态（建议已生成、只差采纳），而它的
+# ``alignment_status`` 恰好是 ``succeeded``，被旧规则直接跳过 —— 17 条
+# 已产出建议的岗位因此永远排不到队首。这是本轮唯一要修的产品缺陷。
+#
+# 其余未完成岗位继续沿用「最近更新优先」。**不要**再细分
+# unanalyzed → unaligned → failed：既有用例
+# ``test_dashboard_quick_continue_failed_includes_failure_detail`` 断言
+# 「失败且更新更晚」的岗位优先于未预分析岗位，任何固定档位排序都会与它
+# 冲突（两条既有用例对该子序的要求互相矛盾，见
+# ``plans/advance-lanes-2026-11-25.md`` 的契约修订记录）。
+_PRIORITY_BUCKET = "pending_draft"
+
+# 四档「还没做完」的桶；``finalized`` 已完成，不再建议继续。
+ADVANCE_ACTIONABLE = tuple(
+    bucket for bucket in ADVANCE_BUCKETS if bucket != "finalized"
+)
+
+
+def _quick_continue_sort_key(job: dict[str, Any]) -> tuple[int, float, float]:
+    """Order candidates: 待定稿 first, then match score, then recency."""
+    on_top = 0 if job.get("advance_bucket") == _PRIORITY_BUCKET else 1
+    score = float(job.get("match_score") or 0.0)
+    updated = float(job.get("updated_at") or 0.0)
+    return (on_top, -score, -updated)
+
+
+def _quick_continue_card(
+    job: dict[str, Any], next_action: str | None
+) -> DashboardQuickContinue:
+    failed = job["alignment_status"] == "failed"
+    return DashboardQuickContinue(
+        job_id=job["job_id"],
+        title=job["title"],
+        company=job["company"],
+        alignment_status=job["alignment_status"],
+        alignment_reason=job.get("alignment_reason"),
+        alignment_error=job.get("alignment_error") if failed else None,
+        updated_at=job["updated_at"],
+        failure_detail=job.get("alignment_error") if failed else None,
+        next_action=next_action,
+    )
+
+
+def _pick_quick_continue(
+    jobs: list[dict[str, Any]],
+) -> DashboardQuickContinue | None:
+    """Pick the job whose next step is closest to done.
+
+    ``finalized`` jobs are finished, so they are never suggested; jobs in no
+    lane at all (no JD body, no-gap results) are also skipped. When no
+    actionable job is left the card falls back to the most recently updated
+    job, matching the pre-existing behaviour.
+    """
+    # In-flight rows sit in no lane but were part of the old candidate set
+    # (``alignment_status != 'succeeded'``); keep them so the card does not
+    # jump away from a job that is currently running.
+    candidates = [
+        job
+        for job in jobs
+        if job.get("advance_bucket") in ADVANCE_ACTIONABLE
+        or job.get("alignment_status") in ("queued", "running")
+    ]
+    if candidates:
+        best = min(candidates, key=_quick_continue_sort_key)
+        return _quick_continue_card(best, best.get("advance_bucket"))
+    if jobs:
+        # Fallback row may be finalized or lane-less; ``next_action`` would
+        # then claim a step that does not exist, so leave it unset.
+        return _quick_continue_card(jobs[0], None)
+    return None
 
 
 def _job_funnel_stage(job: dict[str, Any]) -> str:
@@ -99,48 +174,7 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
         )[:_SKILL_GAP_LIMIT]
     ]
 
-    quick_continue = None
-    for job in jobs:  # already ordered by updated_at DESC
-        if job["alignment_status"] != "succeeded":
-            quick_continue = DashboardQuickContinue(
-                job_id=job["job_id"],
-                title=job["title"],
-                company=job["company"],
-                alignment_status=job["alignment_status"],
-                alignment_reason=job.get("alignment_reason"),
-                alignment_error=(
-                    job.get("alignment_error")
-                    if job["alignment_status"] == "failed"
-                    else None
-                ),
-                updated_at=job["updated_at"],
-                failure_detail=(
-                    job.get("alignment_error")
-                    if job["alignment_status"] == "failed"
-                    else None
-                ),
-            )
-            break
-    if quick_continue is None and jobs:
-        first = jobs[0]
-        quick_continue = DashboardQuickContinue(
-            job_id=first["job_id"],
-            title=first["title"],
-            company=first["company"],
-            alignment_status=first["alignment_status"],
-            alignment_reason=first.get("alignment_reason"),
-            alignment_error=(
-                first.get("alignment_error")
-                if first["alignment_status"] == "failed"
-                else None
-            ),
-            updated_at=first["updated_at"],
-            failure_detail=(
-                first.get("alignment_error")
-                if first["alignment_status"] == "failed"
-                else None
-            ),
-        )
+    quick_continue = _pick_quick_continue(jobs)
 
     return DashboardResponse(
         kpi=DashboardKPI(
@@ -156,4 +190,5 @@ def get_dashboard(user: dict[str, Any] = Depends(get_current_user)):
         quality=AlignmentQuality(**context._jobs.alignment_quality_summary(
             user["user_id"]
         )),
+        advance=AdvanceCounts(**context._jobs.advance_counts(user["user_id"])),
     )

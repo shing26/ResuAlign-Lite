@@ -21,6 +21,7 @@ from ...job_library import (
     _normalize_source_url,
     _parse_salary_text,
     _text_dedupe_key,
+    job_needs_preanalyze,
     normalize_import_date,
 )
 from ...llm_usage import llm_tenant_context, reset_llm_tenant, set_llm_tenant
@@ -1247,20 +1248,6 @@ def preanalyze_job(user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
 
 
 _MAX_PREANALYZE_BATCH = 200
-
-
-def job_needs_preanalyze(job: dict[str, Any]) -> bool:
-    """Return True when a job has JD text but no stored preanalysis product.
-
-    This is the single skip predicate for the bulk sweep: a job is only
-    re-analyzed when it has no ``jd_profile`` yet, or its classification is
-    still pending (a failed earlier attempt).
-    """
-    if not (job.get('jd_text') or '').strip():
-        return False
-    if job.get('classification_pending'):
-        return True
-    return not job.get('jd_profile')
 
 
 def collect_pending_preanalyze_job_ids(

@@ -13328,6 +13328,137 @@ select,
     text-decoration: underline;
   }
 
+  /* 「待推进」五段分组条（2026-11-25）：回答「先做哪个」，不按数量排。
+   * 顺序 = 离完成由近到远，颜色只留在 5px 状态点上。 */
+  .jh-lanes {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--line-faint);
+    border: 1px solid var(--line-subtle);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+
+  .jh-lane {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-3) var(--space-4);
+    border: 0;
+    background: var(--surface-1);
+    color: inherit;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    position: relative;
+  }
+
+  .jh-lane:hover {
+    background: var(--surface-2);
+  }
+
+  .jh-lane.is-active,
+  .jh-lane[aria-pressed="true"] {
+    background: var(--accent-soft);
+  }
+
+  .jh-lane.is-active::after,
+  .jh-lane[aria-pressed="true"]::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 2px;
+    background: var(--accent);
+  }
+
+  .jh-lane__top {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1);
+  }
+
+  .jh-lane__n {
+    font-family: var(--font-num);
+    font-size: var(--text-3xl);
+    font-weight: var(--fw-announce);
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+  }
+
+  .jh-lane.is-active .jh-lane__n {
+    color: var(--accent-text);
+  }
+
+  .jh-lane__dot {
+    width: 5px;
+    height: 5px;
+    border-radius: var(--radius-pill);
+    background: var(--text-faint);
+    flex: 0 0 auto;
+  }
+
+  .jh-lane--pending_draft .jh-lane__dot { background: var(--accent); }
+  .jh-lane--unaligned .jh-lane__dot { background: var(--warn); }
+  .jh-lane--failed .jh-lane__dot { background: var(--danger); }
+  .jh-lane--finalized .jh-lane__dot { background: var(--success); }
+
+  .jh-lane__label {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.005em;
+  }
+
+  .jh-lane__hint {
+    font-size: var(--text-2xs);
+    color: var(--text-tertiary);
+    line-height: 1.4;
+  }
+
+  /* 已定稿是「做完的」，视觉上压一档，不跟待推进抢注意力。 */
+  .jh-lane--finalized .jh-lane__n {
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+
+  .jh-lanenote {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    background: var(--surface-inset);
+    color: var(--text-secondary);
+    font-size: var(--text-xs);
+  }
+
+  .jh-lanenote:empty {
+    display: none;
+  }
+
+  .jh-lanenote b {
+    color: var(--text-primary);
+  }
+
+  .jh-lanenote__clear {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    color: var(--accent-text);
+    font-family: inherit;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-color: var(--accent-line);
+    text-underline-offset: 2px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
   .jh-progress {
     flex: 0 0 auto;
     background: var(--surface-1);
@@ -14542,6 +14673,31 @@ select,
 
     .jh-head__note {
       display: none;
+    }
+
+    /* 移动端 390：2×2 + 第 5 段整行，避免出现「孤零零一格」。 */
+    .jh-lanes {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .jh-lane--finalized {
+      grid-column: 1 / -1;
+      flex-direction: row;
+      align-items: baseline;
+      gap: var(--space-2);
+    }
+
+    .jh-lane--finalized .jh-lane__top {
+      gap: var(--space-1);
+    }
+
+    .jh-lane__hint {
+      display: none;
+    }
+
+    .jh-lane--finalized .jh-lane__hint {
+      display: inline;
+      margin-left: auto;
     }
 
     .jh-metrics {

@@ -431,3 +431,93 @@ def test_dashboard_quality_summary_in_response():
     assert quality["diffs_total"] == 4
     assert quality["diffs_accepted"] == 2
     assert quality["adoption_ratio"] == 0.5
+
+
+def _seed_pending_draft(tenant: str, title: str, score: float | None) -> dict:
+    """Create a job that sits in the 待定稿 lane (succeeded + usable diffs)."""
+    job = _create_job(tenant, title=title, jd_text=f"{title} role text.")
+    api_module._jobs.save_alignment(
+        tenant,
+        job["job_id"],
+        diffs=[{
+            "diff_id": "d0", "type": "modify", "original": "x",
+            "proposed": "y", "provenance_state": "verified",
+        }],
+        alignment_status="succeeded",
+        usable_diffs=1,
+        match_score=score,
+    )
+    return job
+
+
+def test_dashboard_quick_continue_prefers_pending_draft():
+    """待定稿是唯一「再走一步就完成」的状态，必须压过更新的未分析岗位。
+
+    这是本轮唯一要修的产品缺陷：它的 alignment_status 是 succeeded，
+    旧规则会把它当已完成跳过，17 条已产出建议的岗位永远排不到队首。
+    """
+    tenant = _tenant_id()
+    draft = _seed_pending_draft(tenant, "Draft", 10.0)
+    newer_idle = _create_job(
+        tenant, title="Newer idle", jd_text="Newer idle role text."
+    )
+    base = time.time()
+    _set_updated_at(draft["job_id"], base)
+    _set_updated_at(newer_idle["job_id"], base + 1000.0)
+
+    body = client.get("/api/dashboard", headers=_auth_headers()).json()
+    quick = body["quick_continue"]
+    assert quick["job_id"] == draft["job_id"]
+    assert quick["next_action"] == "pending_draft"
+
+
+def test_dashboard_quick_continue_pending_draft_breaks_tie_on_match_score():
+    tenant = _tenant_id()
+    low = _seed_pending_draft(tenant, "Low score", 40.0)
+    high = _seed_pending_draft(tenant, "High score", 90.0)
+    base = time.time()
+    # 低分那条更新更晚：match_score 必须先于 updated_at 决定。
+    _set_updated_at(low["job_id"], base + 1000.0)
+    _set_updated_at(high["job_id"], base)
+
+    body = client.get("/api/dashboard", headers=_auth_headers()).json()
+    assert body["quick_continue"]["job_id"] == high["job_id"]
+
+
+def test_dashboard_quick_continue_skips_finalized_jobs():
+    """已定稿已经完成，不该再占据「继续」卡。"""
+    tenant = _tenant_id()
+    finalized = _create_job(
+        tenant, title="Finalized", jd_text="Finalized role text."
+    )
+    api_module._jobs.save_alignment(
+        tenant, finalized["job_id"],
+        diffs=[{"diff_id": "d0", "type": "modify", "original": "x",
+                "proposed": "y", "provenance_state": "verified"}],
+        alignment_status="succeeded", usable_diffs=1,
+    )
+    api_module._jobs.save_final_draft(
+        tenant, finalized["job_id"], "定稿", accepted_diff_ids=["d0"]
+    )
+    pending = _seed_pending_draft(tenant, "Still pending", 1.0)
+    base = time.time()
+    _set_updated_at(finalized["job_id"], base + 1000.0)
+    _set_updated_at(pending["job_id"], base)
+
+    body = client.get("/api/dashboard", headers=_auth_headers()).json()
+    assert body["quick_continue"]["job_id"] == pending["job_id"]
+
+
+def test_dashboard_advance_counts_are_library_wide():
+    tenant = _tenant_id()
+    _seed_pending_draft(tenant, "Draft", 10.0)
+    _create_job(tenant, title="Idle", jd_text="Idle role text.")
+    body = client.get("/api/dashboard", headers=_auth_headers()).json()
+    advance = body["advance"]
+    assert advance["pending_draft"] == 1
+    assert advance["unanalyzed"] == 1
+    total = sum(
+        advance[key] for key in
+        ("pending_draft", "unanalyzed", "unaligned", "failed", "finalized")
+    ) + advance["unclassified"]
+    assert total == body["kpi"]["jobs"]

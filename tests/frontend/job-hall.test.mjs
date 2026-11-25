@@ -5,7 +5,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  ADVANCE_BUCKETS,
+  ADVANCE_LABELS,
   activeFilterCount,
+  advanceBucket,
   audienceLabel,
   cityOptions,
   companyInitial,
@@ -13,6 +16,7 @@ import {
   dueItems,
   filterHallJobs,
   inferAudience,
+  jobsRequestUrl,
   relativeTime,
   salaryBand,
   sortHallJobs,
@@ -260,4 +264,117 @@ test("job hall is wired into the existing shell and router", () => {
     /@media \(max-width: 640px\)[\s\S]*?\.jh-progress__foot\s*\{\s*display: none/,
     "mobile fold prioritizes jobs over the progress footer",
   );
+});
+
+
+/* ---------------------------------------------------------------- */
+/* 「待推进」五桶：分组条与看板 chip 共用的分桶规则                  */
+/* ---------------------------------------------------------------- */
+
+const summaryJob = (overrides = {}) => ({
+  job_id: "s1",
+  title: "Summary row",
+  jd_excerpt: "面向 2027 届的岗位摘要",
+  has_jd_profile: false,
+  alignment_status: "idle",
+  usable_diffs: 0,
+  final_draft_version: 0,
+  ...overrides,
+});
+
+test("advanceBucket reads the summary projection, not jd_text/jd_profile", () => {
+  /* view=summary 不带 jd_text/jd_profile。只认它们会让整页岗位都判成
+   * null，分组条全显示 0（ADR-0070 为预估按钮踩过同样的坑）。 */
+  assert.equal(advanceBucket(summaryJob()), "unanalyzed");
+  assert.equal(
+    advanceBucket(summaryJob({ has_jd_profile: true })),
+    "unaligned",
+  );
+});
+
+test("advanceBucket puts a job with no JD body into no bucket", () => {
+  assert.equal(advanceBucket(summaryJob({ jd_excerpt: "" })), null);
+  assert.equal(advanceBucket(null), null);
+});
+
+test("advanceBucket separates 待定稿 from 已定稿 and from no-gap", () => {
+  assert.equal(
+    advanceBucket(summaryJob({
+      alignment_status: "succeeded", usable_diffs: 2,
+    })),
+    "pending_draft",
+  );
+  assert.equal(
+    advanceBucket(summaryJob({
+      alignment_status: "succeeded", usable_diffs: 2,
+      final_draft_version: 1,
+    })),
+    "finalized",
+  );
+  // 已跑完但无可采纳项：已完成，不该继续催。
+  assert.equal(
+    advanceBucket(summaryJob({
+      alignment_status: "succeeded", usable_diffs: 0,
+    })),
+    null,
+  );
+  assert.equal(
+    advanceBucket(summaryJob({ alignment_status: "failed" })), "failed",
+  );
+});
+
+test("advanceBucket keeps in-flight jobs out of every lane", () => {
+  for (const status of ["queued", "running"]) {
+    assert.equal(advanceBucket(summaryJob({ alignment_status: status })), null);
+  }
+});
+
+test("classification_pending forces a job back into 未预分析", () => {
+  assert.equal(
+    advanceBucket(summaryJob({
+      has_jd_profile: true, classification_pending: true,
+    })),
+    "unanalyzed",
+  );
+});
+
+test("the five lane labels are the ones the strip renders", () => {
+  assert.deepEqual(ADVANCE_BUCKETS, [
+    "pending_draft", "unanalyzed", "unaligned", "failed", "finalized",
+  ]);
+  for (const key of ADVANCE_BUCKETS) {
+    assert.equal(typeof ADVANCE_LABELS[key], "string");
+    assert.ok(ADVANCE_LABELS[key].length > 0, key);
+  }
+});
+
+test("jobsRequestUrl carries advance only for a lane switch", () => {
+  const first = new URL(
+    jobsRequestUrl({
+      filters: { query: "后端", status: "draft", work_status: "pending_draft" },
+    }),
+    "http://localhost",
+  );
+  assert.equal(first.pathname, "/api/jobs");
+  assert.equal(first.searchParams.get("view"), "summary");
+  assert.equal(first.searchParams.get("limit"), "500");
+  assert.equal(first.searchParams.get("search"), "后端");
+  assert.equal(first.searchParams.get("status"), "draft");
+  assert.equal(
+    first.searchParams.get("advance"),
+    null,
+    "the first load must stay unfiltered so metrics keep the library scope",
+  );
+
+  const lane = new URL(
+    jobsRequestUrl({ filters: {}, advance: "pending_draft" }),
+    "http://localhost",
+  );
+  assert.equal(lane.searchParams.get("advance"), "pending_draft");
+
+  const all = new URL(
+    jobsRequestUrl({ filters: {}, advance: "all" }),
+    "http://localhost",
+  );
+  assert.equal(all.searchParams.get("advance"), null);
 });

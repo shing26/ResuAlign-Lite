@@ -466,6 +466,28 @@ class DashboardQuickContinue(BaseModel):
     # on the dashboard card (frozen ticket #48).
     failure_detail: str | None = None
     updated_at: float | None = None
+    # Which 「待推进」 lane this job came from. The card stays a single row;
+    # this only drives the badge label and the primary button copy.
+    next_action: Literal[
+        "pending_draft", "unanalyzed", "unaligned", "failed", "finalized"
+    ] | None = None
+
+
+class AdvanceCounts(BaseModel):
+    """Library-wide 「待推进」 lane counts for the jobs page lane strip.
+
+    Counts ignore every list filter on purpose: the lane strip must show a
+    stable total while the list below shows the filtered subset. Rows without
+    a JD body belong to no lane, so
+    ``sum(five lanes) + unclassified == kpi.jobs``.
+    """
+
+    pending_draft: int = 0
+    unanalyzed: int = 0
+    unaligned: int = 0
+    failed: int = 0
+    finalized: int = 0
+    unclassified: int = 0
 
 
 class AlignmentQuality(BaseModel):
@@ -536,6 +558,7 @@ class DashboardResponse(BaseModel):
     skill_gaps: list[SkillGapItem] = Field(default_factory=list)
     quick_continue: DashboardQuickContinue | None = None
     quality: AlignmentQuality | None = None
+    advance: AdvanceCounts | None = None
 
 
 class AutomationRuleCreateRequest(BaseModel):

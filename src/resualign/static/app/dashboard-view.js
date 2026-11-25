@@ -224,6 +224,15 @@ export async function renderDashboard(container) {
     if (quick.failure_detail) {
       quickBadgeLabel = `上次失败 · 对齐未完成`;
     }
+  } else if (quick && quick.next_action === "pending_draft") {
+    /* 待定稿是唯一「再走一步就完成」的状态：建议已生成、只差采纳。
+     * 卡片仍是单行，只换徽标与主按钮文案（契约 §6 决定 18）。
+     * 必须排在通用 succeeded 分支之前：待定稿的 alignment_status 也是
+     * succeeded，否则永远走不到这里。 */
+    quickBadgeClass = "badge badge-green";
+    quickBadgeLabel = "待定稿";
+    quickBtnClass = "btn btn-primary btn-sm";
+    quickBtnLabel = "审建议";
   } else if (qStatus === "succeeded" && qKind === "no_gap") {
     quickBadgeClass = "badge badge-amber";
     quickBadgeLabel = "无需改写";

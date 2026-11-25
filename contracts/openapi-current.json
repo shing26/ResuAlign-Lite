@@ -140,7 +140,7 @@
       },
       "get": {
         "summary": "List Library Jobs",
-        "description": "List library jobs with optional filters.\n\n``view=summary`` is the job-hall fast path: it keeps card fields and\nserver-derived hints, but never serializes the JD body or alignment\npayloads. ``view=full`` stays the default for every existing caller.",
+        "description": "List library jobs with optional filters.\n\n``view=summary`` is the job-hall fast path: it keeps card fields and\nserver-derived hints, but never serializes the JD body or alignment\npayloads. ``view=full`` stays the default for every existing caller.\n\n``advance`` narrows to one 「待推进」 lane (``pending_draft`` /\n``unanalyzed`` / ``unaligned`` / ``failed`` / ``finalized``). The filter\nruns in SQL before LIMIT/OFFSET, so a lane is pageable on its own; an\nunknown value is a 422 rather than a silently ignored parameter.",
         "operationId": "list_library_jobs_api_jobs_get",
         "parameters": [
           {
@@ -249,6 +249,22 @@
               "type": "string",
               "default": "full",
               "title": "View"
+            }
+          },
+          {
+            "name": "advance",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Advance"
             }
           },
           {
@@ -4469,6 +4485,43 @@
   },
   "components": {
     "schemas": {
+      "AdvanceCounts": {
+        "properties": {
+          "pending_draft": {
+            "type": "integer",
+            "title": "Pending Draft",
+            "default": 0
+          },
+          "unanalyzed": {
+            "type": "integer",
+            "title": "Unanalyzed",
+            "default": 0
+          },
+          "unaligned": {
+            "type": "integer",
+            "title": "Unaligned",
+            "default": 0
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed",
+            "default": 0
+          },
+          "finalized": {
+            "type": "integer",
+            "title": "Finalized",
+            "default": 0
+          },
+          "unclassified": {
+            "type": "integer",
+            "title": "Unclassified",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "AdvanceCounts",
+        "description": "Library-wide 「待推进」 lane counts for the jobs page lane strip.\n\nCounts ignore every list filter on purpose: the lane strip must show a\nstable total while the list below shows the filtered subset. Rows without\na JD body belong to no lane, so\n``sum(five lanes) + unclassified == kpi.jobs``."
+      },
       "AlignmentQuality": {
         "properties": {
           "window_days": {
@@ -4873,6 +4926,24 @@
               }
             ],
             "title": "Updated At"
+          },
+          "next_action": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pending_draft",
+                  "unanalyzed",
+                  "unaligned",
+                  "failed",
+                  "finalized"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Action"
           }
         },
         "type": "object",
@@ -4909,6 +4980,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/AlignmentQuality"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "advance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdvanceCounts"
               },
               {
                 "type": "null"
